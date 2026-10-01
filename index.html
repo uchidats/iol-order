@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム - 国家公務員共済組合連合会 立川病院眼科">
+  <title>IOL 注文フォーム | 立川病院眼科</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- ヘッダー -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M12 3a9 9 0 0 1 9 9"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </div>
+        <div class="header-text">
+          <h1 class="header-title">IOL 注文フォーム</h1>
+          <p class="header-subtitle">国家公務員共済組合連合会 立川病院眼科</p>
+        </div>
+        <span class="system-badge">実運用版</span>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- 生体計測結果の画像読み取りアシスト -->
+      <section class="feature-card future-feature" id="ocrFeatureCard">
+        <div class="feature-card-content">
+          <div class="feature-icon-wrapper">
+            <svg class="feature-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+          </div>
+          <div class="feature-info">
+            <div class="feature-title-row">
+              <span class="feature-title">計測結果を写真から読み取る</span>
+              <span class="badge badge-info" id="biometryStatusBadge">カメラ・OCR連携</span>
+            </div>
+            <p class="feature-desc">OA-2000等の測定結果画面を撮影し、AL・K値・ACD等を抽出・確認できます</p>
+            <div class="confirmed-biometry-summary hidden" id="confirmedBiometrySummary">
+              <!-- 確定済み計測値の要約チップがここに表示されます -->
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-future" id="btnOpenBiometryModal">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+          <span id="btnOpenBiometryText">計測結果を写真から読み取る</span>
+        </button>
+      </section>
+
+      <!-- 注文フォーム -->
+      <form id="iolOrderForm" class="order-form" novalidate>
+        <!-- セクション 1: レンズ仕様 -->
+        <fieldset class="form-section">
+          <legend class="section-legend">
+            <span class="section-number">1</span>
+            レンズ仕様
+          </legend>
+
+          <!-- 1. メーカー名 / IOLモデル -->
+          <div class="form-group" id="groupModel">
+            <label for="iolModelSelect" class="form-label required">
+              メーカー名 / IOLモデル
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="select-wrapper">
+              <select id="iolModelSelect" name="model" class="form-control" required>
+                <option value="">IOLモデルを選択してください</option>
+                <!-- JSでマスターからGoogle Formの実データに基づき動的生成 -->
+              </select>
+            </div>
+            <div class="model-badge-info" id="modelBadgeInfo" style="display: none;">
+              <!-- 選択モデルのプロパティ表示タグ -->
+            </div>
+            <p class="error-message" id="err-iolModelSelect"></p>
+          </div>
+
+          <!-- 2. トーリック型番 (トーリック選択時のみ表示) -->
+          <div class="form-group form-group-conditional hidden" id="groupToricModel">
+            <label for="toricModelSelect" class="form-label required">
+              トーリックの場合は型番を選択
+              <span class="badge-required">必須</span>
+              <span class="badge badge-info ml-1">トーリックIOL</span>
+            </label>
+            <div class="select-wrapper">
+              <select id="toricModelSelect" name="toricModel" class="form-control">
+                <option value="">型番を選択してください</option>
+                <!-- JSで動的生成 -->
+              </select>
+            </div>
+            <p class="form-hint">選択したトーリックモデルに対応する型番を指定してください。</p>
+            <p class="error-message" id="err-toricModelSelect"></p>
+          </div>
+
+          <!-- 将来機能: Alcon Toric Calculator 連携エリア (Alcon Toric選択時のみ表示) -->
+          <div class="alcon-calc-card hidden" id="alconCalcArea">
+            <div class="alcon-calc-header">
+              <div class="alcon-calc-title">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                  <line x1="8" y1="6" x2="16" y2="6"></line>
+                  <line x1="16" y1="14" x2="16" y2="18"></line>
+                  <path d="M16 10h.01"></path>
+                  <path d="M12 10h.01"></path>
+                  <path d="M8 10h.01"></path>
+                  <path d="M12 14h.01"></path>
+                  <path d="M8 14h.01"></path>
+                  <path d="M12 18h.01"></path>
+                  <path d="M8 18h.01"></path>
+                </svg>
+                Alcon Online Toric Calculator
+              </div>
+              <span class="badge badge-warning">連携準備中</span>
+            </div>
+            <p class="alcon-calc-desc">Alcon製トーリックIOLの計算データ転記および結果反映を連携予定です。</p>
+            <a href="https://www.myalcon-toriccalc.com" target="_blank" rel="noopener noreferrer" class="btn btn-outline-sm alcon-calc-link" id="alconCalcLink">
+              Calculatorを別タブで開く
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+
+          <!-- 3. IOLパワー (ディオプター) -->
+          <div class="form-group" id="groupPower">
+            <label for="iolPowerSelect" class="form-label required">
+              IOLパワー (ディオプター)
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="stepper-input-wrapper">
+              <button type="button" class="stepper-btn" id="btnPowerPrev" aria-label="度数を1段階下げる">◀</button>
+              <div class="select-wrapper flex-1">
+                <select id="iolPowerSelect" name="power" class="form-control text-center font-bold" required>
+                  <option value="">度数を選択してください</option>
+                  <!-- JSでGoogle Formの60段階の度数選択肢から動的設定 -->
+                </select>
+              </div>
+              <button type="button" class="stepper-btn" id="btnPowerNext" aria-label="度数を1段階上げる">▶</button>
+            </div>
+            <div class="power-range-guide" id="powerRangeGuide">
+              ※モデルを選択すると対応度数範囲（ステップ）に自動連動します
+            </div>
+            <p class="error-message" id="err-iolPowerSelect"></p>
+          </div>
+
+          <!-- 4. 枚数 -->
+          <div class="form-group" id="groupQuantity">
+            <label class="form-label required">
+              枚数
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="quantity-selector" role="radiogroup" aria-label="枚数選択">
+              <label class="quantity-option">
+                <input type="radio" name="quantity" value="1 枚" checked>
+                <span class="quantity-btn">1 枚</span>
+              </label>
+              <label class="quantity-option">
+                <input type="radio" name="quantity" value="2 枚">
+                <span class="quantity-btn">2 枚</span>
+              </label>
+            </div>
+            <p class="error-message" id="err-quantity"></p>
+          </div>
+        </fieldset>
+
+        <!-- セクション 2: 手術・発注情報 -->
+        <fieldset class="form-section">
+          <legend class="section-legend">
+            <span class="section-number">2</span>
+            手術・発注情報
+          </legend>
+
+          <!-- 5. 手術日 -->
+          <div class="form-group" id="groupSurgeryDate">
+            <label for="surgeryDateInput" class="form-label required">
+              手術日
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="date-input-wrapper">
+              <input 
+                type="date" 
+                id="surgeryDateInput" 
+                name="surgeryDate" 
+                class="form-control" 
+                required
+              >
+            </div>
+            <p class="form-hint" id="dateHint">スマホのカレンダーから簡単に選択できます。</p>
+            <p class="error-message" id="err-surgeryDateInput"></p>
+          </div>
+
+          <!-- 6. 注文者 -->
+          <div class="form-group" id="groupOrderer">
+            <label for="ordererSelect" class="form-label required">
+              注文者
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="select-wrapper">
+              <select id="ordererSelect" name="orderer" class="form-control" required>
+                <option value="">注文者を選択してください</option>
+                <option value="内田">内田</option>
+                <option value="角田">角田</option>
+                <option value="利根川">利根川</option>
+                <option value="秋冨">秋冨</option>
+                <option value="木村">木村</option>
+              </select>
+            </div>
+            <p class="error-message" id="err-ordererSelect"></p>
+          </div>
+
+          <!-- メールアドレス (新規必須項目) -->
+          <div class="form-group" id="groupEmail">
+            <label for="emailInput" class="form-label required">
+              メールアドレス
+              <span class="badge-required">必須</span>
+            </label>
+            <input 
+              type="email" 
+              id="emailInput" 
+              name="email" 
+              class="form-control" 
+              placeholder="例: doctor@tachikawa-hosp.gr.jp" 
+              required 
+              autocomplete="email"
+              inputmode="email"
+            >
+            <p class="form-hint">注文完了通知・控えを受信するメールアドレスを入力してください。（次回自動入力されます）</p>
+            <p class="error-message" id="err-emailInput"></p>
+          </div>
+
+          <!-- 7. 備考（フリーコメント） -->
+          <div class="form-group" id="groupNotes">
+            <label for="notesInput" class="form-label">
+              備考（フリーコメント）
+              <span class="badge-optional">任意</span>
+            </label>
+            <textarea 
+              id="notesInput" 
+              name="notes" 
+              class="form-control textarea-field" 
+              rows="3" 
+              placeholder="患者ID、左右眼（右/左）、特記事項などがあれば入力してください"
+            ></textarea>
+
+            <!-- 関連リンク集 (Google Form準拠) -->
+            <details class="ref-links-accordion">
+              <summary class="ref-links-summary">各社 Calculator 関連リンク</summary>
+              <ul class="ref-links-list">
+                <li><a href="https://tecnistoriccalc.com" target="_blank" rel="noopener">TECNIS Eyhance Toric Calculator</a></li>
+                <li><a href="https://www.myalcon-toriccalc.com" target="_blank" rel="noopener">Alcon Online Toric Calculator</a></li>
+                <li><a href="https://www.teleon-toric.com" target="_blank" rel="noopener">LENTIS Toric Lens Configulator</a></li>
+                <li><a href="https://www.santen-iol.jp/SantenSite/" target="_blank" rel="noopener">レンティス コンフォート トーリック カリキュレーター</a></li>
+                <li><a href="https://iolcalculator.escrs.org" target="_blank" rel="noopener">ESCRS IOL calculator</a></li>
+              </ul>
+            </details>
+            <p class="error-message" id="err-notesInput"></p>
+          </div>
+        </fieldset>
+
+        <!-- 送信ボタンエリア -->
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-submit" id="btnConfirm">
+            注文内容を確認
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
+        </div>
+      </form>
+    </main>
+
+    <!-- フッター -->
+    <footer class="app-footer">
+      <p>© 立川病院眼科 | IOL注文管理システム</p>
+    </footer>
+  </div>
+
+  <!-- 確認画面モーダル -->
+  <div class="modal-overlay hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h2 class="modal-title" id="modalTitle">注文内容の確認</h2>
+          <p class="modal-subtitle">下記の内容で発注します。誤りがないかご確認ください。</p>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <dl class="summary-list">
+          <div class="summary-item">
+            <dt class="summary-label">メーカー名 / IOLモデル</dt>
+            <dd class="summary-value" id="summaryModel">-</dd>
+          </div>
+
+          <div class="summary-item" id="summaryToricRow" style="display: none;">
+            <dt class="summary-label">トーリック型番</dt>
+            <dd class="summary-value highlight-value" id="summaryToric">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">IOLパワー (ディオプター)</dt>
+            <dd class="summary-value highlight-value" id="summaryPower">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">枚数</dt>
+            <dd class="summary-value" id="summaryQuantity">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">手術日</dt>
+            <dd class="summary-value" id="summarySurgeryDate">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">注文者</dt>
+            <dd class="summary-value" id="summaryOrderer">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">メールアドレス</dt>
+            <dd class="summary-value" id="summaryEmail">-</dd>
+          </div>
+
+          <div class="summary-item">
+            <dt class="summary-label">備考（フリーコメント）</dt>
+            <dd class="summary-value text-break" id="summaryNotes">（なし）</dd>
+          </div>
+        </dl>
+
+        <!-- 送信失敗時のエラーアラート -->
+        <div class="modal-error-alert hidden" id="modalSubmitError" role="alert">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span id="modalSubmitErrorText">送信に失敗しました。時間をおいて再度お試しください。</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnModalBack">
+          戻って修正
+        </button>
+        <button type="button" class="btn btn-primary" id="btnModalSubmit">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          注文を送信
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 生体計測結果 画像読み取りモーダル -->
+  <div class="modal-overlay hidden" id="biometryModal" role="dialog" aria-modal="true" aria-labelledby="biometryModalTitle">
+    <div class="modal-card biometry-modal-card">
+      <div class="modal-header">
+        <div class="modal-header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+        </div>
+        <div>
+          <h2 class="modal-title" id="biometryModalTitle">計測結果の画像読み取り</h2>
+          <p class="modal-subtitle">OA-2000等の測定結果画面を撮影・選択してください</p>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <!-- 1. 読み取りモード選択 & カメラ/画像セクション -->
+        <div class="biometry-upload-section">
+          <!-- モード切り替えボタングループ -->
+          <div class="biometry-mode-tabs" role="tablist">
+            <button type="button" class="mode-tab-btn active" id="tabStaticMode" role="tab" aria-selected="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              写真を撮影 / 選択
+            </button>
+            <button type="button" class="mode-tab-btn" id="tabLiveMode" role="tab" aria-selected="false">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 7l-7 5 7 5V7z"></path>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+              カメラで連続読み取り
+            </button>
+          </div>
+
+          <!-- A. 静止画モードエリア -->
+          <div class="mode-panel" id="panelStaticMode">
+            <input 
+              type="file" 
+              id="biometryFileInput" 
+              accept="image/*" 
+              capture="environment" 
+              class="hidden"
+            >
+
+            <div class="biometry-dropzone" id="biometryDropzone">
+              <div class="dropzone-content" id="dropzonePrompt">
+                <div class="dropzone-icon">
+                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                </div>
+                <p class="dropzone-title">写真を撮影 / 選択</p>
+                <p class="dropzone-hint">タップしてスマートフォンのカメラで撮影またはアルバムから選択</p>
+              </div>
+
+              <!-- 静止画プレビュー -->
+              <div class="biometry-preview-container hidden" id="biometryPreviewContainer">
+                <img id="biometryPreviewImg" class="biometry-preview-img" alt="生体計測画面プレビュー">
+                <div class="preview-actions">
+                  <button type="button" class="btn-preview-action btn-retake" id="btnRetakeImage" title="撮り直す">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="1 4 1 10 7 10"></polyline>
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                    撮り直す
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 静止画OCR実行ボタン -->
+            <div class="ocr-action-area">
+              <button type="button" class="btn btn-secondary w-full" id="btnRunOcr" disabled>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M2 12h20M12 2v20"></path>
+                  <circle cx="12" cy="12" r="7"></circle>
+                </svg>
+                画像から読み取る
+              </button>
+            </div>
+          </div>
+
+          <!-- B. リアルタイム連続読み取りモードエリア -->
+          <div class="mode-panel hidden" id="panelLiveMode">
+            <div class="live-camera-wrapper" id="liveCameraWrapper">
+              <!-- 背面カメラ映像ストリーム -->
+              <video id="biometryVideo" playsinline autoplay muted class="biometry-live-video"></video>
+              
+              <!-- 照準ガイドオーバーレイ -->
+              <div class="camera-target-overlay">
+                <div class="target-frame">
+                  <span class="target-corner top-left"></span>
+                  <span class="target-corner top-right"></span>
+                  <span class="target-corner bottom-left"></span>
+                  <span class="target-corner bottom-right"></span>
+                  <div class="scan-laser-line"></div>
+                </div>
+                <div class="live-status-pill" id="liveStatusPill">
+                  <span class="live-dot pulse"></span>
+                  <span id="liveStatusText">カメラ起動中…</span>
+                </div>
+              </div>
+
+              <!-- 停止ボタン -->
+              <div class="live-controls">
+                <button type="button" class="btn btn-danger btn-sm" id="btnStopLiveOcr">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="6" y="6" width="12" height="12"></rect>
+                  </svg>
+                  読み取り停止
+                </button>
+              </div>
+
+              <!-- フレーム切り出し用非表示Canvas -->
+              <canvas id="liveCaptureCanvas" class="hidden"></canvas>
+            </div>
+
+            <p class="live-help-text">
+              ※OA-2000の画面全体が枠内に収まるように向け、ブレないように数秒静止してください。<br>
+              安定して複数回同一値が認識された項目から順に自動確定（✓ 読み取り済み）されます。
+            </p>
+          </div>
+
+          <!-- ステータス・進捗メッセージ共通表示 -->
+          <div class="ocr-status-message hidden" id="ocrStatusMessage"></div>
+        </div>
+
+        <!-- 2. 読み取り結果確認・手動修正欄 -->
+        <div class="biometry-results-section">
+          <div class="section-subheading">
+            <span class="subheading-title">読み取り結果の確認・修正</span>
+            <span class="subheading-note">※実測値と照合し、必要に応じて手動修正してください</span>
+          </div>
+
+          <div class="biometry-grid">
+            <!-- 患者名 (ローマ字) -->
+            <div class="biometry-field-group col-span-full">
+              <label for="ocrPatientName" class="biometry-label">
+                患者名 (ローマ字)
+                <span class="text-muted-xs">（OA-2000画面表示）</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-patientName">未検出</span>
+              </label>
+              <input 
+                type="text" 
+                id="ocrPatientName" 
+                class="form-control biometry-input text-left" 
+                placeholder="未検出 (例: YAMADA TARO)" 
+                autocomplete="off"
+              >
+            </div>
+
+            <!-- AL: 眼軸長 -->
+            <div class="biometry-field-group">
+              <label for="ocrAL" class="biometry-label">
+                眼軸長 AL
+                <span class="unit-badge">mm</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-al">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrAL" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="0.01" 
+                min="15.00" 
+                max="40.00"
+                inputmode="decimal"
+              >
+            </div>
+
+            <!-- ACD: 前房深度 -->
+            <div class="biometry-field-group">
+              <label for="ocrACD" class="biometry-label">
+                前房深度 ACD
+                <span class="unit-badge">mm</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-acd">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrACD" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="0.01" 
+                min="1.00" 
+                max="6.00"
+                inputmode="decimal"
+              >
+            </div>
+
+            <!-- K1 / K1 Axis (角膜曲率1) -->
+            <div class="biometry-field-group">
+              <label for="ocrK1" class="biometry-label">
+                角膜屈折力 K1
+                <span class="unit-badge">D</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-k1">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrK1" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="0.01" 
+                min="30.00" 
+                max="60.00"
+                inputmode="decimal"
+              >
+            </div>
+
+            <div class="biometry-field-group">
+              <label for="ocrK1Axis" class="biometry-label">
+                K1 乱視軸 (Axis)
+                <span class="unit-badge">°</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-k1Axis">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrK1Axis" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="1" 
+                min="0" 
+                max="180"
+                inputmode="numeric"
+              >
+            </div>
+
+            <!-- K2 / K2 Axis (角膜曲率2) -->
+            <div class="biometry-field-group">
+              <label for="ocrK2" class="biometry-label">
+                角膜屈折力 K2
+                <span class="unit-badge">D</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-k2">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrK2" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="0.01" 
+                min="30.00" 
+                max="60.00"
+                inputmode="decimal"
+              >
+            </div>
+
+            <div class="biometry-field-group">
+              <label for="ocrK2Axis" class="biometry-label">
+                K2 乱視軸 (Axis)
+                <span class="unit-badge">°</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-k2Axis">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrK2Axis" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="1" 
+                min="0" 
+                max="180"
+                inputmode="numeric"
+              >
+            </div>
+
+            <!-- WTW: 角膜径 -->
+            <div class="biometry-field-group col-span-full">
+              <label for="ocrWTW" class="biometry-label">
+                角膜径 WTW
+                <span class="unit-badge">mm</span>
+                <span class="text-muted-xs">（任意）</span>
+                <span class="item-status-badge status-unrecognized" id="statusBadge-wtw">未検出</span>
+              </label>
+              <input 
+                type="number" 
+                id="ocrWTW" 
+                class="form-control biometry-input" 
+                placeholder="未検出" 
+                step="0.1" 
+                min="8.0" 
+                max="15.0"
+                inputmode="decimal"
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnCancelBiometry">
+          キャンセル
+        </button>
+        <button type="button" class="btn btn-primary" id="btnConfirmBiometry">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          計測値を確定
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 完了モーダル (送信結果表示) -->
+  <div class="modal-overlay hidden" id="completeModal" role="dialog" aria-modal="true" aria-labelledby="completeTitle">
+    <div class="modal-card modal-complete">
+      <div class="complete-icon">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#2563eb" stroke-width="2.5">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+      </div>
+      <h2 class="modal-title text-center" id="completeTitle">注文送信が完了しました</h2>
+      <p class="modal-subtitle text-center mt-2">
+        ご注文データがGoogleスプレッドシートへ正常に記録されました。<br>
+        ご登録のメールアドレス宛に控えが送信されます。
+      </p>
+
+      <div class="complete-details" id="completeDetails">
+        <!-- 注文控え番号や要約 -->
+      </div>
+
+      <div class="modal-footer justify-center">
+        <button type="button" class="btn btn-primary" id="btnNewOrder">
+          新しい注文を入力する
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通知トースト -->
+  <div class="toast hidden" id="toastNotice" role="status" aria-live="polite"></div>
+
+  <!-- Tesseract.js (クライアントサイド完全実行型OCR) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,1379 @@
+/* ==========================================================================
+   iol-order - Stylesheet
+   国家公務員共済組合連合会 立川病院眼科 専用UI
+   医療機関向け クリーン・スマホ優先 UI
+   ========================================================================== */
+
+:root {
+  /* プライマリカラー (信頼・清潔感のあるブルー) */
+  --primary: #1d4ed8;
+  --primary-hover: #1e40af;
+  --primary-light: #eff6ff;
+  --primary-focus: rgba(29, 78, 216, 0.2);
+
+  /* アクセント・ステータス */
+  --accent: #0284c7;
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+
+  /* ニュートラル */
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border-color: #cbd5e1;
+  --border-light: #e2e8f0;
+
+  /* UIサイズ・角丸・影 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 10px 25px rgba(15, 23, 42, 0.12);
+  --min-tap: 48px;
+}
+
+/* リセット & 基本設定 */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* アプリ全体レイアウト */
+.app-container {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-page);
+}
+
+/* ==========================================================================
+   ヘッダー
+   ========================================================================== */
+.app-header {
+  background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%);
+  color: #ffffff;
+  padding: 16px 20px;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.header-text {
+  flex: 1;
+}
+
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.header-subtitle {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.9);
+  margin-top: 2px;
+}
+
+.system-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.2);
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   メインコンテンツ
+   ========================================================================== */
+.main-content {
+  flex: 1;
+  padding: 16px 16px 32px;
+}
+
+/* 将来機能バナー */
+.feature-card {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.feature-card-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.feature-icon-wrapper {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.feature-info {
+  flex: 1;
+}
+
+.feature-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.feature-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.feature-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.btn-future {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   フォームスタイル
+   ========================================================================== */
+.order-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-section {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 20px 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.section-legend {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  padding: 0 8px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: var(--primary);
+  color: #ffffff;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* フォームグループ */
+.form-group {
+  margin-bottom: 18px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.badge-required {
+  font-size: 0.68rem;
+  font-weight: 700;
+  background-color: var(--danger-bg);
+  color: var(--danger);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #fca5a5;
+}
+
+.badge-optional {
+  font-size: 0.68rem;
+  font-weight: 600;
+  background-color: #f1f5f9;
+  color: #64748b;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.badge-warning {
+  background-color: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #fde68a;
+}
+
+.badge-info {
+  background-color: #e0f2fe;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+
+/* 入力コントロール共通 */
+.form-control {
+  width: 100%;
+  min-height: var(--min-tap);
+  padding: 12px 14px;
+  font-size: 1rem;
+  font-family: inherit;
+  color: var(--text-main);
+  background-color: #ffffff;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-focus);
+}
+
+.form-control.is-invalid {
+  border-color: var(--danger);
+  background-color: #fffaf0;
+}
+
+.form-control.is-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+}
+
+/* セレクトボックス装飾 */
+.select-wrapper {
+  position: relative;
+}
+
+.select-wrapper::after {
+  content: "";
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid var(--text-muted);
+  pointer-events: none;
+}
+
+.select-wrapper select {
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+/* テキストエリア */
+.textarea-field {
+  min-height: 84px;
+  resize: vertical;
+}
+
+/* モデルタグ・プロパティ表示 */
+.model-badge-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.meta-chip {
+  font-size: 0.75rem;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  font-weight: 500;
+}
+
+/* 条件分岐アニメーション用 */
+.form-group-conditional {
+  transition: all 0.25s ease;
+  background-color: #f8fafc;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1.5px dashed #93c5fd;
+}
+
+/* Alcon Toric Calculator 連携エリア */
+.alcon-calc-card {
+  background: #f0fdf4;
+  border: 1.5px solid #86efac;
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-bottom: 18px;
+  transition: all 0.25s ease;
+}
+
+.alcon-calc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.alcon-calc-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #166534;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alcon-calc-desc {
+  font-size: 0.78rem;
+  color: #14532d;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.alcon-calc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: #15803d;
+  background-color: #ffffff;
+  border: 1px solid #86efac;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.alcon-calc-link:hover {
+  background-color: #dcfce7;
+}
+
+/* 度数ステッパー入力 */
+.stepper-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.stepper-btn {
+  width: var(--min-tap);
+  height: var(--min-tap);
+  background-color: #f1f5f9;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  touch-action: manipulation;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.stepper-btn:hover {
+  background-color: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.stepper-btn:active {
+  background-color: #cbd5e1;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+.power-range-guide {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+  padding-left: 2px;
+}
+
+/* 枚数セレクター (セグメントボタン) */
+.quantity-selector {
+  display: flex;
+  gap: 10px;
+}
+
+.quantity-option {
+  flex: 1;
+  position: relative;
+  cursor: pointer;
+}
+
+.quantity-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.quantity-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--min-tap);
+  background-color: #ffffff;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.quantity-option input[type="radio"]:checked + .quantity-btn {
+  background-color: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.quantity-option:active .quantity-btn {
+  transform: scale(0.98);
+}
+
+/* 手術日入力 */
+.date-input-wrapper {
+  position: relative;
+}
+
+input[type="date"].form-control {
+  font-family: inherit;
+  padding: 10px 14px;
+}
+
+/* 関連リンクアコーディオン */
+.ref-links-accordion {
+  margin-top: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
+.ref-links-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--primary);
+  user-select: none;
+}
+
+.ref-links-list {
+  margin-top: 8px;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.ref-links-list a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* ガイド・エラーメッセージ */
+.form-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.error-message {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--danger);
+  margin-top: 6px;
+  min-height: 1.2em;
+  display: none;
+}
+
+.error-message:not(:empty) {
+  display: block;
+}
+
+/* ==========================================================================
+   ボタン類
+   ========================================================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--min-tap);
+  padding: 12px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+  border-radius: var(--radius-md);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+.btn-secondary {
+  background-color: #f1f5f9;
+  border-color: var(--border-color);
+  color: #334155;
+}
+
+.btn-secondary:hover {
+  background-color: #e2e8f0;
+}
+
+.btn-submit {
+  width: 100%;
+  font-size: 1.1rem;
+  padding: 16px 20px;
+  box-shadow: var(--shadow-md);
+}
+
+.form-actions {
+  margin-top: 8px;
+  padding: 4px 0 20px;
+}
+
+/* ==========================================================================
+   モーダル (確認画面・完了画面)
+   ========================================================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  animation: fadeIn 0.2s ease;
+}
+
+@media (min-width: 640px) {
+  .modal-overlay {
+    align-items: center;
+    padding: 20px;
+  }
+}
+
+.modal-card {
+  background-color: #ffffff;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.25s ease-out;
+}
+
+@media (min-width: 640px) {
+  .modal-card {
+    border-radius: var(--radius-lg);
+  }
+}
+
+.modal-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #fafbfc;
+}
+
+.modal-header-icon {
+  width: 40px;
+  height: 40px;
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.3;
+}
+
+.modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-light);
+  background-color: #fafbfc;
+  display: flex;
+  gap: 12px;
+}
+
+.modal-footer .btn {
+  flex: 1;
+}
+
+/* サマリーリスト */
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  background-color: #f8fafc;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+}
+
+@media (min-width: 480px) {
+  .summary-item {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.summary-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.summary-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 4px;
+}
+
+@media (min-width: 480px) {
+  .summary-value {
+    margin-top: 0;
+    text-align: right;
+  }
+}
+
+.highlight-value {
+  color: var(--primary);
+  font-size: 1.1rem;
+}
+
+.text-break {
+  word-break: break-all;
+  white-space: pre-wrap;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+/* 送信エラーアラート (モーダル内) */
+.modal-error-alert {
+  margin-top: 16px;
+  background-color: var(--danger-bg);
+  border: 1.5px solid #f87171;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--danger);
+  font-size: 0.88rem;
+  font-weight: 600;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-error-alert svg {
+  flex-shrink: 0;
+  stroke: var(--danger);
+}
+
+
+/* 完了モーダル */
+.modal-complete {
+  padding: 28px 24px;
+  align-items: center;
+  text-align: center;
+}
+
+.complete-icon {
+  margin-bottom: 12px;
+  background-color: var(--primary-light);
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.complete-details {
+  width: 100%;
+  background-color: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin: 18px 0;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  line-height: 1.6;
+}
+
+/* トースト通知 */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  pointer-events: none;
+  animation: toastFade 0.3s ease;
+  max-width: 90%;
+  text-align: center;
+}
+
+/* ユーティリティ */
+.hidden {
+  display: none !important;
+}
+
+.ml-1 {
+  margin-left: 4px;
+}
+
+.mt-2 {
+  margin-top: 8px;
+}
+
+.justify-center {
+  justify-content: center !important;
+}
+
+.w-full {
+  width: 100%;
+}
+
+/* ==========================================================================
+   生体計測画像読み取りモーダル UI
+   ========================================================================== */
+.confirmed-biometry-summary {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background-color: var(--primary-light);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--primary);
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.biometry-modal-card {
+  max-width: 580px;
+}
+
+.biometry-upload-section {
+  margin-bottom: 20px;
+}
+
+/* 読み取りモード切り替えタブ */
+.biometry-mode-tabs {
+  display: flex;
+  background-color: #f1f5f9;
+  border-radius: var(--radius-md);
+  padding: 4px;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.mode-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mode-tab-btn.active {
+  background-color: #ffffff;
+  color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* リアルタイムカメラコンテナ */
+.live-camera-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 280px;
+  background-color: #000000;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.8);
+}
+
+.biometry-live-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 照準ガイドオーバーレイ */
+.camera-target-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 16px;
+}
+
+.target-frame {
+  position: relative;
+  width: 85%;
+  height: 75%;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.target-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #38bdf8;
+  border-style: solid;
+  border-width: 0;
+}
+
+.target-corner.top-left { top: -1px; left: -1px; border-top-width: 3px; border-left-width: 3px; }
+.target-corner.top-right { top: -1px; right: -1px; border-top-width: 3px; border-right-width: 3px; }
+.target-corner.bottom-left { bottom: -1px; left: -1px; border-bottom-width: 3px; border-left-width: 3px; }
+.target-corner.bottom-right { bottom: -1px; right: -1px; border-bottom-width: 3px; border-right-width: 3px; }
+
+/* スキャンレーザーアニメーション */
+.scan-laser-line {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #38bdf8 50%, transparent 100%);
+  box-shadow: 0 0 8px #0284c7;
+  animation: scanLaser 2s ease-in-out infinite alternate;
+}
+
+@keyframes scanLaser {
+  0% { top: 5%; opacity: 0.4; }
+  100% { top: 95%; opacity: 0.9; }
+}
+
+.live-status-pill {
+  margin-top: 10px;
+  background-color: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22c55e;
+}
+
+.live-dot.pulse {
+  animation: liveDotPulse 1.2s infinite;
+}
+
+@keyframes liveDotPulse {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.live-controls {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 5;
+}
+
+.btn-sm {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+.btn-danger {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.btn-danger:hover {
+  background-color: #dc2626;
+}
+
+.live-help-text {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 8px;
+  text-align: center;
+}
+
+/* 各項目の状態バッジ (未検出 / 候補検出中 / 読み取り済み) */
+.item-status-badge {
+  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  margin-left: auto;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.status-unrecognized {
+  background-color: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+.status-candidate {
+  background-color: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  animation: candidatePulse 1s infinite alternate;
+}
+
+.status-confirmed {
+  background-color: #dcfce7;
+  color: #16a34a;
+  border: 1px solid #86efac;
+}
+
+@keyframes candidatePulse {
+  from { opacity: 0.85; }
+  to { opacity: 1; }
+}
+
+.text-left {
+  text-align: left !important;
+}
+
+/* ドロップゾーン / カメラ撮影領域 */
+.biometry-dropzone {
+  border: 2px dashed #93c5fd;
+  background-color: #f8fafc;
+  border-radius: var(--radius-md);
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.biometry-dropzone:hover {
+  background-color: #f0f7ff;
+  border-color: var(--primary);
+}
+
+.dropzone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.dropzone-icon {
+  color: var(--primary);
+  background-color: #e0f2fe;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.dropzone-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.dropzone-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* 画像プレビュー */
+.biometry-preview-container {
+  width: 100%;
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.biometry-preview-img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  background-color: #0f172a;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.preview-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.btn-preview-action {
+  background-color: rgba(15, 23, 42, 0.75);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  backdrop-filter: blur(4px);
+  transition: background-color 0.15s ease;
+}
+
+.btn-preview-action:hover {
+  background-color: rgba(15, 23, 42, 0.9);
+}
+
+/* OCRアクション・ステータス */
+.ocr-action-area {
+  margin-top: 12px;
+}
+
+.ocr-status-message {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  animation: fadeIn 0.2s ease;
+}
+
+.ocr-status-message.is-loading {
+  background-color: #eff6ff;
+  color: var(--primary);
+  border: 1px solid #bfdbfe;
+}
+
+.ocr-status-message.is-success {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #86efac;
+}
+
+.ocr-status-message.is-error {
+  background-color: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #fca5a5;
+}
+
+/* 読み取り結果セクション */
+.biometry-results-section {
+  background-color: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+
+.section-subheading {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subheading-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.subheading-note {
+  font-size: 0.72rem;
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* 2カラムグリッド入力 */
+.biometry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.biometry-field-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.col-span-full {
+  grid-column: 1 / -1;
+}
+
+.biometry-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.unit-badge {
+  font-size: 0.65rem;
+  background-color: #e2e8f0;
+  color: #475569;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+/* 信頼度インジケータバッジ */
+.badge-confidence {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+.badge-confidence.badge-low {
+  background-color: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.badge-confidence.badge-high {
+  background-color: #dcfce7;
+  color: #16a34a;
+  border: 1px solid #86efac;
+}
+
+.text-muted-xs {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.biometry-input {
+  min-height: 40px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: right;
+  background-color: #ffffff;
+}
+
+.biometry-input:focus {
+  background-color: #ffffff;
+}
+
+/* フッター */
+.app-footer {
+  text-align: center;
+  padding: 20px 16px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-light);
+  background-color: #ffffff;
+  margin-top: auto;
+}
+
+/* キーフレーム */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes toastFade {
+  from { opacity: 0; transform: translate(-50%, 15px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
