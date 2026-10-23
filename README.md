@@ -52,23 +52,22 @@
 
 ## 🌐 Google Apps Script (GAS) POST送信仕様
 
-### 1. APIエンドポイントの設定
-`script.js` 冒頭に設定された定数 `ORDER_API_URL` を、デプロイしたGAS WebアプリのURLに変更します。
-```javascript
-const ORDER_API_URL = "https://script.google.com/macros/s/AKfycbygDAOMuLcphwak4CdQizjF2A2XExWVVTTaSyE7j_XHLZHOi98V-22KOrMOdOhrS6US/exec";
-```
+### 1. 接続設定（既定は送信しない「開発モード」）
+GASのURLはコードに含めません。既定は `dryrun`（ネットワーク送信なし・実発注なし）です。
+接続先と処理仕様を確認済みの開発用GASに限り、`src/config.local.example.js` を `src/config.local.js` にコピーして設定します（`config.local.js` は Git 管理外）。
+`https://script.google.com/macros/s/` 以外のURLは拒否され、`dryrun` に戻ります。
 
-### 2. 送信方式
-CORSプリフライト（OPTIONSリクエスト）を回避するため、以下のヘッダーでJSON文字列を送信します：
-```javascript
-fetch(ORDER_API_URL, {
-  method: "POST",
-  headers: {
-    "Content-Type": "text/plain;charset=utf-8"
-  },
-  body: JSON.stringify(payload)
-});
-```
+### 2. 送信方式と成功判定
+CORSプリフライトを回避するため `Content-Type: text/plain;charset=utf-8` でJSON文字列をPOSTします。
+**サーバーが `success: true`（または `status: "success"|"ok"`）と、サーバー発行の `orderId` を返した場合のみ「受付完了」と表示します。** 受付番号をブラウザ側で生成・補完することはありません。
+
+| 結果 | 画面表示 |
+|---|---|
+| dryrun | 「開発モード: 実際の発注は行われていません」（完了扱いにしない） |
+| サーバーが明示的にエラー | 「注文は受け付けられていません」 |
+| 通信エラー・HTTPエラー・非JSON・`orderId` なし | 「送信結果を確認できません。受け付けられている可能性があります」 |
+
+いずれも入力内容は保持され、確認画面から再確認・再送信できます。
 
 ### 3. 送信payloadのJSON形式（例）
 
@@ -83,12 +82,11 @@ fetch(ORDER_API_URL, {
   "orderer": "内田",
   "email": "doctor@tachikawa-hosp.gr.jp",
   "notes": "右眼 白内障手術用",
-  "submittedAt": "2026-10-02T01:35:00.000Z"
+  "submittedAt": "2026-10-02T01:35:00.000Z",
+  "clientRequestId": "（再送時の重複検出用UUID。注文番号ではない）"
 }
 ```
 ※トーリックIOLでない場合、`toricModel` は `""`（空文字）となります。
-
----
 
 ---
 
@@ -129,3 +127,24 @@ biometryState = {
 };
 ```
 ※現段階では、確定された計測値は注文送信やAlcon Toric Calculatorへは転記されず、JavaScript内部に確認済み計測値として安全に保持されます。
+
+---
+
+## 🗂 ソース構成（ES Modules）
+
+```
+index.html            画面（<script type="module" src="src/main.js">）
+src/main.js           起動処理
+src/config.js         設定（既定dryrun）/ config.local.js で上書き
+src/api/order-client.js     GAS送信と応答検証
+src/data/iol-models.js      IOLモデル・度数マスター
+src/data/schema.js          施設・注文者・採用IOL・ディーラーの型定義とRepository IF
+src/data/static-repository.js  現行の固定データを返すRepository実装
+src/domain/                 度数フィルタ・入力検証（純粋関数）
+src/ui/                     注文フォーム・共通DOMヘルパー
+src/biometry/               生体計測OCR（state / parser / ocr / UI）
+docs/firestore-data-model.md  Firebase導入時のデータ設計（案）
+tests/                      `npm test`（Node標準テストランナー）
+```
+
+ローカル確認は任意の静的サーバーで行います（ES Modulesのため `file://` では動作しません）。
