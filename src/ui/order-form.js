@@ -2,6 +2,7 @@ import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
 import { renderConfirmLines, renderDealersCard } from "./confirm-lines.js";
+import { findSelfDoctor } from "../domain/self-doctor.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES } from "../config.js";
@@ -18,6 +19,7 @@ let lensOptions = [];           // 採用済み系列を、正式型番ごとの
 let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let doctors = [];               // 担当医マスター(施設設定の「担当医」)
 let alconCalculatorUrl = null;  // ALCONのトーリックを選択中なら、計算ツールのURL(将来の連携用に保持。画面の表示は各レンズのリンク)
+let loginUser = null;            // ログインユーザー(認証情報のうち uid / email / emailVerified だけ。担当医の初期値の判定用。注文者とは別の情報)
 let dealers = [];               // 施設の登録ディーラー(0社=発注先なし / 1社=自動 / 2社以上=明細ごとに選択)
 let currentPendingOrderData = null;
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
@@ -70,7 +72,8 @@ export async function initOrderForm(args) {
   }
 }
 
-async function initOrderFormInner({ config, repository, facilityId, facility = null, orderApi: api = null }) {
+async function initOrderFormInner({ config, repository, facilityId, facility = null, orderApi: api = null, user = null }) {
+  loginUser = user;
   appConfig = config;
   orderApi = api;
   currentFacility = facility;
@@ -94,6 +97,8 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     getOptions: () => lensOptions,
     getDoctors: () => doctors,
     getDealers: () => dealers,
+    // 担当医の初期値: ログインユーザー本人が担当医マスター(メールアドレスで紐づけ)にいれば本人。いなければ未選択(従来どおり)
+    getDefaultDoctorId: () => findSelfDoctor(doctors, loginUser),
     minDate: todayString,
     onChange: updateAlconGuide
   });

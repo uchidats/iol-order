@@ -41,11 +41,12 @@ let seq = 0; // ラベルの for / radio の name を明細ごとに一意にす
  * @param {HTMLElement} deps.addButton 「レンズを追加」ボタン
  * @param {() => Array<object>} deps.getOptions 採用済みIOLの選択肢(buildLensOptions の結果)
  * @param {() => Array<{id:string, name:string, email?:string}>} deps.getDoctors 担当医(施設のマスター)
+ * @param {() => string} [deps.getDefaultDoctorId] 担当医の初期値(ログインユーザー本人が担当医に紐づく場合のその担当医ID。なければ "")。最初の明細と、入力を初期状態に戻したときに使う。変更できる
  * @param {() => Array<{id:string, name:string, orderEmails?:string[]}>} [deps.getDealers] 施設の登録ディーラー。0社=発注先なし / 1社=自動選択 / 2社以上=明細ごとに選択必須
  * @param {() => string} deps.minDate 手術日の最小値(YYYY-MM-DD)
  * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新)
  */
-export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], minDate, onChange = () => {} }) {
+export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], getDefaultDoctorId = () => "", minDate, onChange = () => {} }) {
   const lines = [];
 
   function buildLine(prefill = {}) {
@@ -60,7 +61,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.date.min = minDate();
     if (prefill.surgeryDate) line.date.value = prefill.surgeryDate; // 直前の明細の手術日を引き継ぐ(変更可)
     line.doctor = h("select", { id: id("lensDoctor"), class: "form-control", "data-f": "doctor" }, h("option", { value: "" }, "選択"));
-    fillDoctors(line, prefill.doctorId || ""); // 直前の明細の担当医を引き継ぐ(変更可)
+    // 「レンズを追加」では、直前の明細の担当医を引き継ぐ(変更可。引き継ぎを優先)。最初の明細・初期状態では、本人が担当医に紐づく場合は本人を初期値にする(変更可)
+    fillDoctors(line, prefill.doctorId !== undefined ? prefill.doctorId : getDefaultDoctorId());
     line.dealer = h("select", { id: id("lensDealer"), class: "form-control", "data-f": "dealer" }, h("option", { value: "" }, "選択"));
     fillDealers(line, prefill.dealerId || ""); // 直前の明細の発注先を引き継ぐ(変更可)
     line.qty = [1, 2].map(q => h("input", { type: "radio", name: `lensQty-${n}`, value: String(q), "data-f": "quantity" }));

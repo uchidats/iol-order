@@ -210,7 +210,8 @@ async function bootstrapWithFirebase(config) {
         orderApi: ctx.orderApi,
         repository: ctx.repository,
         facilityId: access.facilityId,
-        facility: { id: access.facilityId, name: facilityName(access.facilityId) }
+        facility: { id: access.facilityId, name: facilityName(access.facilityId) },
+        user: { uid: state.user.uid, email: state.user.email || "", emailVerified: state.user.emailVerified }
       });
     }
     return access;
