@@ -164,11 +164,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.model.firstElementChild.textContent = shown.length ? "選択" : "該当するIOLがありません";
     const byMaker = new Map();
     shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
-    byMaker.forEach((list, maker) => {
-      const group = h("optgroup", { label: maker });
-      // 表示はモデル名だけ(メーカーは見出し)。メーカー込みの全文は title で確認できる。値(key)・注文データは変わらない
-      list.forEach(o => group.appendChild(h("option", { value: o.key, title: o.label }, o.shortLabel)));
-      line.model.appendChild(group);
+    // 一覧は型番(モデル名)だけ。メーカー名の見出し・グループの余白や区切り線は出さない。並び順は従来どおり(メーカーごとにまとまった順)。
+    // メーカー込みの全文は title で確認できる。値(key)・絞り込み・注文データは変わらない
+    byMaker.forEach((list) => {
+      list.forEach(o => line.model.appendChild(h("option", { value: o.key, title: o.label }, o.shortLabel)));
     });
     const kept = shown.some(o => o.key === prevKey);
     line.model.value = kept ? prevKey : "";

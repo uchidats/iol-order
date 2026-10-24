@@ -94,14 +94,27 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(st.optBg, "rgb(255, 255, 255)");
       const hs = await panel.locator(".cs-option").evaluateAll(os => os.map(o => o.getBoundingClientRect().height));
       assert.ok(hs.every(h => h >= 40 && h <= 44), `項目の高さ ${[...new Set(hs)]}`);
-      const groups = await panel.locator(".cs-group-label").allInnerTexts();
-      assert.deepEqual(groups, await modelSelect.locator("optgroup").evaluateAll(gs => gs.map(g => g.label)), "メーカー別のグループを維持");
-      assert.ok(groups.length >= 3);
+      // メーカー名の見出し・グループの区切りは出さない(型番だけを、従来の並び順のまま一覧表示)
+      assert.equal(await panel.locator(".cs-group-label, .cs-group").count(), 0, "メーカー名の見出しなし");
+      assert.equal(await modelSelect.locator("optgroup").count(), 0);
+      const shown = await panel.locator(".cs-option:not(.is-placeholder) .cs-option-text").allInnerTexts();
+      assert.deepEqual(shown, await modelSelect.locator("option:not([value=''])").allInnerTexts(), "型番の並びは元の select と同じ");
+      assert.ok(shown.includes("DIB00V") && shown.includes("CNA0T0") && shown.length >= 6);
+      assert.ok(!shown.some(s => /^(ALCON|J&J|HOYA|NIDEK|SANTEN)$/.test(s)), "メーカー名の行はない");
       assert.equal(await panel.locator(".cs-option").count(), await modelSelect.locator("option").count(), "選択肢は元の select と同じ");
-      assert.ok(st.sh > st.ch && st.overflowY === "auto", "多いときはメニュー内でスクロール");
+      assert.equal(st.overflowY, "auto");
       assert.ok(pr.left >= 8 - 0.5 && pr.right <= 390 - 8 + 0.5 && pr.top >= 0 && pr.bottom <= 700, "画面内");
+      // 選択肢が多いとき(トーリックの一覧)は、メニュー内でスクロールできる
+      await page.keyboard.press("Escape");
+      await line.locator("[data-f=toric]").check();
+      await modelTrigger.click(); await panel.waitFor();
+      const many = await panel.evaluate(p => ({ sh: p.scrollHeight, ch: p.clientHeight }));
+      assert.ok(many.sh > many.ch, "多いときはメニュー内でスクロール: " + JSON.stringify(many));
       await panel.evaluate(p => { p.scrollTop = 99999; });
       assert.ok(await panel.evaluate(p => p.scrollTop > 0), "メニュー内でスクロールできる");
+      await page.keyboard.press("Escape");
+      await line.locator("[data-f=toric]").uncheck();
+      await modelTrigger.click(); await panel.waitFor();
 
       // 選ぶ: select の値が変わり、change が発火し、ボタンの表示が変わり、メニューが閉じる(既存の処理・注文データは select の値のまま)
       const target = await modelSelect.evaluate(s => { const o = [...s.options].find(x => x.textContent === "DIB00V"); return { value: o.value, text: o.textContent }; });
