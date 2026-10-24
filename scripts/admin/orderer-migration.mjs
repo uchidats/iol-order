@@ -1,6 +1,7 @@
 // 注文者の `active` フィールド廃止に伴う移行の「計画」と「引数の検証」(純粋関数。ネットワーク・書き込みなし)
 // 実行本体は migrate-orderer-active.mjs。
 export const PROJECT = "medconf-iol-dev"; // 開発環境のみ
+export const COLLECTIONS = Object.freeze(["orderers", "facilityDealers"]); // active フィールドを廃止するコレクション(注文者・ディーラー)
 
 const key = (o) => `${o.facilityId}/${o.id}`;
 

@@ -198,6 +198,10 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
       const modelIds = [...new Set(input.lines.map(l => l.modelId))];
       const adoptedSnaps = await Promise.all(modelIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/adoptedIols/${id}`))));
       const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
+      // 発注先ディーラー: 採用IOLに設定された dealerId が、この施設に今も登録されているものだけを使う(削除されたディーラーは発注先にならない)
+      const dealerIds = [...new Set(adoptedSnaps.map(a => a.exists ? a.get("dealerId") : null).filter(d => typeof d === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(d)))];
+      const dealerSnaps = await Promise.all(dealerIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/facilityDealers/${id}`))));
+      const dealerBy = new Map(dealerIds.map((id, i) => [id, dealerSnaps[i]]));
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
@@ -220,7 +224,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           throw bad(`明細${n}: この施設で採用されていないIOLモデルです`);
         }
         try { validateLens(model, l); } catch (e) { throw bad(`明細${n}: ${e.message}`); }
-        const dealerId = adopted.get("dealerId");
+        const dealerSnap = dealerBy.get(adopted.get("dealerId"));
+        const dealer = dealerSnap && dealerSnap.exists ? { id: dealerSnap.id, name: dealerSnap.get("name") || "" } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
         return {
           lineNo: n,
           status: ORDER_STATUS.ACCEPTED,
@@ -230,7 +235,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
             power: l.power, quantity: l.quantity
           },
           surgeryDate: l.surgeryDate,
-          dealerId: typeof dealerId === "string" && dealerId ? dealerId : null // 将来、ディーラーごとに明細を振り分けるための情報
+          dealerId: dealer ? dealer.id : null, // 将来、ディーラーごとに明細を振り分けるための情報
+          dealer                              // ディーラーのスナップショット(未設定・削除済みは null)
         };
       });
       if (!orderer.exists) throw bad("注文者が見つかりません"); // 注文者に有効/無効はない(旧形式の active フィールドは無視する)

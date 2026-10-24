@@ -112,7 +112,7 @@ export function planAdoptedWrites(masters, existing, selectedIds, facilityId) {
 // ---------- ディーラー ----------
 /**
  * 発注用メールと使用報告用メールは別々に管理する（送信は未実装）。
- * @param {Array<{id?:string|null, name:string, active:boolean, orderEmailsText:string, usageEmailsText:string}>} rows
+ * @param {Array<{id?:string|null, name:string, orderEmailsText:string, usageEmailsText:string}>} rows
  */
 export function validateDealers(rows) {
   const errors = [];
@@ -131,7 +131,7 @@ export function validateDealers(rows) {
     usage.errors.forEach(message => errors.push({ index, field: "usageEmails", message: `使用報告用: ${message}` }));
 
     cleaned.push({
-      id: r.id || null, name, active: Boolean(r.active),
+      id: r.id || null, name,
       orderEmails: order.emails, usageReportEmails: usage.emails
     });
   });
@@ -147,11 +147,11 @@ export function planDealerWrites(original, cleaned, facilityId) {
     const sortOrder = (i + 1) * LIMITS.sortStep;
     const o = c.id ? byId.get(c.id) : null;
     const data = {
-      facilityId, name: c.name, active: c.active, sortOrder,
+      facilityId, name: c.name, sortOrder,
       orderEmails: c.orderEmails, usageReportEmails: c.usageReportEmails
     };
     if (o && o.dealerId) data.dealerId = o.dealerId; // 将来のグローバルディーラー連携用IDは保持
-    const changed = !o || o.name !== c.name || Boolean(o.active) !== c.active || o.sortOrder !== sortOrder
+    const changed = !o || o.name !== c.name || o.sortOrder !== sortOrder
       || !sameList(o.orderEmails, c.orderEmails) || !sameList(o.usageReportEmails, c.usageReportEmails);
     if (changed) writes.push({ id: c.id, data });
   });

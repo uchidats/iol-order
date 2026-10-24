@@ -231,6 +231,7 @@ const multi = (lines, over = {}) => ({ facilityId: F, requestId: rid(), ordererI
 
 test("複数明細: 異なるモデル・度数・枚数・手術日をまとめて1つの注文として保存し、明細ごとにスナップショットとディーラー情報を持つ", async () => {
   await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
+  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).set({ facilityId: F, name: "テスト商会", orderEmails: ["o@example.jp"] });
   const lines = [
     line(),
     line({ modelId: "jj-diwxxx-toric", toricModel: "DIW300", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12" }),
@@ -253,6 +254,7 @@ test("複数明細: 異なるモデル・度数・枚数・手術日をまとめ
     isToric: true, isMultifocal: false, toricModel: "DIW300", power: "+18.5D", quantity: 2
   });
   assert.deepEqual(o.lines.map(l => l.dealerId), [null, null, "dealer-1"]); // 将来のディーラー振り分け用
+  assert.deepEqual(o.lines.map(l => l.dealer), [null, null, { id: "dealer-1", name: "テスト商会" }]); // その時点のディーラー名のスナップショット
   assert.equal(o.orderer.name, "山田");
   assert.equal("item" in o, false);
 });
@@ -485,4 +487,37 @@ test("開発用受付: 許可リストが空・未設定なら全員拒否(安�
 test("開発用受付: 拒否メッセージは許可リストの内容(施設ID・UID)を明かさない", async () => {
   const s = restrictedService(POLICY);
   await assert.rejects(s.createOrder({ auth: user("ordA"), data: body() }), (e) => !e.message.includes(F) && !e.message.includes("adminA"));
+});
+
+// ================= ディーラー(有効/無効はなく、削除する) =================
+test("ディーラー: 削除されたディーラーは発注先にならない。過去の注文に保存したディーラー情報は、削除・改名後も変わらない", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
+  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).set({ facilityId: F, name: "テスト商会" });
+  const before = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
+  const doc1 = () => db.doc(`facilities/${F}/orders/${before.orderId}`).get();
+  assert.deepEqual((await doc1()).get("lines")[0].dealer, { id: "dealer-1", name: "テスト商会" });
+
+  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).update({ name: "改名商会" });
+  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).delete();                 // ディーラーを削除
+  assert.deepEqual((await doc1()).get("lines")[0].dealer, { id: "dealer-1", name: "テスト商会" }, "past order keeps the snapshot");
+
+  const after = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
+  const l = (await db.doc(`facilities/${F}/orders/${after.orderId}`).get()).get("lines")[0];
+  assert.equal(l.dealerId, null, "deleted dealer is no longer an order destination");
+  assert.equal(l.dealer, null);
+});
+
+test("ディーラー: 他の施設のディーラーは発注先にならない(IDが同じでも、自施設に登録されたものだけ)", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "shared-id" });
+  await db.doc("facilities/fB/facilityDealers/shared-id").set({ facilityId: "fB", name: "他施設のディーラー" });
+  const r = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
+  const l = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines")[0];
+  assert.deepEqual([l.dealerId, l.dealer], [null, null]);
+});
+
+test("ディーラー: 旧形式(active つき)のディーラーでも、有効/無効に関係なく登録されていれば発注先になる(判定に使わない)", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "legacy-d" });
+  await db.doc(`facilities/${F}/facilityDealers/legacy-d`).set({ facilityId: F, name: "旧形式", active: false });
+  const r = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
+  assert.equal((await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines")[0].dealer.name, "旧形式");
 });

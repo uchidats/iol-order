@@ -86,23 +86,23 @@ test("採用IOL → 注文フォームのモデル一覧: 有効なものだけ�
 });
 
 test("ディーラー: 発注用メールと使用報告用メールを別々に保持", () => {
-  const v = validateDealers([{ name: "D1", active: true, orderEmailsText: "order@example.jp", usageEmailsText: "u1@example.jp\nu2@example.jp" }]);
+  const v = validateDealers([{ name: "D1", orderEmailsText: "order@example.jp", usageEmailsText: "u1@example.jp\nu2@example.jp" }]);
   assert.equal(v.ok, true);
   assert.deepEqual(v.cleaned[0].orderEmails, ["order@example.jp"]);
   assert.deepEqual(v.cleaned[0].usageReportEmails, ["u1@example.jp", "u2@example.jp"]);
-  const bad = validateDealers([{ name: "D1", active: true, orderEmailsText: "x", usageEmailsText: "y@example.jp" }]);
+  const bad = validateDealers([{ name: "D1", orderEmailsText: "x", usageEmailsText: "y@example.jp" }]);
   assert.deepEqual(bad.errors.map(e => e.field), ["orderEmails"]);
-  const bad2 = validateDealers([{ name: "D1", active: true, orderEmailsText: "", usageEmailsText: "y" }]);
+  const bad2 = validateDealers([{ name: "D1", orderEmailsText: "", usageEmailsText: "y" }]);
   assert.deepEqual(bad2.errors.map(e => e.field), ["usageEmails"]);
-  assert.equal(validateDealers([{ name: "", active: true, orderEmailsText: "", usageEmailsText: "" }]).ok, false);
-  assert.equal(validateDealers([{ name: "D", active: true, orderEmailsText: "", usageEmailsText: "" }, { name: "d", active: true, orderEmailsText: "", usageEmailsText: "" }]).ok, false);
+  assert.equal(validateDealers([{ name: "", orderEmailsText: "", usageEmailsText: "" }]).ok, false);
+  assert.equal(validateDealers([{ name: "D", orderEmailsText: "", usageEmailsText: "" }, { name: "d", orderEmailsText: "", usageEmailsText: "" }]).ok, false);
 });
 
 test("ディーラーの書き込み計画: 変更検出と dealerId の保持", () => {
-  const original = [{ id: "d1", name: "D1", active: true, sortOrder: 10, orderEmails: ["o@example.jp"], usageReportEmails: [], dealerId: "g1" }];
-  const same = validateDealers([{ id: "d1", name: "D1", active: true, orderEmailsText: "o@example.jp", usageEmailsText: "" }]).cleaned;
+  const original = [{ id: "d1", name: "D1", sortOrder: 10, orderEmails: ["o@example.jp"], usageReportEmails: [], dealerId: "g1" }];
+  const same = validateDealers([{ id: "d1", name: "D1", orderEmailsText: "o@example.jp", usageEmailsText: "" }]).cleaned;
   assert.deepEqual(planDealerWrites(original, same, F), []);
-  const changed = validateDealers([{ id: "d1", name: "D1", active: true, orderEmailsText: "o@example.jp", usageEmailsText: "r@example.jp" }]).cleaned;
+  const changed = validateDealers([{ id: "d1", name: "D1", orderEmailsText: "o@example.jp", usageEmailsText: "r@example.jp" }]).cleaned;
   const w = planDealerWrites(original, changed, F);
   assert.equal(w.length, 1);
   assert.deepEqual(w[0].data.usageReportEmails, ["r@example.jp"]);

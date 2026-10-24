@@ -42,7 +42,7 @@ beforeEach(async () => {
     for (const f of ["fA", "fB", "fS"]) {
       await setDoc(doc(db, `facilities/${f}/orderers/o1`), { facilityId: f, name: "x" });
       await setDoc(doc(db, `facilities/${f}/adoptedIols/a1`), { facilityId: f, catalogIolId: "c", enabled: true });
-      await setDoc(doc(db, `facilities/${f}/facilityDealers/d1`), { facilityId: f, dealerId: "d", name: "n", active: true });
+      await setDoc(doc(db, `facilities/${f}/facilityDealers/d1`), { facilityId: f, dealerId: "d", name: "n" });
       await setDoc(doc(db, `facilities/${f}/orders/ord1`), { status: "received" });
     }
     await setDoc(doc(db, "iolCatalog/c1"), { model: "m" });
@@ -122,7 +122,7 @@ test("施設管理者は自施設の注文者・採用IOL・ディーラーを�
   await assertSucceeds(setDoc(doc(db, "facilities/fA/orderers/n1"), { facilityId: "fA", name: "新規" }));
   await assertSucceeds(setDoc(doc(db, "facilities/fA/adoptedIols/hoya-xy1"), { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true }));
   await assertSucceeds(setDoc(doc(db, "facilities/fA/facilityDealers/n1"), {
-    facilityId: "fA", dealerId: "d", name: "n", active: true, orderEmails: ["a@example.jp"]
+    facilityId: "fA", dealerId: "d", name: "n", orderEmails: ["a@example.jp"]
   }));
   await assertSucceeds(getDocs(collection(db, "facilities/fA/members")));
 });
@@ -145,7 +145,7 @@ test("入力形式の検証: 余分なフィールドや不正な型は拒否", 
   await assertFails(setDoc(doc(db, "facilities/fA/orderers/n1"), { facilityId: "fA", name: "x", active: "yes" }));
   await assertSucceeds(setDoc(doc(db, "facilities/fA/orderers/n1"), { facilityId: "fA", name: "x", email: "x@example.jp", sortOrder: 10 }));
   await assertFails(setDoc(doc(db, "facilities/fA/facilityDealers/n1"), {
-    facilityId: "fA", dealerId: "d", name: "n", active: true, orderEmails: ["1", "2", "3", "4", "5", "6"]
+    facilityId: "fA", dealerId: "d", name: "n", orderEmails: ["1", "2", "3", "4", "5", "6"]
   }));
 });
 
@@ -370,7 +370,7 @@ test("採用IOL: ドキュメントIDと catalogIolId が一致し、共通マ�
 
 test("ディーラー: 発注用と使用報告用のメールを別々に管理し、形式を検証", async () => {
   const db = as("adminA");
-  const base = { facilityId: "fA", name: "ディーラーX", active: true };
+  const base = { facilityId: "fA", name: "ディーラーX" };
   await ok(db, "facilities/fA/facilityDealers/d-ok", {
     ...base, orderEmails: ["order@example.jp"], usageReportEmails: ["report1@example.jp", "report2@example.jp"], sortOrder: 20
   });
@@ -386,14 +386,14 @@ test("ディーラー: 発注用と使用報告用のメールを別々に管理
     await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: "order@example.jp" }); // リスト以外
     await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: [123] });
   }
-  await ng(db, "facilities/fA/facilityDealers/d-bad", { facilityId: "fA", active: true }); // name 必須
+  await ng(db, "facilities/fA/facilityDealers/d-bad", { facilityId: "fA" }); // name 必須
   await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, secretNote: "x" });
 });
 
 test("施設設定は所属先の施設管理者だけが変更できる", async () => {
   const orderer = { facilityId: "fA", name: "新規" };
   const iol = { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true };
-  const dealer = { facilityId: "fA", name: "D", active: true };
+  const dealer = { facilityId: "fA", name: "D" };
   const targets = [
     ["facilities/fA/orderers/z1", orderer],
     ["facilities/fA/adoptedIols/hoya-xy1", iol],
@@ -409,8 +409,8 @@ test("施設設定は所属先の施設管理者だけが変更できる", async
   }
 });
 
-test("採用IOL・ディーラーの削除は運営者のみ（施設管理者は無効化で運用）", async () => {
-  for (const p of ["facilities/fA/adoptedIols/a1", "facilities/fA/facilityDealers/d1"]) {
+test("採用IOLの削除は運営者のみ（施設管理者は採用を外して運用）", async () => {
+  for (const p of ["facilities/fA/adoptedIols/a1"]) {
     await assertFails(deleteDoc(doc(as("adminA"), p)));
     await assertFails(deleteDoc(doc(as("ordA"), p)));
   }
@@ -451,4 +451,24 @@ test("旧形式(active つき)の注文者ドキュメントも、移行まで�
   const after = await getDoc(doc(as("ordA"), "facilities/fA/orderers/legacy"));
   if ("active" in after.data()) throw new Error("active should be gone after replacing with the new format");
   await assertSucceeds(deleteDoc(doc(as("adminA"), "facilities/fA/orderers/legacy")));
+});
+
+test("ディーラーに有効/無効はない: active を含む書き込みは拒否。自施設の施設管理者は削除でき、他施設・orderer・未認証は削除できない", async () => {
+  const db = as("adminA");
+  await assertFails(setDoc(doc(db, "facilities/fA/facilityDealers/x1"), { facilityId: "fA", name: "D", active: true }));
+  await assertFails(setDoc(doc(db, "facilities/fA/facilityDealers/x1"), { facilityId: "fA", name: "D", active: false }));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/facilityDealers/x1"), { facilityId: "fA", name: "D", orderEmails: ["o@example.jp"], usageReportEmails: ["u@example.jp"], sortOrder: 10 }));
+  for (const c of [as("ordA"), as("adminB"), as("stranger"), as("offA"), anon()]) {
+    await assertFails(deleteDoc(doc(c, "facilities/fA/facilityDealers/d1")));
+  }
+  await assertFails(deleteDoc(doc(as("adminA"), "facilities/fB/facilityDealers/d1"))); // 他施設
+  await assertSucceeds(deleteDoc(doc(as("adminA"), "facilities/fA/facilityDealers/d1")));
+  if ((await getDoc(doc(platform(), "facilities/fB/facilityDealers/d1"))).exists() === false) throw new Error("other facility affected");
+  // 過去の注文(orders)は書き換えられない・影響を受けない
+  if (!(await getDoc(doc(platform(), "facilities/fA/orders/ord1"))).exists()) throw new Error("order history affected");
+  // 旧形式(active つき)のドキュメントは、移行までは読める。新しい形式で置き換えれば active が無くなる
+  await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), "facilities/fA/facilityDealers/legacy"), { facilityId: "fA", name: "旧", active: false }); });
+  await assertSucceeds(getDoc(doc(as("ordA"), "facilities/fA/facilityDealers/legacy")));
+  await assertFails(updateDoc(doc(as("adminA"), "facilities/fA/facilityDealers/legacy"), { name: "旧2" }));
+  await assertSucceeds(setDoc(doc(as("adminA"), "facilities/fA/facilityDealers/legacy"), { facilityId: "fA", name: "旧2" }));
 });

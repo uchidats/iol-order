@@ -175,16 +175,16 @@ service cloud.firestore {
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'active', 'sortOrder', 'updatedAt'])
-          && request.resource.data.keys().hasAll(['facilityId', 'name', 'active'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 100)
-          && request.resource.data.active is bool
           && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
           && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
           && validSortOrder(request.resource.data);
-        allow delete: if isPlatformAdmin();
+        // ディーラーに有効/無効はない。自施設の施設管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
       }
 
       // 注文（サーバーのみが作成。クライアントは読取のみ）

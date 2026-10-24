@@ -299,10 +299,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- ディーラー ----------
-  function dealerRow(d = { id: null, name: "", active: true, orderEmails: [], usageReportEmails: [] }) {
+  function dealerRow(d = { id: null, name: "", orderEmails: [], usageReportEmails: [] }) {
+    // ディーラーに有効/無効はない。不要になったディーラーは削除する(過去の注文に保存されたディーラー情報は残る)
+    const del = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "delete-dealer", "aria-label": "このディーラーを削除", title: "削除" }, trashIcon());
     const row = h("div", { class: "settings-card", "data-id": d.id || "" },
-      h("input", { class: "form-control", "data-f": "name", type: "text", value: d.name, maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名", "aria-label": "ディーラー名" }),
-      h("label", { class: "settings-check" }, h("input", { "data-f": "active", type: "checkbox", checked: d.active }), "有効"),
+      h("div", { class: "dealer-head" },
+        h("input", { class: "form-control", "data-f": "name", type: "text", value: d.name, maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名", "aria-label": "ディーラー名" }),
+        del),
       h("label", { class: "form-label" }, "発注用メールアドレス（1行に1件・最大" + LIMITS.emailsPerList + "件）",
         h("textarea", { class: "form-control", "data-f": "orderEmails", rows: "2", placeholder: "order@example.jp" }, (d.orderEmails || []).join("\n"))),
       h("label", { class: "form-label" }, "使用報告用メールアドレス（発注用とは別に管理）",
@@ -310,7 +313,33 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("p", { class: "error-message", "data-err": "" }));
     row.addEventListener("input", markDirty);
     row.addEventListener("change", markDirty);
+    del.addEventListener("click", () => deleteDealerRow(row, del));
     return row;
+  }
+
+  /**
+   * ディーラーの削除。保存済みのディーラーは即時に削除する(以後の注文の発注先として使えなくなる。過去の注文に保存された情報は変わらない)。
+   * 他の行の未保存の編集は保持する。未保存の追加行は画面から外すだけ。
+   */
+  async function deleteDealerRow(row, btn) {
+    const section = sections.dealers;
+    const id = row.getAttribute("data-id");
+    const name = row.querySelector('[data-f="name"]').value.trim() || "このディーラー";
+    if (!id) { row.remove(); return; }
+    if (!window.confirm(`ディーラー「${name}」を削除しますか？\n以後の注文の発注先として使えなくなります。過去の注文に保存されたディーラー情報には影響しません。`)) return;
+    btn.disabled = true;
+    message(section, "削除しています…");
+    try {
+      await settingsApi.deleteDealer(facility.id, id);
+      data.dealers = data.dealers.filter(x => x.id !== id);
+      row.remove();
+      await onSaved();
+      message(section, `「${name}」を削除しました。`);
+    } catch (e) {
+      console.error("ディーラーの削除に失敗しました:", e);
+      message(section, "削除できませんでした。権限がない、またはネットワークの問題の可能性があります。", true);
+      btn.disabled = false;
+    }
   }
 
   function dealerSection() {
@@ -330,7 +359,6 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const rows = [...section.querySelectorAll(".settings-card")].map(r => ({
         id: r.getAttribute("data-id") || null,
         name: r.querySelector('[data-f="name"]').value,
-        active: r.querySelector('[data-f="active"]').checked,
         orderEmailsText: r.querySelector('[data-f="orderEmails"]').value,
         usageEmailsText: r.querySelector('[data-f="usageEmails"]').value
       }));

@@ -68,5 +68,7 @@ export function createFirestoreSettingsApi(db, fs) {
     saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),
     /** 注文者マスターの削除（所属・認証ユーザー・注文履歴には触れない） */
     deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
+    /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
+    deleteDealer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "facilityDealers", id)),
   };
 }
