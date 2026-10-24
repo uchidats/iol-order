@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:browser": "node --test tests/browser/*.pw.mjs",
+    "test:browser": "node --test --test-concurrency=1 tests/browser/*.pw.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-iol-rules \"node --test tests/rules/*.test.js\"",
     "deploy:dev:firestore": "firebase deploy --only firestore --project medconf-iol-dev",
     "test:functions": "firebase emulators:exec --only firestore --project demo-iol-functions \"node --test --test-concurrency=1 tests/functions/*.test.js\"",

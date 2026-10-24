@@ -3,6 +3,9 @@ import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
 import { renderConfirmLines, renderDealersCard } from "./confirm-lines.js";
 import { findSelfDoctor } from "../domain/self-doctor.js";
+import { draftKey } from "../domain/order-draft.js";
+import { createDraftStore } from "./draft-store.js";
+import { showUndoToast, hideUndoToast } from "./undo-toast.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES } from "../config.js";
@@ -19,6 +22,7 @@ let lensOptions = [];           // 採用済み系列を、正式型番ごとの
 let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let doctors = [];               // 担当医マスター(施設設定の「担当医」)
 let alconCalculatorUrl = null;  // ALCONのトーリックを選択中なら、計算ツールのURL(将来の連携用に保持。画面の表示は各レンズのリンク)
+let draft = null;               // 下書きの自動保存(createDraftStore)
 let loginUser = null;            // ログインユーザー(認証情報のうち uid / email / emailVerified だけ。担当医の初期値の判定用。注文者とは別の情報)
 let dealers = [];               // 施設の登録ディーラー(0社=発注先なし / 1社=自動 / 2社以上=明細ごとに選択)
 let currentPendingOrderData = null;
@@ -100,10 +104,25 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     // 担当医の初期値: ログインユーザー本人が担当医マスター(メールアドレスで紐づけ)にいれば本人。いなければ未選択(従来どおり)
     getDefaultDoctorId: () => findSelfDoctor(doctors, loginUser),
     minDate: todayString,
-    onChange: updateAlconGuide
+    onChange: () => { updateAlconGuide(); if (draft) draft.save(); },   // モデル・絞り込み・レンズの追加/削除/元に戻すは、すぐ下書きに反映する
+    // 削除は確認ダイアログなし。「元に戻す」付きの通知を出す(元に戻した結果も下書きに反映される)
+    onLineRemoved: ({ lineNo, undo }) => showUndoToast(`レンズ${lineNo}を削除しました`, undo)
   });
   setupEventListeners();
+  setupDraft();
   renderModeBadge();
+}
+
+/** 入力内容の自動保存・復元(localStorage の下書き。ログインユーザー・施設ごと)。注文が正常に完了したときだけ削除する */
+function setupDraft() {
+  draft = createDraftStore({
+    // ログインユーザーが分からない(開発用の静的モード)ときは、下書きを使わない
+    key: loginUser && loginUser.uid && facilityRepositoryId ? draftKey(loginUser.uid, facilityRepositoryId) : null,
+    form: el.form, lensLinesBox: el.lensLinesBox, notesInput: el.notesInput,
+    getLensLines: () => lensLines,
+    onRestored: () => { updateAlconGuide(); showToast("入力途中の内容を復元しました"); }
+  });
+  draft.restore();
 }
 
 /** 今日(端末のローカル日付)。手術日の最小値 */
@@ -291,6 +310,7 @@ async function handleExecuteOrder() {
     el.btnModalSubmit.disabled = false;
     el.btnModalBack.disabled = false;
     hideConfirmModal();
+    if (draft) { draft.clear(); draft.setReady(false); }   // 注文が正常に完了したときだけ、下書きを削除する(失敗したときは下の catch に入り、下書きは残る)
     showCompleteModal(currentPendingOrderData, result);
   } catch (err) {
     if (err instanceof OrderError && err.kind === "dryrun") {
@@ -335,8 +355,10 @@ function handleResetForNewOrder() {
   document.body.style.overflow = "";
   currentPendingOrderData = null;
 
+  hideUndoToast();
   el.form.reset();
   lensLines.reset(); // 1明細・両チェックOFFに戻る
+  if (draft) { draft.setReady(true); draft.save(); }   // 新しい注文(空の状態)。下書きは作らない。完了後は、完了した内容を下書きとして保存し直さない
   updateAlconGuide();
   window.scrollTo({ top: 0, behavior: "smooth" });
   showToast("フォームをリセットしました");

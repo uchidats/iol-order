@@ -29,6 +29,17 @@ function externalLinkIcon() {
   return svg;
 }
 
+/** ゴミ箱アイコン(装飾。ボタンの aria-label で意味を伝える) */
+function trashIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "18", height: "18", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
+  for (const d of ["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6", "M14 11v6"]) {
+    const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); svg.appendChild(p);
+  }
+  return svg;
+}
+
 const ALCON_CALCULATOR_FALLBACK_URL = "https://www.myalcon-toriccalc.com"; // 従来と同じリンク先
 
 let seq = 0; // ラベルの for / radio の name を明細ごとに一意にする
@@ -45,9 +56,10 @@ let seq = 0; // ラベルの for / radio の name を明細ごとに一意にす
  * @param {() => string} [deps.getDefaultDoctorId] 担当医の初期値(ログインユーザー本人が担当医に紐づく場合のその担当医ID。なければ "")。最初の明細と、入力を初期状態に戻したときに使う。変更できる
  * @param {() => Array<{id:string, name:string, orderEmails?:string[]}>} [deps.getDealers] 施設の登録ディーラー。0社=発注先なし / 1社=自動選択 / 2社以上=明細ごとに選択必須
  * @param {() => string} deps.minDate 手術日の最小値(YYYY-MM-DD)
- * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新)
+ * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新・下書きの保存)
+ * @param {(info:{lineNo:number, undo:()=>void}) => void} [deps.onLineRemoved] レンズを削除した(最後の1枚は空に戻した)とき。undo() で元に戻せる
  */
-export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], getDefaultDoctorId = () => "", minDate, onChange = () => {} }) {
+export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], getDefaultDoctorId = () => "", minDate, onChange = () => {}, onLineRemoved = () => {} }) {
   const lines = [];
 
   function buildLine(prefill = {}) {
@@ -71,7 +83,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.errs = {};
     const err = (k) => (line.errs[k] = h("p", { class: "error-message", "data-err": k }));
     line.title = h("strong", { class: "lens-line-title" });
-    line.removeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "remove" }, "削除");
+    // 各レンズカードの右上の、控えめなゴミ箱アイコン(確認ダイアログなし。削除すると「元に戻す」付きの通知が出る)
+    line.removeBtn = h("button", { type: "button", class: "lens-line-trash", "data-act": "remove", title: "このレンズを削除", "aria-label": "このレンズを削除" }, trashIcon());
 
     // ALCON製トーリックIOLを選んだ明細だけ、チェックボックスの右に小さなリンクを出す(別タブで開く。テキストとアイコン全体がリンク)
     line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Online Toric IOL Calculator", externalLinkIcon());
@@ -184,7 +197,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
 
   function renumber() {
-    lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.hidden = lines.length <= 1; });
+    lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.setAttribute("aria-label", `レンズ${i + 1}を削除`); l.removeBtn.title = `レンズ${i + 1}を削除`; });
     addButton.disabled = lines.length >= MAX_LINES;
   }
 
@@ -199,13 +212,64 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     return line;
   }
 
+  /** 1明細の入力状態(下書きの保存・削除の「元に戻す」に使う) */
+  function readState(line) {
+    return {
+      toric: line.chkToric.checked, multifocal: line.chkMf.checked, modelKey: line.model.value, power: line.power.value,
+      quantity: parseInt((line.qty.find(r => r.checked) || {}).value || "1", 10),
+      date: line.date.value, doctorId: line.doctor.value, dealerId: line.dealer.value
+    };
+  }
+
+  /**
+   * 入力状態を明細に反映する。モデル・度数・担当医・発注先は、今の選択肢に存在するものだけ(なければ未選択)。
+   * 復元後も、モデルに対応しない度数は残らない(度数はモデルの選択肢の中から選ぶ)。必須チェックは validate() が行う。
+   */
+  function writeState(line, st = {}) {
+    const lens = st.modelKey ? findLensOption(getOptions(), st.modelKey) : null;
+    line.chkToric.checked = lens ? lens.isToric : st.toric === true;           // 選んだモデルが一覧に出る絞り込みにする
+    line.chkMf.checked = lens ? lens.isMultifocal : st.multifocal === true;
+    rebuildModels(line, st.modelKey || "");
+    line.model.title = line.model.value && line.model.selectedOptions[0] ? line.model.selectedOptions[0].title : "";
+    line.power.value = keepPowerIfAvailable(st.power || "", [...line.power.options].map(o => o.value).filter(Boolean));
+    line.qty.forEach(r => { r.checked = r.value === String(st.quantity === 2 ? 2 : 1); });
+    line.date.value = st.date && st.date >= minDate() ? st.date : "";           // 過去の日付は復元しない
+    fillDoctors(line, st.doctorId || "");
+    fillDealers(line, st.dealerId || "");
+    syncDealerGroup(line);
+    for (const k of ["model", "power", "quantity", "date", "doctor", "dealer"]) clearErr(line, k);
+  }
+
+  /** 削除した明細を、元の位置に戻す */
+  function insertAt(index, state) {
+    if (lines.length >= MAX_LINES) return;
+    const line = buildLine({ doctorId: state.doctorId });
+    lines.splice(index, 0, line);
+    container.insertBefore(line.root, container.children[index] || null);
+    rebuildModels(line, "");
+    writeState(line, state);
+  }
+
+  /**
+   * レンズを削除する(確認ダイアログなし。onLineRemoved の「元に戻す」で戻せる)。レンズ番号は残りで自動的に振り直される。
+   * 最後の1枚は削除せず、空の入力カードに戻す。
+   */
   function removeLine(line) {
-    if (lines.length <= 1) return;
-    if (!window.confirm(`${line.title.textContent} を削除しますか？`)) return;
-    lines.splice(lines.indexOf(line), 1);
-    line.root.remove();
+    const index = lines.indexOf(line);
+    if (index < 0) return;
+    const state = readState(line);
+    let undo;
+    if (lines.length <= 1) {
+      writeState(line, { doctorId: getDefaultDoctorId() });
+      undo = () => writeState(line, state);
+    } else {
+      lines.splice(index, 1);
+      line.root.remove();
+      undo = () => insertAt(index, state);
+    }
     renumber();
     onChange();
+    onLineRemoved({ lineNo: index + 1, undo: () => { undo(); renumber(); onChange(); } });
   }
 
   addButton.addEventListener("click", () => {
@@ -254,6 +318,23 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       return { ok: !first, firstInvalid: first };
     },
     refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); }); },
+    /** 全明細の入力状態(下書きの保存用) */
+    snapshot() { return lines.map(readState); },
+    /** 下書きの復元: 保存された状態から明細を作り直す(選択肢にないモデル・度数・担当医・発注先は未選択になる) */
+    restore(states) {
+      lines.splice(0).forEach(l => l.root.remove());
+      const list = (Array.isArray(states) ? states : []).slice(0, MAX_LINES);
+      if (!list.length) { addLine(); return; }
+      list.forEach((st, i) => {
+        const line = buildLine({ doctorId: st.doctorId });
+        lines.push(line);
+        container.appendChild(line.root);
+        rebuildModels(line, "");
+        writeState(line, st);
+      });
+      renumber();
+      onChange();
+    },
     /** 初期状態(1明細・両チェックOFF)に戻す */
     reset() {
       lines.splice(0).forEach(l => l.root.remove());
