@@ -480,13 +480,13 @@ body {
   margin-bottom: 8px;
 }
 
-.lens-line .form-group { max-width: 28rem; margin-bottom: 14px; }
+.lens-line .form-group { max-width: 20rem; margin-bottom: 14px; } /* IOLモデル: 約320px。長い名称は選択肢・確認画面で全文を確認できる */
 .lens-line [data-group="power"] { max-width: 12rem; }
 .lens-line [data-group="quantity"] { max-width: 16rem; }
 .lens-line .date-input-wrapper { max-width: 14rem; }
 .lens-lines-actions { margin: 4px 0 14px; }
 .lens-line [hidden] { display: none !important; }
-#groupOrderer { max-width: 18rem; }
+#groupOrderer { max-width: 200px; }
 #groupNotes { max-width: 36rem; }
 
 /* 確認画面の明細一覧 */

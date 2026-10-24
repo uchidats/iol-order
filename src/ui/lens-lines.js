@@ -67,7 +67,10 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
         err("quantity")),
       group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate")));
 
-    line.model.addEventListener("change", () => { clearErr(line, "model"); onModelChange(line); onChange(); });
+    line.model.addEventListener("change", () => {
+      line.model.title = line.model.value ? line.model.selectedOptions[0].textContent : ""; // 表示しきれない長い名称は、ホバーで全文
+      clearErr(line, "model"); onModelChange(line); onChange();
+    });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
     line.qty.forEach(r => r.addEventListener("change", () => clearErr(line, "quantity")));
@@ -90,11 +93,12 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
     byMaker.forEach((list, maker) => {
       const group = h("optgroup", { label: maker });
-      list.forEach(o => group.appendChild(h("option", { value: o.key }, o.label)));
+      list.forEach(o => group.appendChild(h("option", { value: o.key, title: o.label }, o.label))); // 長い名称は title で全文を確認できる
       line.model.appendChild(group);
     });
     const kept = shown.some(o => o.key === prevKey);
     line.model.value = kept ? prevKey : "";
+    line.model.title = line.model.selectedOptions[0] && line.model.value ? line.model.selectedOptions[0].textContent : "";
     if (prevKey && !kept) line.power.value = "";
     onModelChange(line);
   }
