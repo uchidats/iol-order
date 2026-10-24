@@ -505,18 +505,17 @@ body {
 
 .lens-line .form-group { max-width: 20rem; margin-bottom: 14px; }
 /* 2項目を同じ行に並べる。各項目は必要な幅だけ(全幅にしない)。足りない画面では折り返して縦並び。上端をそろえる */
-.lens-row { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 22px; }
+.lens-row { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 20px; }
 .lens-row .form-group { flex: 0 1 auto; min-width: 0; }
 .lens-row .form-group .form-label { min-height: 1.5em; }
 .lens-row [data-group="model"] { flex-basis: 220px; }   /* 幅は従来どおり(モデル約220px・パワー12rem・手術日14rem) */
 .lens-row [data-group="power"] { flex-basis: 12rem; }
 .lens-row [data-group="date"] { flex-basis: 14rem; }
-/* 枚数: 「1枚」「2枚」は横並びにする前と同じ大きさ(幅120px・高さ48px・間隔12px)。縮めない */
+/* 枚数: 「1枚」「2枚」は幅80px・高さ48px・間隔10px。枚数と手術日は幅が足りなければ折り返す(重ならない) */
 .lens-row [data-group="quantity"] { flex: 0 0 auto; }
-.lens-line .quantity-selector { gap: 12px; }
-.lens-line .quantity-option { flex: 0 0 120px; }
+.lens-line .quantity-selector { gap: 10px; }
+.lens-line .quantity-option { flex: 0 0 80px; }
 .lens-line .quantity-btn { min-height: 48px; }
-@media (max-width: 340px) { .lens-line .quantity-option { flex: 1 1 0; min-width: 0; } .lens-row [data-group="quantity"] { flex: 1 1 100%; max-width: none; } }
 /* 担当医: 約200px(狭い画面では画面幅まで) */
 .lens-line [data-group="doctor"] { max-width: 200px; }
 .lens-line [data-group="doctor"] .form-control { width: 100%; min-width: 0; }
