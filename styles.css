@@ -1538,6 +1538,44 @@ input[type="date"].form-control {
   justify-content: center;
 }
 
+/* 利用者管理の行: 1段目に氏名と右端の操作、2段目にメール・権限。人数が増えても1人2行で収まる */
+.settings-row-member {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  margin: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.settings-row-member [data-f="name"] {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.settings-member-action {
+  justify-self: end;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.settings-member-action .btn-outline-sm {
+  min-height: 0;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
+.settings-member-meta {
+  grid-column: 1 / -1;
+  font-size: 0.85rem;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.settings-row-member.is-disabled [data-f="name"],
+.settings-row-member.is-disabled .settings-member-meta {
+  opacity: 0.6;
+}
+
 .settings-card {
   display: flex;
   flex-direction: column;
@@ -1588,7 +1626,8 @@ input[type="date"].form-control {
     grid-template-columns: 1fr;
   }
 
-  .settings-row-orderer {
+  .settings-row-orderer,
+  .settings-row-member {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 

@@ -300,12 +300,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const btn = plan.ok
         ? h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "toggle-member" }, plan.to === "disabled" ? "無効化" : "再有効化")
         : h("span", { class: "form-hint", title: plan.reason }, m.uid === currentUser.uid ? "（自分）" : "—");
-      const row = h("div", { class: "settings-row", "data-uid": m.uid },
+      // 1段目: 氏名 + 右端に操作(一般注文者はボタン、管理者は状態の表示) / 2段目: メール・権限
+      const right = m.role === "admin" ? h("span", { "data-f": "status", class: active ? "" : "error-message" }, active ? "有効" : "無効") : btn;
+      const row = h("div", { class: "settings-row settings-row-member" + (active ? "" : " is-disabled"), "data-uid": m.uid },
         h("span", { "data-f": "name" }, memberLabel(m)),
-        h("span", { "data-f": "email" }, m.email || "—"),
-        h("span", { "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者"),
-        h("span", { "data-f": "status", class: active ? "" : "error-message" }, active ? "有効" : "無効"),
-        btn);
+        h("span", { class: "settings-member-action" }, right),
+        h("span", { class: "settings-member-meta" },
+          h("span", { "data-f": "email" }, m.email || "—"), " ・ ", h("span", { "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者")));
       if (plan.ok) {
         btn.addEventListener("click", async () => {
           if (!window.confirm(confirmMessage(m, plan))) return;
