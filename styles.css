@@ -1958,3 +1958,8 @@ input[type="date"].form-control {
   .history-row { grid-template-columns: minmax(0, 1fr) auto; }
   .history-by { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* ディーラー(担当医と同じ行デザイン。編集時はメール欄を縦に並べる) */
+.dealer-edit { grid-template-columns: minmax(0, 1fr); }
+.dealer-edit .form-label { display: block; margin: 0; font-size: 0.9rem; }
+.dealer-edit textarea.form-control { margin-top: 4px; width: 100%; }

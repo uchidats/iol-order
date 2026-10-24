@@ -331,35 +331,116 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); markDirty(); };
   }
 
-  // ---------- ディーラー ----------
+  // ---------- ディーラー(担当医と同じ操作: 通常は一覧表示、鉛筆を押した行だけ編集、↑↓で並び替え、ゴミ箱で削除) ----------
+  // ディーラーに有効/無効はない。不要になったディーラーは削除する(過去の注文に保存されたディーラー情報は残る)。
+  // 並び順は sortOrder に保存する(選択肢の表示順だけ。発注先の判定には使わない)。
   function dealerRow(d = { id: null, name: "", orderEmails: [], usageReportEmails: [] }) {
-    // ディーラーに有効/無効はない。不要になったディーラーは削除する(過去の注文に保存されたディーラー情報は残る)
-    const del = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "delete-dealer", "aria-label": "このディーラーを削除", title: "削除" }, trashIcon());
-    const row = h("div", { class: "settings-card", "data-id": d.id || "" },
-      h("div", { class: "dealer-head" },
-        h("input", { class: "form-control", "data-f": "name", type: "text", value: d.name, maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名", "aria-label": "ディーラー名" }),
-        del),
-      h("label", { class: "form-label" }, "発注用メールアドレス（1行に1件・最大" + LIMITS.emailsPerList + "件）",
-        h("textarea", { class: "form-control", "data-f": "orderEmails", rows: "2", placeholder: "order@example.jp" }, (d.orderEmails || []).join("\n"))),
-      h("label", { class: "form-label" }, "使用報告用メールアドレス（発注用とは別に管理）",
-        h("textarea", { class: "form-control", "data-f": "usageEmails", rows: "2", placeholder: "report@example.jp" }, (d.usageReportEmails || []).join("\n"))),
-      h("p", { class: "error-message", "data-err": "" }));
-    row.addEventListener("input", markDirty);
-    row.addEventListener("change", markDirty);
-    del.addEventListener("click", () => deleteDealerRow(row, del));
+    const row = h("div", { class: "orderer-item dealer-item", "data-id": d.id || "" });
+    row._state = { id: d.id || null, name: d.name || "", orderEmailsText: (d.orderEmails || []).join("\n"), usageEmailsText: (d.usageReportEmails || []).join("\n") };
+    let editing = false;
+    const countOf = (text) => String(text || "").split(/\r?\n|,/).map(s => s.trim()).filter(Boolean).length;
+
+    const btn = (act, label, child) => h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": act, "aria-label": label, title: label }, child);
+    const nameView = h("span", { class: "orderer-name", "data-v": "name" });
+    const infoView = h("span", { class: "orderer-email", "data-v": "info" });   // 登録状況(発注用・使用報告用のメールの件数)
+    const actions = h("span", { class: "orderer-actions" },
+      btn("edit", "名前・メールアドレスを編集", pencilIcon()),
+      btn("up", "上へ", "↑"),
+      btn("down", "下へ", "↓"),
+      btn("delete", "このディーラーを削除", trashIcon()));
+    const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名（必須）", "aria-label": "ディーラー名（必須）" });
+    const orderInput = h("textarea", { class: "form-control", "data-f": "orderEmails", rows: "2", placeholder: "order@example.jp", "aria-label": "発注用メールアドレス" });
+    const usageInput = h("textarea", { class: "form-control", "data-f": "usageEmails", rows: "2", placeholder: "report@example.jp", "aria-label": "使用報告用メールアドレス" });
+    const editBox = h("div", { class: "orderer-edit dealer-edit", hidden: true },
+      nameInput,
+      h("label", { class: "form-label" }, `発注用メールアドレス（1行に1件・最大${LIMITS.emailsPerList}件）`, orderInput),
+      h("label", { class: "form-label" }, "使用報告用メールアドレス（発注用とは別に管理）", usageInput),
+      h("div", { class: "orderer-edit-actions" },
+        h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存"),
+        h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル")));
+    const err = h("p", { class: "error-message", "data-err": "" });
+    row.append(h("div", { class: "orderer-view" }, h("span", { class: "orderer-namebox" }, nameView), infoView, actions), editBox, err);
+
+    function paint() {
+      const s = row._state, o = countOf(s.orderEmailsText), u = countOf(s.usageEmailsText);
+      nameView.textContent = s.name || "（名称未入力）";
+      infoView.textContent = `${o ? `発注用メール ${o}件` : "発注用メール未登録(自動送信不可)"} ・ 使用報告用 ${u}件`;
+      infoView.classList.toggle("is-empty", !o);
+      row.querySelector(".orderer-view").hidden = editing;
+      editBox.hidden = !editing;
+      row.classList.toggle("is-editing", editing);
+    }
+    row._isEditing = () => editing;
+    row._startEdit = () => {
+      editing = true;
+      nameInput.value = row._state.name; orderInput.value = row._state.orderEmailsText; usageInput.value = row._state.usageEmailsText;
+      paint(); nameInput.focus();
+    };
+    row._commit = () => {
+      row._state.name = nameInput.value; row._state.orderEmailsText = orderInput.value; row._state.usageEmailsText = usageInput.value;
+      editing = false; paint(); markDirty();
+    };
+    row._cancel = () => {
+      const s = row._state;
+      if (!s.id && !s.name && !s.orderEmailsText && !s.usageEmailsText) { row.remove(); return; } // 追加したばかりの行は取り消すと消える
+      editing = false; err.textContent = ""; paint();
+    };
+
+    row.querySelector('[data-act="edit"]').addEventListener("click", () => row._startEdit());
+    row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
+    row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveDealerRow(row));
+    row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); markDirty(); });
+    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); markDirty(); });
+    row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteDealerRow(row));
+    paint();
     return row;
+  }
+
+  const readDealerRows = (section) => [...section.querySelectorAll(".dealer-item")].map(r => ({
+    id: r._state.id, name: r._state.name, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText
+  }));
+
+  /** 行の「保存」: この行の編集内容を、一覧全体の既存の検証にかけ、問題なければ(並び替えなどの未保存の変更も含めて)保存する */
+  async function saveDealerRow(row) {
+    const section = sections.dealers;
+    const before = { ...row._state };
+    const typed = { name: row.querySelector('[data-f="name"]').value, order: row.querySelector('[data-f="orderEmails"]').value, usage: row.querySelector('[data-f="usageEmails"]').value };
+    row._commit();
+    const v = validateDealers(readDealerRows(section));
+    showRowErrors(section, v.errors);
+    if (!v.ok) { // 検証に通らなければ、編集中のまま入力を残す
+      Object.assign(row._state, before); row._startEdit();
+      const own = row.querySelector("[data-err]");
+      if (!own.textContent) own.textContent = v.errors.map(e => e.message).join(" / ");
+      row.querySelector('[data-f="name"]').value = typed.name;
+      row.querySelector('[data-f="orderEmails"]').value = typed.order;
+      row.querySelector('[data-f="usageEmails"]').value = typed.usage;
+      return message(section, "入力内容を確認してください。", true);
+    }
+    await saveDealersNow(section);
+  }
+
+  async function saveDealersNow(section) {
+    const v = validateDealers(readDealerRows(section));
+    showRowErrors(section, v.errors);
+    if (!v.ok) return message(section, "入力内容を確認してください。", true);
+    const writes = planDealerWrites(data.dealers, v.cleaned, facility.id);   // 並び順は sortOrder として保存される
+    if (!writes.length) return message(section, "変更はありません。");
+    const ok = await saveWith(section, section.querySelector('[data-act="save"]'), () => settingsApi.saveDealers(facility.id, writes));
+    if (ok) { renderDealers(section); message(section, "ディーラーを保存しました。"); }
   }
 
   /**
    * ディーラーの削除。保存済みのディーラーは即時に削除する(以後の注文の発注先として使えなくなる。過去の注文に保存された情報は変わらない)。
    * 他の行の未保存の編集は保持する。未保存の追加行は画面から外すだけ。
    */
-  async function deleteDealerRow(row, btn) {
+  async function deleteDealerRow(row) {
     const section = sections.dealers;
     const id = row.getAttribute("data-id");
-    const name = row.querySelector('[data-f="name"]').value.trim() || "このディーラー";
+    const name = (row._state.name || "").trim() || "このディーラー";
     if (!id) { row.remove(); return; }
     if (!window.confirm(`ディーラー「${name}」を削除しますか？\n以後の注文の発注先として使えなくなります。過去の注文に保存されたディーラー情報には影響しません。`)) return;
+    const btn = row.querySelector('[data-act="delete"]');
     btn.disabled = true;
     message(section, "削除しています…");
     try {
@@ -377,7 +458,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function dealerSection() {
     const section = h("section", { class: "settings-section", "data-section": "dealers" },
-      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。現在は登録のみで、メール送信は行われません。"),
+      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑↓で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。現在は登録のみで、メール送信は行われません。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "ディーラーを追加"),
@@ -385,27 +466,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = dealerRow(); section.querySelector("[data-list]").appendChild(row); markDirty();
-      row.querySelector('[data-f="name"]').focus();
+      row._startEdit(); // 追加した行は編集状態で表示する
     });
-    const saveBtn = section.querySelector('[data-act="save"]');
-    saveBtn.addEventListener("click", async () => {
-      const rows = [...section.querySelectorAll(".settings-card")].map(r => ({
-        id: r.getAttribute("data-id") || null,
-        name: r.querySelector('[data-f="name"]').value,
-        orderEmailsText: r.querySelector('[data-f="orderEmails"]').value,
-        usageEmailsText: r.querySelector('[data-f="usageEmails"]').value
-      }));
-      const v = validateDealers(rows);
-      section.querySelectorAll("[data-err]").forEach(p => { p.textContent = ""; });
-      v.errors.forEach(e => {
-        const p = section.querySelectorAll(".settings-card")[e.index].querySelector("[data-err]");
-        p.textContent = (p.textContent ? p.textContent + " / " : "") + e.message;
-      });
-      if (!v.ok) return message(section, "入力内容を確認してください。", true);
-      const writes = planDealerWrites(data.dealers, v.cleaned, facility.id);
-      if (!writes.length) return message(section, "変更はありません。");
-      const ok = await saveWith(section, saveBtn, () => settingsApi.saveDealers(facility.id, writes));
-      if (ok) { renderDealers(section); message(section, "ディーラーを保存しました。"); }
+    section.querySelector('[data-act="save"]').addEventListener("click", async () => {
+      if ([...section.querySelectorAll(".dealer-item")].some(r => r._isEditing())) {
+        return message(section, "編集中の行を、保存またはキャンセルしてください。", true);
+      }
+      await saveDealersNow(section);
     });
     return section;
   }
