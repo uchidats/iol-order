@@ -2,6 +2,8 @@
  * 注文の明細(複数のIOL)に関する純粋関数。
  * 1回の注文は複数の明細を持てる。明細ごとにモデル・度数・枚数・手術日を持ち、将来はディーラーごとに振り分ける。
  */
+import { baseModelName } from "./lens-labels.js";
+
 export const MAX_LINES = 20;          // サーバー(createOrder)の上限と同じ
 export const MAX_TOTAL_QUANTITY = 40; // 同上
 
@@ -35,6 +37,7 @@ export function toOrderLines(values) {
     manufacturer: v.lens.manufacturer,
     toricModel: v.lens.isToric ? v.lens.toricModel : "",
     label: v.lens.label, // 画面表示用(メーカー / 型番)
+    modelName: v.lens.isToric ? v.lens.toricModel : baseModelName(v.lens.model), // 画面表示用(モデル名だけ。メーカーは別に表示)
     isToric: v.lens.model.isToric, isMultifocal: v.lens.model.isMultifocal, // 画面表示用(バッジ)。サーバーには送らない
     power: v.power,
     quantity: v.quantity,

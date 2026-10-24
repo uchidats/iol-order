@@ -482,7 +482,8 @@ body {
 }
 
 /* 「レンズ1」「レンズ2」… ヘッダーの状態表示と同じピル型。文字の長さに合わせた小さなサイズ */
-.lens-line-title {
+.lens-line-title,
+.lens-no-badge {
   display: inline-block;
   padding: 3px 10px;
   font-size: 0.75rem;
@@ -536,6 +537,13 @@ body {
 .summary-line:last-child { border-bottom: 0; }
 .summary-line-title { font-weight: 600; overflow-wrap: anywhere; }
 .summary-line-detail { font-size: 0.9rem; color: #475569; }
+/* 確認画面の各レンズ: [レンズN] メーカー モデル名 度数 枚数 を1行に(幅が足りないときだけ折り返す)。手術日は次の行 */
+.summary-line-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.summary-line-main .lens-no-badge { flex: none; }
+.summary-maker { font-size: 0.9rem; color: #475569; }
+.summary-model { font-weight: 700; overflow-wrap: anywhere; }
+.summary-power, .summary-qty { font-weight: 600; white-space: nowrap; }
+.summary-line-date { margin-top: 2px; font-size: 0.9rem; color: #475569; }
 
 /* 度数ステッパー入力 */
 .stepper-input-wrapper {

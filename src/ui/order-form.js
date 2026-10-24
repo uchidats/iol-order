@@ -250,17 +250,24 @@ function showConfirmModal(data) {
   list.replaceChildren(...data.lines.map(l => {
     const li = document.createElement("li");
     li.className = "summary-line";
-    const title = document.createElement("div");
-    title.className = "summary-line-title";
-    title.textContent = `${l.lineNo}. ${l.label}`; // メーカー / 具体的な型番
-    title.append(" ", ...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal })); // 特徴はバッジ(判定は isToric / isMultifocal)
-    const detail = document.createElement("div");
-    detail.className = "summary-line-detail";
-    detail.textContent = `${l.power} ・ ${l.quantity} 枚 ・ 手術日 ${formatDate(l.surgeryDate)}`;
-    li.append(title, detail);
+    // 1行目: [レンズN] メーカー モデル名 度数 枚数(収まらないときだけ折り返す) / 2行目: 手術日
+    const span = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; };
+    const main = document.createElement("div");
+    main.className = "summary-line-main";
+    main.append(
+      span("lens-no-badge", `レンズ${l.lineNo}`),
+      span("summary-maker", l.manufacturer),
+      span("summary-model", l.modelName),
+      ...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal }), // 特徴はバッジ(判定は isToric / isMultifocal)
+      span("summary-power", l.power),
+      span("summary-qty", `${l.quantity}枚`));
+    const date = document.createElement("div");
+    date.className = "summary-line-date";
+    date.textContent = `手術日 ${formatDate(l.surgeryDate)}`;
+    li.append(main, date);
     return li;
   }));
-  $("summaryTotal").textContent = `${data.lines.length}明細・合計 ${data.totalQuantity} 枚`;
+  $("summaryTotal").textContent = `${data.lines.length}種類・合計${data.totalQuantity}枚`;
 
   $("summaryOrderer").textContent = data.orderer;
   $("summaryEmail").textContent = data.email || "（未登録）";
@@ -367,7 +374,7 @@ function showCompleteModal(orderData, result) {
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
     ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)}</div>`).join("")}
-    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}明細・${escapeHtml(orderData.totalQuantity)}枚</div>
+    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}種類・${escapeHtml(orderData.totalQuantity)}枚</div>
     <div style="margin-bottom: 4px;"><strong>注文者:</strong> ${escapeHtml(orderData.orderer)}</div>
     ${orderData.email ? `<div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>` : ""}
   `;
