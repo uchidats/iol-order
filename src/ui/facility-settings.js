@@ -80,7 +80,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     // 有効/無効は画面では操作しない。新規は有効(active=true)、既存の値はそのまま保持する(互換性)
     const row = h("div", { class: "settings-row settings-row-orderer", "data-id": o.id || "", "data-active": o.active ? "1" : "0" },
       h("input", { class: "form-control", "data-f": "name", type: "text", value: o.name, maxlength: LIMITS.ordererNameMax, placeholder: "注文者名", "aria-label": "注文者名" }),
-      h("input", { class: "form-control", "data-f": "email", type: "email", value: o.email || "", placeholder: "メールアドレス（任意）", "aria-label": "メールアドレス" }),
+      h("input", { class: "form-control", "data-f": "email", type: "email", value: o.email || "", placeholder: "メールアドレス（注文に必要）", "aria-label": "メールアドレス" }),
       h("span", { class: "settings-move" },
         o.active ? null : h("span", { class: "form-hint", title: "注文フォームの選択肢には表示されません" }, "無効"),
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "up", "aria-label": "上へ" }, "↑"),

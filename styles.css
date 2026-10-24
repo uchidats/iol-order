@@ -150,6 +150,18 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* 計測結果の読み取り: 初期は折りたたみ */
+.ocr-collapse > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-main);
+  list-style-position: inside;
+}
+
+.ocr-collapse[open] > summary {
+  margin-bottom: 12px;
+}
+
 .feature-card-content {
   display: flex;
   align-items: flex-start;
@@ -542,7 +554,7 @@ body {
   border: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   font-size: 1.05rem;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--text-main);
   transition: all 0.15s ease;
   user-select: none;

@@ -2,7 +2,7 @@ import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { filterPowersByModel, defaultPowerLabel } from "../domain/power-filter.js";
 import { isValidEmail } from "../domain/order-validation.js";
-import { STORAGE_KEY_EMAIL, ORDER_MODES } from "../config.js";
+import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
 import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.js";
 
@@ -29,7 +29,6 @@ function cacheElements() {
     powerSelect: $("iolPowerSelect"),
     surgeryDateInput: $("surgeryDateInput"),
     ordererSelect: $("ordererSelect"),
-    emailInput: $("emailInput"),
     notesInput: $("notesInput"),
     confirmModal: $("confirmModal"),
     btnModalBack: $("btnModalBack"),
@@ -67,7 +66,6 @@ export async function initOrderForm({ config, repository, facilityId, facility =
   initOrdererSelect(orderers.filter(o => o.active));
   initPowerOptions(GOOGLE_FORM_ALL_POWERS);
   initDefaultDate();
-  initSavedEmail();
   setupEventListeners();
   renderModeBadge();
 }
@@ -101,11 +99,18 @@ function initModelSelect() {
   });
 }
 
+/** 選択中の注文者のマスターに登録されたメールアドレス(未選択・未登録は空) */
+function selectedOrdererEmail() {
+  const opt = el.ordererSelect.selectedOptions && el.ordererSelect.selectedOptions[0];
+  return opt && opt.value ? (opt.dataset.email || "").trim() : "";
+}
+
 function initOrdererSelect(orderers) {
   orderers.forEach(o => {
     const option = document.createElement("option");
     option.value = o.name;
     option.textContent = o.name;
+    option.dataset.email = (o.email || "").trim(); // 注文者マスターのメール(ログインユーザーのメールではない)
     el.ordererSelect.appendChild(option);
   });
 }
@@ -138,15 +143,6 @@ function initDefaultDate() {
   el.surgeryDateInput.min = `${yyyy}-${mm}-${dd}`;
 }
 
-function initSavedEmail() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_EMAIL);
-    if (saved && el.emailInput) el.emailInput.value = saved;
-  } catch (e) {
-    console.warn("localStorageへのアクセスに失敗しました:", e);
-  }
-}
-
 function setupEventListeners() {
   el.modelSelect.addEventListener("change", handleModelChange);
   el.toricModelSelect.addEventListener("change", () => clearFieldError("toricModelSelect"));
@@ -155,7 +151,6 @@ function setupEventListeners() {
 
   el.surgeryDateInput.addEventListener("change", () => clearFieldError("surgeryDateInput"));
   el.ordererSelect.addEventListener("change", () => clearFieldError("ordererSelect"));
-  el.emailInput.addEventListener("input", () => clearFieldError("emailInput"));
 
   document.querySelectorAll('input[name="quantity"]').forEach(r => {
     r.addEventListener("change", () => clearFieldError("quantity"));
@@ -241,13 +236,8 @@ function handleFormSubmit(e) {
   if (!validateOrderForm()) return;
 
   const quantityEl = document.querySelector('input[name="quantity"]:checked');
-  const emailVal = el.emailInput.value.trim();
-
-  try {
-    localStorage.setItem(STORAGE_KEY_EMAIL, emailVal);
-  } catch (err) {
-    console.warn("localStorageへの保存に失敗しました:", err);
-  }
+  // 注文者のメールアドレスは、選択された注文者のマスターデータから取得する(ログインユーザーのメールとは別物)
+  const emailVal = selectedOrdererEmail();
 
   currentPendingOrderData = {
     model: el.modelSelect.value,
@@ -315,17 +305,10 @@ function validateOrderForm() {
 
   if (!el.ordererSelect.value) {
     invalid("ordererSelect", "注文者を選択してください", el.ordererSelect);
+  } else if (!isValidEmail(selectedOrdererEmail())) {
+    invalid("ordererSelect", "この注文者のメールアドレスが登録されていません。施設管理者に、施設設定での登録を依頼してください", el.ordererSelect);
   } else {
     clearFieldError("ordererSelect");
-  }
-
-  const emailVal = el.emailInput.value.trim();
-  if (!emailVal) {
-    invalid("emailInput", "メールアドレスを入力してください", el.emailInput);
-  } else if (!isValidEmail(emailVal)) {
-    invalid("emailInput", "正しいメールアドレスの形式で入力してください（例: doctor@example.jp）", el.emailInput);
-  } else {
-    clearFieldError("emailInput");
   }
 
   if (firstInvalidEl) {
@@ -469,14 +452,13 @@ function handleResetForNewOrder() {
   el.modelSelect.value = "";
   handleModelChange();
   initDefaultDate();
-  initSavedEmail();
   window.scrollTo({ top: 0, behavior: "smooth" });
   showToast("フォームをリセットしました");
 }
 
 /**
  * 入力途中の内容があるか（施設切替時の破棄確認用）
- * 保存済みメールアドレスや既定値だけの状態は「入力あり」とみなさない。
+ * 既定値だけの状態は「入力あり」とみなさない。
  */
 export function isOrderFormDirty() {
   if (!el.form) return false;
