@@ -9,7 +9,7 @@ import {
   initializeTestEnvironment, assertSucceeds, assertFails
 } from "@firebase/rules-unit-testing";
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, deleteField, writeBatch, serverTimestamp
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, orderBy, limit, deleteField, writeBatch, serverTimestamp
 } from "firebase/firestore";
 
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
@@ -496,4 +496,16 @@ test("表示順: 形式の検証(別のドキュメントID・余計なキー・
   await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [], modelOrder: Array(201).fill("a") }));
   await assertSucceeds(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [], modelOrder: [] }));
   await assertSucceeds(deleteDoc(doc(db, "facilities/fA/displaySettings/iolOrder")));
+});
+
+// ---------- 注文履歴(閲覧のみ)の問い合わせ ----------
+test("注文履歴: 自施設の所属メンバーは「新しい順・50件」の一覧を読める。他施設の一覧・未認証は読めない。書き込みはできない", async () => {
+  const q = (db, f) => query(collection(db, `facilities/${f}/orders`), orderBy("createdAt", "desc"), limit(50));
+  await assertSucceeds(getDocs(q(as("ordA"), "fA")));
+  await assertSucceeds(getDocs(q(as("adminA"), "fA")));
+  await assertFails(getDocs(q(as("ordA"), "fB")));
+  await assertFails(getDocs(q(as("ordB"), "fA")));
+  await assertFails(getDocs(q(anon(), "fA")));
+  await assertFails(updateDoc(doc(as("adminA"), "facilities/fA/orders/ord1"), { status: "x" }));
+  await assertFails(deleteDoc(doc(as("adminA"), "facilities/fA/orders/ord1")));
 });

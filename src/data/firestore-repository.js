@@ -25,6 +25,12 @@ export function createFirestoreRepository(db, fs) {
     },
     listOrderers: async (facilityId) => (await listSub(facilityId, "orderers")).sort(bySortOrder),
     listAdoptedIols: (facilityId) => listSub(facilityId, "adoptedIols"),
+    /** 注文履歴(閲覧のみ)。新しい順に最大 limit 件。読めるのは自施設の所属メンバーと運営者(Rules) */
+    async listOrders(facilityId, limit = 50) {
+      const q = fs.query(fs.collection(db, "facilities", facilityId, "orders"), fs.orderBy("createdAt", "desc"), fs.limit(limit));
+      const snap = await fs.getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, facilityId, ...d.data() }));
+    },
     /**
      * 施設ごとのIOLモデルの表示順(未設定は null)。順番だけの設定なので、読めない・壊れている場合も null にして標準の順番で動かす
      * (注文フォームを止めない)

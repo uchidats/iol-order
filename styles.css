@@ -1939,3 +1939,22 @@ input[type="date"].form-control {
 /* ディーラー: 名前の右側に削除ボタン */
 .dealer-head { display: flex; align-items: center; gap: 8px; }
 .dealer-head .form-control { flex: 1; min-width: 0; }
+
+/* 注文履歴(閲覧のみ)。明細の見た目は注文確認画面と同じ(.summary-line*) */
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-list li + li { border-top: 1px solid #e5e7eb; }
+.history-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 12px;
+  width: 100%; padding: 12px 4px; background: none; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  min-height: var(--min-tap);
+}
+.history-row:hover { background: #f8fafc; }
+.history-date { font-weight: 600; white-space: nowrap; }
+.history-by { color: #475569; overflow-wrap: anywhere; }
+.history-count { font-weight: 600; white-space: nowrap; }
+.history-detail-head { margin: 12px 0 8px; }
+.history-total { margin: 10px 0 0; font-weight: 700; }
+@media (max-width: 480px) {
+  .history-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .history-by { grid-column: 1 / -1; grid-row: 2; }
+}

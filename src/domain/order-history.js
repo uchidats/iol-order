@@ -1,0 +1,81 @@
+/**
+ * 注文履歴の表示用データ(純粋関数)。注文ドキュメントの新旧の形式を、同じ形にそろえて読む。
+ *  - 現行(schemaVersion 3): 各明細に doctor(担当医のスナップショット)・dealer(発注先のスナップショット)がある
+ *  - 旧(schemaVersion 2): 明細に doctor が無く、注文全体の orderer(注文者) → その担当医として扱う
+ *  - 旧(schemaVersion 1): トップレベルの item / surgeryDate / orderer
+ * 実際に操作した発注者は、どの形式でも order.createdBy(サーバーが認証情報から記録)。
+ * orderLinesOf は functions/src/orders.js の同名の関数と同じ動作(tests/order-history.test.js で一致を確認する)。
+ */
+import { baseModelName } from "./lens-labels.js";
+
+export function orderLinesOf(order) {
+  const fallback = order.orderer || null;
+  if (Array.isArray(order.lines)) return order.lines.map(l => ({ ...l, doctor: l.doctor ?? fallback }));
+  if (order.item) return [{ lineNo: 1, status: order.status, item: order.item, surgeryDate: order.surgeryDate, dealerId: null, doctor: fallback }];
+  return [];
+}
+
+/** Firestore の Timestamp / Date / 数値 / ISO文字列 → ミリ秒(読めなければ null) */
+export function toMillis(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  if (typeof v.seconds === "number") return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "number") return v;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : t;
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+
+/** 日本時間の「2026/10/25 14:30」。読めなければ「—」 */
+export function formatDateTimeJst(v) {
+  const ms = toMillis(v);
+  if (ms === null) return "—";
+  const d = new Date(ms + 9 * 3600 * 1000);
+  return `${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** 実際の発注者(ログインしていた人)の表示名。氏名 → メール → 不明 */
+export function orderedByLabel(order) {
+  const c = order.createdBy;
+  return (c && (String(c.displayName || "").trim() || String(c.email || "").trim())) || "（不明）";
+}
+
+/** 1明細の表示用データ */
+export function describeLine(line, index = 0) {
+  const item = line.item || {};
+  const doctor = line.doctor && line.doctor.name ? String(line.doctor.name) : "";
+  const dealer = line.dealer && line.dealer.name ? String(line.dealer.name) : "";
+  return {
+    lineNo: line.lineNo || index + 1,
+    maker: item.manufacturer || "",
+    model: item.toricModel || baseModelName({ displayName: item.displayName, model: item.model }),
+    isToric: item.isToric === true, isMultifocal: item.isMultifocal === true,
+    power: item.power || "", quantity: Number(item.quantity) || 0,
+    surgeryDate: line.surgeryDate || "",
+    doctorName: doctor || "（記録なし）",
+    dealerName: dealer || null          // null = 発注先未設定(または発注時にすでに削除されていた)
+  };
+}
+
+/** 一覧の1行分 */
+export function summarizeOrder(order) {
+  const lines = orderLinesOf(order).map(describeLine);
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber || "",
+    createdAtMs: toMillis(order.createdAt),
+    createdAtLabel: formatDateTimeJst(order.createdAt),
+    orderedBy: orderedByLabel(order),
+    lineCount: lines.length,
+    totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
+    testOrder: order.testOrder === true,
+    lines
+  };
+}
+
+/** 新しい順(作成日時が読めないものは末尾) */
+export function sortOrdersNewestFirst(orders) {
+  return [...orders].sort((a, b) => (b.createdAtMs ?? -Infinity) - (a.createdAtMs ?? -Infinity));
+}
