@@ -103,6 +103,7 @@ body {
 
 .header-text {
   flex: 1;
+  min-width: 0;
 }
 
 .header-title {
@@ -113,6 +114,7 @@ body {
 }
 
 .header-subtitle {
+  overflow-wrap: anywhere;
   font-size: 0.78rem;
   color: rgba(255, 255, 255, 0.9);
   margin-top: 2px;

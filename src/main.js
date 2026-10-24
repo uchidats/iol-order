@@ -136,8 +136,19 @@ async function bootstrapWithFirebase(config) {
     return (f && f.name) || "（名称未設定）";
   };
 
+  // ヘッダーの施設名: 施設が確定している間だけ、Firestoreの施設データの名称を表示する(固定名・代替名は使わない)
+  const headerFacility = document.getElementById("headerFacility");
+  const setHeaderFacility = (name) => {
+    if (!headerFacility) return;
+    const text = typeof name === "string" ? name.trim() : "";
+    headerFacility.textContent = text; // textContent: HTMLとして解釈しない
+    headerFacility.hidden = !text;
+  };
+
   const render = () => {
     const access = decideAccess(state);
+    const current = access.state === ACCESS.GRANTED ? state.facilities.find(f => f.id === access.facilityId) : null;
+    setHeaderFacility(current && current.name);
     ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy, registration });
     if (access.state === ACCESS.GRANTED) {
       menu.update({
