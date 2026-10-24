@@ -52,3 +52,17 @@ export function toOrderLines(values) {
     dealerId: v.dealer ? v.dealer.id : "", dealerName: v.dealer ? v.dealer.name : "", dealerOrderEmails: v.dealer ? (v.dealer.orderEmails || []) : []
   }));
 }
+
+/**
+ * 確認画面用: 明細を手術日ごとにまとめる(表示のみ。注文データの並び順・送信・保存には使わない)。
+ * グループは手術日の早い順。同じ手術日の中は入力順を維持する。各明細の lineNo(元のレンズ番号)は変えない。
+ * @returns {Array<{surgeryDate:string, lines:Array<object>}>}
+ */
+export function groupLinesBySurgeryDate(lines) {
+  const groups = new Map();
+  for (const l of lines) {
+    if (!groups.has(l.surgeryDate)) groups.set(l.surgeryDate, []);
+    groups.get(l.surgeryDate).push(l);      // Map と配列は挿入順 = 入力順
+  }
+  return [...groups.keys()].sort().map(surgeryDate => ({ surgeryDate, lines: groups.get(surgeryDate) })); // YYYY-MM-DD は文字列順 = 日付順
+}

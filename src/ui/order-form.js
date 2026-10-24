@@ -2,9 +2,9 @@ import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
 import { summarizeDealers } from "../domain/dealer-selection.js";
+import { renderConfirmLines } from "./confirm-lines.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
-import { lensBadgeElements } from "./lens-badges.js";
 import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
@@ -204,11 +204,6 @@ function validateOrderForm() {
 // ==========================================================================
 // モーダル表示制御 & サマリー作成
 // ==========================================================================
-function formatDate(iso) {
-  const d = new Date(iso + "T00:00:00");
-  return isNaN(d) ? iso : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${["日", "月", "火", "水", "木", "金", "土"][d.getDay()]})`;
-}
-
 function showConfirmModal(data) {
   // 発注先の取り違え防止のため、施設名を明示する
   const facilityRow = $("summaryFacilityRow");
@@ -221,29 +216,7 @@ function showConfirmModal(data) {
 
   // 全明細と合計枚数
   const list = $("summaryLines");
-  list.replaceChildren(...data.lines.map(l => {
-    const li = document.createElement("li");
-    li.className = "summary-line";
-    // 1行目: [レンズN] メーカー モデル名 度数 枚数(収まらないときだけ折り返す) / 2行目: 手術日
-    const span = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; };
-    const main = document.createElement("div");
-    main.className = "summary-line-main";
-    main.append(
-      span("lens-no-badge", `レンズ${l.lineNo}`),
-      span("summary-maker", l.manufacturer),
-      span("summary-model", l.modelName),
-      ...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal }), // 特徴はバッジ(判定は isToric / isMultifocal)
-      span("summary-power", l.power),
-      span("summary-qty", `${l.quantity}枚`));
-    const date = document.createElement("div");
-    date.className = "summary-line-date";
-    date.textContent = `手術日 ${formatDate(l.surgeryDate)}`;
-    const who = document.createElement("div");
-    who.className = "summary-line-detail";
-    who.textContent = `担当医 ${l.doctor}`; // 担当医が違う明細も、明細ごとに正しく表示する(発注先は、下の「発注先」カードにまとめる)
-    li.append(main, date, who);
-    return li;
-  }));
+  renderConfirmLines(list, data.lines); // 手術日ごとにまとめて表示(表示のみ。注文データの並び順・送信内容は変えない)
   $("summaryTotal").textContent = `${data.lines.length}件・合計${data.totalQuantity}枚`; // 件数=レンズ明細の数、枚数=各明細の枚数の合計
 
   $("summaryNotes").textContent = data.notes || "（なし）";

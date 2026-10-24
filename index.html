@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=75bfea7033">
+  <link rel="stylesheet" href="styles.css?v=f4de7e3439">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -36,7 +36,7 @@
       "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=7ca06e7e90",
       "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=31603a3427",
       "./src/domain/order-history.js": "./src/domain/order-history.js?v=01205eb9e5",
-      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=a77b1a1aa3",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=27768c26bd",
       "./src/domain/order-mail-profiles.js": "./src/domain/order-mail-profiles.js?v=0f6b679167",
       "./src/domain/order-mail.js": "./src/domain/order-mail.js?v=fb1f2c3b0d",
       "./src/domain/order-request.js": "./src/domain/order-request.js?v=a677a9ed01",
@@ -48,6 +48,7 @@
       "./src/firebase/sdk.js": "./src/firebase/sdk.js?v=82975b38ab",
       "./src/main.js": "./src/main.js?v=2f6a49fa93",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=cd8d14c8b4",
+      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=2f8c0fd5de",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
       "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=3d7fd7fba2",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
@@ -55,7 +56,7 @@
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
       "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=dfb55d71bf",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=2d47288a88",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=8b3990673b",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=268f0c542c"
     }
   }
@@ -224,7 +225,7 @@
           </div>
 
           <div class="summary-item summary-item-lines">
-            <dt class="summary-label">発注するレンズ(担当医・手術日)</dt>
+            <dt class="summary-label">発注するレンズ(手術日別)</dt>
             <dd class="summary-value">
               <ol class="summary-lines" id="summaryLines"></ol>
             </dd>

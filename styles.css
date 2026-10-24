@@ -1968,3 +1968,9 @@ input[type="date"].form-control {
 .summary-dealer + .summary-dealer { margin-top: 6px; }
 .summary-dealer-name { font-weight: 600; overflow-wrap: anywhere; }
 .summary-dealer-warning { font-size: 0.9rem; color: #475569; }
+
+/* 確認画面: 手術日ごとのグループ(見出しに手術日、その下に同じ日のレンズ)。担当医はレンズ情報より控えめに */
+.summary-date-group + .summary-date-group { margin-top: 10px; }
+.summary-date-head { font-size: 0.9rem; font-weight: 700; color: #334155; padding-bottom: 2px; border-bottom: 1px solid #e2e8f0; }
+.summary-date-lines { margin-top: 2px; }
+.summary-doctor { font-size: 0.9rem; color: #64748b; font-weight: 500; overflow-wrap: anywhere; }
