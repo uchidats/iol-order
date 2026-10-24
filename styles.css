@@ -1792,6 +1792,21 @@ input[type="date"].form-control {
   white-space: nowrap;
 }
 
+/* 採用IOL: メーカーごとの折りたたみ */
+.iol-maker { border: 1px solid #e5e7eb; border-radius: var(--radius-md); margin: 8px 0; min-width: 0; }
+.iol-maker-summary {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 6px 12px;
+  cursor: pointer; list-style: none; user-select: none;
+  font-weight: 600;
+}
+.iol-maker-summary::-webkit-details-marker { display: none; }
+.iol-maker-summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--text-muted, #6b7280); transition: transform 0.15s; }
+.iol-maker[open] > .iol-maker-summary::before { transform: rotate(90deg); }
+.iol-maker-count { margin-left: auto; font-size: 0.75rem; font-weight: 500; color: var(--text-muted, #6b7280); white-space: nowrap; }
+.iol-maker-list { padding: 2px 12px 8px; }
+.iol-maker-list .settings-check { display: flex; margin: 6px 0; white-space: normal; overflow-wrap: anywhere; }
+
 .settings-iol-group {
   min-width: 0;
   margin: 8px 0;

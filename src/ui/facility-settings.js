@@ -279,16 +279,27 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const enabled = new Set(data.adopted.filter(a => a.enabled).map(a => a.catalogIolId));
     const groups = new Map();
     masters.forEach(m => { if (!groups.has(m.manufacturer)) groups.set(m.manufacturer, []); groups.get(m.manufacturer).push(m); });
-    const nodes = [...groups.entries()].map(([mfg, items]) =>
-      h("fieldset", { class: "settings-iol-group" },
-        h("legend", {}, mfg),
-        items.map(m => h("label", { class: "settings-check" },
-          h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
-          h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
-          lensBadgeElements(m)))));                              // 特徴は isToric / isMultifocal のバッジで1回だけ
+    // メーカーごとに折りたたみ(初期はすべて閉じる)。見出しの右側に「採用数/登録数」。チェックと保存は従来どおり
+    const nodes = [...groups.entries()].map(([mfg, items]) => {
+      const count = h("span", { class: "iol-maker-count" });
+      const group = h("details", { class: "iol-maker", "data-maker": mfg },
+        h("summary", { class: "iol-maker-summary" }, h("span", { class: "iol-maker-name" }, mfg), count),
+        h("div", { class: "iol-maker-list" },
+          items.map(m => h("label", { class: "settings-check" },
+            h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
+            h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
+            lensBadgeElements(m)))));                              // 特徴は isToric / isMultifocal のバッジで1回だけ
+      group._updateCount = () => {
+        const adopted = group.querySelectorAll('input[type="checkbox"]:checked').length;
+        count.textContent = `${adopted}/${items.length}`;
+        count.setAttribute("aria-label", `採用 ${adopted}、登録 ${items.length}`);
+      };
+      group._updateCount();
+      return group;
+    });
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...nodes);
-    list.addEventListener("change", markDirty);
+    list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); markDirty(); };
   }
 
   // ---------- ディーラー ----------
