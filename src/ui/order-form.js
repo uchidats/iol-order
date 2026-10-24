@@ -22,15 +22,11 @@ function cacheElements() {
   Object.assign(el, {
     form: $("iolOrderForm"),
     modelSelect: $("iolModelSelect"),
-    modelBadgeInfo: $("modelBadgeInfo"),
     groupToricModel: $("groupToricModel"),
     toricModelSelect: $("toricModelSelect"),
     alconCalcArea: $("alconCalcArea"),
     alconCalcLink: $("alconCalcLink"),
     powerSelect: $("iolPowerSelect"),
-    btnPowerPrev: $("btnPowerPrev"),
-    btnPowerNext: $("btnPowerNext"),
-    powerRangeGuide: $("powerRangeGuide"),
     surgeryDateInput: $("surgeryDateInput"),
     ordererSelect: $("ordererSelect"),
     emailInput: $("emailInput"),
@@ -116,7 +112,7 @@ function initOrdererSelect(orderers) {
 
 function initPowerOptions(powers, defaultVal = "+20.0D") {
   const previousValue = el.powerSelect.value;
-  el.powerSelect.innerHTML = '<option value="">度数を選択してください</option>';
+  el.powerSelect.innerHTML = '<option value="">選択してください</option>';
 
   powers.forEach(p => {
     const opt = document.createElement("option");
@@ -156,8 +152,6 @@ function setupEventListeners() {
   el.toricModelSelect.addEventListener("change", () => clearFieldError("toricModelSelect"));
 
   el.powerSelect.addEventListener("change", () => clearFieldError("iolPowerSelect"));
-  el.btnPowerPrev.addEventListener("click", () => stepPower(-1));
-  el.btnPowerNext.addEventListener("click", () => stepPower(1));
 
   el.surgeryDateInput.addEventListener("change", () => clearFieldError("surgeryDateInput"));
   el.ordererSelect.addEventListener("change", () => clearFieldError("ordererSelect"));
@@ -190,19 +184,9 @@ function handleModelChange() {
   if (!selectedModelData) {
     hideToricField();
     el.alconCalcArea.classList.add("hidden");
-    el.modelBadgeInfo.style.display = "none";
-    el.modelBadgeInfo.innerHTML = "";
-    el.powerRangeGuide.textContent = "※モデルを選択すると対応度数範囲（ステップ）に自動連動します";
     initPowerOptions(GOOGLE_FORM_ALL_POWERS);
     return;
   }
-
-  el.modelBadgeInfo.style.display = "flex";
-  el.modelBadgeInfo.innerHTML = `
-    <span class="meta-chip">メーカー: ${selectedModelData.manufacturer}</span>
-    <span class="meta-chip">${selectedModelData.notes}</span>
-    ${selectedModelData.isToric ? '<span class="meta-chip" style="background:#fef3c7; color:#b45309; border-color:#fde68a;">トーリック</span>' : ''}
-  `;
 
   if (selectedModelData.isToric) {
     showToricField(selectedModelData.toricModels);
@@ -245,25 +229,7 @@ function hideToricField() {
 
 function updatePowerOptionsForModel(modelData) {
   const allowed = filterPowersByModel(modelData);
-  el.powerRangeGuide.textContent = `※度数範囲: ${modelData.notes}`;
   initPowerOptions(allowed, defaultPowerLabel(modelData));
-}
-
-function stepPower(direction) {
-  clearFieldError("iolPowerSelect");
-  if (!currentAllowedPowers.length) return;
-
-  const currentIndex = currentAllowedPowers.indexOf(el.powerSelect.value);
-  if (currentIndex === -1) {
-    const midIndex = Math.floor(currentAllowedPowers.length / 2);
-    el.powerSelect.value = currentAllowedPowers[midIndex];
-    return;
-  }
-
-  const nextIndex = currentIndex + direction;
-  if (nextIndex >= 0 && nextIndex < currentAllowedPowers.length) {
-    el.powerSelect.value = currentAllowedPowers[nextIndex];
-  }
 }
 
 // ==========================================================================

@@ -435,6 +435,30 @@ body {
   background-color: #dcfce7;
 }
 
+/* IOLモデル(6) と IOLパワー(4) の横並び。極端に狭い画面では縦並び */
+.model-power-row {
+  display: grid;
+  grid-template-columns: 6fr 4fr;
+  align-items: end; /* ラベルが折り返しても、プルダウンの高さを揃える */
+  gap: 0 10px;
+}
+
+.model-power-row > .form-group {
+  margin-bottom: 18px;
+  min-width: 0;
+}
+
+.model-power-row .form-label {
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+@media (max-width: 339px) {
+  .model-power-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 度数ステッパー入力 */
 .stepper-input-wrapper {
   display: flex;

@@ -69,22 +69,36 @@
             レンズ仕様
           </legend>
 
-          <!-- 1. メーカー名 / IOLモデル -->
-          <div class="form-group" id="groupModel">
-            <label for="iolModelSelect" class="form-label required">
-              メーカー名 / IOLモデル
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="select-wrapper">
-              <select id="iolModelSelect" name="model" class="form-control" required>
-                <option value="">IOLモデルを選択してください</option>
-                <!-- JSでマスターからGoogle Formの実データに基づき動的生成 -->
-              </select>
+          <!-- 1. メーカー名 / IOLモデル と IOLパワー（横並び 6:4。極端に狭い画面では縦並び） -->
+          <div class="model-power-row">
+            <div class="form-group" id="groupModel">
+              <label for="iolModelSelect" class="form-label required">
+                IOLモデル
+                <span class="badge-required">必須</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="iolModelSelect" name="model" class="form-control" required>
+                  <option value="">選択してください</option>
+                  <!-- JSでマスターからGoogle Formの実データに基づき動的生成 -->
+                </select>
+              </div>
+              <p class="error-message" id="err-iolModelSelect"></p>
             </div>
-            <div class="model-badge-info" id="modelBadgeInfo" style="display: none;">
-              <!-- 選択モデルのプロパティ表示タグ -->
+
+            <!-- 3. IOLパワー (ディオプター)。変更はプルダウンのみ -->
+            <div class="form-group" id="groupPower">
+              <label for="iolPowerSelect" class="form-label required">
+                IOLパワー
+                <span class="badge-required">必須</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="iolPowerSelect" name="power" class="form-control font-bold" required>
+                  <option value="">選択してください</option>
+                  <!-- JSでGoogle Formの60段階の度数選択肢から動的設定 -->
+                </select>
+              </div>
+              <p class="error-message" id="err-iolPowerSelect"></p>
             </div>
-            <p class="error-message" id="err-iolModelSelect"></p>
           </div>
 
           <!-- 2. トーリック型番 (トーリック選択時のみ表示) -->
@@ -133,28 +147,6 @@
                 <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
             </a>
-          </div>
-
-          <!-- 3. IOLパワー (ディオプター) -->
-          <div class="form-group" id="groupPower">
-            <label for="iolPowerSelect" class="form-label required">
-              IOLパワー (ディオプター)
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="stepper-input-wrapper">
-              <button type="button" class="stepper-btn" id="btnPowerPrev" aria-label="度数を1段階下げる">◀</button>
-              <div class="select-wrapper flex-1">
-                <select id="iolPowerSelect" name="power" class="form-control text-center font-bold" required>
-                  <option value="">度数を選択してください</option>
-                  <!-- JSでGoogle Formの60段階の度数選択肢から動的設定 -->
-                </select>
-              </div>
-              <button type="button" class="stepper-btn" id="btnPowerNext" aria-label="度数を1段階上げる">▶</button>
-            </div>
-            <div class="power-range-guide" id="powerRangeGuide">
-              ※モデルを選択すると対応度数範囲（ステップ）に自動連動します
-            </div>
-            <p class="error-message" id="err-iolPowerSelect"></p>
           </div>
 
           <!-- 4. 枚数 -->
