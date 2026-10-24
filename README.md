@@ -148,3 +148,15 @@ tests/                      `npm test`（Node標準テストランナー）
 ```
 
 ローカル確認は任意の静的サーバーで行います（ES Modulesのため `file://` では動作しません）。
+
+---
+
+## 🔐 Firebase（Authentication / Firestore）基盤
+
+- 開発プロジェクト: `medconf-iol-dev`。設定は [src/firebase/firebase-config.js](src/firebase/firebase-config.js)。
+- **`apiKey` が未設定の間は Firebase 機能を完全に無効化し、従来どおり（dryrun・固定データ）で動作します。** 値は推測せず、Firebase Console の値を設定してください。
+- `apiKey` を設定すると、ログイン（Google / メールリンク）と施設への所属確認が済むまで、注文画面と生体計測OCRは表示されません。ログイン済みでも所属が無ければ、案内のみ表示されます。
+- Firebase JavaScript SDK は v10.14.1 を CDN（gstatic）から動的に読み込みます（ビルド不要・既存の GitHub Pages 構成のまま）。
+- Security Rules: `firestore.rules`。権限設計は [docs/firestore-data-model.md](docs/firestore-data-model.md)。
+- テスト: `npm test`（単体）、`npm run test:rules`（Firestoreエミュレータ。Java と firebase-tools が必要。`demo-` プロジェクトで実行し、実プロジェクトには接続しません）。
+- **サービスアカウント秘密鍵・Admin SDK 認証情報は Git に置かないこと**（`.gitignore` で代表的なファイル名を除外済み）。Web 用の `firebaseConfig` は公開前提の識別情報で、秘密鍵とは別物です。

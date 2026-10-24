@@ -1,0 +1,149 @@
+rules_version = '2';
+
+// iol-order Firestore Security Rules
+// 方針:
+//  - 既定は全拒否。施設配下のデータは「その施設の有効な所属メンバー」のみ読める。
+//  - 施設管理者(admin)は同一施設の orderer 権限のメンバー・注文者・採用IOL・ディーラー設定のみ管理できる。
+//  - admin 権限の付与、施設の作成・停止、マスター(iolCatalog / dealers)の変更は
+//    カスタムクレーム platformAdmin(Admin SDK / サーバー側でのみ設定可能)を持つ運営者のみ。
+//  - 自分自身の所属ドキュメントはクライアントから変更できない（自己昇格の防止）。
+//  - 注文(orders)はクライアントから作成・変更不可（将来のCloud Functionsのみ）。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- 共通関数 ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isPlatformAdmin() {
+      return signedIn() && request.auth.token.get('platformAdmin', false) == true;
+    }
+
+    function memberPath(fid) {
+      return /databases/$(database)/documents/facilities/$(fid)/members/$(request.auth.uid);
+    }
+
+    function facilityIsActive(fid) {
+      return get(/databases/$(database)/documents/facilities/$(fid)).data.status == 'active';
+    }
+
+    // 有効な所属（status=active かつ role が admin/orderer）で、施設も有効
+    function isMember(fid) {
+      return signedIn()
+        && exists(memberPath(fid))
+        && get(memberPath(fid)).data.status == 'active'
+        && get(memberPath(fid)).data.role in ['admin', 'orderer']
+        && facilityIsActive(fid);
+    }
+
+    function isFacilityAdmin(fid) {
+      return isMember(fid) && get(memberPath(fid)).data.role == 'admin';
+    }
+
+    function stringIn(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    // ---------- マスター ----------
+    match /iolCatalog/{catalogIolId} {
+      allow read: if signedIn();
+      allow write: if isPlatformAdmin();
+    }
+
+    match /dealers/{dealerId} {
+      allow read: if isPlatformAdmin()
+        || (signedIn() && request.auth.uid in resource.data.get('memberUids', []));
+      allow write: if isPlatformAdmin();
+    }
+
+    // ---------- 施設 ----------
+    match /facilities/{fid} {
+      allow get: if isPlatformAdmin() || isMember(fid);
+      allow list: if isPlatformAdmin();
+      allow create: if isPlatformAdmin();
+      // 施設管理者は表示名のみ変更可（status 等は変更不可）
+      allow update: if isPlatformAdmin()
+        || (isFacilityAdmin(fid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt'])
+            && stringIn(request.resource.data.name, 1, 100));
+      allow delete: if false;
+
+      // 所属メンバー
+      function validMemberShape(uid) {
+        return request.resource.data.keys().hasOnly(['uid', 'role', 'status', 'displayName', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['uid', 'role', 'status'])
+          && request.resource.data.uid == uid
+          && request.resource.data.status in ['active', 'disabled'];
+      }
+
+      match /members/{uid} {
+        // 自分の所属は読める（ログイン後の所属確認用）。他人の所属は施設管理者のみ。
+        allow get: if signedIn() && (request.auth.uid == uid || isFacilityAdmin(fid) || isPlatformAdmin());
+        allow list: if isFacilityAdmin(fid) || isPlatformAdmin();
+
+        // admin の付与・変更・削除は運営者のみ。施設管理者は他人の orderer のみ管理可。自分自身は不可。
+        allow create: if (isPlatformAdmin()
+              && validMemberShape(uid) && request.resource.data.role in ['admin', 'orderer'])
+          || (isFacilityAdmin(fid) && uid != request.auth.uid
+              && validMemberShape(uid) && request.resource.data.role == 'orderer');
+        allow update: if (isPlatformAdmin()
+              && validMemberShape(uid) && request.resource.data.role in ['admin', 'orderer'])
+          || (isFacilityAdmin(fid) && uid != request.auth.uid
+              && resource.data.role == 'orderer'
+              && validMemberShape(uid) && request.resource.data.role == 'orderer');
+        allow delete: if isPlatformAdmin()
+          || (isFacilityAdmin(fid) && uid != request.auth.uid && resource.data.role == 'orderer');
+      }
+
+      // 注文者
+      match /orderers/{id} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'active', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'name', 'active'])
+          && request.resource.data.facilityId == fid
+          && stringIn(request.resource.data.name, 1, 50)
+          && request.resource.data.active is bool;
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+      }
+
+      // 採用IOL
+      match /adoptedIols/{id} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+          && request.resource.data.keys().hasOnly(['facilityId', 'catalogIolId', 'dealerId', 'enabled', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'catalogIolId', 'enabled'])
+          && request.resource.data.facilityId == fid
+          && stringIn(request.resource.data.catalogIolId, 1, 200)
+          && request.resource.data.enabled is bool;
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+      }
+
+      // 施設が使うディーラー（発注先設定）
+      match /facilityDealers/{id} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'active', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'dealerId', 'name', 'active'])
+          && request.resource.data.facilityId == fid
+          && stringIn(request.resource.data.name, 1, 100)
+          && request.resource.data.active is bool
+          && (!('orderEmails' in request.resource.data)
+              || (request.resource.data.orderEmails is list && request.resource.data.orderEmails.size() <= 5));
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+      }
+
+      // 注文（サーバーのみが作成。クライアントは読取のみ）
+      match /orders/{orderId} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow write: if false;
+      }
+    }
+
+    // 自分の所属を調べる collectionGroup クエリ用（uid == 自分 の所属ドキュメントのみ）
+    match /{path=**}/members/{uid} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+  }
+}

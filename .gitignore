@@ -1,2 +1,10 @@
 src/config.local.js
 node_modules/
+# Firebase: 秘密情報は絶対にコミットしない
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+.env
+.env.*
+.firebase/
+*-debug.log
+firestore-debug.log
