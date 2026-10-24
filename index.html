@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=9d4d1b3a2f">
+  <link rel="stylesheet" href="styles.css?v=0b7b160572">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -201,20 +201,8 @@
   <!-- 確認画面モーダル -->
   <div class="modal-overlay hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-header-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-            <polyline points="14 2 14 8 20 8"></polyline>
-            <line x1="16" y1="13" x2="8" y2="13"></line>
-            <line x1="16" y1="17" x2="8" y2="17"></line>
-            <polyline points="10 9 9 9 8 9"></polyline>
-          </svg>
-        </div>
-        <div>
-          <h2 class="modal-title" id="modalTitle">注文内容の確認</h2>
-          <p class="modal-subtitle">下記の内容で発注します。誤りがないかご確認ください。</p>
-        </div>
+      <div class="modal-header modal-header-simple">
+        <h2 class="modal-title" id="modalTitle">注文内容の確認</h2>
       </div>
 
       <div class="modal-body">

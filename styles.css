@@ -1978,3 +1978,7 @@ input[type="date"].form-control {
 /* 確認画面: 施設・発注するレンズ・合計は、見出しを画面には出さず(読み上げ用には残す)、内容だけを表示する */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .summary-item:has(> .sr-only) .summary-value { margin-top: 0; }
+
+/* 確認画面のヘッダー: タイトルだけ(左揃え)。アイコン・説明文なしの分、高さと余白を小さくする */
+.modal-header-simple { padding: 14px 20px; }
+.modal-header-simple .modal-title { margin: 0; text-align: left; }
