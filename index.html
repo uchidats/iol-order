@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=d4794dc1b5">
+  <link rel="stylesheet" href="styles.css?v=821af8b1c1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -36,6 +36,7 @@
       "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=7ca06e7e90",
       "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=31603a3427",
       "./src/domain/order-draft.js": "./src/domain/order-draft.js?v=0d0b9bda36",
+      "./src/domain/order-duplicates.js": "./src/domain/order-duplicates.js?v=3ba50c340a",
       "./src/domain/order-history.js": "./src/domain/order-history.js?v=01205eb9e5",
       "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=1d182a1599",
       "./src/domain/order-mail-profiles.js": "./src/domain/order-mail-profiles.js?v=0f6b679167",
@@ -54,13 +55,14 @@
       "./src/ui/custom-select.js": "./src/ui/custom-select.js?v=a1b3feb521",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
       "./src/ui/draft-store.js": "./src/ui/draft-store.js?v=73d3fd5df9",
+      "./src/ui/duplicate-warning.js": "./src/ui/duplicate-warning.js?v=77956e01fd",
       "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=3d7fd7fba2",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=857aaf30da",
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
       "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=bcdaa0546c",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=f723ed3628",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=202b57876c",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=268f0c542c",
       "./src/ui/undo-toast.js": "./src/ui/undo-toast.js?v=a5922dc06d"
     }
@@ -170,6 +172,23 @@
     <footer class="app-footer">
       <p>© 2026 IOL注文フォーム</p>
     </footer>
+  </div>
+
+  <!-- 過去の注文との重複確認(確認画面へ進む前。重複したレンズだけを表示し、確認操作は1回) -->
+  <div class="modal-overlay hidden" id="duplicateModal" role="alertdialog" aria-modal="true" aria-labelledby="duplicateTitle">
+    <div class="modal-card">
+      <div class="modal-header modal-header-simple">
+        <h2 class="modal-title" id="duplicateTitle">過去の注文と一致するレンズがあります</h2>
+      </div>
+      <div class="modal-body">
+        <ul class="dup-list" id="duplicateList"></ul>
+        <p class="dup-question">今回の注文に間違いありませんか？</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnDupBack">注文内容を修正</button>
+        <button type="button" class="btn btn-primary" id="btnDupContinue">確認して続行</button>
+      </div>
+    </div>
   </div>
 
   <!-- 確認画面モーダル -->

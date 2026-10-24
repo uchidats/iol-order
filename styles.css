@@ -2032,3 +2032,14 @@ input[type="date"].form-control {
 }
 .undo-toast-btn:hover { background: rgba(255, 255, 255, 0.1); }
 .undo-toast-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+/* 過去の注文との重複確認(重複したレンズだけ。1レンズ=2行: [レンズN] モデル 度数 / 過去の注文日) */
+.dup-list { list-style: none; margin: 0 0 14px; padding: 0; }
+.dup-line { padding: 8px 0; border-bottom: 1px solid #eef2f7; }
+.dup-line:last-child { border-bottom: 0; }
+.dup-line-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.dup-line-main .lens-no-badge { flex: none; }
+.dup-model { font-weight: 700; overflow-wrap: anywhere; }
+.dup-power { font-weight: 700; white-space: nowrap; }
+.dup-line-date { margin-top: 2px; font-size: 0.9rem; color: #475569; }
+.dup-question { margin: 0; font-weight: 700; }

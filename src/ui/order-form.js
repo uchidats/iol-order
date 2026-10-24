@@ -5,6 +5,8 @@ import { renderConfirmLines, renderDealersCard } from "./confirm-lines.js";
 import { findSelfDoctor } from "../domain/self-doctor.js";
 import { draftKey } from "../domain/order-draft.js";
 import { createDraftStore } from "./draft-store.js";
+import { findPastOrderDuplicates } from "../domain/order-duplicates.js";
+import { renderDuplicateWarning } from "./duplicate-warning.js";
 import { showUndoToast, hideUndoToast } from "./undo-toast.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
@@ -45,7 +47,9 @@ function cacheElements() {
     modalSubmitErrorText: $("modalSubmitErrorText"),
     completeModal: $("completeModal"),
     completeDetails: $("completeDetails"),
-    btnNewOrder: $("btnNewOrder")
+    btnNewOrder: $("btnNewOrder"),
+    duplicateModal: $("duplicateModal"), duplicateTitle: $("duplicateTitle"), duplicateList: $("duplicateList"),
+    btnDupBack: $("btnDupBack"), btnDupContinue: $("btnDupContinue"), btnConfirm: $("btnConfirm")
   });
 }
 
@@ -157,6 +161,8 @@ function setupEventListeners() {
   el.btnModalBack.addEventListener("click", hideConfirmModal);
   el.btnModalSubmit.addEventListener("click", handleExecuteOrder);
   el.btnNewOrder.addEventListener("click", handleResetForNewOrder);
+  el.btnDupBack.addEventListener("click", hideDuplicateModal);                       // 修正する。次に「確認画面へ進む」を押したときに、重複を再判定する
+  el.btnDupContinue.addEventListener("click", () => { hideDuplicateModal(); showConfirmModal(currentPendingOrderData); });   // 確認後は発注を許可(この後も、通常の確認画面と最終確認は省略しない)
 
   // 背景クリックでモーダル閉じ (送信中は不可)
   el.confirmModal.addEventListener("click", (e) => {
@@ -170,8 +176,31 @@ function setupEventListeners() {
 // ==========================================================================
 // バリデーション & 確認画面フロー
 // ==========================================================================
-function handleFormSubmit(e) {
+let checkingDuplicates = false;
+
+function hideDuplicateModal() {
+  el.duplicateModal.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+/**
+ * 確認画面へ進む前に、施設全体の発注済みの注文(最新)と照合する。照会できなかった場合は、注文を止めずに通常どおり進む(通知だけ出す)。
+ * @returns {Promise<Array|null>} 重複したレンズ(なければ空配列)。照会できなければ null
+ */
+async function findDuplicatesFor(lines) {
+  if (!facilityRepository || !facilityRepository.listOrders || !facilityRepositoryId) return [];   // 開発用の静的モードなど、注文履歴がない場合
+  try {
+    const orders = await facilityRepository.listOrders(facilityRepositoryId, 300);   // 最新の注文履歴を、確認画面へ進むたびに照会する
+    return findPastOrderDuplicates(lines, orders);
+  } catch (e) {
+    console.warn("過去の注文との照合ができませんでした:", e);
+    return null;
+  }
+}
+
+async function handleFormSubmit(e) {
   e.preventDefault();
+  if (checkingDuplicates) return;
 
   if (!validateOrderForm()) return;
 
@@ -200,6 +229,18 @@ function handleFormSubmit(e) {
     currentPendingOrderData.facilityName = currentFacility.name;
   }
 
+  // 過去の注文との重複確認: 一致するレンズがあれば警告(確認は1回。確認後は通常の確認画面へ)。なければ従来どおり確認画面へ
+  checkingDuplicates = true;
+  el.btnConfirm.disabled = true;
+  let duplicates;
+  try { duplicates = await findDuplicatesFor(lines); } finally { checkingDuplicates = false; el.btnConfirm.disabled = false; }
+  if (duplicates === null) showToast("過去の注文との照合ができませんでした。内容をご確認ください");
+  if (duplicates && duplicates.length) {
+    renderDuplicateWarning({ title: el.duplicateTitle, list: el.duplicateList }, duplicates);
+    el.duplicateModal.classList.remove("hidden");
+    document.body.style.overflow = "hidden";
+    return;
+  }
   showConfirmModal(currentPendingOrderData);
 }
 
