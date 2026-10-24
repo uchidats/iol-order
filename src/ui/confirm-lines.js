@@ -1,5 +1,6 @@
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
+import { summarizeDealers } from "../domain/dealer-selection.js";
 
 const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -48,5 +49,35 @@ export function renderConfirmLines(list, lines) {
     items.append(...group.lines.map(lineItem));
     section.append(head, items);
     return section;
+  }));
+}
+
+/**
+ * 「発注先:」(発注元と同じカードの右側)。1社なら名称を1回だけ、複数社ならディーラーごとにレンズ番号をまとめて表示する。
+ * 発注先未設定・発注用メール未登録(自動送信不可)の警告は、ディーラー名の下に小さく出す。判定(dealer-selection.js)・送信データは変更しない。
+ */
+export function renderDealersCard(box, lines) {
+  const { allSame, groups } = summarizeDealers(lines);
+  box.replaceChildren(...groups.map(g => {
+    const item = document.createElement("div");
+    item.className = "summary-dealer";
+    const title = document.createElement("div");
+    title.className = "summary-dealer-name";
+    const nos = g.lineNos.map(n => `レンズ${n}`).join("・");
+    title.textContent = g.name || "未設定";   // 「発注先：」の右に出す
+    item.append(title);
+    if (!allSame) { // 複数の発注先: ディーラー名の下に、対象のレンズ番号(小さめ)
+      const lenses = document.createElement("div");
+      lenses.className = "summary-dealer-lenses";
+      lenses.textContent = nos;
+      item.append(lenses);
+    }
+    if (g.name && g.warning) {
+      const w = document.createElement("div");
+      w.className = "summary-dealer-warning";
+      w.textContent = g.warning;
+      item.append(w);
+    }
+    return item;
   }));
 }

@@ -1982,3 +1982,28 @@ input[type="date"].form-control {
 /* 確認画面のヘッダー: タイトルだけ(左揃え)。アイコン・説明文なしの分、高さと余白を小さくする */
 .modal-header-simple { padding: 14px 20px; }
 .modal-header-simple .modal-title { margin: 0; text-align: left; }
+
+/* 確認画面: 発注元(施設)と発注先(ディーラー)を1枚のカードに(左右・細い縦の区切り線)。同程度の文字サイズ・太さ */
+.summary-item.summary-item-parties, #summaryPartiesRow { width: 100%; box-sizing: border-box; }
+.summary-parties { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0; width: 100%; margin: 0; font-size: 1rem; font-weight: 700; }
+.summary-party { display: flex; align-items: flex-start; min-width: 0; padding: 0 12px; }
+.summary-party:first-child { padding-left: 0; }
+.summary-party:last-child { padding-right: 0; }
+.summary-party + .summary-party { border-left: 1px solid #cbd5e1; }   /* 細い縦の区切り線 */
+.summary-party-label { flex: none; white-space: nowrap; }
+.summary-party-body { min-width: 0; overflow-wrap: anywhere; }
+.summary-party[hidden] { display: none; }
+.summary-parties .summary-dealer + .summary-dealer { margin-top: 4px; }
+.summary-parties .summary-dealer-name { font-weight: 700; font-size: 1rem; }   /* 発注元と同じ文字サイズ・太さ */
+.summary-parties .summary-dealer-warning { font-size: 0.78rem; font-weight: 400; color: #475569; margin-top: 1px; }   /* 警告は小さめ */
+#summaryPartiesRow.is-dealer-only .summary-party + .summary-party { border-left: 0; padding-left: 0; }
+#summaryPartiesRow.is-dealer-only .summary-parties { grid-template-columns: minmax(0, 1fr); }
+/* 非常に狭い画面: 左右が窮屈なら、上下に並べて区切りを横線にする */
+@media (max-width: 340px) {
+  .summary-parties { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .summary-party { padding: 0; }
+  .summary-party + .summary-party { border-left: 0; border-top: 1px solid #cbd5e1; padding-top: 8px; }
+}
+.summary-parties .summary-dealer-lenses { font-size: 0.85rem; font-weight: 500; color: #334155; }
+.summary-parties { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }
+@media (max-width: 340px) { .summary-parties { grid-template-columns: minmax(0, 1fr); } }

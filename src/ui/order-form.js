@@ -1,8 +1,7 @@
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
-import { summarizeDealers } from "../domain/dealer-selection.js";
-import { renderConfirmLines } from "./confirm-lines.js";
+import { renderConfirmLines, renderDealersCard } from "./confirm-lines.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES } from "../config.js";
@@ -205,14 +204,11 @@ function validateOrderForm() {
 // モーダル表示制御 & サマリー作成
 // ==========================================================================
 function showConfirmModal(data) {
-  // 発注先の取り違え防止のため、施設名を明示する
-  const facilityRow = $("summaryFacilityRow");
-  if (data.facilityName) {
-    facilityRow.style.display = "flex";
-    $("summaryFacility").textContent = data.facilityName;
-  } else {
-    facilityRow.style.display = "none";
-  }
+  // 発注先の取り違え防止のため、発注元(施設名)と発注先(ディーラー)を、最上部の1つのカードに並べて明示する
+  const facilityBox = $("summaryFacilityBox");
+  facilityBox.hidden = !data.facilityName;
+  $("summaryFacility").textContent = data.facilityName || "";
+  $("summaryPartiesRow").classList.toggle("is-dealer-only", !data.facilityName);
 
   // 全明細と合計枚数
   const list = $("summaryLines");
@@ -220,37 +216,12 @@ function showConfirmModal(data) {
   $("summaryTotal").textContent = `${data.lines.length}件・合計${data.totalQuantity}枚`; // 件数=レンズ明細の数、枚数=各明細の枚数の合計
 
   $("summaryNotes").textContent = data.notes || "（なし）";
-  renderDealersCard(data.lines);
+  renderDealersCard($("summaryDealers"), data.lines);
 
   el.modalSubmitError.classList.add("hidden");
 
   el.confirmModal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
-}
-
-/**
- * 「発注先」カード。1社なら名称を1回だけ、複数社ならディーラーごとにレンズ番号をまとめて表示する。
- * 発注先未設定・発注用メール未登録(自動送信不可)の警告も、このカードの中に出す。判定(dealer-selection.js)・送信データは変更しない。
- */
-function renderDealersCard(lines) {
-  const { allSame, groups } = summarizeDealers(lines);
-  const box = $("summaryDealers");
-  box.replaceChildren(...groups.map(g => {
-    const item = document.createElement("div");
-    item.className = "summary-dealer";
-    const title = document.createElement("div");
-    title.className = "summary-dealer-name";
-    const nos = g.lineNos.map(n => `レンズ${n}`).join("・");
-    title.textContent = g.name ? (allSame ? g.name : `${g.name}: ${nos}`) : (allSame ? "発注先未設定" : `発注先未設定: ${nos}`);
-    item.append(title);
-    if (g.name && g.warning) {
-      const w = document.createElement("div");
-      w.className = "summary-dealer-warning";
-      w.textContent = g.warning;
-      item.append(w);
-    }
-    return item;
-  }));
 }
 
 function hideConfirmModal() {
