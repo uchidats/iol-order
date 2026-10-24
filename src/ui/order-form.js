@@ -50,8 +50,25 @@ function cacheElements() {
  * @param {{id:string, name:string}} [deps.facility] 注文確認画面に表示する施設（Firebase有効時）
  * @param {{createOrder:Function}} [deps.orderApi] サーバー受付(server-dev のときのみ使用)
  */
-export async function initOrderForm({ config, repository, facilityId, facility = null, orderApi: api = null }) {
+export async function initOrderForm(args) {
   cacheElements();
+  try {
+    await initOrderFormInner(args);
+  } catch (e) {
+    // 入力欄が空のまま無反応になるのを避ける(例: 古いキャッシュのJSと新しいHTMLの食い違い)
+    console.error("注文フォームの初期化に失敗しました:", e);
+    if (el.lensLinesBox) {
+      const p = document.createElement("p");
+      p.className = "error-message";
+      p.setAttribute("role", "alert");
+      p.textContent = "画面の読み込みに失敗しました。ページを再読み込みしてください（Ctrl + Shift + R）。";
+      el.lensLinesBox.replaceChildren(p);
+    }
+    throw e;
+  }
+}
+
+async function initOrderFormInner({ config, repository, facilityId, facility = null, orderApi: api = null }) {
   appConfig = config;
   orderApi = api;
   currentFacility = facility;

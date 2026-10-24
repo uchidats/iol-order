@@ -5,10 +5,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=a5eee5e8d4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- asset-stamp:begin -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./src/api/order-client.js": "./src/api/order-client.js?v=4b0159d745",
+      "./src/biometry/biometry-ui.js": "./src/biometry/biometry-ui.js?v=29892c8fb8",
+      "./src/biometry/ocr.js": "./src/biometry/ocr.js?v=0191908359",
+      "./src/biometry/parser.js": "./src/biometry/parser.js?v=a471323757",
+      "./src/biometry/state.js": "./src/biometry/state.js?v=6bd254fb21",
+      "./src/config.js": "./src/config.js?v=ccf7bde99c",
+      "./src/config.local.example.js": "./src/config.local.example.js?v=c33444ab3e",
+      "./src/data/firestore-repository.js": "./src/data/firestore-repository.js?v=3802b89b55",
+      "./src/data/iol-models.js": "./src/data/iol-models.js?v=43312f6eb3",
+      "./src/data/order-api.js": "./src/data/order-api.js?v=593c21c67b",
+      "./src/data/registration-api.js": "./src/data/registration-api.js?v=e54f15299b",
+      "./src/data/schema.js": "./src/data/schema.js?v=8adf47697a",
+      "./src/data/static-repository.js": "./src/data/static-repository.js?v=0498dfbeef",
+      "./src/domain/access.js": "./src/domain/access.js?v=1d3c960e11",
+      "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=7b9e10ba2d",
+      "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=acb1939d46",
+      "./src/domain/geo.js": "./src/domain/geo.js?v=cc70776997",
+      "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=2fa815095f",
+      "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=fd691cfeb8",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=ad22af88a5",
+      "./src/domain/order-request.js": "./src/domain/order-request.js?v=07167eca25",
+      "./src/domain/order-validation.js": "./src/domain/order-validation.js?v=432a8bd522",
+      "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=5439af84ee",
+      "./src/domain/registration-flow.js": "./src/domain/registration-flow.js?v=f354be2979",
+      "./src/firebase/auth-service.js": "./src/firebase/auth-service.js?v=08a008feaf",
+      "./src/firebase/firebase-config.js": "./src/firebase/firebase-config.js?v=867ddadea3",
+      "./src/firebase/sdk.js": "./src/firebase/sdk.js?v=82975b38ab",
+      "./src/main.js": "./src/main.js?v=69b7cad797",
+      "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=cd8d14c8b4",
+      "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=257fb41bf9",
+      "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
+      "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=160fe8335e",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=ef75f18525",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=71287fd0ba"
+    }
+  }
+  </script>
+  <!-- asset-stamp:end -->
 </head>
 <body>
   <div class="app-container">
@@ -580,6 +623,6 @@
 
   <!-- Tesseract.js (クライアントサイド完全実行型OCR) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script type="module" src="src/main.js"></script>
+  <script type="module" src="src/main.js?v=69b7cad797"></script>
 </body>
 </html>

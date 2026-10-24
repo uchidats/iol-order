@@ -111,7 +111,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
   }
 
   function renumber() {
-    lines.forEach((l, i) => { l.title.textContent = `明細 ${i + 1}`; l.removeBtn.hidden = lines.length <= 1; });
+    lines.forEach((l, i) => { l.title.textContent = `レンズ ${i + 1}`; l.removeBtn.hidden = lines.length <= 1; });
     addButton.disabled = lines.length >= MAX_LINES;
   }
 

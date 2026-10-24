@@ -700,9 +700,10 @@ input[type="date"].form-control {
 }
 
 .btn-submit {
-  width: 100%;
-  font-size: 1.1rem;
-  padding: 16px 20px;
+  width: min(100%, 240px); /* 全幅にせず、左揃え。狭い画面では画面幅まで */
+  min-height: 46px;        /* スマホで押しやすい高さは維持 */
+  font-size: 1rem;
+  padding: 10px 16px;
   box-shadow: var(--shadow-md);
 }
 
