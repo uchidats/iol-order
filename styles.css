@@ -514,7 +514,7 @@ body {
 /* 枚数: 「1枚」「2枚」は幅80px・高さ48px・間隔10px。枚数と手術日は幅が足りなければ折り返す(重ならない) */
 .lens-row [data-group="quantity"] { flex: 0 0 auto; }
 .lens-line .quantity-selector { gap: 10px; }
-.lens-line .quantity-option { flex: 0 0 80px; }
+.lens-line .quantity-option { flex: none; width: 80px; }   /* flex-basis ではなく width で幅を決める(Firefox/Safari は flex-basis を内在幅に含めず、枚数の欄が78pxに潰れて手術日と重なっていた) */
 .lens-line .quantity-btn { min-height: 48px; }
 /* 担当医: 約200px(狭い画面では画面幅まで) */
 .lens-line [data-group="doctor"] { max-width: 200px; }
