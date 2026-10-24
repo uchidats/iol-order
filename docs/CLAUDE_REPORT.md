@@ -3,7 +3,7 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 注文履歴画面 / 発注メールの dry-run 生成
+- **作業**: 注文履歴画面 / 発注メールの dry-run 生成 / レビュー指摘への対応
 - **ブランチ**: `feature/order-history`(`main` へは未merge)
 
 ## 変更内容
@@ -17,15 +17,20 @@
    - `scripts/admin/preview-order-mail.mjs`: 保存済み注文のプレビューを表示(読み取り専用)。
    - 仕様は `docs/order-intake.md` に追記。
 
+3. **レビュー対応**
+   - 注文履歴: 読み込み中に施設を切り替えた・画面を閉じた場合、遅れて届いた古い施設の結果を捨てる(世代番号で判定)。回帰テスト(Chromium・Firefox・WebKit)を追加。ガードを外すと失敗することを確認済み。
+   - 発注メール: 暫定テンプレートを正式版として扱わない(各メールに `draft-unconfirmed`・`reviewRequired`、`isTemplateConfirmed()`=false、CLIにも明記)。備考は本文とは別にも返し、実送信前に人が確認できる設計を維持。
+
 ## commit ID
 - 注文履歴画面: `9956654`
-- 発注メール dry-run: 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)
+- 発注メール dry-run: `c012cd7`
+- レビュー対応: 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)
 
 ## テスト結果
-- unit 151 / Rules 43 / ブラウザ(Chromium・Firefox・WebKit)6 すべて成功。Functions は今回変更なし。
+- unit 152 / ブラウザ(Chromium・Firefox・WebKit)9 すべて成功。Rules・Functions は今回変更なし(直前: Rules 43)。
 
 ## push状況
-- `feature/order-history` を push(`main` は未変更)。
+- `feature/order-history` を push 済み(`main` は未変更・merge しない)。
 
 ## Firebaseデプロイ状況
 - 今回なし。`ORDER_INTAKE_ENABLED=false` のまま。

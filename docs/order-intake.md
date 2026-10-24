@@ -82,4 +82,6 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 - 宛先は、**生成時点の**施設のディーラー設定の発注用メール(`orderEmails`)だけ(重複・不正な形式は除く)。使用報告用メールは宛先にも本文にも使わない。
 - 注文に保存された `dispatch.allowed` は参考情報。生成時点で、ディーラーが存在すること・発注用メールが1件以上あることを再検証する。食い違うときは警告を付け、判定は現在の設定で行う。発注先未設定の明細はメールにせず(`unrouted`)、1通でも送れないものがあれば `allReady=false`。
 - **【保留】件名・本文の形式は未確定。** 現行 Google Forms + GAS が送るメールの形式は、このリポジトリの資料・コードに無い(GAS側は管理外)。現在の件名・本文は暫定の下書き(`templateStatus: "draft-unconfirmed"`)。形式が確定したら `buildSubject` / `buildBody` だけを差し替える(宛先の決定・振り分け・検証は形式に依存しない)。
+- **暫定テンプレートは正式版ではない。** 各メールに `templateStatus: "draft-unconfirmed"`・`reviewRequired: true` が付き、`isTemplateConfirmed()` は常に false。**将来の実送信の処理は、現行GASの形式で確認済みになる(この関数を変更する)まで、このテンプレートを使ってはいけない。**
+- **備考**は注文時の自由記述(患者に関わる内容が書かれうる)。現時点ではdry-run生成のみで、本文に載せるとともに `notes` として別にも返し、実送信の前に人が内容を確認できるようにしている(プレビューCLIも備考を別行で表示する)。実送信の設計では、送信前の確認(承認)の手順を残す。
 - 使い方: `node scripts/admin/preview-order-mail.mjs --facility <施設ID> --latest`(medconf-iol-dev・読み取りのみ)。

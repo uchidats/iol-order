@@ -13,7 +13,10 @@
 import { orderLinesOf, describeLine, formatDateTimeJst, orderedByLabel } from "./order-history.js";
 import { isValidEmail } from "./order-validation.js";
 
-export const TEMPLATE_STATUS = "draft-unconfirmed"; // 現行GASの形式が未確認の暫定テンプレート
+export const TEMPLATE_STATUS = "draft-unconfirmed"; // 現行GASの形式が未確認の暫定テンプレート(正式版として扱わない)
+
+/** 件名・本文のテンプレートが、現行GASの形式で確認済みか。**false の間は、実送信の処理から使ってはいけない**(将来の送信処理はここを必ず確認する) */
+export const isTemplateConfirmed = () => false;
 
 const oneLine = (s) => String(s ?? "").replace(/[\r\n]+/g, " ").trim(); // 件名・宛先にヘッダー注入(改行)を入れない
 
@@ -94,7 +97,8 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
       facilityName, orderNumber, orderedAtLabel: formatDateTimeJst(order.createdAt), orderedBy: orderedByLabel(order),
       dealerName, lines: lineViews, totalQuantity, notes: order.notes
     });
-    return { dealerId, dealerName, status: blocked ? "blocked" : "ready", blockedReason: blocked, to: blocked ? [] : to, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
+    // 備考は注文時の自由記述。実送信の前に人が内容を確認できるよう、本文とは別にも返す(reviewRequired: 実送信の前に必ず確認する)
+    return { dealerId, dealerName, templateStatus: TEMPLATE_STATUS, reviewRequired: true, notes: order.notes ? String(order.notes).trim() : "", status: blocked ? "blocked" : "ready", blockedReason: blocked, to: blocked ? [] : to, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
   });
   return { templateStatus: TEMPLATE_STATUS, orderNumber, mails, unrouted, allReady: mails.length > 0 && unrouted.length === 0 && mails.every(m => m.status === "ready") };
 }

@@ -32,7 +32,7 @@ const orders = [
 window.__closed = 0;
 window.__asked = [];
 window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose: () => { window.__closed++; },
-  repository: { listOrders: async (fid, limit) => { window.__asked.push([fid, limit]); return orders; } } });
+  repository: { listOrders: async (fid, limit) => { window.__asked.push([fid, limit]); if (window.__defer && window.__defer[fid]) return window.__defer[fid]; return orders; } } });
 await window.__h.open({ id: "f1", name: "テスト施設" });
 window.__ready = true;
 </script></body></html>`;
@@ -61,6 +61,8 @@ async function launch(type, name) {
   }
   return null;
 }
+
+const lateOrder = { id: "late", orderNumber: "IOL-LATE-0001", createdAt: { seconds: 1, nanoseconds: 0 }, item: { manufacturer: "X", model: "LATE", displayName: "X / LATE", power: "+1.0D", quantity: 1 }, surgeryDate: "2026-12-01" };
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`注文履歴: 一覧(新しい順)と詳細(新旧データ): ${name}`, async (t) => {
@@ -102,6 +104,39 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.click("#btnHistoryClose");
       assert.equal(await page.evaluate(() => window.__closed), 1);
       assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`注文履歴: 読み込み中に施設を切り替えても・閉じても、古い施設の結果を表示しない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+      await page.goto(base);
+      await page.waitForFunction(() => window.__ready);
+      // 施設f-oldの読み込みが遅れている間に、別の施設f-newを開く → 遅れて届いたf-oldの結果は捨てる
+      await page.evaluate(async (late) => {
+        let release; window.__defer = { "f-old": new Promise(r => { release = r; }) };
+        const first = window.__h.open({ id: "f-old", name: "古い施設" });
+        await window.__h.open({ id: "f-new", name: "新しい施設" });
+        release([late]);
+        await first;
+      }, lateOrder);
+      assert.equal(await page.locator(".settings-facility").innerText(), "新しい施設");
+      assert.equal(await page.locator(".history-row").count(), 3, "新しい施設の注文だけ");
+      assert.equal(await page.locator('[data-order="late"]').count(), 0, "古い施設の注文は出ない");
+      // 読み込み中に画面を閉じる → 遅れて届いた結果で再描画しない(閉じたまま)
+      await page.evaluate(async (late) => {
+        let release; window.__defer = { "f-slow": new Promise(r => { release = r; }) };
+        const p = window.__h.open({ id: "f-slow", name: "遅い施設" });
+        window.__h.close();
+        release([late]);
+        await p;
+      }, lateOrder);
+      assert.equal(await page.locator("#orderHistory").isHidden(), true);
+      assert.equal(await page.locator('[data-order="late"]').count(), 0);
     } finally { await browser.close(); }
   });
 }

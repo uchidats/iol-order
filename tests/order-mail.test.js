@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildOrderMailPreview, orderRecipients, buildSubject, TEMPLATE_STATUS } from "../src/domain/order-mail.js";
+import { buildOrderMailPreview, orderRecipients, buildSubject, TEMPLATE_STATUS, isTemplateConfirmed } from "../src/domain/order-mail.js";
 
 const item = (over = {}) => ({ manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", isToric: false, isMultifocal: false, toricModel: "", power: "+20.0D", quantity: 1, ...over });
 const ts = (iso) => ({ toMillis: () => Date.parse(iso) });
@@ -88,4 +88,11 @@ test("トーリック・多焦点の表記と合計。メール送信の関数�
   assert.match(p.mails[0].body, /DIW300\(トーリック\)/);
   const mod = await import("../src/domain/order-mail.js");
   assert.ok(!Object.keys(mod).some(k => /send|smtp|post/i.test(k)));
+});
+
+test("暫定テンプレートは正式版として扱わない: 各メールに draft-unconfirmed と reviewRequired が付き、備考は本文とは別にも返す。確認済みフラグは false", () => {
+  const p = buildOrderMailPreview(order([line(1, A)], { notes: "  備考テキスト  " }), { dealers: settings });
+  assert.equal(p.templateStatus, "draft-unconfirmed");
+  assert.deepEqual([p.mails[0].templateStatus, p.mails[0].reviewRequired, p.mails[0].notes], ["draft-unconfirmed", true, "備考テキスト"]);
+  assert.equal(isTemplateConfirmed(), false, "確認済みになるまで、実送信の処理から使ってはいけない");
 });

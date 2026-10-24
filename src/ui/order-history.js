@@ -38,6 +38,7 @@ export function createOrderHistory({ mount, repository, onClose }) {
   let orders = [];
   let facility = null;
   let selectedId = null;
+  let seq = 0; // 読み込みの世代。施設の切替・画面を閉じたあとに届いた古い結果は捨てる
 
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnHistoryClose" }, "注文画面に戻る");
   const title = h("span", { class: "settings-facility" });
@@ -46,7 +47,7 @@ export function createOrderHistory({ mount, repository, onClose }) {
   root.append(h("div", { class: "settings-head" }, h("h2", {}, "注文履歴"), title, closeBtn), status, body);
   closeBtn.addEventListener("click", () => { close(); onClose(); });
 
-  function close() { open = false; selectedId = null; root.hidden = true; }
+  function close() { open = false; selectedId = null; seq++; root.hidden = true; }
 
   function lineView(l) {
     const main = h("div", { class: "summary-line-main" },
@@ -94,7 +95,10 @@ export function createOrderHistory({ mount, repository, onClose }) {
   return {
     isOpen: () => open,
     async open(fac) {
+      const mySeq = ++seq;
+      const stale = () => mySeq !== seq || !open;
       facility = fac;
+      orders = [];
       title.textContent = fac.name;
       status.textContent = "読み込み中…";
       body.replaceChildren();
@@ -102,10 +106,12 @@ export function createOrderHistory({ mount, repository, onClose }) {
       open = true;
       try {
         const raw = await repository.listOrders(fac.id, 50);
+        if (stale()) return; // 読み込み中に別の施設を開いた・閉じた場合は、この結果を表示しない
         orders = sortOrdersNewestFirst(raw.map(summarizeOrder));
         status.textContent = orders.length >= 50 ? "新しい順に最大50件を表示しています。" : "";
         renderList();
       } catch (e) {
+        if (stale()) return;
         console.error("注文履歴の読み込みに失敗しました:", e);
         status.textContent = "注文履歴を読み込めませんでした。権限を確認してください。";
       }

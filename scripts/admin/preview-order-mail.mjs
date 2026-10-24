@@ -58,12 +58,13 @@ const order = orderId
 if (!order) { console.error("注文がありません。"); process.exit(1); }
 
 const p = buildOrderMailPreview(order, { facilityName: fac.name, dealers });
-console.log(`【プレビュー(送信しません)】 テンプレート: ${p.templateStatus}(現行GASの形式は未確認の暫定版)`);
+console.log(`【プレビュー(送信しません)】 テンプレート: ${p.templateStatus}(現行GASの形式は未確認の暫定版。正式版ではない・実送信には使えない)`);
 console.log(`注文 ${p.orderNumber}  ディーラー宛のメール ${p.mails.length} 通 / 発注先未設定の明細 ${p.unrouted.length} 件 / 全て送信可: ${p.allReady}\n`);
 for (const m of p.mails) {
   console.log(`=== ${m.dealerName} (${m.status}${m.blockedReason ? ": " + m.blockedReason : ""}) ===`);
   console.log(`宛先: ${m.to.length ? m.to.join(", ") : "(なし)"}`);
   console.log(`件名: ${m.subject}`);
+  if (m.notes) console.log(`備考(注文時の自由記述。実送信の前に人が確認する): ${m.notes}`);
   if (m.warnings.length) console.log(`警告: ${m.warnings.join(" / ")}`);
   console.log(`---\n${m.body}\n`);
 }
