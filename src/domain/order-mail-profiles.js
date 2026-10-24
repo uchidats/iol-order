@@ -26,7 +26,7 @@ export const GAS_CLOSING = Object.freeze([
  * GAS形式の形式を作る。**施設の住所・署名(signature)は施設ごとの設定**(未指定なら署名なし)。
  * 件名の「施設名」は、生成時に施設名から入れる(固定しない)。
  */
-export function createGasProfile({ id, signature = [] }) {
+export function createGasProfile({ id, signature = [], dealerDisplayNames = {} }) {
   return Object.freeze({
     id, confirmed: true, format: "gas-questions",
     subjectTemplate: "【{facility}】IOL注文：ご確認のほどよろしくお願いします",
@@ -34,6 +34,8 @@ export function createGasProfile({ id, signature = [] }) {
     closing: GAS_CLOSING,
     signature: Object.freeze([...signature]),
     signatureConfigured: signature.length > 0,
+    // 宛名に使うディーラーの正式表記(キーは facilityDealers のID)。登録データの名称と異なる場合に、登録データを変えずに宛名だけ正式表記にする
+    dealerDisplayNames: Object.freeze({ ...dealerDisplayNames }),
     sendToOrderer: true   // Google Forms の回答者(=発注者)のメールアドレスも宛先(To)に含める
   });
 }
@@ -41,7 +43,9 @@ export function createGasProfile({ id, signature = [] }) {
 /** 立川病院の署名(施設の情報。他の施設には使わない) */
 export const TACHIKAWA_GAS_PROFILE = createGasProfile({
   id: "tachikawa-gas",
-  signature: ["〒190-8531 東京都立川市錦町4-2-22", "国家公務員共済組合連合会　立川病院　眼科"]
+  signature: ["〒190-8531 東京都立川市錦町4-2-22", "国家公務員共済組合連合会　立川病院　眼科"],
+  // 現行GASの正式表記は「栗原医療器械店」。Firestore の登録名は「栗原医療機械店」(登録データは変更しない)
+  dealerDisplayNames: { "1Fc1MIFpWjR6bwjuG1sS": "栗原医療器械店" }
 });
 
 /** 署名が未設定の施設の既定(GAS形式。住所・署名は出さず、警告を付ける) */

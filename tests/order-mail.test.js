@@ -215,3 +215,65 @@ test("トーリック型番は該当する明細だけ表示(空欄の項目は�
   assert.equal(m.body.split("トーリックの場合は型番を選択").length - 1, 1);
   assert.ok(m.body.includes("トーリックの場合は型番を選択: DIW300"));
 });
+
+// ================= 立川病院の実際のID・正式表記・本文の欠落/混入 =================
+test("立川病院: 実際の施設ID(tachikawa-hospital)とディーラーID(登録データ)に紐付く。宛名は正式表記「栗原医療器械店」(登録名「機械」は変更しない)", () => {
+  const profile = resolveMailProfile("tachikawa-hospital");
+  assert.equal(profile, TACHIKAWA_GAS_PROFILE);
+  const REAL_DEALER = { id: "1Fc1MIFpWjR6bwjuG1sS", name: "栗原医療機械店" };   // Firestore の登録(読み取りで確認した値)
+  const p = buildOrderMailPreview(order([line(1, REAL_DEALER)]), {
+    facilityName: "立川病院", profile, confirmationEmails: ["confirm@example.jp"],
+    dealers: { [REAL_DEALER.id]: { name: "栗原医療機械店", orderEmails: ["kurihara@example.jp"] } }
+  });
+  const m = p.mails[0];
+  assert.equal(m.subject, "【立川病院】IOL注文：ご確認のほどよろしくお願いします");
+  assert.ok(m.body.startsWith("栗原医療器械店御中\n"), "宛名は正式表記");
+  assert.ok(!m.body.includes("栗原医療機械店"), "登録名の表記は本文に出ない");
+  assert.match(m.warnings.join("\n"), /正式表記「栗原医療器械店」.*登録名は「栗原医療機械店」.*未変更/);
+  assert.equal(m.dealerName, "栗原医療器械店");
+  assert.equal(m.status, "ready");
+  // 他の施設・他のディーラーには、立川病院の署名も正式表記も使われない
+  const other = buildOrderMailPreview(order([line(1, { id: "x1", name: "別商会" })]), { facilityName: "別眼科", profile: resolveMailProfile("fac-other"), dealers: { x1: { name: "別商会", orderEmails: ["o@example.jp"] } } }).mails[0];
+  assert.ok(other.body.startsWith("別商会御中") && !other.body.includes("立川") && !other.body.includes("器械"));
+});
+
+test("本文に必要な情報の欠落がない: 全明細の モデル・パワー・枚数・手術日・担当医、発注者、メールアドレス、備考、定型文、署名。「undefined」「null」が出ない", () => {
+  const lines = [
+    line(1, KURIHARA, { item: { displayName: "ALCON / CNA0T0", power: "+18.0D", quantity: 1 }, doctor: "山田", surgeryDate: "2026-11-10" }),
+    line(2, KURIHARA, { item: { displayName: "J&J / DIWxxx (トーリック)", isToric: true, toricModel: "DIW300", power: "+18.5D", quantity: 2 }, doctor: "佐藤", surgeryDate: "2026-11-12" }),
+    line(3, KURIHARA, { item: { displayName: "HOYA / XY1", power: "-5.0D", quantity: 1 }, doctor: "鈴木", surgeryDate: "2026-12-01" })
+  ];
+  const m = buildOrderMailPreview(order(lines, { notes: "備考あり" }), gasOpts).mails[0];
+  const blocks = m.body.split("\n\n");
+  for (const [n, model, power, qty, date, doctor] of [[1, "ALCON / CNA0T0", "+18.0D", 1, "2026-11-10", "山田"], [2, "J&J / DIWxxx (トーリック)", "+18.5D", 2, "2026-11-12", "佐藤"], [3, "HOYA / XY1", "-5.0D", 1, "2026-12-01", "鈴木"]]) {
+    const b = blocks.find(x => x.startsWith(`レンズ${n}\n`));
+    assert.ok(b, `レンズ${n}のブロックがある`);
+    for (const need of [`メーカー名 / IOLモデル: ${model}`, `IOLパワー (ディオプター): ${power}`, `枚数: ${qty} 枚`, `手術日: ${date}`, `担当医: ${doctor}`]) assert.ok(b.includes(need), `${n}: ${need}`);
+  }
+  for (const need of ["発注者: ログイン太郎", "メールアドレス: login@example.jp", "備考: 備考あり", "大変お世話になっております。", "何卒よろしくお願い申し上げます。", "国家公務員共済組合連合会　立川病院　眼科"]) assert.ok(m.body.includes(need), need);
+  assert.ok(!/undefined|null|\[object|NaN/.test(m.body + m.subject), "未定義値が本文・件名に出ない");
+  assert.equal(m.totalQuantity, 4);
+});
+
+test("複数ディーラー: 明細・宛先が他のディーラーのメールに混入しない(3社・6明細)", () => {
+  const D = ["dX", "dY", "dZ"].map((id, i) => ({ id, name: `商会${"XYZ"[i]}` }));
+  const set = Object.fromEntries(D.map((d, i) => [d.id, { name: d.name, orderEmails: [`order-${"xyz"[i]}@example.jp`], usageReportEmails: [`report-${"xyz"[i]}@example.jp`] }]));
+  const mk = (n, d, power, doctor, date) => line(n, d, { item: { power, quantity: 1 }, doctor, surgeryDate: date });
+  const p = buildOrderMailPreview(order([
+    mk(1, D[0], "+10.0D", "医師一", "2026-11-01"), mk(2, D[1], "+11.0D", "医師二", "2026-11-02"), mk(3, D[2], "+12.0D", "医師三", "2026-11-03"),
+    mk(4, D[0], "+13.0D", "医師四", "2026-11-04"), mk(5, D[1], "+14.0D", "医師五", "2026-11-05"), mk(6, D[2], "+15.0D", "医師六", "2026-11-06")
+  ]), { profile: resolveMailProfile("fac-other"), facilityName: "テスト眼科", dealers: set, confirmationEmails: ["confirm@example.jp"] });
+  assert.equal(p.mails.length, 3);
+  const mine = { dX: [1, 4], dY: [2, 5], dZ: [3, 6] };
+  const marks = { 1: ["+10.0D", "医師一", "2026-11-01"], 2: ["+11.0D", "医師二", "2026-11-02"], 3: ["+12.0D", "医師三", "2026-11-03"], 4: ["+13.0D", "医師四", "2026-11-04"], 5: ["+14.0D", "医師五", "2026-11-05"], 6: ["+15.0D", "医師六", "2026-11-06"] };
+  for (const m of p.mails) {
+    assert.deepEqual(m.lineNos, mine[m.dealerId]);
+    for (let n = 1; n <= 6; n++) for (const mark of marks[n]) assert.equal(m.body.includes(mark), mine[m.dealerId].includes(n), `${m.dealerId} / レンズ${n} / ${mark}`);
+    assert.ok(m.body.startsWith(`${m.dealerName}御中`));
+    // 宛先: 自社の発注用メール + 確認先 + 発注者のみ。他社の発注用・どの使用報告用も入らない
+    const own = `order-${m.dealerId.slice(1).toLowerCase()}@example.jp`;
+    assert.deepEqual(m.to, [own, "confirm@example.jp", "login@example.jp"]);
+    assert.ok(!JSON.stringify(m).includes("report-"), "使用報告用メールは出ない");
+    assert.equal(m.totalQuantity, 2);
+  }
+});

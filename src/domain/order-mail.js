@@ -106,7 +106,9 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
   const mails = [...groups.entries()].map(([dealerId, ls]) => {
     const current = dealers[dealerId] || null;
     const snapshotName = ls[0].raw.dealer && ls[0].raw.dealer.name;
-    const dealerName = oneLine((current && current.name) || snapshotName || "");
+    const registeredName = oneLine((current && current.name) || snapshotName || "");
+    const formalName = oneLine(profile.dealerDisplayNames && profile.dealerDisplayNames[dealerId]);   // 宛名の正式表記(あれば登録名より優先)
+    const dealerName = formalName || registeredName;
     const dealerTo = current ? orderRecipients(current) : [];   // ① ディーラーの発注用メール
     const confirmTo = cleanEmails(confirmationEmails);            // ② 固定の確認先(設定から渡す。コードに固定しない)
     const ordererEmail = oneLine(order.createdBy && order.createdBy.email).toLowerCase();
@@ -115,6 +117,7 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
     let blocked = null;
     if (!current) blocked = "dealer-deleted";               // 発注後にディーラーが削除された
     else if (!dealerTo.length) blocked = "no-order-email";        // 発注用メールがない(使用報告用だけの場合を含む)
+    if (formalName && formalName !== registeredName) warnings.push(`宛名は正式表記「${formalName}」を使用しています(登録名は「${registeredName}」。登録データは未変更)`);
     if (current && snapshotName && current.name && snapshotName !== current.name) warnings.push(`発注時のディーラー名「${snapshotName}」から「${current.name}」に変更されています`);
     // 発注時の判定(参考)と、生成時点の判定が食い違うとき
     const snapAllowed = ls.every(l => !l.raw.dispatch || l.raw.dispatch.allowed === true);
