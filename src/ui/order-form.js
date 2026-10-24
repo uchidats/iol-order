@@ -1,6 +1,7 @@
 import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { filterPowersByModel, defaultPowerLabel } from "../domain/power-filter.js";
+import { buildLensOptions, filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
@@ -11,7 +12,9 @@ import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.
 let appConfig = null;
 let orderApi = null; // 開発用のサーバー受付(createOrder)。server-dev のときだけ使う
 let availableModels = [];
-let selectedModelData = null;
+let selectedModelData = null;   // 選択中の系列(マスター)
+let selectedToricModel = "";    // 選択中のトーリック正式型番(ノントーリックは空)
+let lensOptions = [];           // 採用済み系列を、正式型番ごとの選択肢に展開したもの
 let currentPendingOrderData = null;
 let currentAllowedPowers = [...GOOGLE_FORM_ALL_POWERS];
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
@@ -24,8 +27,8 @@ function cacheElements() {
   Object.assign(el, {
     form: $("iolOrderForm"),
     modelSelect: $("iolModelSelect"),
-    groupToricModel: $("groupToricModel"),
-    toricModelSelect: $("toricModelSelect"),
+    chkMultifocal: $("chkMultifocal"),
+    chkToric: $("chkToric"),
     alconCalcArea: $("alconCalcArea"),
     alconCalcLink: $("alconCalcLink"),
     powerSelect: $("iolPowerSelect"),
@@ -85,24 +88,36 @@ function renderModeBadge() {
     : appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
 }
 
-function initModelSelect() {
-  const manufacturers = {};
-  availableModels.forEach(m => {
-    if (!manufacturers[m.manufacturer]) manufacturers[m.manufacturer] = [];
-    manufacturers[m.manufacturer].push(m);
+/**
+ * IOLモデルの選択肢を、「多焦点」「トーリック」のチェック状態で絞って作り直す。
+ * 施設が採用している全メーカーを横断する(メーカー別の選択はない)。選択肢の表示は「メーカー / 型番」。
+ * 現在の選択が絞り込み後にも残る場合のみ維持し、無ければ選択とパワーをリセットする。
+ */
+function initModelSelect(prevKey = "") {
+  lensOptions = buildLensOptions(availableModels);
+  const shown = filterLensOptions(lensOptions, { multifocal: el.chkMultifocal.checked, toric: el.chkToric.checked });
+
+  while (el.modelSelect.children.length > 1) el.modelSelect.removeChild(el.modelSelect.lastChild);
+  el.modelSelect.firstElementChild.textContent = shown.length ? "選択してください" : "該当するIOLがありません";
+
+  const byMaker = new Map();
+  shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
+  byMaker.forEach((list, maker) => {
+    const group = document.createElement("optgroup");
+    group.label = maker;
+    list.forEach(o => {
+      const option = document.createElement("option");
+      option.value = o.key;
+      option.textContent = o.label;
+      group.appendChild(option);
+    });
+    el.modelSelect.appendChild(group);
   });
 
-  Object.keys(manufacturers).forEach(mfg => {
-    const optGroup = document.createElement("optgroup");
-    optGroup.label = mfg;
-    manufacturers[mfg].forEach(m => {
-      const option = document.createElement("option");
-      option.value = m.displayName;
-      option.textContent = m.displayName;
-      optGroup.appendChild(option);
-    });
-    el.modelSelect.appendChild(optGroup);
-  });
+  const kept = shown.some(o => o.key === prevKey);
+  el.modelSelect.value = kept ? prevKey : "";
+  if (prevKey && !kept) el.powerSelect.value = ""; // 絞り込みで選択が外れたら、そのモデル向けのパワー選択も持ち越さない
+  handleModelChange();
 }
 
 /** 選択中の注文者のマスターに登録されたメールアドレス(未選択・未登録は空) */
@@ -157,7 +172,9 @@ function initDefaultDate() {
 
 function setupEventListeners() {
   el.modelSelect.addEventListener("change", handleModelChange);
-  el.toricModelSelect.addEventListener("change", () => clearFieldError("toricModelSelect"));
+  const onFilterChange = () => initModelSelect(el.modelSelect.value);
+  el.chkMultifocal.addEventListener("change", onFilterChange);
+  el.chkToric.addEventListener("change", onFilterChange);
 
   el.powerSelect.addEventListener("change", () => clearFieldError("iolPowerSelect"));
 
@@ -185,20 +202,14 @@ function setupEventListeners() {
 // ==========================================================================
 function handleModelChange() {
   clearFieldError("iolModelSelect");
-  const selectedName = el.modelSelect.value;
-  selectedModelData = availableModels.find(m => m.displayName === selectedName) || null;
+  const lens = findLensOption(lensOptions, el.modelSelect.value);
+  selectedModelData = lens ? lens.model : null;
+  selectedToricModel = lens ? lens.toricModel : "";
 
   if (!selectedModelData) {
-    hideToricField();
     el.alconCalcArea.classList.add("hidden");
     initPowerOptions(GOOGLE_FORM_ALL_POWERS);
     return;
-  }
-
-  if (selectedModelData.isToric) {
-    showToricField(selectedModelData.toricModels);
-  } else {
-    hideToricField();
   }
 
   if (selectedModelData.manufacturer === "ALCON" && selectedModelData.isToric) {
@@ -211,27 +222,6 @@ function handleModelChange() {
   }
 
   updatePowerOptionsForModel(selectedModelData);
-}
-
-function showToricField(models) {
-  el.groupToricModel.classList.remove("hidden");
-  el.toricModelSelect.setAttribute("required", "required");
-  el.toricModelSelect.innerHTML = '<option value="">型番を選択してください</option>';
-
-  models.forEach(item => {
-    const opt = document.createElement("option");
-    opt.value = item;
-    opt.textContent = item;
-    el.toricModelSelect.appendChild(opt);
-  });
-}
-
-function hideToricField() {
-  el.groupToricModel.classList.add("hidden");
-  el.toricModelSelect.removeAttribute("required");
-  el.toricModelSelect.value = "";
-  el.toricModelSelect.innerHTML = '<option value="">型番を選択してください</option>';
-  clearFieldError("toricModelSelect");
 }
 
 function updatePowerOptionsForModel(modelData) {
@@ -252,10 +242,10 @@ function handleFormSubmit(e) {
   const emailVal = selectedOrdererEmail();
 
   currentPendingOrderData = {
-    model: el.modelSelect.value,
+    model: selectedModelData ? selectedModelData.displayName : "", // 系列名(従来どおり)。正式型番は toricModel に保持
     modelId: selectedModelData ? selectedModelData.id : "",
     manufacturer: selectedModelData ? selectedModelData.manufacturer : "",
-    toricModel: selectedModelData && selectedModelData.isToric ? el.toricModelSelect.value : "",
+    toricModel: selectedModelData && selectedModelData.isToric ? selectedToricModel : "",
     power: el.powerSelect.value,
     quantity: quantityEl ? quantityEl.value : "1 枚",
     surgeryDate: el.surgeryDateInput.value,
@@ -286,17 +276,9 @@ function validateOrderForm() {
   };
 
   if (!el.modelSelect.value) {
-    invalid("iolModelSelect", "メーカー名 / IOLモデルを選択してください", el.modelSelect);
+    invalid("iolModelSelect", "IOLモデルを選択してください", el.modelSelect);
   } else {
     clearFieldError("iolModelSelect");
-  }
-
-  if (selectedModelData && selectedModelData.isToric) {
-    if (!el.toricModelSelect.value) {
-      invalid("toricModelSelect", "トーリック型番を選択してください", el.toricModelSelect);
-    } else {
-      clearFieldError("toricModelSelect");
-    }
   }
 
   if (!el.powerSelect.value) {
@@ -481,9 +463,8 @@ function handleResetForNewOrder() {
   document.body.style.overflow = "";
   currentPendingOrderData = null;
 
-  el.form.reset();
-  el.modelSelect.value = "";
-  handleModelChange();
+  el.form.reset(); // チェックボックスも初期状態(両方OFF)に戻る
+  initModelSelect("");
   initDefaultDate();
   window.scrollTo({ top: 0, behavior: "smooth" });
   showToast("フォームをリセットしました");
@@ -512,20 +493,13 @@ export async function reloadFacilityOptions() {
     facilityRepository.listOrderers(facilityRepositoryId)
   ]);
 
-  const prevModel = el.modelSelect.value;
+  const prevModelKey = el.modelSelect.value;
   const prevOrderer = el.ordererSelect.value;
 
   availableModels = resolveAdoptedModels(adoptedIols);
-  while (el.modelSelect.children.length > 1) el.modelSelect.removeChild(el.modelSelect.lastChild);
   while (el.ordererSelect.children.length > 1) el.ordererSelect.removeChild(el.ordererSelect.lastChild);
-  initModelSelect();
+  initModelSelect(prevModelKey); // 採用解除などで選択肢から外れた場合は、選択とパワーをリセットする
   initOrdererSelect(orderers.filter(o => o.active));
 
   el.ordererSelect.value = [...el.ordererSelect.options].some(o => o.value === prevOrderer) ? prevOrderer : "";
-  if (prevModel && !availableModels.some(m => m.displayName === prevModel)) {
-    el.modelSelect.value = "";
-    handleModelChange(); // 採用解除されたモデルが選ばれていた場合はリセット
-  } else {
-    el.modelSelect.value = prevModel;
-  }
 }

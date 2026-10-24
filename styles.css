@@ -448,29 +448,29 @@ body {
   background-color: #dcfce7;
 }
 
-/* IOLモデル(6) と IOLパワー(4) の横並び。極端に狭い画面では縦並び */
-.model-power-row {
-  display: grid;
-  grid-template-columns: 6fr 4fr;
-  align-items: end; /* ラベルが折り返しても、プルダウンの高さを揃える */
-  gap: 0 10px;
-}
-
-.model-power-row > .form-group {
-  margin-bottom: 18px;
-  min-width: 0;
-}
-
-.model-power-row .form-label {
+/* レンズ選択: 左揃え・縦並び。各項目は必要な幅に制限する(狭い画面では画面幅まで) */
+.lens-filter {
+  display: flex;
   flex-wrap: wrap;
-  gap: 2px 6px;
+  gap: 6px 20px;
+  margin-bottom: 12px;
 }
 
-@media (max-width: 339px) {
-  .model-power-row {
-    grid-template-columns: 1fr;
-  }
+.lens-filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  font-size: 0.95rem;
+  cursor: pointer;
 }
+
+#groupModel { max-width: 28rem; }
+#groupPower { max-width: 12rem; }
+#groupSurgeryDate { max-width: 14rem; }
+#groupOrderer { max-width: 18rem; }
+#groupQuantity .quantity-selector { max-width: 16rem; }
+#groupNotes { max-width: 36rem; }
 
 /* 度数ステッパー入力 */
 .stepper-input-wrapper {

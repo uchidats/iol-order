@@ -61,56 +61,43 @@
         <!-- レンズの選択（レンズ仕様と手術・発注情報を統合） -->
         <fieldset class="form-section">
           <legend class="section-legend">
-            レンズの選択
+            レンズ・手術日の選択
           </legend>
 
-          <!-- 1. メーカー名 / IOLモデル と IOLパワー（横並び 6:4。極端に狭い画面では縦並び） -->
-          <div class="model-power-row">
-            <div class="form-group" id="groupModel">
-              <label for="iolModelSelect" class="form-label required">
-                IOLモデル
-                <span class="badge-required">必須</span>
-              </label>
-              <div class="select-wrapper">
-                <select id="iolModelSelect" name="model" class="form-control" required>
-                  <option value="">選択してください</option>
-                  <!-- JSでマスターからGoogle Formの実データに基づき動的生成 -->
-                </select>
-              </div>
-              <p class="error-message" id="err-iolModelSelect"></p>
-            </div>
-
-            <!-- 3. IOLパワー (ディオプター)。変更はプルダウンのみ -->
-            <div class="form-group" id="groupPower">
-              <label for="iolPowerSelect" class="form-label required">
-                IOLパワー
-                <span class="badge-required">必須</span>
-              </label>
-              <div class="select-wrapper">
-                <select id="iolPowerSelect" name="power" class="form-control" required>
-                  <option value="">選択してください</option>
-                  <!-- JSでGoogle Formの60段階の度数選択肢から動的設定 -->
-                </select>
-              </div>
-              <p class="error-message" id="err-iolPowerSelect"></p>
-            </div>
+          <!-- 種類の絞り込み: メーカーを問わず、施設が採用している全IOLを横断して絞る。両方OFF=単焦点・ノントーリック -->
+          <div class="lens-filter" role="group" aria-label="レンズの種類">
+            <label class="lens-filter-check"><input type="checkbox" id="chkMultifocal"> 多焦点</label>
+            <label class="lens-filter-check"><input type="checkbox" id="chkToric"> トーリック</label>
           </div>
 
-          <!-- 2. トーリック型番 (トーリック選択時のみ表示) -->
-          <div class="form-group form-group-conditional hidden" id="groupToricModel">
-            <label for="toricModelSelect" class="form-label required">
-              トーリックの場合は型番を選択
+          <!-- 1. IOLモデル(メーカー名と具体的なトーリック型番まで) -->
+          <div class="form-group" id="groupModel">
+            <label for="iolModelSelect" class="form-label required">
+              IOLモデル
               <span class="badge-required">必須</span>
-              <span class="badge badge-info ml-1">トーリックIOL</span>
             </label>
             <div class="select-wrapper">
-              <select id="toricModelSelect" name="toricModel" class="form-control">
-                <option value="">型番を選択してください</option>
-                <!-- JSで動的生成 -->
+              <select id="iolModelSelect" name="model" class="form-control" required>
+                <option value="">選択してください</option>
+                <!-- JSで、採用済みIOLをチェック状態に応じて生成 -->
               </select>
             </div>
-            <p class="form-hint">選択したトーリックモデルに対応する型番を指定してください。</p>
-            <p class="error-message" id="err-toricModelSelect"></p>
+            <p class="error-message" id="err-iolModelSelect"></p>
+          </div>
+
+          <!-- 2. IOLパワー (ディオプター)。変更はプルダウンのみ -->
+          <div class="form-group" id="groupPower">
+            <label for="iolPowerSelect" class="form-label required">
+              IOLパワー
+              <span class="badge-required">必須</span>
+            </label>
+            <div class="select-wrapper">
+              <select id="iolPowerSelect" name="power" class="form-control" required>
+                <option value="">選択してください</option>
+                <!-- JSでモデルの度数範囲に応じて生成 -->
+              </select>
+            </div>
+            <p class="error-message" id="err-iolPowerSelect"></p>
           </div>
 
           <!-- 将来機能: Alcon Toric Calculator 連携エリア (Alcon Toric選択時のみ表示) -->
