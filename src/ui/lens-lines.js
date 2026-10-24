@@ -73,7 +73,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.removeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "remove" }, "削除");
 
     // ALCON製トーリックIOLを選んだ明細だけ、チェックボックスの右に小さなリンクを出す(別タブで開く。テキストとアイコン全体がリンク)
-    line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Toric Calculator", externalLinkIcon());
+    line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Online Toric IOL Calculator", externalLinkIcon());
     line.badges = h("span", { class: "lens-badges" }); // 選択中のIOLの特徴(多焦点・トーリック)。情報表示のみ
     const group = (labelText, control, errKey, forId, extra = null) => h("div", { class: "form-group", "data-group": errKey },
       h("label", { class: "form-label required", for: forId }, labelText, " ", h("span", { class: "badge-required" }, "必須"), extra),

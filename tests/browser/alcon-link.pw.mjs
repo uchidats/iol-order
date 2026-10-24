@@ -92,7 +92,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await link(0).isVisible(), true);
 
       // 小さなテキストリンク + 外部リンクアイコン(SVG)。矢印文字「↗」は使わない。リンク先は従来どおり・別タブ
-      assert.equal((await link(0).innerText()).trim(), "Alcon Toric Calculator");
+      assert.equal((await link(0).innerText()).trim(), "Alcon Online Toric IOL Calculator");
       assert.ok(!(await link(0).textContent()).includes("↗"));
       assert.equal(await link(0).locator("svg").count(), 1);
       assert.equal(await link(0).getAttribute("href"), CALC_URL);
@@ -113,7 +113,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(popup.url(), /myalcon-toriccalc\.com/);
       await popup.close();
       assert.equal(page.url(), base);
-      const [popup2] = await Promise.all([context.waitForEvent("page"), link(0).getByText("Alcon Toric Calculator").click()]);
+      const [popup2] = await Promise.all([context.waitForEvent("page"), link(0).getByText("Alcon Online Toric IOL Calculator").click()]);
       await popup2.close();
 
       // 明細ごとに独立(2つ目のレンズがALCONのトーリックでなければ、そのレンズには出ない)

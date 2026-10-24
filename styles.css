@@ -654,10 +654,15 @@ input[type="date"].form-control {
   line-height: 1.6;
 }
 
+/* 関連リンク: 常時の下線はなし。テキストの右に外部リンクアイコン(テキストとアイコン全体がリンク)。ホバー・キーボードフォーカスで下線 */
 .ref-links-list a {
   color: var(--primary);
-  text-decoration: underline;
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
+.ref-links-list a .ext-icon { display: inline; margin-left: 4px; vertical-align: -1px; }   /* 折り返しても、アイコンは最後の行のテキストの右に付く */
+.ref-links-list a:hover { text-decoration: underline; }
+.ref-links-list a:focus-visible, .alcon-calc-link:focus-visible { text-decoration: underline; outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
 
 /* ガイド・エラーメッセージ */
 .form-hint {
