@@ -1884,3 +1884,7 @@ input[type="date"].form-control {
   background: #f3f4f6;
   border-radius: var(--radius-sm, 6px);
 }
+
+/* ディーラー: 名前の右側に削除ボタン */
+.dealer-head { display: flex; align-items: center; gap: 8px; }
+.dealer-head .form-control { flex: 1; min-width: 0; }

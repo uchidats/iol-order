@@ -25,7 +25,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
   ├─ members/{uid}               uid, role: admin|orderer, displayName?, email?, updatedAt   ← 有効/無効(status)はない。削除=所属の解除
   ├─ orderers/{id}               facilityId, name(1-50), email?, sortOrder?, updatedAt   ← 有効/無効(active)はない
   ├─ adoptedIols/{catalogIolId}  facilityId, catalogIolId(=doc id, 共通マスターのID), dealerId?, enabled, updatedAt
-  ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, active, sortOrder?, updatedAt,
+  ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, sortOrder?, updatedAt,
   │                              orderEmails[<=5]?（発注用）, usageReportEmails[<=5]?（使用報告用。発注用とは別管理）
   ├─ orders/{orderId}            サーバー(createOrder)発行のみ・クライアント書込不可。詳細は order-intake.md
   └─ orderCounters/{yyyymmdd}    注文番号の連番(サーバー専用)
@@ -47,7 +47,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 - **注文者**: 追加・名前/メール編集・並び替え（`sortOrder` は表示順×10）。削除（ゴミ箱アイコン・確認ダイアログあり）は自施設の施設管理者と運営者が可能。削除するのは注文者マスターのみで、所属・認証ユーザー・過去の注文には影響しない。一時的に外すだけなら無効化を使う。同名（大文字小文字・全角半角の差を無視）は登録不可。
 - **採用IOL**: 共通IOLマスター（`src/data/iol-models.js` の `IOL_MODELS[].id`）から選ぶ。ドキュメントID＝マスターID（重複採用を構造的に防ぐ）。解除は `enabled=false`。マスターに無いIDは Rules が拒否する。
   Rules 内の許可IDの一覧は `IOL_MODELS` と同期が必要（`tests/rules-catalog-sync.test.js` が不一致を検出する）。マスターを Firestore の `iolCatalog` へ移す際にこの二重管理を解消する。
-- **ディーラー**: 名称・有効/無効・**発注用メール**と**使用報告用メール**（それぞれ最大5件、形式検証あり）。現時点では登録のみで、メール送信・ディーラー連携は未実装。
+- **ディーラー**: 名称・追加・編集・削除(有効/無効はない)・**発注用メール**と**使用報告用メール**（それぞれ最大5件、形式検証あり）。現時点では登録のみで、メール送信・ディーラー連携は未実装。
 - 検証は画面（`src/domain/facility-settings.js`）と Rules の両方で行う。権限は常に Rules が最終判定し、画面でメニューを隠すだけに依存しない。
 - 所属先以外の施設・orderer 権限・所属のない人・未認証は、設定の読み書きができない（Rules テストで検証）。
 

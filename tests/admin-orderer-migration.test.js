@@ -62,3 +62,10 @@ test("CLI: 条件を満たさない --execute は、ネットワークに触れ�
   assert.match(r.stderr, /--backup/);
   assert.match(r.stderr, /--confirm/);
 });
+
+test("対象コレクション: 既定は orderers。ディーラー(facilityDealers)も指定でき、それ以外は拒否される", () => {
+  assert.equal(parseMigrationArgs([]).collection, "orderers");
+  assert.deepEqual(parseMigrationArgs(["--collection", "facilityDealers"]).errors, []);
+  assert.equal(parseMigrationArgs(["--collection", "facilityDealers"]).collection, "facilityDealers");
+  for (const bad of ["members", "facilities", "", "orders"]) assert.ok(parseMigrationArgs(["--collection", bad]).errors.length > 0, bad);
+});

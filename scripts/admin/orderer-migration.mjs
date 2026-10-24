@@ -53,11 +53,12 @@ const list = (v) => String(v || "").split(",").map(s => s.trim()).filter(Boolean
 
 /** 実行できる条件の検証。既定は dry-run。実行には --execute・--backup(新しいファイル)・--confirm <プロジェクトID> がすべて必要 */
 export function parseMigrationArgs(argv) {
-  const a = { mode: "dry-run", keepInactive: [], removeInactive: [], backup: "", confirm: "", errors: [] };
+  const a = { mode: "dry-run", collection: "orderers", keepInactive: [], removeInactive: [], backup: "", confirm: "", errors: [] };
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     const val = () => argv[++i];
     if (t === "--execute") a.mode = "execute";
+    else if (t === "--collection") a.collection = val() || "";
     else if (t === "--keep-inactive") a.keepInactive.push(...list(val()));
     else if (t === "--remove-inactive") a.removeInactive.push(...list(val()));
     else if (t === "--backup") a.backup = val() || "";
@@ -65,6 +66,7 @@ export function parseMigrationArgs(argv) {
     else if (t === "--project") a.errors.push("--project は指定できません(対象は " + PROJECT + " のみ)");
     else a.errors.push(`不明な引数: ${t}`);
   }
+  if (!COLLECTIONS.includes(a.collection)) a.errors.push(`--collection は ${COLLECTIONS.join(" か ")} のどちらかです(注文者=orderers、ディーラー=facilityDealers)`);
   if (a.mode === "execute") {
     if (!a.backup) a.errors.push("--execute には --backup <新しいファイルのパス> が必要です(実行前に全注文者のバックアップを書き出します)");
     if (a.confirm !== PROJECT) a.errors.push(`--execute には --confirm ${PROJECT} が必要です`);

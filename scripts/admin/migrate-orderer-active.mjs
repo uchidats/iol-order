@@ -1,4 +1,5 @@
-// 注文者ドキュメントから `active` フィールドを取り除く移行(medconf-iol-dev のみ)。
+// 注文者(orderers)・ディーラー(facilityDealers)のドキュメントから `active` フィールドを取り除く移行(medconf-iol-dev のみ)。
+// 対象は --collection orderers(既定) / facilityDealers で指定する。コレクションごとに dry-run → 判断 → 実行を行う。
 //
 //   1) dry-run(既定。読み取りだけで、何も変更しない):
 //        node scripts/admin/migrate-orderer-active.mjs
@@ -60,7 +61,7 @@ async function loadOrderers() {
   const res = [];
   for (const f of await listAll("facilities")) {
     const facilityId = f.name.split("/").pop();
-    for (const d of await listAll(`facilities/${facilityId}/orderers`)) {
+    for (const d of await listAll(`facilities/${facilityId}/${args.collection}`)) {
       res.push({
         facilityId, id: d.name.split("/").pop(), updateTime: d.updateTime, raw: d,
         fields: Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, plain(v)]))
@@ -73,7 +74,7 @@ async function loadOrderers() {
 const orderers = await loadOrderers();
 const plan = buildPlan(orderers, { keepInactive: args.keepInactive, removeInactive: args.removeInactive });
 
-console.log(`対象: ${PROJECT}   モード: ${args.mode === "execute" ? "実行" : "dry-run(何も変更しません)"}\n`);
+console.log(`対象: ${PROJECT} / ${args.collection}   モード: ${args.mode === "execute" ? "実行" : "dry-run(何も変更しません)"}\n`);
 for (const o of orderers) {
   const f = o.fields;
   console.log(`  ${o.facilityId}/${o.id}  名前=${f.name}  メール=${f.email ?? "(なし)"}  active=${"active" in f ? f.active : "(なし=新形式)"}  並び=${f.sortOrder ?? "-"}`);
@@ -96,11 +97,11 @@ if (!plan.ok) { console.error("\n要対応の項目があるため、実行し�
 
 // ---- 実行 ----
 fs.mkdirSync(path.dirname(path.resolve(args.backup)), { recursive: true });
-fs.writeFileSync(args.backup, JSON.stringify({ project: PROJECT, takenAt: new Date().toISOString(), orderers: orderers.map(o => o.raw) }, null, 2), { flag: "wx" });
+fs.writeFileSync(args.backup, JSON.stringify({ project: PROJECT, takenAt: new Date().toISOString(), collection: args.collection, docs: orderers.map(o => o.raw) }, null, 2), { flag: "wx" });
 console.log(`\nバックアップを書き出しました: ${args.backup} (${orderers.length}件)`);
 
 for (const op of plan.ops) {
-  const doc = `${BASE}/facilities/${op.facilityId}/orderers/${op.id}`;
+  const doc = `${BASE}/facilities/${op.facilityId}/${args.collection}/${op.id}`;
   const pre = `currentDocument.updateTime=${encodeURIComponent(op.updateTime)}`;
   const r = op.type === "delete"
     ? await fetch(`${doc}?${pre}`, { method: "DELETE", headers })
