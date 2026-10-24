@@ -24,7 +24,9 @@ test("モデル名に埋め込まれた「（トーリック）」などの括�
   assert.equal(n("A / B (トーリック) （トーリック）"), "B");                    // 重複していても整理する
   assert.equal(n("A / B（多焦点）"), "B");
   assert.equal(n("A / B (多焦点トーリック)"), "B");
-  assert.equal(n("ALCON / MN60MA (イエロー)"), "MN60MA (イエロー)");              // 特徴以外の括弧書きは残す
+  assert.equal(n("ALCON / MN60MA (イエロー)"), "MN60MA");                         // 色の括弧書きも表示では付けない
+  assert.equal(n("ALCON / MN60MA（イエロー）"), "MN60MA");
+  assert.equal(n("A / B (その他の注記)"), "B (その他の注記)");                    // 上記以外の括弧書きは残す
   assert.equal(n("HOYA / XY1"), "XY1");
 });
 

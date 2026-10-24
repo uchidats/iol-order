@@ -25,7 +25,7 @@ test("分類: 全系列に isMultifocal(真偽値)があり、確定した分類
 test("絞り込み: 両方OFF=単焦点・ノントーリックのみ(全メーカー横断)", () => {
   const r = filterLensOptions(buildLensOptions(adoptAll()), {});
   assert.deepEqual(labels(r), [
-    "J&J / DIB00V", "ALCON / CNA0T0", "SANTEN / NX-70S", "NIDEK / NSP-2", "HOYA / XY1", "HOYA / PY-60AD", "ALCON / MN60MA (イエロー)"
+    "J&J / DIB00V", "ALCON / CNA0T0", "SANTEN / NX-70S", "NIDEK / NSP-2", "HOYA / XY1", "HOYA / PY-60AD", "ALCON / MN60MA"
   ]);
 });
 
@@ -88,4 +88,29 @@ test("度数制限は系列ごと: 同じ系列の型番はすべて同じ度数
 test("選択肢のキーは一意", () => {
   const all = buildLensOptions(adoptAll());
   assert.equal(new Set(all.map(o => o.key)).size, all.length);
+});
+
+test("プルダウンの表示はモデル名だけ(メーカーは見出し)。値・全文の表示名・注文データ用の情報は変わらない", () => {
+  const all = buildLensOptions(adoptAll());
+  const by = Object.fromEntries(all.map(o => [o.key, o]));
+  assert.equal(by["alcon-cna0t0"].shortLabel, "CNA0T0");
+  assert.equal(by["alcon-cna0t0"].label, "ALCON / CNA0T0");     // 確認画面などで使う全文
+  assert.equal(by["jj-dib00v"].shortLabel, "DIB00V");
+  assert.equal(by["jj-diwxxx-toric|DIW300"].shortLabel, "DIW300");
+  assert.equal(by["jj-diwxxx-toric|DIW300"].label, "J&J / DIW300");
+  assert.equal(by["alcon-mn60ma-yellow"].shortLabel, "MN60MA");
+  assert.equal(by["alcon-mn60ma-yellow"].label, "ALCON / MN60MA");
+  assert.equal(by["alcon-mn60ma-yellow"].model.displayName, "ALCON / MN60MA (イエロー)"); // 発注用の名称(内部)は変更しない
+  assert.equal(by["alcon-mn60ma-yellow"].model.model, "MN60MA (イエロー)");
+  for (const o of all) assert.doesNotMatch(o.shortLabel, /\//.test(o.model.model) ? /^$/ : / \/ /, o.key); // 型番内のスラッシュ以外に「メーカー / 」は含まない
+  assert.equal(by["alcon-cna0tx-cnw0tx-toric|CNW0T8"].key, "alcon-cna0tx-cnw0tx-toric|CNW0T8");     // キー(系列ID|型番)は不変
+  assert.equal(by["alcon-cna0tx-cnw0tx-toric|CNW0T8"].toricModel, "CNW0T8");
+  assert.equal(by["alcon-cna0tx-cnw0tx-toric|CNW0T8"].manufacturer, "ALCON");
+});
+
+test("異なるメーカーでモデル名が重複する場合は、識別できる表示(メーカー / モデル名)を維持する。同じメーカー内の重複は対象外", () => {
+  const mk = (id, manufacturer, model) => ({ id, manufacturer, model, displayName: `${manufacturer} / ${model}`, isToric: false, toricModels: [], isMultifocal: false });
+  const o = buildLensOptions([mk("a1", "AAA", "X100"), mk("b1", "BBB", "X100"), mk("b2", "BBB", "Y200")]);
+  assert.deepEqual(o.map(x => x.shortLabel), ["AAA / X100", "BBB / X100", "Y200"]);
+  assert.deepEqual(o.map(x => x.key), ["a1", "b1", "b2"]);
 });
