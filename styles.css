@@ -502,7 +502,11 @@ body {
   margin-bottom: 8px;
 }
 
-.lens-line .form-group { max-width: 20rem; margin-bottom: 14px; } /* IOLモデル: 約320px。長い名称は選択肢・確認画面で全文を確認できる */
+.lens-line .form-group { max-width: 20rem; margin-bottom: 14px; }
+.lens-line [data-group="model"] { max-width: 220px; }   /* IOLモデル: 約220px(選択欄と展開した一覧の幅をそろえる)。狭い画面では画面幅まで */
+.lens-line [data-group="model"] .form-control { width: 100%; min-width: 0; }
+/* メーカー見出し(optgroup): 斜体を解除し、太字は維持(文字サイズ・色・余白は既定のまま) */
+.lens-line select optgroup { font-style: normal; font-weight: 700; }
 .lens-line [data-group="power"] { max-width: 12rem; }
 .lens-line [data-group="quantity"] { max-width: 16rem; }
 .lens-line .date-input-wrapper { max-width: 14rem; }
