@@ -1604,12 +1604,34 @@ input[type="date"].form-control {
   margin: 0;
 }
 
-/* 見出し右側のⓘ(説明は押したときだけ表示する共通部品: info-tip.js) */
+/* IOLの特徴バッジ(多焦点・トーリック): 小さな楕円形・控えめな色。情報表示のみ */
+.lens-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: #475569;
+  background-color: #f1f5f9;
+  border: 1px solid #d6dde8;
+  border-radius: 999px;
+}
+
+.lens-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.lens-badges:empty { display: none; }
+.iol-name { margin-right: 6px; }
+.settings-iol-group .settings-check { flex-wrap: wrap; gap: 4px 6px; }
+.summary-line-title .lens-badge { margin-left: 2px; }
+
+/* 見出し右側のⓘ(説明は押したときだけ表示する共通部品: info-tip.js)
+   デザインは web-onsen-stamp-rally の .progress-help-* に合わせる: 透明なボタン(背景・枠線・影なし)、枠線つきの小さな説明ボックス */
 .settings-heading {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   margin-bottom: 6px;
 }
 
@@ -1617,37 +1639,46 @@ input[type="date"].form-control {
 .info-tip { display: inline-flex; }
 
 .info-tip-btn {
-  width: 20px;
-  height: 20px;
-  padding: 0;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: italic 700 0.72rem/1 Georgia, "Times New Roman", serif;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--primary, #1d4ed8);
-  background: #eef3fd;
-  border: 1px solid #c9d8f6;
-  border-radius: 50%;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.info-tip-btn:hover, .info-tip-btn[aria-expanded="true"] { background: #dbe6fb; }
+/* 見た目は小さいまま、タップできる範囲(約36×36px)を広げる */
+.info-tip-btn::after { content: ""; position: absolute; inset: -8px; }
+.info-tip-btn:focus-visible { outline: 2px solid var(--primary, #1d4ed8); outline-offset: 2px; border-radius: 2px; }
 
 .info-tip-pop {
   position: absolute;
+  z-index: 20;
   top: 100%;
   left: 0;
-  z-index: 20;
-  width: min(26rem, 100%);   /* 見出しの幅の中に収める(狭い画面ではみ出さない) */
-  margin-top: 6px;
+  width: min(320px, 100%);   /* 見出しの幅の中に収める(狭い画面ではみ出さない) */
+  margin-top: 4px;
   padding: 10px 12px;
-  font-size: 0.85rem;
-  line-height: 1.6;
-  color: var(--text-main, #1f2937);
+  border: 1px solid var(--border-color, #dcd9ce);
+  border-radius: 4px;
   background: #ffffff;
-  border: 1px solid #c9d8f6;
-  border-radius: var(--radius-md, 8px);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+  box-shadow: none;
+  color: var(--text-main, #1f2937);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.7;
+  text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
@@ -1769,6 +1800,21 @@ input[type="date"].form-control {
   font-size: 0.9rem;
   white-space: nowrap;
 }
+
+/* 採用IOL: メーカーごとの折りたたみ */
+.iol-maker { border: 1px solid #e5e7eb; border-radius: var(--radius-md); margin: 8px 0; min-width: 0; }
+.iol-maker-summary {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 6px 12px;
+  cursor: pointer; list-style: none; user-select: none;
+  font-weight: 600;
+}
+.iol-maker-summary::-webkit-details-marker { display: none; }
+.iol-maker-summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--text-muted, #6b7280); transition: transform 0.15s; }
+.iol-maker[open] > .iol-maker-summary::before { transform: rotate(90deg); }
+.iol-maker-count { margin-left: auto; font-size: 0.75rem; font-weight: 500; color: var(--text-muted, #6b7280); white-space: nowrap; }
+.iol-maker-list { padding: 2px 12px 8px; }
+.iol-maker-list .settings-check { display: flex; margin: 6px 0; white-space: normal; overflow-wrap: anywhere; }
 
 .settings-iol-group {
   min-width: 0;

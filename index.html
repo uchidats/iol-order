@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=0522bfde64">
+  <link rel="stylesheet" href="styles.css?v=5d0135caf1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -30,9 +30,10 @@
       "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=7b9e10ba2d",
       "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=2e94947c03",
       "./src/domain/geo.js": "./src/domain/geo.js?v=cc70776997",
-      "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=2fa815095f",
+      "./src/domain/lens-labels.js": "./src/domain/lens-labels.js?v=7f071b62a6",
+      "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=ae53544a93",
       "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=31603a3427",
-      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=ad22af88a5",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=9c77da1d89",
       "./src/domain/order-request.js": "./src/domain/order-request.js?v=07167eca25",
       "./src/domain/order-validation.js": "./src/domain/order-validation.js?v=432a8bd522",
       "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=5439af84ee",
@@ -43,12 +44,13 @@
       "./src/main.js": "./src/main.js?v=845a7d6943",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=cd8d14c8b4",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
-      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=94294416f0",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=f0267aebd2",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=160fe8335e",
-      "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=386e4c81b7",
-      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=e06344f302",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=667cab4065"
+      "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
+      "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=806a3e8651",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=331024c80c"
     }
   }
   </script>
@@ -68,38 +70,6 @@
     </header>
 
     <main class="main-content">
-      <!-- 生体計測結果の画像読み取りアシスト -->
-      <section class="feature-card future-feature" id="ocrFeatureCard">
-       <details class="ocr-collapse">
-        <summary>計測結果を写真から読み取る（任意）</summary>
-        <div class="feature-card-content">
-          <div class="feature-icon-wrapper">
-            <svg class="feature-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-              <circle cx="12" cy="13" r="4"></circle>
-            </svg>
-          </div>
-          <div class="feature-info">
-            <div class="feature-title-row">
-              <span class="feature-title">計測結果を写真から読み取る</span>
-              <span class="badge badge-info" id="biometryStatusBadge">カメラ・OCR連携</span>
-            </div>
-            <p class="feature-desc">OA-2000等の測定結果画面を撮影し、AL・K値・ACD等を抽出・確認できます</p>
-            <div class="confirmed-biometry-summary hidden" id="confirmedBiometrySummary">
-              <!-- 確定済み計測値の要約チップがここに表示されます -->
-            </div>
-          </div>
-        </div>
-        <button type="button" class="btn btn-secondary btn-future" id="btnOpenBiometryModal">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-            <circle cx="12" cy="13" r="4"></circle>
-          </svg>
-          <span id="btnOpenBiometryText">計測結果を写真から読み取る</span>
-        </button>
-       </details>
-      </section>
-
       <!-- 注文フォーム -->
       <form id="iolOrderForm" class="order-form" novalidate>
         <!-- 注文の入力欄(見出し・外枠なし。各レンズは「レンズN」のカード) -->
@@ -183,6 +153,38 @@
             </details>
             <p class="error-message" id="err-notesInput"></p>
           </div>
+
+        <!-- 生体計測結果の画像読み取りアシスト -->
+        <section class="feature-card future-feature" id="ocrFeatureCard">
+         <details class="ocr-collapse">
+          <summary>計測結果を写真から読み取る（任意）</summary>
+          <div class="feature-card-content">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+            </div>
+            <div class="feature-info">
+              <div class="feature-title-row">
+                <span class="feature-title">計測結果を写真から読み取る</span>
+                <span class="badge badge-info" id="biometryStatusBadge">カメラ・OCR連携</span>
+              </div>
+              <p class="feature-desc">OA-2000等の測定結果画面を撮影し、AL・K値・ACD等を抽出・確認できます</p>
+              <div class="confirmed-biometry-summary hidden" id="confirmedBiometrySummary">
+                <!-- 確定済み計測値の要約チップがここに表示されます -->
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-future" id="btnOpenBiometryModal">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+            <span id="btnOpenBiometryText">計測結果を写真から読み取る</span>
+          </button>
+         </details>
+        </section>
         </div>
 
         <!-- 送信ボタンエリア -->
@@ -199,7 +201,7 @@
 
     <!-- フッター -->
     <footer class="app-footer">
-      <p>© 2026 MedConf | IOL注文フォーム</p>
+      <p>© 2026 IOL注文フォーム</p>
     </footer>
   </div>
 

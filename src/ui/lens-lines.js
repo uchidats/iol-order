@@ -2,6 +2,7 @@ import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { filterPowersByModel } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
+import { lensBadgeElements } from "./lens-badges.js";
 
 /** 要素生成の小さなヘルパー(表示文字列は textContent で扱い、HTMLとして解釈しない) */
 function h(tag, attrs = {}, ...children) {
@@ -49,8 +50,9 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     line.title = h("strong", { class: "lens-line-title" });
     line.removeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "remove" }, "削除");
 
-    const group = (labelText, control, errKey, forId) => h("div", { class: "form-group", "data-group": errKey },
-      h("label", { class: "form-label required", for: forId }, labelText, " ", h("span", { class: "badge-required" }, "必須")),
+    line.badges = h("span", { class: "lens-badges" }); // 選択中のIOLの特徴(多焦点・トーリック)。情報表示のみ
+    const group = (labelText, control, errKey, forId, extra = null) => h("div", { class: "form-group", "data-group": errKey },
+      h("label", { class: "form-label required", for: forId }, labelText, " ", h("span", { class: "badge-required" }, "必須"), extra),
       control, err(errKey));
 
     line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
@@ -58,7 +60,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
       h("div", { class: "lens-filter", role: "group", "aria-label": "レンズの種類" },
         h("label", { class: "lens-filter-check" }, line.chkMf, " 多焦点"),
         h("label", { class: "lens-filter-check" }, line.chkToric, " トーリック")),
-      group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel")),
+      group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel"), line.badges),
       group("IOLパワー", h("div", { class: "select-wrapper" }, line.power), "power", id("lensPower")),
       h("div", { class: "form-group", "data-group": "quantity" },
         h("span", { class: "form-label required" }, "枚数 ", h("span", { class: "badge-required" }, "必須")),
@@ -109,6 +111,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
    */
   function onModelChange(line, reset = true) {
     const lens = findLensOption(getOptions(), line.model.value);
+    line.badges.replaceChildren(...(lens ? lensBadgeElements(lens.model) : []));
     const powers = lens ? filterPowersByModel(lens.model) : GOOGLE_FORM_ALL_POWERS;
     const prev = line.power.value;
     while (line.power.children.length > 1) line.power.removeChild(line.power.lastChild);

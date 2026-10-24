@@ -1,8 +1,12 @@
 /**
  * 見出し右側の小さなⓘアイコンと、クリック・タップで開く説明(共通部品)。
- * - ⓘを押すと説明が開き、もう一度押す・外側を押す・Esc キーで閉じる。同時に開くのは1つだけ。
- * - 説明は textContent で表示する(HTMLとして解釈しない)。
- * - キーボード・スクリーンリーダー対応: ボタン(aria-expanded / aria-controls)で、フォーカス可能。
+ * デザイン・動作は web-onsen-stamp-rally(温泉の旅)の `.progress-help-*` に合わせている:
+ *  - 「ⓘ」の文字を、背景・枠線・影のない透明なボタンで表示する
+ *  - 説明は、枠線つきの小さなボックス(影なし・12px・行間1.7)で、アイコンの下に出す
+ *  - マウス: ホバーで開き、離れると閉じる。クリックで開いたまま固定(もう一度クリックで閉じる)
+ *  - タッチ: タップで開閉
+ *  - 外側のクリック・タップ / Esc / フォーカスが外れたとき に閉じる。同時に開くのは1つだけ
+ * 説明は textContent で表示する(HTMLとして解釈しない)。ボタンは aria-expanded / aria-controls / aria-describedby 付き。
  *
  *   const heading = createSectionHeading("注文者", "説明文…");
  */
@@ -43,24 +47,33 @@ export function createInfoTip(text, { label = "説明を表示" } = {}) {
   button.setAttribute("aria-label", label);
   button.setAttribute("aria-expanded", "false");
   button.setAttribute("aria-controls", id);
-  button.textContent = "i";
+  button.setAttribute("aria-describedby", id);
+  const glyph = document.createElement("span");
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = "ⓘ";
+  button.append(glyph);
 
   const popup = document.createElement("div");
   popup.className = "info-tip-pop";
   popup.id = id;
-  popup.setAttribute("role", "note");
+  popup.setAttribute("role", "tooltip");
   popup.hidden = true;
   popup.textContent = text;
 
+  let pinned = false; // クリック・タップで開いた(ホバーを外れても閉じない)
   const tip = {
     root, button, popup,
     open() { closeAll(tip); popup.hidden = false; button.setAttribute("aria-expanded", "true"); openTips.add(tip); },
-    close() { popup.hidden = true; button.setAttribute("aria-expanded", "false"); openTips.delete(tip); }
+    close() { pinned = false; popup.hidden = true; button.setAttribute("aria-expanded", "false"); openTips.delete(tip); }
   };
   button.addEventListener("click", (e) => {
     e.stopPropagation(); // 同じクリックを「外側のクリック」と数えない
-    if (popup.hidden) tip.open(); else tip.close();
+    if (!popup.hidden && pinned) { tip.close(); return; } // 固定されていれば閉じる
+    pinned = true; tip.open();                              // ホバーで開いていた場合も、固定する
   });
+  root.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse" && popup.hidden) tip.open(); });
+  root.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse" && !pinned) tip.close(); });
+  root.addEventListener("focusout", (e) => { if (!root.contains(e.relatedTarget)) tip.close(); });
   root.append(button, popup);
   return tip;
 }
