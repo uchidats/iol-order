@@ -52,14 +52,15 @@ export function buildBody({ facilityName, orderNumber, orderedAtLabel, orderedBy
 }
 
 /** 現行GAS形式の本文: Google Forms の質問名と回答を入力順に「質問名: 回答」で列挙し、定型文・署名を付ける。複数レンズはレンズごとに1ブロック */
-export function buildGasStyleBody({ dealerName, lines, ordererEmail, notes, profile }) {
+export function buildGasStyleBody({ dealerName, lines, ordererName, ordererEmail, notes, profile }) {
   const out = [`${dealerName}${profile.salutationSuffix}`, ""];
   for (const l of lines) {
     out.push(`レンズ${l.lineNo}`, `メーカー名 / IOLモデル: ${l.displayName}`);
-    if (l.isToric && l.toricModel) out.push(`トーリックの場合は型番を選択: ${l.toricModel}`);
+    if (l.toricModel) out.push(`トーリックの場合は型番を選択: ${l.toricModel}`);
     out.push(`IOLパワー (ディオプター): ${l.power}`, `枚数: ${l.quantity} 枚`, `手術日: ${l.surgeryDate}`, `担当医: ${l.doctorName}`, "");
   }
-  out.push(`メールアドレス: ${ordererEmail || "（なし）"}`, `備考: ${notes ? String(notes).trim() : ""}`, "");
+  // 発注者(Googleログイン情報)は、明細ごとの担当医とは別の項目。備考は省略・要約・整形せず、改行を含めてそのまま載せる
+  out.push(`発注者: ${ordererName}`, `メールアドレス: ${ordererEmail || "（なし）"}`, `備考: ${typeof notes === "string" && notes.trim() ? notes : ""}`, "");
   out.push(...profile.closing, "", ...profile.signature);
   return out.join("\n");
 }
@@ -122,15 +123,16 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
     const lineViews = ls.map(l => l.view);
     const totalQuantity = lineViews.reduce((s, l) => s + l.quantity, 0);
     if (profile.sendToOrderer && !ordererTo.length) warnings.push("発注者のメールアドレスが記録されていないため、発注者宛の確認は含まれません");
+    if (profile.format === "gas-questions" && !profile.signatureConfigured) warnings.push("この施設の住所・署名が設定されていないため、署名なしで生成しています");
     const gas = profile.format === "gas-questions";
-    const subject = gas ? oneLine(profile.subject) : buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity });
-    const body = gas ? buildGasStyleBody({ dealerName, lines: lineViews, ordererEmail: ordererTo[0] || ordererEmail, notes: order.notes, profile }) : buildBody({
+    const subject = gas ? oneLine(profile.subjectTemplate.replace("{facility}", oneLine(facilityName))) : buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity });
+    const body = gas ? buildGasStyleBody({ dealerName, lines: lineViews, ordererName: orderedByLabel(order), ordererEmail: ordererTo[0] || ordererEmail, notes: order.notes, profile }) : buildBody({
       facilityName, orderNumber, orderedAtLabel: formatDateTimeJst(order.createdAt), orderedBy: orderedByLabel(order),
       dealerName, lines: lineViews, totalQuantity, notes: order.notes
     });
     // 備考は注文時の自由記述。実送信の前に人が内容を確認できるよう、本文とは別にも返す(reviewRequired: 実送信の前に必ず確認する)
     const to = blocked ? [] : [...new Set([...dealerTo, ...confirmTo, ...ordererTo])];   // すべて To。CC・BCC は使わない
-    return { dealerId, dealerName, templateStatus: profile.confirmed ? "gas-compatible" : TEMPLATE_STATUS, profileId: profile.id, reviewRequired: true, notes: order.notes ? String(order.notes).trim() : "", status: blocked ? "blocked" : "ready", blockedReason: blocked, to, cc: [], bcc: [], recipients: blocked ? { dealer: [], confirmation: [], orderer: [] } : { dealer: dealerTo, confirmation: confirmTo, orderer: ordererTo }, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
+    return { dealerId, dealerName, templateStatus: profile.confirmed ? "gas-compatible" : TEMPLATE_STATUS, profileId: profile.id, reviewRequired: true, notes: typeof order.notes === "string" && order.notes.trim() ? order.notes : "", status: blocked ? "blocked" : "ready", blockedReason: blocked, to, cc: [], bcc: [], recipients: blocked ? { dealer: [], confirmation: [], orderer: [] } : { dealer: dealerTo, confirmation: confirmTo, orderer: ordererTo }, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
   });
   return { templateStatus: profile.confirmed ? "gas-compatible" : TEMPLATE_STATUS, profileId: profile.id, orderNumber, mails, unrouted, allReady: mails.length > 0 && unrouted.length === 0 && mails.every(m => m.status === "ready") };
 }

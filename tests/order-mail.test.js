@@ -93,18 +93,18 @@ test("トーリック・多焦点の表記と合計。メール送信の関数�
 test("暫定テンプレートは正式版として扱わない: 各メールに draft-unconfirmed と reviewRequired が付き、備考は本文とは別にも返す。確認済みフラグは false", () => {
   const p = buildOrderMailPreview(order([line(1, A)], { notes: "  備考テキスト  " }), { dealers: settings });
   assert.equal(p.templateStatus, "draft-unconfirmed");
-  assert.deepEqual([p.mails[0].templateStatus, p.mails[0].reviewRequired, p.mails[0].notes], ["draft-unconfirmed", true, "備考テキスト"]);
+  assert.deepEqual([p.mails[0].templateStatus, p.mails[0].reviewRequired, p.mails[0].notes], ["draft-unconfirmed", true, "  備考テキスト  "]);   // 備考は整形しない
   assert.equal(isTemplateConfirmed(), false, "確認済みになるまで、実送信の処理から使ってはいけない");
 });
 
 // ================= 現行GAS(立川病院)形式の再現 =================
-import { TACHIKAWA_GAS_PROFILE, GENERIC_DRAFT_PROFILE, resolveMailProfile } from "../src/domain/order-mail-profiles.js";
+import { TACHIKAWA_GAS_PROFILE, GENERIC_DRAFT_PROFILE, DEFAULT_GAS_PROFILE, createGasProfile, resolveMailProfile } from "../src/domain/order-mail-profiles.js";
 
 const KURIHARA = { id: "dK", name: "栗原医療器械店" };
 const gasSettings = { dK: { name: "栗原医療器械店", orderEmails: ["kurihara-order@example.jp"], usageReportEmails: ["kurihara-report@example.jp"] } };
 const gasOpts = { profile: TACHIKAWA_GAS_PROFILE, confirmationEmails: ["confirm@example.jp"], dealers: gasSettings, facilityName: "立川病院" };
 
-test("GAS形式: 件名は固定、宛名は「ディーラー名御中」、本文は「質問名: 回答」を入力順に列挙し、定型文と署名で終わる", () => {
+test("GAS形式: 件名は「【施設名】IOL注文：…」、宛名は「ディーラー名御中」、本文は「質問名: 回答」を入力順に列挙し、定型文と署名で終わる", () => {
   const p = buildOrderMailPreview(order([
     line(1, KURIHARA, { item: { displayName: "ALCON / CNA0T0", manufacturer: "ALCON", model: "CNA0T0", power: "+18.0D" } }),
     line(2, KURIHARA, { item: { displayName: "J&J / DIWxxx (トーリック)", isToric: true, toricModel: "DIW300", power: "+18.5D", quantity: 2 }, doctor: "佐藤", surgeryDate: "2026-11-12" })
@@ -130,6 +130,7 @@ test("GAS形式: 件名は固定、宛名は「ディーラー名御中」、本
     "手術日: 2026-11-12",
     "担当医: 佐藤",
     "",
+    "発注者: ログイン太郎",
     "メールアドレス: login@example.jp",
     "備考: 備考テキスト",
     "",
@@ -172,15 +173,45 @@ test("GAS形式: 発注者のメールが記録されていない場合は警告
   assert.deepEqual(p.mails[1].recipients.orderer, []);
 });
 
-test("形式は施設ごと: 立川病院はGAS形式(確認済み)、定義のない施設は暫定(未確認・実送信不可)。形式の定義にメールアドレスは含まれない", () => {
+test("形式は施設ごと: 立川病院の署名は立川病院だけ。他の施設は署名なしのGAS形式。形式の定義にメールアドレスは含まれない", () => {
   assert.equal(resolveMailProfile("tachikawa-hospital"), TACHIKAWA_GAS_PROFILE);
-  assert.equal(resolveMailProfile("other-facility"), GENERIC_DRAFT_PROFILE);
+  assert.equal(resolveMailProfile("other-facility"), DEFAULT_GAS_PROFILE);
+  assert.deepEqual(DEFAULT_GAS_PROFILE.signature, []);
   assert.equal(isTemplateConfirmed(TACHIKAWA_GAS_PROFILE), true);
-  assert.equal(isTemplateConfirmed(resolveMailProfile("other-facility")), false);
+  assert.equal(isTemplateConfirmed(GENERIC_DRAFT_PROFILE), false);
   assert.equal(isTemplateConfirmed(), false);
   assert.ok(!/@/.test(JSON.stringify(TACHIKAWA_GAS_PROFILE)), "no e-mail address in the profile");
   // 暫定形式は従来どおり(確認先・発注者は宛先に入らない)
   const g = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, confirmationEmails: ["confirm@example.jp"] }).mails[0];
   assert.deepEqual(g.to, ["order-a@example.jp", "confirm@example.jp"]);
   assert.equal(g.templateStatus, "draft-unconfirmed");
+});
+
+test("他の施設: 件名は自施設名、立川病院の住所・署名は出ない(署名未設定の警告)。施設ごとの署名を設定できる", () => {
+  const other = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, facilityName: "みどり眼科", profile: resolveMailProfile("fac-other") }).mails[0];
+  assert.equal(other.subject, "【みどり眼科】IOL注文：ご確認のほどよろしくお願いします");
+  assert.ok(other.body.startsWith("A商会御中"));
+  assert.ok(other.body.includes("上記の眼内レンズを注文させていただきたく存じます。"));
+  assert.ok(!other.body.includes("立川") && !other.body.includes("190-8531"));
+  assert.match(other.warnings.join("\n"), /署名が設定されていない/);
+  const own = createGasProfile({ id: "x", signature: ["〒100-0001 東京都千代田区1-1", "みどり眼科"] });
+  const m = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, facilityName: "みどり眼科", profile: own }).mails[0];
+  assert.ok(m.body.endsWith("〒100-0001 東京都千代田区1-1\nみどり眼科"));
+  assert.deepEqual(m.warnings, []);
+});
+
+test("備考は省略・要約・整形せず、改行を含めて正確に本文へ。空白だけ・未入力は空欄。発注者は担当医と別の項目", () => {
+  const notes = "右眼 白内障手術用\n\n  2行目(先頭に空白)\n3行目: 「特記」&<>";
+  const m = buildOrderMailPreview(order([line(1, KURIHARA)], { notes }), gasOpts).mails[0];
+  assert.ok(m.body.includes("備考: " + notes + "\n"), "備考が一字一句そのまま(改行・空行・空白を含む)");
+  assert.equal(m.notes, notes);
+  const lines = m.body.split("\n");
+  assert.ok(lines.indexOf("担当医: 山田") >= 0 && lines.indexOf("発注者: ログイン太郎") > lines.indexOf("担当医: 山田"));
+  for (const empty of ["", "   ", undefined]) assert.ok(buildOrderMailPreview(order([line(1, KURIHARA)], { notes: empty }), gasOpts).mails[0].body.includes("\n備考: \n"));
+});
+
+test("トーリック型番は該当する明細だけ表示(空欄の項目は出さない)", () => {
+  const m = buildOrderMailPreview(order([line(1, KURIHARA), line(2, KURIHARA, { item: { isToric: true, toricModel: "DIW300" } })]), gasOpts).mails[0];
+  assert.equal(m.body.split("トーリックの場合は型番を選択").length - 1, 1);
+  assert.ok(m.body.includes("トーリックの場合は型番を選択: DIW300"));
 });
