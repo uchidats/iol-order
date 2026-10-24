@@ -23,16 +23,18 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** ゴミ箱アイコン(SVG。装飾なので aria-hidden) */
-function trashIcon() {
+/** 小さなアイコン(SVG。装飾なので aria-hidden。意味はボタンの aria-label / title で伝える) */
+function icon(d) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
-  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
   const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6");
+  path.setAttribute("d", d);
   svg.appendChild(path);
   return svg;
 }
+const trashIcon = () => icon("M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6");
+const pencilIcon = () => icon("M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z");
 
 const SAVE_ERROR = "保存できませんでした。権限がない、またはネットワークの問題の可能性があります。";
 
@@ -77,22 +79,89 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   // ---------- 注文者 ----------
   function ordererRow(o = { id: null, name: "", email: "", active: true }) {
+    // 通常は一覧表示(入力ボックスなし)。鉛筆を押した行だけ、名前とメールを編集できる。
     // 有効/無効は画面では操作しない。新規は有効(active=true)、既存の値はそのまま保持する(互換性)
-    const row = h("div", { class: "settings-row settings-row-orderer", "data-id": o.id || "", "data-active": o.active ? "1" : "0" },
-      h("input", { class: "form-control", "data-f": "name", type: "text", value: o.name, maxlength: LIMITS.ordererNameMax, placeholder: "注文者名", "aria-label": "注文者名" }),
-      h("input", { class: "form-control", "data-f": "email", type: "email", value: o.email || "", placeholder: "メールアドレス（注文に必要）", "aria-label": "メールアドレス" }),
-      h("span", { class: "settings-move" },
-        o.active ? null : h("span", { class: "form-hint", title: "注文フォームの選択肢には表示されません" }, "無効"),
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "up", "aria-label": "上へ" }, "↑"),
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "down", "aria-label": "下へ" }, "↓"),
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "delete", "aria-label": "この注文者を削除", title: "削除" }, trashIcon())),
-      h("p", { class: "error-message", "data-err": "" }));
-    row.addEventListener("input", markDirty);
-    row.addEventListener("change", markDirty);
+    const row = h("div", { class: "orderer-item", "data-id": o.id || "" });
+    row._state = { id: o.id || null, name: o.name || "", email: o.email || "", active: o.active !== false };
+    let editing = false;
+
+    const btn = (act, label, child) => h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": act, "aria-label": label, title: label }, child);
+    const nameView = h("span", { class: "orderer-name", "data-v": "name" });
+    const emailView = h("span", { class: "orderer-email", "data-v": "email" });
+    const inactive = h("span", { class: "orderer-inactive", title: "注文フォームの選択肢には表示されません" }, "無効");
+    const actions = h("span", { class: "orderer-actions" },
+      btn("edit", "名前・メールを編集", pencilIcon()),
+      btn("up", "上へ", "↑"),
+      btn("down", "下へ", "↓"),
+      btn("delete", "この注文者を削除", trashIcon()));
+    const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.ordererNameMax, placeholder: "注文者名", "aria-label": "注文者名" });
+    const emailInput = h("input", { class: "form-control", "data-f": "email", type: "email", placeholder: "メールアドレス（注文に必要）", "aria-label": "メールアドレス" });
+    const editBox = h("div", { class: "orderer-edit", hidden: true },
+      nameInput, emailInput,
+      h("div", { class: "orderer-edit-actions" },
+        h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存"),
+        h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル")));
+    const err = h("p", { class: "error-message", "data-err": "" });
+    row.append(h("div", { class: "orderer-view" }, h("span", { class: "orderer-namebox" }, nameView, inactive), emailView, actions), editBox, err);
+
+    function paint() {
+      nameView.textContent = row._state.name || "（名称未入力）";
+      emailView.textContent = row._state.email || "メール未登録";
+      emailView.classList.toggle("is-empty", !row._state.email);
+      inactive.hidden = row._state.active;
+      row.querySelector(".orderer-view").hidden = editing;
+      editBox.hidden = !editing;
+      row.classList.toggle("is-editing", editing);
+    }
+    row._isEditing = () => editing;
+    row._startEdit = () => {
+      editing = true;
+      nameInput.value = row._state.name; emailInput.value = row._state.email;
+      paint(); nameInput.focus();
+    };
+    row._commit = () => { row._state.name = nameInput.value; row._state.email = emailInput.value; editing = false; paint(); };
+    row._cancel = () => {
+      if (!row._state.id && !row._state.name && !row._state.email) { row.remove(); return; } // 追加したばかりの行は取り消すと消える
+      editing = false; err.textContent = ""; paint();
+    };
+    row._paint = paint;
+
+    row.querySelector('[data-act="edit"]').addEventListener("click", () => row._startEdit());
+    row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
+    row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveOrdererRow(row));
     row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); markDirty(); });
     row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); markDirty(); });
     row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteOrdererRow(row));
+    paint();
     return row;
+  }
+
+  /** 行の「保存」: この行の編集内容を、一覧全体の既存の検証にかけ、問題なければ(並び替えなどの未保存の変更も含めて)保存する */
+  async function saveOrdererRow(row) {
+    const section = sections.orderers;
+    const before = { name: row._state.name, email: row._state.email };
+    const typed = { name: row.querySelector('[data-f="name"]').value, email: row.querySelector('[data-f="email"]').value };
+    row._commit();
+    const v = validateOrderers(readOrdererRows(section));
+    showRowErrors(section, v.errors);
+    if (!v.ok) { // 検証に通らなければ、編集中のまま入力を残す
+      row._state.name = before.name; row._state.email = before.email; row._startEdit();
+      const own = row.querySelector("[data-err]");
+      if (!own.textContent) own.textContent = v.errors.map(e => e.message).join(" / "); // 重複など、他の行側に出た指摘も、編集中の行に表示する
+      row.querySelector('[data-f="name"]').value = typed.name; row.querySelector('[data-f="email"]').value = typed.email; // 入力した内容は残す
+      return message(section, "入力内容を確認してください。", true);
+    }
+    await saveOrderersNow(section);
+  }
+
+  async function saveOrderersNow(section) {
+    const v = validateOrderers(readOrdererRows(section));
+    showRowErrors(section, v.errors);
+    if (!v.ok) return message(section, "入力内容を確認してください。", true);
+    const writes = planOrdererWrites(data.orderers, v.cleaned, facility.id);
+    if (!writes.length) return message(section, "変更はありません。");
+    const ok = await saveWith(section, section.querySelector('[data-act="save"]'), () => settingsApi.saveOrderers(facility.id, writes));
+    if (ok) { renderOrderers(section); message(section, "注文者を保存しました。"); }
   }
 
   /**
@@ -102,11 +171,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   async function deleteOrdererRow(row) {
     const section = sections.orderers;
     const id = row.getAttribute("data-id");
-    const name = row.querySelector('[data-f="name"]').value.trim() || "この注文者";
+    const name = (row._state.name || "").trim() || "この注文者";
     if (!id) { row.remove(); return; }
     if (!window.confirm(`注文者「${name}」を削除しますか？
-注文フォームの選択肢から無くなります。過去の注文には影響しません。
-（一時的に外すだけなら、削除せず「有効」を外してください）`)) return;
+注文フォームの選択肢から無くなります。過去の注文には影響しません。`)) return;
     const btn = row.querySelector('[data-act="delete"]');
     btn.disabled = true;
     message(section, "削除しています…");
@@ -128,16 +196,16 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     list.replaceChildren(...data.orderers.map(ordererRow));
   }
 
-  const readOrdererRows = (section) => [...section.querySelectorAll(".settings-row")].map(r => ({
-    id: r.getAttribute("data-id") || null,
-    name: r.querySelector('[data-f="name"]').value,
-    email: r.querySelector('[data-f="email"]').value,
-    active: r.getAttribute("data-active") !== "0"
+  const readOrdererRows = (section) => [...section.querySelectorAll(".orderer-item")].map(r => ({
+    id: r._state.id,
+    name: r._state.name,
+    email: r._state.email,
+    active: r._state.active
   }));
 
   function showRowErrors(section, errors) {
     section.querySelectorAll("[data-err]").forEach(p => { p.textContent = ""; });
-    const rows = section.querySelectorAll(".settings-row");
+    const rows = section.querySelectorAll(".settings-row, .orderer-item");
     errors.forEach(e => {
       const p = rows[e.index] && rows[e.index].querySelector("[data-err]");
       if (p) p.textContent = (p.textContent ? p.textContent + " / " : "") + e.message;
@@ -165,7 +233,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
       h("h3", {}, "注文者"),
-      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。ゴミ箱で削除すると一覧から無くなります（過去の注文には影響しません）。並び順は上から順です。"),
+      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。鉛筆で名前・メールを編集、↑↓で並び替え、ゴミ箱で削除できます（過去の注文には影響しません）。並び順は上から順です。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "注文者を追加"),
@@ -173,17 +241,14 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = ordererRow(); section.querySelector("[data-list]").appendChild(row); markDirty();
-      row.querySelector('[data-f="name"]').focus();
+      row._startEdit(); // 追加した行は編集状態で表示する
     });
     const saveBtn = section.querySelector('[data-act="save"]');
     saveBtn.addEventListener("click", async () => {
-      const v = validateOrderers(readOrdererRows(section));
-      showRowErrors(section, v.errors);
-      if (!v.ok) return message(section, "入力内容を確認してください。", true);
-      const writes = planOrdererWrites(data.orderers, v.cleaned, facility.id);
-      if (!writes.length) return message(section, "変更はありません。");
-      const ok = await saveWith(section, saveBtn, () => settingsApi.saveOrderers(facility.id, writes));
-      if (ok) { renderOrderers(section); message(section, "注文者を保存しました。"); }
+      if ([...section.querySelectorAll(".orderer-item")].some(r => r._isEditing())) {
+        return message(section, "編集中の行を、保存またはキャンセルしてください。", true);
+      }
+      await saveOrderersNow(section);
     });
     return section;
   }
