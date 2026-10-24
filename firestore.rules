@@ -179,7 +179,7 @@ service cloud.firestore {
         return /databases/$(database)/documents/facilities/$(fid2)/members/$(uid);
       }
 
-      // 注文者（施設管理者のみ変更可。削除は運営者のみ＝通常は無効化 active=false で運用）
+      // 注文者（施設管理者のみ変更・削除可）
       match /orderers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
@@ -190,7 +190,8 @@ service cloud.firestore {
           && request.resource.data.active is bool
           && (!('email' in request.resource.data) || emailOk(request.resource.data.email))
           && validSortOrder(request.resource.data);
-        allow delete: if isPlatformAdmin();
+        // 注文者マスターのみ、自施設の施設管理者も削除できる（所属・認証ユーザー・注文履歴には影響しない）
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
       }
 
       // 採用IOL（ドキュメントID = 共通IOLマスターのID。マスターに無いIDは登録不可）

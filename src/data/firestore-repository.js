@@ -67,6 +67,8 @@ export function createFirestoreSettingsApi(db, fs) {
     saveOrderers: (facilityId, writes) => commit(facilityId, "orderers", writes),
     saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
     saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),
+    /** 注文者マスターの削除（所属・認証ユーザー・注文履歴には触れない） */
+    deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
     /** 所属の有効/無効の変更と操作記録を1つのバッチで書く（どちらか片方だけの反映はRulesが拒否する） */
     async applyMemberChange({ facilityId, auditId, memberUid, memberUpdate, log }) {
       const batch = fs.writeBatch(db);

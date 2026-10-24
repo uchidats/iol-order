@@ -23,6 +23,17 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+/** ゴミ箱アイコン(SVG。装飾なので aria-hidden) */
+function trashIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6");
+  svg.appendChild(path);
+  return svg;
+}
+
 const SAVE_ERROR = "保存できませんでした。権限がない、またはネットワークの問題の可能性があります。";
 
 /**
@@ -73,12 +84,42 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("span", { class: "settings-move" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "up", "aria-label": "上へ" }, "↑"),
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "down", "aria-label": "下へ" }, "↓")),
+      h("button", { type: "button", class: "btn btn-outline-sm settings-delete", "data-act": "delete", "aria-label": "この注文者を削除", title: "削除" }, trashIcon()),
       h("p", { class: "error-message", "data-err": "" }));
     row.addEventListener("input", markDirty);
     row.addEventListener("change", markDirty);
     row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); markDirty(); });
     row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); markDirty(); });
+    row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteOrdererRow(row));
     return row;
+  }
+
+  /**
+   * 注文者の削除。保存済みの注文者はマスターのみ即時に削除する(所属・認証ユーザー・過去の注文は変更しない)。
+   * 他の行の未保存の編集は保持する。未保存の追加行は画面から外すだけ。
+   */
+  async function deleteOrdererRow(row) {
+    const section = sections.orderers;
+    const id = row.getAttribute("data-id");
+    const name = row.querySelector('[data-f="name"]').value.trim() || "この注文者";
+    if (!id) { row.remove(); return; }
+    if (!window.confirm(`注文者「${name}」を削除しますか？
+注文フォームの選択肢から無くなります。過去の注文には影響しません。
+（一時的に外すだけなら、削除せず「有効」を外してください）`)) return;
+    const btn = row.querySelector('[data-act="delete"]');
+    btn.disabled = true;
+    message(section, "削除しています…");
+    try {
+      await settingsApi.deleteOrderer(facility.id, id);
+      data.orderers = data.orderers.filter(o => o.id !== id);
+      row.remove();
+      await onSaved();
+      message(section, `「${name}」を削除しました。`);
+    } catch (e) {
+      console.error("注文者の削除に失敗しました:", e);
+      message(section, "削除できませんでした。権限がない、またはネットワークの問題の可能性があります。", true);
+      btn.disabled = false;
+    }
   }
 
   function renderOrderers(section) {
@@ -123,7 +164,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
       h("h3", {}, "注文者"),
-      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。無効にすると選択肢から外れます（過去の注文には影響しません）。並び順は上から順です。"),
+      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。無効にすると選択肢から外れます（過去の注文には影響しません）。ゴミ箱で削除すると一覧から無くなります。並び順は上から順です。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "注文者を追加"),

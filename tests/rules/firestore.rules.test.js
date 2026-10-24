@@ -423,12 +423,26 @@ test("施設設定は所属先の施設管理者だけが変更できる", async
   }
 });
 
-test("設定ドキュメントの削除は運営者のみ（施設管理者は無効化で運用）", async () => {
-  for (const p of ["facilities/fA/orderers/o1", "facilities/fA/adoptedIols/a1", "facilities/fA/facilityDealers/d1"]) {
+test("採用IOL・ディーラーの削除は運営者のみ（施設管理者は無効化で運用）", async () => {
+  for (const p of ["facilities/fA/adoptedIols/a1", "facilities/fA/facilityDealers/d1"]) {
     await assertFails(deleteDoc(doc(as("adminA"), p)));
     await assertFails(deleteDoc(doc(as("ordA"), p)));
   }
   await assertSucceeds(deleteDoc(doc(platform(), "facilities/fA/orderers/o1")));
+});
+
+test("注文者マスターは自施設の施設管理者が削除できる。他施設・orderer・無効な所属・未認証は削除できず、所属や注文は変わらない", async () => {
+  await assertFails(deleteDoc(doc(as("ordA"), "facilities/fA/orderers/o1")));
+  await assertFails(deleteDoc(doc(as("offA"), "facilities/fA/orderers/o1")));
+  await assertFails(deleteDoc(doc(as("adminB"), "facilities/fA/orderers/o1")));
+  await assertFails(deleteDoc(doc(as("adminA"), "facilities/fB/orderers/o1")));
+  await assertFails(deleteDoc(doc(anon(), "facilities/fA/orderers/o1")));
+  await assertSucceeds(deleteDoc(doc(as("adminA"), "facilities/fA/orderers/o1")));
+  const ops = platform();
+  if ((await getDoc(doc(ops, "facilities/fA/orderers/o1"))).exists()) throw new Error("not deleted");
+  if (!(await getDoc(doc(ops, "facilities/fB/orderers/o1"))).exists()) throw new Error("other facility affected");
+  if (!(await getDoc(doc(ops, "facilities/fA/members/adminA"))).exists()) throw new Error("member affected");
+  if (!(await getDoc(doc(ops, "facilities/fA/orders/ord1"))).exists()) throw new Error("order history affected");
 });
 
 test("設定の読取は所属メンバーのみ。他施設の設定は読めない", async () => {
