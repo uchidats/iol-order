@@ -504,6 +504,13 @@ body {
 }
 
 .lens-line .form-group { max-width: 20rem; margin-bottom: 14px; }
+/* 2項目を同じ行に並べる。各項目は必要な幅だけ(全幅にしない)。足りない画面では折り返して縦並び。上端をそろえる */
+.lens-row { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 20px; }
+.lens-row .form-group { flex: 0 1 auto; min-width: 0; }
+.lens-row .form-group .form-label { min-height: 1.5em; }
+.lens-row [data-group="model"] { flex-basis: 220px; }   /* 幅は従来どおり(モデル約220px・パワー12rem・手術日14rem) */
+.lens-row [data-group="power"] { flex-basis: 12rem; }
+.lens-row [data-group="date"] { flex-basis: 14rem; }
 .lens-line [data-group="model"] { max-width: 220px; }   /* IOLモデル: 約220px(選択欄と展開した一覧の幅をそろえる)。狭い画面では画面幅まで */
 .lens-line [data-group="model"] .form-control { width: 100%; min-width: 0; }
 /* メーカー見出し(optgroup): 斜体を解除し、太字は維持(文字サイズ・色・余白は既定のまま) */
