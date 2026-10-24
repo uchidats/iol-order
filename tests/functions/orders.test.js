@@ -232,8 +232,7 @@ const line = (over = {}) => ({ modelId: "jj-dib00v", power: "+20.0D", quantity: 
 const multi = (lines, over = {}) => ({ facilityId: F, requestId: rid(), notes: "まとめ発注", lines, ...over });
 
 test("複数明細: 異なるモデル・度数・枚数・手術日をまとめて1つの注文として保存し、明細ごとにスナップショットとディーラー情報を持つ", async () => {
-  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
-  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).set({ facilityId: F, name: "テスト商会", orderEmails: ["o@example.jp"] });
+  await db.doc(`facilities/${F}/facilityDealers/dealer-1`).set({ facilityId: F, name: "テスト商会", orderEmails: ["o@example.jp"] }); // 登録ディーラーが1社 → 全明細に自動選択
   const lines = [
     line(),
     line({ modelId: "jj-diwxxx-toric", toricModel: "DIW300", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12" }),
@@ -255,8 +254,8 @@ test("複数明細: 異なるモデル・度数・枚数・手術日をまとめ
     modelId: "jj-diwxxx-toric", manufacturer: "J&J", model: "DIWxxx (トーリック)", displayName: "J&J / DIWxxx (トーリック)",
     isToric: true, isMultifocal: false, toricModel: "DIW300", power: "+18.5D", quantity: 2
   });
-  assert.deepEqual(o.lines.map(l => l.dealerId), [null, null, "dealer-1"]); // 将来のディーラー振り分け用
-  assert.deepEqual(o.lines.map(l => l.dealer), [null, null, { id: "dealer-1", name: "テスト商会" }]); // その時点のディーラー名のスナップショット
+  assert.deepEqual(o.lines.map(l => l.dealerId), ["dealer-1", "dealer-1", "dealer-1"]); // 1社なら自動選択
+  assert.deepEqual(o.lines.map(l => l.dealer), Array(3).fill({ id: "dealer-1", name: "テスト商会" })); // その時点のディーラー名のスナップショット
   assert.deepEqual(o.lines.map(l => l.doctor.name), ["山田", "山田", "山田"]);
   assert.equal("item" in o, false);
 });
@@ -493,7 +492,6 @@ test("開発用受付: 拒否メッセージは許可リストの内容(施設ID
 
 // ================= ディーラー(有効/無効はなく、削除する) =================
 test("ディーラー: 削除されたディーラーは発注先にならない。過去の注文に保存したディーラー情報は、削除・改名後も変わらない", async () => {
-  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
   await db.doc(`facilities/${F}/facilityDealers/dealer-1`).set({ facilityId: F, name: "テスト商会" });
   const before = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
   const doc1 = () => db.doc(`facilities/${F}/orders/${before.orderId}`).get();
@@ -509,26 +507,8 @@ test("ディーラー: 削除されたディーラーは発注先にならない
   assert.equal(l.dealer, null);
 });
 
-test("ディーラー: 実メール送信の可否(dispatch)。発注先未設定・発注用メール未登録は送信不可。使用報告用メールは発注先に使わない。メールアドレスは注文に保存しない", async () => {
-  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "d-ok" });
-  await db.doc(`facilities/${F}/adoptedIols/alcon-mn60ma-yellow`).update({ dealerId: "d-usage" });
-  await db.doc(`facilities/${F}/facilityDealers/d-ok`).set({ facilityId: F, name: "OK商会", orderEmails: ["order@example.jp"], usageReportEmails: ["report@example.jp"] });
-  await db.doc(`facilities/${F}/facilityDealers/d-usage`).set({ facilityId: F, name: "報告のみ商会", usageReportEmails: ["report@example.jp"] }); // 発注用メールなし
-  const r = await order(user("ordA"), multi([
-    line({ modelId: "nidek-nsp-2", power: "+5.5D" }),
-    line({ modelId: "alcon-mn60ma-yellow", power: "-5.0D", surgeryDate: "2026-11-12" }),
-    line({ modelId: "jj-dib00v", power: "+20.0D", surgeryDate: "2026-11-13" })   // 発注先未設定
-  ]));
-  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.deepEqual(o.lines.map(l => l.dispatch), [
-    { allowed: true, reason: null }, { allowed: false, reason: "no-order-email" }, { allowed: false, reason: "dealer-unset" }]);
-  assert.equal(o.dispatchAllowed, false, "one blocked line blocks the order");
-  assert.deepEqual(o.lines.map(l => l.dealer && l.dealer.name), ["OK商会", "報告のみ商会", null]);
-  assert.ok(!JSON.stringify(o).includes("@example.jp"), "no dealer e-mail addresses stored in the order");
-});
-
 test("ディーラー: 他の施設のディーラーは発注先にならない(IDが同じでも、自施設に登録されたものだけ)", async () => {
-  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "shared-id" });
+  await db.doc(`facilities/fB/facilityDealers/shared-id`).set({ facilityId: "fB", name: "他施設の商会", orderEmails: ["x@example.jp"] });
   await db.doc("facilities/fB/facilityDealers/shared-id").set({ facilityId: "fB", name: "他施設のディーラー" });
   const r = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
   const l = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines")[0];
@@ -536,7 +516,6 @@ test("ディーラー: 他の施設のディーラーは発注先にならない
 });
 
 test("ディーラー: 旧形式(active つき)のディーラーでも、有効/無効に関係なく登録されていれば発注先になる(判定に使わない)", async () => {
-  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "legacy-d" });
   await db.doc(`facilities/${F}/facilityDealers/legacy-d`).set({ facilityId: F, name: "旧形式", active: false });
   const r = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
   assert.equal((await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines")[0].dealer.name, "旧形式");
@@ -609,4 +588,68 @@ test("互換性(読み込み): 旧形式の注文(注文全体の orderer)も、
   const v3 = { schemaVersion: 3, createdBy: { uid: "u1" }, lines: [{ lineNo: 1, doctor: { id: "o2", name: "佐藤", email: null } }, { lineNo: 2, doctor: { id: "o1", name: "山田", email: null } }] };
   assert.deepEqual(orderLinesOf(v3).map(l => l.doctor.name), ["佐藤", "山田"]);
   assert.deepEqual(orderLinesOf({ status: "x" }), []);
+});
+
+// ================= 発注先ディーラー(施設の登録ディーラーから決める。採用IOLの dealerId には依存しない) =================
+const dealerOf = async (r) => (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines");
+const addDealer = (id, name, extra = {}) => db.doc(`facilities/${F}/facilityDealers/${id}`).set({ facilityId: F, name, ...extra });
+
+test("発注先: 登録ディーラーが0社なら発注先なし(注文は受け付ける)。実メール送信は不可(dealer-unset)", async () => {
+  const lines = await dealerOf(await order(user("ordA"), multi([line()])));
+  assert.deepEqual([lines[0].dealerId, lines[0].dealer, lines[0].dispatch], [null, null, { allowed: false, reason: "dealer-unset" }]);
+  await rejects(order(user("ordA"), multi([line({ dealerId: "ghost" })])), "invalid-argument"); // 0社で指定があるのは不正
+});
+
+test("発注先: 1社なら自動選択(指定なしでよい)。指定する場合はその1社だけ。発注用メールがなければ実送信不可", async () => {
+  await addDealer("d1", "唯一の商会", { orderEmails: ["o@example.jp"], usageReportEmails: ["u@example.jp"] });
+  const [a] = await dealerOf(await order(user("ordA"), multi([line()])));
+  assert.deepEqual([a.dealerId, a.dealer, a.dispatch], ["d1", { id: "d1", name: "唯一の商会" }, { allowed: true, reason: null }]);
+  const [b] = await dealerOf(await order(user("ordA"), multi([line({ dealerId: "d1" })])));
+  assert.equal(b.dealerId, "d1");
+  await rejects(order(user("ordA"), multi([line({ dealerId: "other" })])), "invalid-argument");
+  // 使用報告用メールだけ・形式が不正なメールだけ → 送信不可
+  await addDealer("d1", "唯一の商会", { usageReportEmails: ["u@example.jp"], orderEmails: ["not-an-email"] });
+  const [c] = await dealerOf(await order(user("ordA"), multi([line()])));
+  assert.deepEqual(c.dispatch, { allowed: false, reason: "no-order-email" });
+});
+
+test("発注先: 2社以上は明細ごとに選択が必須(勝手に決めない)。未選択・登録にないIDは拒否。選んだ発注先が明細ごとに保存される", async () => {
+  await addDealer("dA", "A商会", { orderEmails: ["a@example.jp"] });
+  await addDealer("dB", "B医療", { usageReportEmails: ["report@example.jp"] });   // 発注用メールなし
+  await rejects(order(user("ordA"), multi([line()])), "invalid-argument");                       // 未選択
+  await rejects(order(user("ordA"), multi([line({ dealerId: "dA" }), line({ modelId: "nidek-nsp-2", power: "+5.5D" })])), "invalid-argument"); // 1明細だけ未選択
+  await assert.rejects(order(user("ordA"), multi([line({ dealerId: "dA" }), line({ modelId: "nidek-nsp-2", power: "+5.5D" })])), /明細2: 発注先を選択してください/);
+  await assert.rejects(order(user("ordA"), multi([line({ dealerId: "nope" })])), /発注先が見つかりません/);
+  const r = await order(user("ordA"), multi([
+    line({ dealerId: "dA" }), line({ modelId: "nidek-nsp-2", power: "+5.5D", dealerId: "dB", surgeryDate: "2026-11-12" })
+  ]));
+  const lines = await dealerOf(r);
+  assert.deepEqual(lines.map(l => l.dealer), [{ id: "dA", name: "A商会" }, { id: "dB", name: "B医療" }]);
+  assert.deepEqual(lines.map(l => l.dispatch), [{ allowed: true, reason: null }, { allowed: false, reason: "no-order-email" }]);
+  const stored = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.equal(stored.dispatchAllowed, false, "1つでも送れない明細があれば、注文全体は送信不可");
+  assert.ok(!JSON.stringify(stored).includes("@example.jp"), "ディーラーのメールアドレスは注文に保存しない");
+});
+
+test("発注先: 採用IOLの dealerId には依存しない(あっても無視)。他施設のディーラーID・同じ明細でも発注先が違えば重複ではない", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dZ" });          // 旧データの dealerId(使われない)
+  await addDealer("dA", "A商会", { orderEmails: ["a@example.jp"] });
+  const [a] = await dealerOf(await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })])));
+  assert.equal(a.dealerId, "dA", "1社なら、採用IOLの dealerId ではなく登録ディーラーが選ばれる");
+  await db.doc("facilities/fB/facilityDealers/dFB").set({ facilityId: "fB", name: "他施設", orderEmails: ["x@example.jp"] });
+  await rejects(order(user("ordA"), multi([line({ dealerId: "dFB" })])), "invalid-argument");
+  await addDealer("dB", "B医療", { orderEmails: ["b@example.jp"] });
+  const dup = [line({ dealerId: "dA" }), line({ dealerId: "dB" })];                                // 同じレンズ・度数・手術日・担当医でも、発注先が違えば別の明細
+  assert.equal((await dealerOf(await order(user("ordA"), multi(dup)))).length, 2);
+  await rejects(order(user("ordA"), multi([line({ dealerId: "dA" }), line({ dealerId: "dA" })])), "invalid-argument");
+});
+
+test("発注先: 冪等性。同じ requestId・同じ内容の再送は同じ注文。発注先を変えた再送は別内容として拒否", async () => {
+  await addDealer("dA", "A商会", { orderEmails: ["a@example.jp"] });
+  await addDealer("dB", "B医療", { orderEmails: ["b@example.jp"] });
+  const body1 = multi([line({ dealerId: "dA" })]);
+  const r1 = await order(user("ordA"), body1);
+  const r2 = await order(user("ordA"), body1);
+  assert.deepEqual([r2.replayed, r2.orderId], [true, r1.orderId]);
+  await rejects(order(user("ordA"), { ...body1, lines: [line({ dealerId: "dB" })] }), "already-exists");
 });

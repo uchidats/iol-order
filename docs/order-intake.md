@@ -15,7 +15,7 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 
 ## 保存内容（スナップショット）
 `schemaVersion: 2`、`status`（`accepted`）、`orderNumber`、`requestId`、`contentHash`、`facilityId` / `facilityName`、`lines[]`、`lineCount`、`totalQuantity`、`firstSurgeryDate` / `lastSurgeryDate`、`orderer`。
-各明細 `lines[i]` = `{ lineNo, status, dealerId, surgeryDate, item }`。`item` は `modelId`, `manufacturer`, `model`, `displayName`, `isToric`, `isMultifocal`, `toricModel`(メーカーへ送る正式型番), `power`, `quantity`。**`dealerId` は採用IOLの設定(`adoptedIols/{id}.dealerId`)をその時点でスナップショットしたもので、未設定は `null`。将来はこれで明細をディーラーごとに振り分け、明細ごとの `status`(通知待ち・通知済み・失敗)を更新する。**
+各明細 `lines[i]` = `{ lineNo, status, dealerId, surgeryDate, item }`。`item` は `modelId`, `manufacturer`, `model`, `displayName`, `isToric`, `isMultifocal`, `toricModel`(メーカーへ送る正式型番), `power`, `quantity`。**`dealerId` / `dealer` は、注文時に決まった発注先(施設の登録ディーラー)のスナップショットで、発注先なしは `null`(下記「発注先の決め方」)。将来はこれで明細をディーラーごとに振り分け、明細ごとの `status`(通知待ち・通知済み・失敗)を更新する。**
 従来の単一IOL形式の保存(`schemaVersion: 1`: トップレベルの `item` / `surgeryDate`)は、`orderLinesOf()` で明細の配列として読める(実データには未作成)。
 その他: `orderer`（`id`, `name`, `email|null`）、`notes`、`createdBy`（ログインユーザーの `uid` / `email` / `displayName`。注文者とは別）、`createdAt` / `acceptedAt` / `statusUpdatedAt`、`schemaVersion`。マスターを後で変更しても、この内容から注文を再現できる。
 
@@ -68,9 +68,23 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 - 手順: ① Firebase Console で Web アプリに reCAPTCHA Enterprise（または v3）を登録 ② クライアントで `initializeAppCheck` をSDKの初期化直後に実行（`src/firebase/sdk.js` にApp Check SDKの読み込みを追加）③ **まず `enforceAppCheck: false` のまま**、Console の指標で未検証リクエストの割合を観察 ④ 問題なければ `functions/index.js` の `options.enforceAppCheck` を `true` にしてデプロイ。
 - 注意: enforce にすると、App Check トークンを持たない古いクライアント・curl・エミュレータのテストは拒否される（エミュレータ用に debug token が必要）。リファラ制限した API キーと併用する。
 
+## 発注先の決め方(施設の登録ディーラー)
+採用IOLごとの発注先設定は**使わない**(採用IOLの `dealerId` が残っていても無視する。既存データは変更しない)。発注先は、施設の登録ディーラー(`facilityDealers`)の数で決まる。
+
+| 登録ディーラー | 画面 | サーバー(`createOrder`) |
+|---|---|---|
+| 0社 | 「発注先未設定」と表示。入力欄なし | 発注先なし(`dealer: null`)で受け付ける。`dealerId` の指定があれば拒否 |
+| 1社 | そのディーラーを自動選択(入力欄なし) | 自動選択。指定がある場合はその1社と一致すること |
+| 2社以上 | **明細ごとに「発注先」を選択(必須)**。直前の明細を引き継ぐが、勝手には決めない | 各明細に `dealerId` が必須。未選択・登録にないIDは拒否(`明細N: 発注先を選択してください` / `発注先が見つかりません`) |
+
+- 画面の判定(`src/domain/dealer-selection.js`)とサーバー(`functions/src/orders.js` の `resolveLineDealer` / `dealerDispatch`)は同じ規則で、`tests/dealer-selection.test.js` で全組み合わせの一致を確認する。メールdry-runの送信可否も同じ判定。
+- 画面がサーバーへ送るのは、**利用者が複数社から選んだ発注先のIDだけ**。1社の自動選択は送らず、サーバーが決める(確認画面から送信までの間に登録が増えて2社になった場合は、サーバーが「発注先を選択してください」と拒否し、画面で選び直す)。
+- 注文時の発注先は、これまでどおり明細ごとに `{id, name}` のスナップショットで保存する(後で改名・削除しても変わらない)。同じ明細でも発注先が違えば別の明細(重複ではない)。冪等性のハッシュにも発注先を含める(未指定の場合は従来と同じ値)。
+- 他施設のディーラーID・施設間の権限分離は従来どおり(自施設の `facilityDealers` だけを見る)。
+
 ## 発注先・実メール送信の可否(dispatch)
 - 各明細は `dealerId` / `dealer`(その時点の `{id, name}` のスナップショット。後でディーラーを改名・削除しても過去の注文は変わらない)と、`dispatch: { allowed, reason }` を持つ。
-  - `allowed=true`: 発注先が施設に登録されていて、**発注用メール(`orderEmails`)が1件以上**ある。
+  - `allowed=true`: 発注先が施設に登録されていて、**有効な形式の発注用メール(`orderEmails`)が1件以上**ある。
   - `allowed=false`: `reason` が `dealer-unset`(発注先未設定・削除済み)または `no-order-email`(発注用メール未登録)。
 - 注文全体の `dispatchAllowed` は、全明細が `allowed=true` のときだけ true。
 - **将来の実メール送信は、`dispatch.allowed=true` の明細だけを対象にし、使用報告用メール(`usageReportEmails`)を発注の送信先に使わない。** メールアドレスは注文には保存しない(送信時点のディーラー設定を参照するか、その設計時に別途決める)。

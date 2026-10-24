@@ -3,6 +3,7 @@ import { filterPowersByModel } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
+import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
 
 /** 要素生成の小さなヘルパー(表示文字列は textContent で扱い、HTMLとして解釈しない) */
 function h(tag, attrs = {}, ...children) {
@@ -27,10 +28,11 @@ let seq = 0; // ラベルの for / radio の name を明細ごとに一意にす
  * @param {HTMLElement} deps.addButton 「レンズを追加」ボタン
  * @param {() => Array<object>} deps.getOptions 採用済みIOLの選択肢(buildLensOptions の結果)
  * @param {() => Array<{id:string, name:string, email?:string}>} deps.getDoctors 担当医(施設のマスター)
+ * @param {() => Array<{id:string, name:string, orderEmails?:string[]}>} [deps.getDealers] 施設の登録ディーラー。0社=発注先なし / 1社=自動選択 / 2社以上=明細ごとに選択必須
  * @param {() => string} deps.minDate 手術日の最小値(YYYY-MM-DD)
  * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新)
  */
-export function createLensLines({ container, addButton, getOptions, getDoctors, minDate, onChange = () => {} }) {
+export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], minDate, onChange = () => {} }) {
   const lines = [];
 
   function buildLine(prefill = {}) {
@@ -46,6 +48,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     if (prefill.surgeryDate) line.date.value = prefill.surgeryDate; // 直前の明細の手術日を引き継ぐ(変更可)
     line.doctor = h("select", { id: id("lensDoctor"), class: "form-control", "data-f": "doctor" }, h("option", { value: "" }, "選択"));
     fillDoctors(line, prefill.doctorId || ""); // 直前の明細の担当医を引き継ぐ(変更可)
+    line.dealer = h("select", { id: id("lensDealer"), class: "form-control", "data-f": "dealer" }, h("option", { value: "" }, "選択"));
+    fillDealers(line, prefill.dealerId || ""); // 直前の明細の発注先を引き継ぐ(変更可)
     line.qty = [1, 2].map(q => h("input", { type: "radio", name: `lensQty-${n}`, value: String(q), "data-f": "quantity" }));
     line.qty[0].checked = true;
     line.errs = {};
@@ -74,7 +78,11 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
             line.qty.map(r => h("label", { class: "quantity-option" }, r, h("span", { class: "quantity-btn" }, `${r.value} 枚`)))),
           err("quantity")),
         group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate"))),
-      group("担当医", h("div", { class: "select-wrapper" }, line.doctor), "doctor", id("lensDoctor")));
+      group("担当医", h("div", { class: "select-wrapper" }, line.doctor), "doctor", id("lensDoctor")),
+      // 発注先: 施設の登録ディーラーが2社以上のときだけ表示(選択必須)。1社は自動、0社は「発注先未設定」
+      group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
+    line.dealerGroup = line.root.querySelector('[data-group="dealer"]');
+    syncDealerGroup(line);
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
@@ -83,6 +91,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
     line.doctor.addEventListener("change", () => clearErr(line, "doctor"));
+    line.dealer.addEventListener("change", () => clearErr(line, "dealer"));
     line.qty.forEach(r => r.addEventListener("change", () => clearErr(line, "quantity")));
     const onFilter = () => { rebuildModels(line, line.model.value); onChange(); };
     line.chkMf.addEventListener("change", onFilter);
@@ -91,7 +100,15 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     return line;
   }
 
-  const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : k === "doctor" ? line.doctor : null)?.classList.remove("is-invalid"); };
+  const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : k === "doctor" ? line.doctor : k === "dealer" ? line.dealer : null)?.classList.remove("is-invalid"); };
+
+  /** 発注先の選択肢を作り直す。選択中のディーラーが登録に残っていれば維持し、無ければ未選択に戻す */
+  function fillDealers(line, selectedId) {
+    while (line.dealer.children.length > 1) line.dealer.removeChild(line.dealer.lastChild);
+    for (const d of getDealers()) line.dealer.appendChild(h("option", { value: d.id }, d.name));
+    line.dealer.value = [...line.dealer.options].some(o => o.value === selectedId) ? selectedId : "";
+  }
+  const syncDealerGroup = (line) => { if (line.dealerGroup) line.dealerGroup.hidden = dealerMode(getDealers()) !== "choose"; };
 
   /** 担当医の選択肢を作り直す。選択中の担当医がマスターに残っていれば維持し、無ければ未選択に戻す */
   function fillDoctors(line, selectedId) {
@@ -166,7 +183,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
 
   addButton.addEventListener("click", () => {
     const last = lines[lines.length - 1];
-    const added = addLine({ surgeryDate: last ? last.date.value : "", doctorId: last ? last.doctor.value : "" });
+    const added = addLine({ surgeryDate: last ? last.date.value : "", doctorId: last ? last.doctor.value : "", dealerId: last ? last.dealer.value : "" });
     if (added) added.model.focus();
   });
 
@@ -180,7 +197,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         power: l.power.value,
         quantity: parseInt((l.qty.find(r => r.checked) || {}).value || "0", 10),
         surgeryDate: l.date.value,
-        doctor: getDoctors().find(d => d.id === l.doctor.value) || null
+        doctor: getDoctors().find(d => d.id === l.doctor.value) || null,
+        // 発注先: 1社なら自動、2社以上は選んだもの(未選択は null)、0社は null。判定はサーバーと同じ規則
+        dealer: (() => { const r = resolveLineDealer(getDealers(), l.dealer.value); return r.ok ? r.dealer : null; })(),
+        dealerExplicit: dealerMode(getDealers()) === "choose"   // 利用者が選んだ発注先か(1社の自動選択は、サーバーへ送らず、サーバーが決める)
       }));
     },
     /** 全明細の入力検証。最初の不備の要素を返す */
@@ -195,6 +215,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         v.quantity ? clearErr(l, "quantity") : fail("quantity", "枚数を選択してください", l.qty[0]);
         v.surgeryDate ? clearErr(l, "date") : fail("date", "手術日を選択してください", l.date);
         v.doctor ? clearErr(l, "doctor") : fail("doctor", "担当医を選択してください", l.doctor);
+        if (dealerMode(getDealers()) === "choose" && !v.dealer) fail("dealer", "発注先を選択してください", l.dealer); else clearErr(l, "dealer");
       });
       // 同じレンズ・度数・手術日の重複(枚数で指定する)
       if (!first) {
@@ -205,7 +226,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       }
       return { ok: !first, firstInvalid: first };
     },
-    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); }); },
+    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); }); },
     /** 初期状態(1明細・両チェックOFF)に戻す */
     reset() {
       lines.splice(0).forEach(l => l.root.remove());

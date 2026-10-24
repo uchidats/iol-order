@@ -1,6 +1,7 @@
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
+import { dealerLabel } from "../domain/dealer-selection.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -17,7 +18,7 @@ let availableModels = [];
 let lensOptions = [];           // 採用済み系列を、正式型番ごとの選択肢に展開したもの
 let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let doctors = [];               // 担当医マスター(施設設定の「担当医」)
-let dealerNameByModel = new Map(); // 系列ID → 発注先ディーラー名(確認画面の表示用。実際の発注先はサーバーが決める)
+let dealers = [];               // 施設の登録ディーラー(0社=発注先なし / 1社=自動 / 2社以上=明細ごとに選択)
 let currentPendingOrderData = null;
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
 let facilityRepository = null;
@@ -78,7 +79,7 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   facilityRepository = repository;
   facilityRepositoryId = facilityId;
 
-  const [adoptedIols, doctorList, dealers, iolOrder] = await Promise.all([
+  const [adoptedIols, doctorList, dealerList, iolOrder] = await Promise.all([
     repository.listAdoptedIols(facilityId),
     repository.listOrderers(facilityId),   // 担当医マスター(コレクション名は互換性のため orderers のまま)
     repository.listDealers(facilityId),
@@ -86,7 +87,7 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   ]);
   availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
-  dealerNameByModel = buildDealerNames(adoptedIols, dealers);
+  dealers = dealerList;
 
   lensOptions = buildLensOptions(availableModels);
   lensLines = createLensLines({
@@ -94,19 +95,12 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     addButton: el.btnAddLine,
     getOptions: () => lensOptions,
     getDoctors: () => doctors,
+    getDealers: () => dealers,
     minDate: todayString,
     onChange: updateAlconGuide
   });
   setupEventListeners();
   renderModeBadge();
-}
-
-/** 採用IOLの発注先(dealerId)を、この施設に今も登録されているディーラー名に引く(登録がなければ入れない) */
-function buildDealerNames(adoptedIols, dealers) {
-  const byId = new Map(dealers.map(d => [d.id, d.name]));
-  const m = new Map();
-  for (const a of adoptedIols) if (a.enabled && a.dealerId && byId.has(a.dealerId)) m.set(a.catalogIolId, byId.get(a.dealerId));
-  return m;
 }
 
 /** 今日(端末のローカル日付)。手術日の最小値 */
@@ -246,8 +240,8 @@ function showConfirmModal(data) {
     date.textContent = `手術日 ${formatDate(l.surgeryDate)}`;
     const who = document.createElement("div");
     who.className = "summary-line-detail";
-    const dealer = dealerNameByModel.get(l.modelId);
-    who.textContent = `担当医 ${l.doctor} ・ ${dealer ? `発注先 ${dealer}` : "発注先未設定"}`; // 担当医が違う明細も、明細ごとに正しく表示する
+    // 発注先: 画面の判定(dealer-selection.js)はサーバーと同じ規則。発注用メールがないディーラーは自動送信不可と明示する
+    who.textContent = `担当医 ${l.doctor} ・ ${dealerLabel(l.dealerId ? { id: l.dealerId, name: l.dealerName, orderEmails: l.dealerOrderEmails } : null)}`; // 担当医が違う明細も、明細ごとに正しく表示する
     li.append(main, date, who);
     return li;
   }));
@@ -393,7 +387,7 @@ export function isOrderFormDirty() {
  */
 export async function reloadFacilityOptions() {
   if (!facilityRepository || !el.form) return;
-  const [adoptedIols, doctorList, dealers, iolOrder] = await Promise.all([
+  const [adoptedIols, doctorList, dealerList, iolOrder] = await Promise.all([
     facilityRepository.listAdoptedIols(facilityRepositoryId),
     facilityRepository.listOrderers(facilityRepositoryId),
     facilityRepository.listDealers(facilityRepositoryId),
@@ -402,7 +396,7 @@ export async function reloadFacilityOptions() {
 
   availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
-  dealerNameByModel = buildDealerNames(adoptedIols, dealers);
+  dealers = dealerList;
   lensOptions = buildLensOptions(availableModels);
   lensLines.refresh(); // 採用解除・担当医の削除などで選択肢から外れた明細は、選択を未選択に戻す
   updateAlconGuide();
