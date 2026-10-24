@@ -64,41 +64,12 @@
             レンズ・手術日の選択
           </legend>
 
-          <!-- 種類の絞り込み: メーカーを問わず、施設が採用している全IOLを横断して絞る。両方OFF=単焦点・ノントーリック -->
-          <div class="lens-filter" role="group" aria-label="レンズの種類">
-            <label class="lens-filter-check"><input type="checkbox" id="chkMultifocal"> 多焦点</label>
-            <label class="lens-filter-check"><input type="checkbox" id="chkToric"> トーリック</label>
+          <!-- レンズの明細(複数)。各明細に 多焦点・トーリックの絞り込み / IOLモデル / IOLパワー / 枚数 / 手術日 がある(lens-lines.js が生成) -->
+          <div id="lensLines" class="lens-lines"></div>
+          <div class="lens-lines-actions">
+            <button type="button" class="btn btn-secondary" id="btnAddLine">＋ レンズを追加</button>
           </div>
-
-          <!-- 1. IOLモデル(メーカー名と具体的なトーリック型番まで) -->
-          <div class="form-group" id="groupModel">
-            <label for="iolModelSelect" class="form-label required">
-              IOLモデル
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="select-wrapper">
-              <select id="iolModelSelect" name="model" class="form-control" required>
-                <option value="">選択してください</option>
-                <!-- JSで、採用済みIOLをチェック状態に応じて生成 -->
-              </select>
-            </div>
-            <p class="error-message" id="err-iolModelSelect"></p>
-          </div>
-
-          <!-- 2. IOLパワー (ディオプター)。変更はプルダウンのみ -->
-          <div class="form-group" id="groupPower">
-            <label for="iolPowerSelect" class="form-label required">
-              IOLパワー
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="select-wrapper">
-              <select id="iolPowerSelect" name="power" class="form-control" required>
-                <option value="">選択してください</option>
-                <!-- JSでモデルの度数範囲に応じて生成 -->
-              </select>
-            </div>
-            <p class="error-message" id="err-iolPowerSelect"></p>
-          </div>
+          <p class="error-message" id="err-lensLines"></p>
 
           <!-- 将来機能: Alcon Toric Calculator 連携エリア (Alcon Toric選択時のみ表示) -->
           <div class="alcon-calc-card hidden" id="alconCalcArea">
@@ -129,44 +100,6 @@
                 <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
             </a>
-          </div>
-
-          <!-- 4. 枚数 -->
-          <div class="form-group" id="groupQuantity">
-            <label class="form-label required">
-              枚数
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="quantity-selector" role="radiogroup" aria-label="枚数選択">
-              <label class="quantity-option">
-                <input type="radio" name="quantity" value="1 枚" checked>
-                <span class="quantity-btn">1 枚</span>
-              </label>
-              <label class="quantity-option">
-                <input type="radio" name="quantity" value="2 枚">
-                <span class="quantity-btn">2 枚</span>
-              </label>
-            </div>
-            <p class="error-message" id="err-quantity"></p>
-          </div>
-
-          <!-- 5. 手術日 -->
-          <div class="form-group" id="groupSurgeryDate">
-            <label for="surgeryDateInput" class="form-label required">
-              手術日
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="date-input-wrapper">
-              <input 
-                type="date" 
-                id="surgeryDateInput" 
-                name="surgeryDate" 
-                class="form-control" 
-                required
-              >
-            </div>
-            <p class="form-hint" id="dateHint">スマホのカレンダーから簡単に選択できます。</p>
-            <p class="error-message" id="err-surgeryDateInput"></p>
           </div>
 
           <!-- 6. 注文者 -->
@@ -256,29 +189,16 @@
             <dd class="summary-value" id="summaryFacility">-</dd>
           </div>
 
-          <div class="summary-item">
-            <dt class="summary-label">メーカー名 / IOLモデル</dt>
-            <dd class="summary-value" id="summaryModel">-</dd>
-          </div>
-
-          <div class="summary-item" id="summaryToricRow" style="display: none;">
-            <dt class="summary-label">トーリック型番</dt>
-            <dd class="summary-value highlight-value" id="summaryToric">-</dd>
+          <div class="summary-item summary-item-lines">
+            <dt class="summary-label">発注するレンズ</dt>
+            <dd class="summary-value">
+              <ol class="summary-lines" id="summaryLines"></ol>
+            </dd>
           </div>
 
           <div class="summary-item">
-            <dt class="summary-label">IOLパワー (ディオプター)</dt>
-            <dd class="summary-value highlight-value" id="summaryPower">-</dd>
-          </div>
-
-          <div class="summary-item">
-            <dt class="summary-label">枚数</dt>
-            <dd class="summary-value" id="summaryQuantity">-</dd>
-          </div>
-
-          <div class="summary-item">
-            <dt class="summary-label">手術日</dt>
-            <dd class="summary-value" id="summarySurgeryDate">-</dd>
+            <dt class="summary-label">合計</dt>
+            <dd class="summary-value highlight-value" id="summaryTotal">-</dd>
           </div>
 
           <div class="summary-item">

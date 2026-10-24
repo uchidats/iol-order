@@ -9,7 +9,7 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, collection } from "firebase/firestore";
-import { createOrderService, ORDER_STATUS, ORDER_LIMITS, deriveOrderId, jstDate } from "../../functions/src/orders.js";
+import { createOrderService, ORDER_STATUS, ORDER_LIMITS, deriveOrderId, jstDate, orderLinesOf } from "../../functions/src/orders.js";
 
 const PROJECT = "demo-iol-functions";
 const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").split(":");
@@ -73,15 +73,18 @@ test("正常系: 検証して保存され、受付済み(accepted)・サーバ�
   assert.equal(o.status, "accepted");
   assert.equal(o.facilityId, F);
   assert.equal(o.facilityName, "A眼科");
-  assert.deepEqual(o.item, {
+  assert.equal(o.lines.length, 1);
+  assert.deepEqual(o.lines[0].item, {
     modelId: "jj-dib00v", manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V",
-    isToric: false, toricModel: "", power: "+20.0D", quantity: 1
+    isToric: false, isMultifocal: false, toricModel: "", power: "+20.0D", quantity: 1
   });
-  assert.equal(o.surgeryDate, "2026-11-10");
+  assert.equal(o.lines[0].status, "accepted");
+  assert.equal(o.lines[0].dealerId, null);
+  assert.equal(o.lines[0].surgeryDate, "2026-11-10");
   assert.deepEqual(o.orderer, { id: "o1", name: "山田", email: "y@orderer.jp" }); // マスターから取得
   assert.deepEqual(o.createdBy, { uid: "ordA", email: "orda@login.jp", displayName: "ログイン-ordA" }); // 注文者とは別に記録
   assert.equal(o.notes, "右眼");
-  assert.ok(o.createdAt && o.acceptedAt && o.requestId === d.requestId && o.schemaVersion === 1);
+  assert.ok(o.createdAt && o.acceptedAt && o.requestId === d.requestId && o.schemaVersion === 2);
 });
 
 test("注文者のメールは任意: 未登録でも受け付けられ、null で保存される。管理者も注文できる", async () => {
@@ -184,8 +187,8 @@ test("トーリック: 型番は必須で、そのモデルの型番のみ。非
   await rejects(order(user("ordA"), body({ toricModel: "DIW150" })), "invalid-argument");
   const r = await order(user("ordA"), body({ ...t, toricModel: "DIW225" }));
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.equal(o.item.toricModel, "DIW225");
-  assert.equal(o.item.isToric, true);
+  assert.equal(o.lines[0].item.toricModel, "DIW225");
+  assert.equal(o.lines[0].item.isToric, true);
 });
 
 test("枚数・手術日・備考・識別子の検証", async () => {
@@ -218,6 +221,119 @@ test("注文者: 施設のマスターにいる有効な注文者のみ。存在
   assert.equal((await orders()).length, 0);
 });
 
+// ================= 複数明細(まとめ発注) =================
+const line = (over = {}) => ({ modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", ...over });
+const multi = (lines, over = {}) => ({ facilityId: F, requestId: rid(), ordererId: "o1", notes: "まとめ発注", lines, ...over });
+
+test("複数明細: 異なるモデル・度数・枚数・手術日をまとめて1つの注文として保存し、明細ごとにスナップショットとディーラー情報を持つ", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
+  const lines = [
+    line(),
+    line({ modelId: "jj-diwxxx-toric", toricModel: "DIW300", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12" }),
+    line({ modelId: "nidek-nsp-2", power: "+5.5D", surgeryDate: "2026-11-20" })
+  ];
+  const r = await order(user("ordA"), multi(lines));
+  assert.equal(r.lineCount, 3);
+  assert.equal(r.totalQuantity, 4);
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.equal(o.schemaVersion, 2);
+  assert.equal(o.lineCount, 3);
+  assert.equal(o.totalQuantity, 4);
+  assert.equal(o.firstSurgeryDate, "2026-11-10");
+  assert.equal(o.lastSurgeryDate, "2026-11-20");
+  assert.deepEqual(o.lines.map(l => l.lineNo), [1, 2, 3]);
+  assert.deepEqual(o.lines.map(l => l.status), ["accepted", "accepted", "accepted"]);
+  assert.deepEqual(o.lines.map(l => l.surgeryDate), ["2026-11-10", "2026-11-12", "2026-11-20"]);
+  assert.deepEqual(o.lines[1].item, {
+    modelId: "jj-diwxxx-toric", manufacturer: "J&J", model: "DIWxxx (トーリック)", displayName: "J&J / DIWxxx (トーリック)",
+    isToric: true, isMultifocal: false, toricModel: "DIW300", power: "+18.5D", quantity: 2
+  });
+  assert.deepEqual(o.lines.map(l => l.dealerId), [null, null, "dealer-1"]); // 将来のディーラー振り分け用
+  assert.equal(o.orderer.name, "山田");
+  assert.equal("item" in o, false);
+});
+
+test("複数明細: 1つでも不正な明細があれば、注文全体を拒否し、何も保存せず注文番号も消費しない。エラーには明細番号が付く", async () => {
+  const bads = [
+    [line({ power: "+20.2D" }), /明細2/],
+    [line({ modelId: "hoya-xy1" }), /明細2.*採用されていない/],
+    [line({ modelId: "jj-diwxxx-toric" }), /明細2/],                  // トーリック型番なし
+    [line({ modelId: "jj-diwxxx-toric", toricModel: "XXX" }), /明細2/],
+    [line({ toricModel: "DIW150" }), /明細2/],                          // 非トーリックに型番
+    [line({ quantity: 3 }), /明細2/],
+    [line({ surgeryDate: "2026-10-01" }), /明細2/],
+    [line({ surgeryDate: "2026-02-30" }), /明細2/],
+    [{ ...line(), extra: 1 }, /明細2/],
+    [null, /明細2/]
+  ];
+  for (const [bad, re] of bads) {
+    await assert.rejects(order(user("ordA"), multi([line(), bad])), (e) => e.code === "invalid-argument" && re.test(e.message), JSON.stringify(bad));
+  }
+  assert.equal((await orders()).length, 0);
+  assert.equal((await order(user("ordA"), multi([line()]))).orderNumber, "IOL-20261024-0001");
+});
+
+test("複数明細: 明細数・合計枚数の上限、空、重複明細、トップレベルとの混在は拒否される", async () => {
+  await rejects(order(user("ordA"), multi([])), "invalid-argument");
+  await rejects(order(user("ordA"), { ...multi([line()]), lines: "x" }), "invalid-argument");
+  const many = Array.from({ length: ORDER_LIMITS.maxLines + 1 }, (_, i) => line({ surgeryDate: `2026-12-${String((i % 28) + 1).padStart(2, "0")}`, power: `+${10 + i * 0.5}D`.replace(/\.0D$/, ".0D") }));
+  await rejects(order(user("ordA"), multi(many)), "invalid-argument");
+  // 合計枚数(2枚×21明細)の上限
+  const heavy = Array.from({ length: 21 }, (_, i) => line({ quantity: 2, power: `+${(6 + i * 0.5).toFixed(1)}D` }));
+  await assert.rejects(order(user("ordA"), multi(heavy)), (e) => e.code === "invalid-argument");
+  const twenty = Array.from({ length: 20 }, (_, i) => line({ quantity: 2, power: `+${(6 + i * 0.5).toFixed(1)}D` }));
+  await order(user("ordA"), multi(twenty)); // 20明細・40枚は可
+  await rejects(order(user("ordA"), multi([line(), line()])), "invalid-argument"); // 同じレンズ・度数・手術日の重複
+  await order(user("ordA"), multi([line(), line({ surgeryDate: "2026-11-11" })])); // 手術日が違えば別明細
+  await rejects(order(user("ordA"), { ...multi([line()]), modelId: "jj-dib00v" }), "invalid-argument"); // 混在
+});
+
+test("複数明細: 同じ requestId の再送は同じ注文番号。明細の変更・順序変更・追加は拒否される。並列でも1件", async () => {
+  const d = multi([line(), line({ modelId: "nidek-nsp-2", power: "+5.5D" })]);
+  const a = await order(user("ordA"), d);
+  const b = await order(user("ordA"), JSON.parse(JSON.stringify(d)));
+  assert.equal(b.replayed, true);
+  assert.equal(b.orderNumber, a.orderNumber);
+  assert.equal(b.lineCount, 2);
+  assert.equal(b.totalQuantity, 2);
+  for (const changed of [
+    { ...d, lines: [d.lines[0]] },
+    { ...d, lines: [d.lines[1], d.lines[0]] },
+    { ...d, lines: [d.lines[0], { ...d.lines[1], quantity: 2 }] },
+    { ...d, lines: [...d.lines, line({ surgeryDate: "2026-11-30" })] }
+  ]) await rejects(order(user("ordA"), changed), "already-exists");
+  assert.equal((await orders()).length, 1);
+
+  const p = multi([line(), line({ surgeryDate: "2026-11-15" })]);
+  const rs = await Promise.all(Array.from({ length: 12 }, () => order(user("ordA"), p)));
+  assert.equal(new Set(rs.map(r => r.orderNumber)).size, 1);
+  assert.equal(rs.filter(r => !r.replayed).length, 1);
+  assert.equal((await orders()).length, 2);
+});
+
+test("互換性: 従来の単一IOL形式と、明細1件の形式は同じ内容として扱われ(再送しても二重登録にならない)、保存は明細の形式に統一される", async () => {
+  const legacy = body();
+  const a = await order(user("ordA"), legacy);
+  const asLines = { facilityId: F, requestId: legacy.requestId, ordererId: legacy.ordererId, notes: legacy.notes,
+    lines: [{ modelId: legacy.modelId, power: legacy.power, quantity: legacy.quantity, surgeryDate: legacy.surgeryDate }] };
+  const b = await order(user("ordA"), asLines);
+  assert.equal(b.replayed, true);
+  assert.equal(b.orderNumber, a.orderNumber);
+  const o = (await db.doc(`facilities/${F}/orders/${a.orderId}`).get()).data();
+  assert.equal(o.lines.length, 1);
+  assert.equal(orderLinesOf(o)[0].item.modelId, "jj-dib00v");
+});
+
+test("互換性: 保存済みの旧形式(schemaVersion 1: item / surgeryDate)の注文も、明細の配列として読める", () => {
+  const old = { status: "accepted", item: { modelId: "jj-dib00v", power: "+20.0D", quantity: 1 }, surgeryDate: "2026-11-10" };
+  const l = orderLinesOf(old);
+  assert.equal(l.length, 1);
+  assert.equal(l[0].lineNo, 1);
+  assert.equal(l[0].surgeryDate, "2026-11-10");
+  assert.equal(l[0].dealerId, null);
+  assert.deepEqual(orderLinesOf({ lines: [{ lineNo: 1 }, { lineNo: 2 }] }).length, 2);
+});
+
 // ================= 冪等性・二重送信 =================
 test("同じ requestId・同じ内容の再送は、既存の注文番号を返し、二重登録しない", async () => {
   const d = body();
@@ -237,7 +353,7 @@ test("同じ requestId で内容が違う場合は拒否され、元の注文は
     await rejects(order(user("ordA"), { ...d, ...change }), "already-exists");
   }
   const o = (await db.doc(`facilities/${F}/orders/${a.orderId}`).get()).data();
-  assert.equal(o.item.power, "+20.0D");
+  assert.equal(o.lines[0].item.power, "+20.0D");
   assert.equal((await orders()).length, 1);
 });
 

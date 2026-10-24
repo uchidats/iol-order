@@ -465,12 +465,36 @@ body {
   cursor: pointer;
 }
 
-#groupModel { max-width: 28rem; }
-#groupPower { max-width: 12rem; }
-#groupSurgeryDate { max-width: 14rem; }
+.lens-line {
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 10px 12px 2px;
+  border: 1px solid var(--border-light, #e5e7eb);
+  border-radius: var(--radius-md);
+}
+
+.lens-line-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lens-line .form-group { max-width: 28rem; margin-bottom: 14px; }
+.lens-line [data-group="power"] { max-width: 12rem; }
+.lens-line [data-group="quantity"] { max-width: 16rem; }
+.lens-line .date-input-wrapper { max-width: 14rem; }
+.lens-lines-actions { margin: 4px 0 14px; }
+.lens-line [hidden] { display: none !important; }
 #groupOrderer { max-width: 18rem; }
-#groupQuantity .quantity-selector { max-width: 16rem; }
 #groupNotes { max-width: 36rem; }
+
+/* 確認画面の明細一覧 */
+.summary-lines { margin: 0; padding-left: 0; list-style: none; }
+.summary-line { padding: 4px 0; border-bottom: 1px solid #eef2f7; }
+.summary-line:last-child { border-bottom: 0; }
+.summary-line-title { font-weight: 600; overflow-wrap: anywhere; }
+.summary-line-detail { font-size: 0.9rem; color: #475569; }
 
 /* 度数ステッパー入力 */
 .stepper-input-wrapper {

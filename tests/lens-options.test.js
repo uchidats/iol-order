@@ -69,11 +69,11 @@ test("メーカーに送る正式型番を保持: 選択肢から系列ID・系�
   assert.equal(o.toricModel, "DIW300");
   assert.equal(o.model.displayName, "J&J / DIWxxx (トーリック)"); // 従来の model 値
   const req = buildCreateOrderRequest({
-    facilityId: "f", clientRequestId: "r".repeat(20), modelId: o.model.id, toricModel: o.toricModel,
-    power: "+20.0D", quantity: "1 枚", surgeryDate: "2026-11-10", ordererId: "o1"
+    facilityId: "f", clientRequestId: "r".repeat(20), ordererId: "o1",
+    lines: [{ modelId: o.model.id, toricModel: o.toricModel, power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10" }]
   });
-  assert.equal(req.modelId, "jj-diwxxx-toric");
-  assert.equal(req.toricModel, "DIW300"); // createOrder が検証する(系列の型番に含まれること)
+  assert.equal(req.lines[0].modelId, "jj-diwxxx-toric");
+  assert.equal(req.lines[0].toricModel, "DIW300"); // createOrder が検証する(系列の型番に含まれること)
   // すべての選択肢の型番は、サーバーが検証するマスターの型番に含まれる
   for (const x of all) if (x.isToric) assert.ok(x.model.toricModels.includes(x.toricModel));
 });

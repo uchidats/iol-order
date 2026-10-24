@@ -3,7 +3,7 @@
 Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Firestore に保存する。**ディーラーへの通知・メール送信は行わない**（次段階）。
 
 ## 流れ
-1. 画面は、確認済みの入力から `{ facilityId, requestId, modelId, power, toricModel?, quantity, surgeryDate, ordererId, notes? }` だけを送る（`src/domain/order-request.js`）。レンズ名・注文者名・メール・価格などは送らない（送っても未知のキーとして拒否される）。
+1. 画面は、確認済みの入力から `{ facilityId, requestId, ordererId, notes?, lines: [{ modelId, toricModel?, power, quantity, surgeryDate }, ...] }` だけを送る。1回の注文に複数の明細(最大20件・合計40枚)を入れられ、明細ごとに手術日が違ってもよい。従来の単一IOL形式(`modelId` 等をトップレベルに置く)も受け付け、1明細として扱う(同じ内容なら、どちらの形式で再送しても同じ注文になる)（`src/domain/order-request.js`）。レンズ名・注文者名・メール・価格などは送らない（送っても未知のキーとして拒否される）。
 2. サーバー（`functions/src/orders.js`）が、1つのトランザクション内で次を確認する。
    - ログイン済み・メール確認済み。
    - 施設が有効で、操作者がその施設の有効な `admin` / `orderer` であること（毎回 Firestore で再確認。無効化されたユーザー・他施設・所属なしは `permission-denied`）。
@@ -14,7 +14,17 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 3. 保存先 `facilities/{facilityId}/orders/{orderId}`。`orderId` は (操作ユーザー, `requestId`) から決まる。注文番号 `IOL-YYYYMMDD-NNNN`（日本時間・施設ごと・日ごとの連番）はサーバーが発行する。
 
 ## 保存内容（スナップショット）
-`status`（`accepted`）、`orderNumber`、`requestId`、`contentHash`、`facilityId` / `facilityName`、`item`（`modelId`, `manufacturer`, `model`, `displayName`, `isToric`, `toricModel`, `power`, `quantity`）、`surgeryDate`、`orderer`（`id`, `name`, `email|null`）、`notes`、`createdBy`（ログインユーザーの `uid` / `email` / `displayName`。注文者とは別）、`createdAt` / `acceptedAt` / `statusUpdatedAt`、`schemaVersion`。マスターを後で変更しても、この内容から注文を再現できる。
+`schemaVersion: 2`、`status`（`accepted`）、`orderNumber`、`requestId`、`contentHash`、`facilityId` / `facilityName`、`lines[]`、`lineCount`、`totalQuantity`、`firstSurgeryDate` / `lastSurgeryDate`、`orderer`。
+各明細 `lines[i]` = `{ lineNo, status, dealerId, surgeryDate, item }`。`item` は `modelId`, `manufacturer`, `model`, `displayName`, `isToric`, `isMultifocal`, `toricModel`(メーカーへ送る正式型番), `power`, `quantity`。**`dealerId` は採用IOLの設定(`adoptedIols/{id}.dealerId`)をその時点でスナップショットしたもので、未設定は `null`。将来はこれで明細をディーラーごとに振り分け、明細ごとの `status`(通知待ち・通知済み・失敗)を更新する。**
+従来の単一IOL形式の保存(`schemaVersion: 1`: トップレベルの `item` / `surgeryDate`)は、`orderLinesOf()` で明細の配列として読める(実データには未作成)。
+その他: `orderer`（`id`, `name`, `email|null`）、`notes`、`createdBy`（ログインユーザーの `uid` / `email` / `displayName`。注文者とは別）、`createdAt` / `acceptedAt` / `statusUpdatedAt`、`schemaVersion`。マスターを後で変更しても、この内容から注文を再現できる。
+
+## 複数明細の検証
+- 1つでも不正な明細があれば、注文全体を拒否し(何も保存せず、注文番号も消費しない)、エラーに「明細N:」を付ける。
+- 明細ごとに: 採用済み・有効なモデル、度数の範囲と刻み、トーリックの正式型番、枚数(1か2)、手術日(日本時間で本日以降・366日以内)を検証する。
+- 同じレンズ・型番・度数・手術日の明細の重複は拒否(枚数で指定する)。
+- 画面側の検証と上限(`src/domain/order-lines.js`)は、サーバーの上限と一致していることをテストで確認している。
+- 旧経路(GAS直接送信)は複数明細に対応しない(複数明細のときは送信せずエラーにする)。
 
 ## 冪等性・二重送信
 - 同じ `requestId`・同じ内容の再送 → 既存の注文番号を返す（`replayed: true`）。

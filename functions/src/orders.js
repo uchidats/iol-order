@@ -1,6 +1,10 @@
 /**
  * 注文の受付(第1段階): 検証して Firestore に保存するところまで。ディーラーへの通知は行わない(次段階)。
  *
+ * 1回の注文は複数の明細(lines)を持てる。明細ごとにモデル・度数・型番・枚数・手術日をサーバーで検証し、
+ * 明細にはディーラー振り分け用の dealerId(採用IOLの設定から取得。未設定は null)を保持する。
+ * 従来の単一IOLの形式(modelId/power/... をトップレベルに置く)も受け付け、1明細の注文として扱う。
+ *
  * 方針:
  * - 認証必須。所属・権限・施設の状態・採用IOL・注文者は、すべてサーバー側で Firestore から再確認する。
  * - クライアントが送るのは「何を選んだか」の識別子(modelId / ordererId / 度数 など)だけ。
@@ -26,6 +30,8 @@ export const ORDER_STATUS = Object.freeze({
 
 export const ORDER_LIMITS = Object.freeze({
   notesMax: 1000,
+  maxLines: 20,          // 1回の注文の明細数の上限
+  maxTotalQuantity: 40,  // 1回の注文の合計枚数の上限
   maxDaysAhead: 366,
   rateWindowMs: 60 * 60 * 1000,
   rateMax: 60,
@@ -35,7 +41,8 @@ export const ORDER_LIMITS = Object.freeze({
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const ALLOWED_KEYS = ["facilityId", "requestId", "modelId", "power", "toricModel", "quantity", "surgeryDate", "ordererId", "notes"];
+const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate"];
+const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", ...LINE_KEYS]; // LINE_KEYS をトップレベルに置くのは従来の単一IOL形式
 
 const bad = (message = "入力内容を確認してください") => new RegistrationError("invalid-argument", message);
 
@@ -50,39 +57,77 @@ function validDate(s) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-/** 入力の形式検証と正規化(マスターとの突き合わせは別) */
+/** 1明細の形式検証と正規化。n は画面に出す明細番号(1始まり) */
+function parseLine(raw, n, nowMs) {
+  const at = (m) => bad(`明細${n}: ${m}`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw at("入力内容を確認してください");
+  for (const k of Object.keys(raw)) if (!LINE_KEYS.includes(k)) throw at("入力内容を確認してください");
+  const { modelId, power, quantity, surgeryDate } = raw;
+  const toricModel = raw.toricModel === undefined || raw.toricModel === null ? "" : raw.toricModel;
+
+  if (typeof modelId !== "string" || !ID.test(modelId)) throw at("IOLモデルを選択してください");
+  if (typeof power !== "string" || power.length < 1 || power.length > 10) throw at("IOLパワーを選択してください");
+  if (typeof toricModel !== "string" || toricModel.length > 60) throw at("トーリック型番が正しくありません");
+  if (!ORDER_LIMITS.quantities.includes(quantity)) throw at("枚数が正しくありません");
+  if (!validDate(surgeryDate)) throw at("手術日が正しくありません");
+  const today = jstDate(nowMs);
+  const limit = jstDate(nowMs + ORDER_LIMITS.maxDaysAhead * 24 * 60 * 60 * 1000);
+  if (surgeryDate < today) throw at("手術日は本日以降を指定してください");
+  if (surgeryDate > limit) throw at("手術日が先すぎます");
+  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate };
+}
+
+/** 入力の形式検証と正規化(マスターとの突き合わせは別)。従来の単一IOL形式は1明細に正規化する */
 export function parseOrderInput(data, nowMs) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw bad();
   for (const k of Object.keys(data)) if (!ALLOWED_KEYS.includes(k)) throw bad();
 
-  const { facilityId, requestId, modelId, power, quantity, surgeryDate, ordererId } = data;
-  const toricModel = data.toricModel === undefined || data.toricModel === null ? "" : data.toricModel;
+  const { facilityId, requestId, ordererId } = data;
   const notes = data.notes === undefined || data.notes === null ? "" : data.notes;
 
   if (typeof facilityId !== "string" || !ID.test(facilityId)) throw bad();
   if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) throw bad("注文の識別子が正しくありません");
-  if (typeof modelId !== "string" || !ID.test(modelId)) throw bad("IOLモデルを選択してください");
-  if (typeof power !== "string" || power.length < 1 || power.length > 10) throw bad("IOLパワーを選択してください");
-  if (typeof toricModel !== "string" || toricModel.length > 60) throw bad();
-  if (!ORDER_LIMITS.quantities.includes(quantity)) throw bad("枚数が正しくありません");
   if (typeof ordererId !== "string" || !ID.test(ordererId)) throw bad("注文者を選択してください");
   if (typeof notes !== "string" || notes.trim().length > ORDER_LIMITS.notesMax) throw bad(`備考は${ORDER_LIMITS.notesMax}文字以内で入力してください`);
 
-  if (!validDate(surgeryDate)) throw bad("手術日が正しくありません");
-  const today = jstDate(nowMs);
-  const limit = jstDate(nowMs + ORDER_LIMITS.maxDaysAhead * 24 * 60 * 60 * 1000);
-  if (surgeryDate < today) throw bad("手術日は本日以降を指定してください");
-  if (surgeryDate > limit) throw bad("手術日が先すぎます");
+  let rawLines;
+  if (data.lines !== undefined) {
+    if (LINE_KEYS.some(k => data[k] !== undefined)) throw bad(); // 明細とトップレベルの混在は不可
+    if (!Array.isArray(data.lines) || data.lines.length < 1) throw bad("レンズを1つ以上追加してください");
+    if (data.lines.length > ORDER_LIMITS.maxLines) throw bad(`明細は${ORDER_LIMITS.maxLines}件までです`);
+    rawLines = data.lines;
+  } else {
+    rawLines = [Object.fromEntries(LINE_KEYS.filter(k => data[k] !== undefined).map(k => [k, data[k]]))];
+  }
+  const lines = rawLines.map((l, i) => parseLine(l, i + 1, nowMs));
 
-  return { facilityId, requestId, modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, ordererId, notes: notes.trim() };
+  const seen = new Set();
+  lines.forEach((l, i) => {
+    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate]);
+    if (seen.has(k)) throw bad(`明細${i + 1}: 同じレンズ・度数・手術日の明細が重複しています。枚数で指定してください`);
+    seen.add(k);
+  });
+  const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0);
+  if (totalQuantity > ORDER_LIMITS.maxTotalQuantity) throw bad(`合計枚数は${ORDER_LIMITS.maxTotalQuantity}枚までです`);
+
+  return { facilityId, requestId, ordererId, notes: notes.trim(), lines, totalQuantity };
 }
 
-/** 注文内容(識別子・選択値)の正規化ハッシュ。同じ requestId での内容変更の検出に使う */
+/** 注文内容(識別子・選択値)の正規化ハッシュ。同じ requestId での内容変更の検出に使う(単一IOL形式でも明細1件の形式でも同じ値になる) */
 export function contentHash(i) {
   return createHash("sha256")
-    .update(JSON.stringify([i.facilityId, i.modelId, i.power, i.toricModel, i.quantity, i.surgeryDate, i.ordererId, i.notes]))
+    .update(JSON.stringify([i.facilityId, i.ordererId, i.notes, i.lines.map(l => [l.modelId, l.power, l.toricModel, l.quantity, l.surgeryDate])]))
     .digest("hex");
 }
+
+/** 保存済みの注文を明細の配列として読む(従来の単一IOL形式の注文=schemaVersion 1 も含む) */
+export function orderLinesOf(order) {
+  if (Array.isArray(order.lines)) return order.lines;
+  if (order.item) return [{ lineNo: 1, status: order.status, item: order.item, surgeryDate: order.surgeryDate, dealerId: null }];
+  return [];
+}
+
+const summaryOf = (o) => ({ lineCount: o.lineCount ?? 1, totalQuantity: o.totalQuantity ?? (o.item ? o.item.quantity : 0) });
 
 /** 注文ドキュメントID: 操作ユーザーと requestId から決める(他のユーザーの requestId とは衝突しない) */
 export function deriveOrderId(uid, requestId) {
@@ -129,7 +174,6 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
 
     const fRef = db.doc(`facilities/${input.facilityId}`);
     const mRef = db.doc(`facilities/${input.facilityId}/members/${user.uid}`);
-    const aRef = db.doc(`facilities/${input.facilityId}/adoptedIols/${input.modelId}`);
     const oRef = db.doc(`facilities/${input.facilityId}/orderers/${input.ordererId}`);
     const orderId = deriveOrderId(user.uid, input.requestId);
     const orderRef = db.doc(`facilities/${input.facilityId}/orders/${orderId}`);
@@ -138,8 +182,11 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     const counterRef = db.doc(`facilities/${input.facilityId}/orderCounters/${day}`);
 
     return db.runTransaction(async (tx) => {
-      const [fac, mem, adopted, orderer, existing, counter] = await Promise.all(
-        [fRef, mRef, aRef, oRef, orderRef, counterRef].map(r => tx.get(r)));
+      const [fac, mem, orderer, existing, counter] = await Promise.all(
+        [fRef, mRef, oRef, orderRef, counterRef].map(r => tx.get(r)));
+      const modelIds = [...new Set(input.lines.map(l => l.modelId))];
+      const adoptedSnaps = await Promise.all(modelIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/adoptedIols/${id}`))));
+      const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
@@ -150,14 +197,31 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         if (existing.get("contentHash") !== hash) {
           throw new RegistrationError("already-exists", "同じ注文の識別子で、異なる内容は受け付けられません。画面を開き直して、もう一度操作してください");
         }
-        return { orderId, orderNumber: existing.get("orderNumber"), status: existing.get("status"), replayed: true };
+        return { orderId, orderNumber: existing.get("orderNumber"), status: existing.get("status"), replayed: true, ...summaryOf(existing.data()) };
       }
 
-      const model = catalog.find(m => m.id === input.modelId);
-      if (!model || !adopted.exists || adopted.get("enabled") !== true || adopted.get("catalogIolId") !== model.id) {
-        throw bad("この施設で採用されていないIOLモデルです");
-      }
-      validateLens(model, input);
+      // 明細ごとに、採用済みモデル・度数・型番をサーバーのマスターで検証し、その時点のマスターをスナップショットする
+      const lines = input.lines.map((l, i) => {
+        const n = i + 1;
+        const model = catalog.find(m => m.id === l.modelId);
+        const adopted = adoptedBy.get(l.modelId);
+        if (!model || !adopted.exists || adopted.get("enabled") !== true || adopted.get("catalogIolId") !== model.id) {
+          throw bad(`明細${n}: この施設で採用されていないIOLモデルです`);
+        }
+        try { validateLens(model, l); } catch (e) { throw bad(`明細${n}: ${e.message}`); }
+        const dealerId = adopted.get("dealerId");
+        return {
+          lineNo: n,
+          status: ORDER_STATUS.ACCEPTED,
+          item: {
+            modelId: model.id, manufacturer: model.manufacturer, model: model.model, displayName: model.displayName,
+            isToric: model.isToric, isMultifocal: model.isMultifocal, toricModel: model.isToric ? l.toricModel : "",
+            power: l.power, quantity: l.quantity
+          },
+          surgeryDate: l.surgeryDate,
+          dealerId: typeof dealerId === "string" && dealerId ? dealerId : null // 将来、ディーラーごとに明細を振り分けるための情報
+        };
+      });
       if (!orderer.exists || orderer.get("active") !== true) throw bad("注文者が見つかりません");
 
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
@@ -166,24 +230,23 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
 
       tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp() });
       tx.create(orderRef, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
-        item: {
-          modelId: model.id, manufacturer: model.manufacturer, model: model.model, displayName: model.displayName,
-          isToric: model.isToric, toricModel: model.isToric ? input.toricModel : "",
-          power: input.power, quantity: input.quantity
-        },
-        surgeryDate: input.surgeryDate,
+        lines,
+        lineCount: lines.length,
+        totalQuantity: input.totalQuantity,
+        firstSurgeryDate: lines.map(l => l.surgeryDate).sort()[0],
+        lastSurgeryDate: lines.map(l => l.surgeryDate).sort().slice(-1)[0],
         orderer: { id: input.ordererId, name: orderer.get("name"), email: typeof email === "string" && email ? email : null },
         notes: input.notes,
         // 操作したログインユーザー(注文者とは別の情報)
         createdBy: { uid: user.uid, email: user.email, displayName: user.displayName },
         createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp()
       });
-      return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false };
+      return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false, lineCount: lines.length, totalQuantity: input.totalQuantity };
     });
   }
 

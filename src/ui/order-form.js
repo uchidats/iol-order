@@ -1,7 +1,7 @@
-import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { resolveAdoptedModels } from "../data/static-repository.js";
-import { filterPowersByModel, defaultPowerLabel } from "../domain/power-filter.js";
-import { buildLensOptions, filterLensOptions, findLensOption } from "../domain/lens-options.js";
+import { buildLensOptions } from "../domain/lens-options.js";
+import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
+import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
@@ -12,11 +12,9 @@ import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.
 let appConfig = null;
 let orderApi = null; // 開発用のサーバー受付(createOrder)。server-dev のときだけ使う
 let availableModels = [];
-let selectedModelData = null;   // 選択中の系列(マスター)
-let selectedToricModel = "";    // 選択中のトーリック正式型番(ノントーリックは空)
 let lensOptions = [];           // 採用済み系列を、正式型番ごとの選択肢に展開したもの
+let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let currentPendingOrderData = null;
-let currentAllowedPowers = [...GOOGLE_FORM_ALL_POWERS];
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
 let facilityRepository = null;
 let facilityRepositoryId = null;
@@ -26,13 +24,10 @@ const el = {};
 function cacheElements() {
   Object.assign(el, {
     form: $("iolOrderForm"),
-    modelSelect: $("iolModelSelect"),
-    chkMultifocal: $("chkMultifocal"),
-    chkToric: $("chkToric"),
+    lensLinesBox: $("lensLines"),
+    btnAddLine: $("btnAddLine"),
     alconCalcArea: $("alconCalcArea"),
     alconCalcLink: $("alconCalcLink"),
-    powerSelect: $("iolPowerSelect"),
-    surgeryDateInput: $("surgeryDateInput"),
     ordererSelect: $("ordererSelect"),
     notesInput: $("notesInput"),
     confirmModal: $("confirmModal"),
@@ -69,12 +64,31 @@ export async function initOrderForm({ config, repository, facilityId, facility =
   ]);
   availableModels = resolveAdoptedModels(adoptedIols);
 
-  initModelSelect();
+  lensOptions = buildLensOptions(availableModels);
+  lensLines = createLensLines({
+    container: el.lensLinesBox,
+    addButton: el.btnAddLine,
+    getOptions: () => lensOptions,
+    minDate: todayString,
+    onChange: updateAlconGuide
+  });
   initOrdererSelect(orderers.filter(o => o.active));
-  initPowerOptions(GOOGLE_FORM_ALL_POWERS);
-  initDefaultDate();
   setupEventListeners();
   renderModeBadge();
+}
+
+/** 今日(端末のローカル日付)。手術日の最小値 */
+function todayString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** いずれかの明細が ALCON のトーリックなら、計算ツールの案内を表示する */
+function updateAlconGuide() {
+  if (!lensLines) return; // 明細の入力欄を作っている最中
+  const url = lensLines.alconCalculator();
+  el.alconCalcArea.classList.toggle("hidden", url === null);
+  if (url) el.alconCalcLink.href = url;
 }
 
 /**
@@ -86,38 +100,6 @@ function renderModeBadge() {
   if (!badge) return;
   badge.textContent = appConfig.orderMode === ORDER_MODES.GAS ? "実運用版"
     : appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
-}
-
-/**
- * IOLモデルの選択肢を、「多焦点」「トーリック」のチェック状態で絞って作り直す。
- * 施設が採用している全メーカーを横断する(メーカー別の選択はない)。選択肢の表示は「メーカー / 型番」。
- * 現在の選択が絞り込み後にも残る場合のみ維持し、無ければ選択とパワーをリセットする。
- */
-function initModelSelect(prevKey = "") {
-  lensOptions = buildLensOptions(availableModels);
-  const shown = filterLensOptions(lensOptions, { multifocal: el.chkMultifocal.checked, toric: el.chkToric.checked });
-
-  while (el.modelSelect.children.length > 1) el.modelSelect.removeChild(el.modelSelect.lastChild);
-  el.modelSelect.firstElementChild.textContent = shown.length ? "選択してください" : "該当するIOLがありません";
-
-  const byMaker = new Map();
-  shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
-  byMaker.forEach((list, maker) => {
-    const group = document.createElement("optgroup");
-    group.label = maker;
-    list.forEach(o => {
-      const option = document.createElement("option");
-      option.value = o.key;
-      option.textContent = o.label;
-      group.appendChild(option);
-    });
-    el.modelSelect.appendChild(group);
-  });
-
-  const kept = shown.some(o => o.key === prevKey);
-  el.modelSelect.value = kept ? prevKey : "";
-  if (prevKey && !kept) el.powerSelect.value = ""; // 絞り込みで選択が外れたら、そのモデル向けのパワー選択も持ち越さない
-  handleModelChange();
 }
 
 /** 選択中の注文者のマスターに登録されたメールアドレス(未選択・未登録は空) */
@@ -142,48 +124,8 @@ function initOrdererSelect(orderers) {
   });
 }
 
-function initPowerOptions(powers, defaultVal = "+20.0D") {
-  const previousValue = el.powerSelect.value;
-  el.powerSelect.innerHTML = '<option value="">選択してください</option>';
-
-  powers.forEach(p => {
-    const opt = document.createElement("option");
-    opt.value = p;
-    opt.textContent = p;
-    el.powerSelect.appendChild(opt);
-  });
-
-  currentAllowedPowers = powers;
-
-  if (previousValue && powers.includes(previousValue)) {
-    el.powerSelect.value = previousValue;
-  } else if (defaultVal && powers.includes(defaultVal)) {
-    el.powerSelect.value = defaultVal;
-  }
-}
-
-function initDefaultDate() {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const dd = String(today.getDate()).padStart(2, "0");
-  el.surgeryDateInput.min = `${yyyy}-${mm}-${dd}`;
-}
-
 function setupEventListeners() {
-  el.modelSelect.addEventListener("change", handleModelChange);
-  const onFilterChange = () => initModelSelect(el.modelSelect.value);
-  el.chkMultifocal.addEventListener("change", onFilterChange);
-  el.chkToric.addEventListener("change", onFilterChange);
-
-  el.powerSelect.addEventListener("change", () => clearFieldError("iolPowerSelect"));
-
-  el.surgeryDateInput.addEventListener("change", () => clearFieldError("surgeryDateInput"));
   el.ordererSelect.addEventListener("change", () => clearFieldError("ordererSelect"));
-
-  document.querySelectorAll('input[name="quantity"]').forEach(r => {
-    r.addEventListener("change", () => clearFieldError("quantity"));
-  });
 
   el.form.addEventListener("submit", handleFormSubmit);
 
@@ -200,35 +142,6 @@ function setupEventListeners() {
 // ==========================================================================
 // モデル選択変更時の条件分岐ロジック
 // ==========================================================================
-function handleModelChange() {
-  clearFieldError("iolModelSelect");
-  const lens = findLensOption(lensOptions, el.modelSelect.value);
-  selectedModelData = lens ? lens.model : null;
-  selectedToricModel = lens ? lens.toricModel : "";
-
-  if (!selectedModelData) {
-    el.alconCalcArea.classList.add("hidden");
-    initPowerOptions(GOOGLE_FORM_ALL_POWERS);
-    return;
-  }
-
-  if (selectedModelData.manufacturer === "ALCON" && selectedModelData.isToric) {
-    el.alconCalcArea.classList.remove("hidden");
-    if (selectedModelData.calculatorUrl) {
-      el.alconCalcLink.href = selectedModelData.calculatorUrl;
-    }
-  } else {
-    el.alconCalcArea.classList.add("hidden");
-  }
-
-  updatePowerOptionsForModel(selectedModelData);
-}
-
-function updatePowerOptionsForModel(modelData) {
-  const allowed = filterPowersByModel(modelData);
-  initPowerOptions(allowed, defaultPowerLabel(modelData));
-}
-
 // ==========================================================================
 // バリデーション & 確認画面フロー
 // ==========================================================================
@@ -237,18 +150,14 @@ function handleFormSubmit(e) {
 
   if (!validateOrderForm()) return;
 
-  const quantityEl = document.querySelector('input[name="quantity"]:checked');
+  const lines = toOrderLines(lensLines.values());
   // 注文者のメールアドレスは、選択された注文者のマスターデータから取得する(ログインユーザーのメールとは別物)
   const emailVal = selectedOrdererEmail();
 
   currentPendingOrderData = {
-    model: selectedModelData ? selectedModelData.displayName : "", // 系列名(従来どおり)。正式型番は toricModel に保持
-    modelId: selectedModelData ? selectedModelData.id : "",
-    manufacturer: selectedModelData ? selectedModelData.manufacturer : "",
-    toricModel: selectedModelData && selectedModelData.isToric ? selectedToricModel : "",
-    power: el.powerSelect.value,
-    quantity: quantityEl ? quantityEl.value : "1 枚",
-    surgeryDate: el.surgeryDateInput.value,
+    // 明細(複数)。各明細は、系列名(model)・系列ID(modelId)・メーカー・トーリック正式型番(toricModel)・度数・枚数・手術日を持つ
+    lines,
+    totalQuantity: totalQuantity(lines),
     orderer: el.ordererSelect.value,
     ordererId: selectedOrdererId(),
     email: emailVal,
@@ -258,6 +167,14 @@ function handleFormSubmit(e) {
     // 同じ確認内容の再送では同一値を使う。
     clientRequestId: crypto.randomUUID()
   };
+  if (lines.length === 1) {
+    // 従来の単一IOL形式(旧経路・ログ)との互換: 1明細のときだけ、従来のトップレベルの項目も付ける
+    const l = lines[0];
+    Object.assign(currentPendingOrderData, {
+      model: l.model, modelId: l.modelId, manufacturer: l.manufacturer, toricModel: l.toricModel,
+      power: l.power, quantity: `${l.quantity} 枚`, surgeryDate: l.surgeryDate
+    });
+  }
   if (currentFacility) {
     currentPendingOrderData.facilityId = currentFacility.id;
     currentPendingOrderData.facilityName = currentFacility.name;
@@ -275,29 +192,8 @@ function validateOrderForm() {
     if (!firstInvalidEl && focusEl) firstInvalidEl = focusEl;
   };
 
-  if (!el.modelSelect.value) {
-    invalid("iolModelSelect", "IOLモデルを選択してください", el.modelSelect);
-  } else {
-    clearFieldError("iolModelSelect");
-  }
-
-  if (!el.powerSelect.value) {
-    invalid("iolPowerSelect", "IOLパワー (ディオプター) を選択してください", el.powerSelect);
-  } else {
-    clearFieldError("iolPowerSelect");
-  }
-
-  if (!document.querySelector('input[name="quantity"]:checked')) {
-    invalid("quantity", "枚数を選択してください");
-  } else {
-    clearFieldError("quantity");
-  }
-
-  if (!el.surgeryDateInput.value) {
-    invalid("surgeryDateInput", "手術日を選択してください", el.surgeryDateInput);
-  } else {
-    clearFieldError("surgeryDateInput");
-  }
+  const lens = lensLines.validate(); // 全明細(モデル・度数・枚数・手術日・重複)
+  if (!lens.ok) invalid("lensLines", "", lens.firstInvalid);
 
   if (!el.ordererSelect.value) {
     invalid("ordererSelect", "注文者を選択してください", el.ordererSelect);
@@ -316,6 +212,11 @@ function validateOrderForm() {
 // ==========================================================================
 // モーダル表示制御 & サマリー作成
 // ==========================================================================
+function formatDate(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return isNaN(d) ? iso : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${["日", "月", "火", "水", "木", "金", "土"][d.getDay()]})`;
+}
+
 function showConfirmModal(data) {
   // 発注先の取り違え防止のため、施設名を明示する
   const facilityRow = $("summaryFacilityRow");
@@ -326,25 +227,21 @@ function showConfirmModal(data) {
     facilityRow.style.display = "none";
   }
 
-  $("summaryModel").textContent = data.model;
-
-  const toricRow = $("summaryToricRow");
-  if (data.toricModel) {
-    toricRow.style.display = "flex";
-    $("summaryToric").textContent = data.toricModel;
-  } else {
-    toricRow.style.display = "none";
-  }
-
-  $("summaryPower").textContent = data.power;
-  $("summaryQuantity").textContent = data.quantity;
-
-  const dateObj = new Date(data.surgeryDate + "T00:00:00");
-  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
-  const formattedDate = !isNaN(dateObj)
-    ? `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月${dateObj.getDate()}日 (${weekdays[dateObj.getDay()]})`
-    : data.surgeryDate;
-  $("summarySurgeryDate").textContent = formattedDate;
+  // 全明細と合計枚数
+  const list = $("summaryLines");
+  list.replaceChildren(...data.lines.map(l => {
+    const li = document.createElement("li");
+    li.className = "summary-line";
+    const title = document.createElement("div");
+    title.className = "summary-line-title";
+    title.textContent = `${l.lineNo}. ${l.label}`; // メーカー / 具体的な型番
+    const detail = document.createElement("div");
+    detail.className = "summary-line-detail";
+    detail.textContent = `${l.power} ・ ${l.quantity} 枚 ・ 手術日 ${formatDate(l.surgeryDate)}`;
+    li.append(title, detail);
+    return li;
+  }));
+  $("summaryTotal").textContent = `${data.lines.length}明細・合計 ${data.totalQuantity} 枚`;
 
   $("summaryOrderer").textContent = data.orderer;
   $("summaryEmail").textContent = data.email || "（未登録）";
@@ -405,6 +302,10 @@ async function handleExecuteOrder() {
       const r = await orderApi.createOrder(buildCreateOrderRequest(currentPendingOrderData));
       result = { orderId: r.orderNumber, message: "開発用受付・ディーラー未通知", serverDev: true };
     } else {
+      if (appConfig.orderMode === ORDER_MODES.GAS && currentPendingOrderData.lines.length > 1) {
+        // 廃止予定の旧経路(GAS直接送信)は、複数明細に対応しない(誤った内容で送らない)
+        throw new OrderError("failed", "この送信方法は複数のレンズをまとめて注文できません。レンズを1つずつ注文してください");
+      }
       if (appConfig.orderMode !== ORDER_MODES.GAS) {
         console.log("【dryrun】送信予定のペイロード（送信はしていません）:", currentPendingOrderData);
       }
@@ -446,10 +347,8 @@ function showCompleteModal(orderData, result) {
   }
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
-    <div style="margin-bottom: 4px;"><strong>IOLモデル:</strong> ${escapeHtml(orderData.model)}</div>
-    ${orderData.toricModel ? `<div style="margin-bottom: 4px;"><strong>トーリック型番:</strong> ${escapeHtml(orderData.toricModel)}</div>` : ""}
-    <div style="margin-bottom: 4px;"><strong>度数 / 枚数:</strong> ${escapeHtml(orderData.power)} / ${escapeHtml(orderData.quantity)}</div>
-    <div style="margin-bottom: 4px;"><strong>手術予定日:</strong> ${escapeHtml(orderData.surgeryDate)}</div>
+    ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)}</div>`).join("")}
+    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}明細・${escapeHtml(orderData.totalQuantity)}枚</div>
     <div style="margin-bottom: 4px;"><strong>注文者:</strong> ${escapeHtml(orderData.orderer)}</div>
     ${orderData.email ? `<div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>` : ""}
   `;
@@ -463,9 +362,9 @@ function handleResetForNewOrder() {
   document.body.style.overflow = "";
   currentPendingOrderData = null;
 
-  el.form.reset(); // チェックボックスも初期状態(両方OFF)に戻る
-  initModelSelect("");
-  initDefaultDate();
+  el.form.reset();
+  lensLines.reset(); // 1明細・両チェックOFFに戻る
+  updateAlconGuide();
   window.scrollTo({ top: 0, behavior: "smooth" });
   showToast("フォームをリセットしました");
 }
@@ -477,7 +376,7 @@ function handleResetForNewOrder() {
 export function isOrderFormDirty() {
   if (!el.form) return false;
   return Boolean(
-    el.modelSelect.value || el.ordererSelect.value || el.surgeryDateInput.value ||
+    lensLines.isDirty() || el.ordererSelect.value ||
     el.notesInput.value.trim() || currentPendingOrderData
   );
 }
@@ -493,12 +392,13 @@ export async function reloadFacilityOptions() {
     facilityRepository.listOrderers(facilityRepositoryId)
   ]);
 
-  const prevModelKey = el.modelSelect.value;
   const prevOrderer = el.ordererSelect.value;
 
   availableModels = resolveAdoptedModels(adoptedIols);
   while (el.ordererSelect.children.length > 1) el.ordererSelect.removeChild(el.ordererSelect.lastChild);
-  initModelSelect(prevModelKey); // 採用解除などで選択肢から外れた場合は、選択とパワーをリセットする
+  lensOptions = buildLensOptions(availableModels);
+  lensLines.refresh(); // 採用解除などで選択肢から外れた明細は、選択とパワーをリセットする
+  updateAlconGuide();
   initOrdererSelect(orderers.filter(o => o.active));
 
   el.ordererSelect.value = [...el.ordererSelect.options].some(o => o.value === prevOrderer) ? prevOrderer : "";

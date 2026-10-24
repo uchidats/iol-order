@@ -153,3 +153,31 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   const outsider = await createUser("order-outsider@example.jp", { verified: true });
   assert.equal((await call("createOrder", { ...data, requestId: "order-e2e-request-0003" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
 });
+
+test("callable: createOrder は複数明細(まとめ発注)を受け付け、従来の単一IOL形式も同じ注文として扱う", async () => {
+  const owner2 = await createUser("bulk-owner@example.jp", { verified: true });
+  const reg = await call("registerFacility", { name: "ネリマ眼科クリニック", requestId: "order-e2e-register-02" }, owner2.idToken);
+  const fid = reg.body.result.facilityId;
+  for (const id of ["jj-dib00v", "nidek-nsp-2"]) await putDoc(`facilities/${fid}/adoptedIols/${id}`, { facilityId: fid, catalogIolId: id, enabled: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: true });
+  const base = { facilityId: fid, requestId: "order-e2e-request-0101", ordererId: "o1" };
+  const lines = [
+    { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(14) },
+    { modelId: "nidek-nsp-2", power: "+5.5D", quantity: 2, surgeryDate: future(21) }
+  ];
+  const ok = await call("createOrder", { ...base, lines }, owner2.idToken);
+  assert.equal(ok.body.result.lineCount, 2);
+  assert.equal(ok.body.result.totalQuantity, 3);
+  const saved = await getDoc(`facilities/${fid}/orders/${ok.body.result.orderId}`);
+  assert.equal(saved.fields.lines.arrayValue.values.length, 2);
+  // 1明細でも不正なら全体を拒否(明細番号つき)
+  const bad = await call("createOrder", { ...base, requestId: "order-e2e-request-0102", lines: [lines[0], { ...lines[1], power: "+4.5D" }] }, owner2.idToken);
+  assert.equal(bad.body.error.status, "INVALID_ARGUMENT");
+  assert.match(bad.body.error.message, /明細2/);
+  // 従来の単一IOL形式
+  const single = { ...base, requestId: "order-e2e-request-0103", ...lines[0] };
+  const s1 = await call("createOrder", single, owner2.idToken);
+  const s2 = await call("createOrder", { ...base, requestId: "order-e2e-request-0103", lines: [lines[0]] }, owner2.idToken);
+  assert.equal(s2.body.result.orderNumber, s1.body.result.orderNumber);
+  assert.equal(s2.body.result.replayed, true);
+});
