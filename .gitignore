@@ -8,3 +8,5 @@ serviceAccount*.json
 .firebase/
 *-debug.log
 firestore-debug.log
+# 非機密の設定(実行サービスアカウント名)はコミットする
+!functions/.env.medconf-iol-dev
