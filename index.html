@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=0c56fba2ce">
+  <link rel="stylesheet" href="styles.css?v=0522bfde64">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -43,9 +43,10 @@
       "./src/main.js": "./src/main.js?v=69b7cad797",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=cd8d14c8b4",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
-      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=653f881af7",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=af2ec3c72d",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=160fe8335e",
+      "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=386e4c81b7",
       "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=e06344f302",
       "./src/ui/order-form.js": "./src/ui/order-form.js?v=667cab4065"
     }
@@ -101,12 +102,8 @@
 
       <!-- 注文フォーム -->
       <form id="iolOrderForm" class="order-form" novalidate>
-        <!-- レンズの選択（レンズ仕様と手術・発注情報を統合） -->
-        <fieldset class="form-section">
-          <legend class="section-legend">
-            レンズ・手術日の選択
-          </legend>
-
+        <!-- 注文の入力欄(見出し・外枠なし。各レンズは「レンズN」のカード) -->
+        <div class="order-fields">
           <!-- レンズの明細(複数)。各明細に 多焦点・トーリックの絞り込み / IOLモデル / IOLパワー / 枚数 / 手術日 がある(lens-lines.js が生成) -->
           <div id="lensLines" class="lens-lines"></div>
           <div class="lens-lines-actions">
@@ -186,7 +183,7 @@
             </details>
             <p class="error-message" id="err-notesInput"></p>
           </div>
-        </fieldset>
+        </div>
 
         <!-- 送信ボタンエリア -->
         <div class="form-actions">

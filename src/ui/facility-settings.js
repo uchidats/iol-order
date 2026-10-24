@@ -3,6 +3,7 @@ import {
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
 import { planMemberToggle, confirmMessage, memberLabel, sortMembers, newAuditId, buildMemberChange } from "../domain/member-admin.js";
+import { createSectionHeading } from "./info-tip.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
 
@@ -228,8 +229,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
-      h("h3", {}, "注文者"),
-      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。鉛筆で名前・メールを編集、↑↓で並び替え、ゴミ箱で削除できます（過去の注文には影響しません）。並び順は上から順です。"),
+      createSectionHeading("注文者", "注文フォームの「注文者」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "注文者を追加"),
@@ -252,8 +252,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 採用IOL ----------
   function iolSection() {
     const section = h("section", { class: "settings-section", "data-section": "iols" },
-      h("h3", {}, "採用IOL"),
-      h("p", { class: "form-hint" }, "共通のIOLマスターから、この施設で使うモデルを選びます。チェックしたモデルだけが注文フォームに表示されます。"),
+      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" }, h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "採用IOLを保存")),
       h("p", { class: "form-hint", "data-msg": "" }));
@@ -303,8 +302,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function dealerSection() {
     const section = h("section", { class: "settings-section", "data-section": "dealers" },
-      h("h3", {}, "ディーラー"),
-      h("p", { class: "form-hint" }, "発注先ディーラーの連絡先を登録します。発注用と使用報告用のメールアドレスは別々に管理します。現在は登録のみで、メール送信やディーラーとの連携は行いません。"),
+      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。現在は登録のみで、メール送信は行われません。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "ディーラーを追加"),
@@ -347,8 +345,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function memberSection() {
     return h("section", { class: "settings-section", "data-section": "members" },
-      h("h3", {}, "利用者管理"),
-      h("p", { class: "form-hint" }, "この施設に所属するユーザーです。一般注文者は無効化・再有効化できます（無効化すると、この施設の注文画面・設定を利用できなくなります）。管理者の変更はできません。"),
+      createSectionHeading("利用者管理", "この施設に所属するユーザーです。一般注文者は無効化・再有効化できます（無効化すると、この施設の注文画面・設定を利用できなくなります）。管理者の変更はできません。"),
       h("div", { "data-list": "" }),
       h("p", { class: "form-hint", "data-msg": "" }));
   }
@@ -397,8 +394,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const emailInput = h("input", { class: "form-control", type: "email", "data-f": "inviteEmail", placeholder: "招待するメールアドレス", "aria-label": "招待するメールアドレス" });
     const btn = h("button", { type: "button", class: "btn btn-primary", "data-act": "invite" }, "招待コードを発行");
     const section = h("section", { class: "settings-section", "data-section": "invites" },
-      h("h3", {}, "メンバーの招待"),
-      h("p", { class: "form-hint" }, "招待したメールアドレスでログインした本人だけが、注文者として参加できます。招待コードは発行時に1度だけ表示されます（有効期限7日）。メールは自動送信されません。安全な方法でご本人にお伝えください。"),
+      createSectionHeading("メンバーの招待", "招待したメールアドレスでログインした本人だけが参加できます。招待コードの有効期限は7日間で、1回のみ使用可能です。メールは自動送信されないため、本人に直接お伝えください。"),
       h("div", { class: "settings-actions" }, emailInput, btn),
       result,
       h("p", { class: "form-hint", "data-msg": "" }));
