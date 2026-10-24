@@ -408,6 +408,29 @@ test("招待と利用枠は、運営者権限を含むどのクライアント�
   }
 });
 
+// ================= 利用者管理との整合 =================
+test("無効化された後は、無効化より前に発行された招待で再有効化できない。無効化の後に発行した招待なら再有効化できる", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin();
+  const old = await service.createInvite({ auth: admin, data: { facilityId, email: "ex@example.jp" } });
+  await seedMember(facilityId, "ex", "orderer");
+  await new Promise(r => setTimeout(r, 20));
+  await db.doc(`facilities/${facilityId}/members/ex`).update({ status: "disabled", updatedAt: FieldValue.serverTimestamp() }); // 管理者による無効化
+  await rejects(service.acceptInvite({ auth: user("ex"), data: { token: old.token } }), "failed-precondition");
+  assert.equal((await db.doc(`facilities/${facilityId}/members/ex`).get()).get("status"), "disabled");
+  await new Promise(r => setTimeout(r, 20));
+  const fresh = await service.createInvite({ auth: admin, data: { facilityId, email: "ex@example.jp" } });
+  await service.acceptInvite({ auth: user("ex"), data: { token: fresh.token } });
+  assert.equal((await db.doc(`facilities/${facilityId}/members/ex`).get()).get("status"), "active");
+});
+
+test("所属ドキュメントに確認済みメールが記録される(利用者管理の表示用)", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin();
+  assert.equal((await db.doc(`facilities/${facilityId}/members/adminA`).get()).get("email"), "admina@example.jp");
+  const inv = await service.createInvite({ auth: admin, data: { facilityId, email: "New@Example.jp" } });
+  await service.acceptInvite({ auth: user("newbie", { email: "New@Example.jp" }), data: { token: inv.token } });
+  assert.equal((await db.doc(`facilities/${facilityId}/members/newbie`).get()).get("email"), "new@example.jp");
+});
+
 // ================= レート制限・期限切れ招待・複数施設 =================
 test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否され、時間経過で回復し、他ユーザーには影響しない", async () => {
   const a = user("userA");

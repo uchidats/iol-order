@@ -25,7 +25,9 @@ export function createFirestoreRepository(db, fs) {
     },
     listOrderers: async (facilityId) => (await listSub(facilityId, "orderers")).sort(bySortOrder),
     listAdoptedIols: (facilityId) => listSub(facilityId, "adoptedIols"),
-    listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder)
+    listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
+    /** 所属ユーザー（施設管理者のみ読める）。id = uid */
+    listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id }))
   };
 }
 
@@ -64,6 +66,13 @@ export function createFirestoreSettingsApi(db, fs) {
   return {
     saveOrderers: (facilityId, writes) => commit(facilityId, "orderers", writes),
     saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
-    saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes)
+    saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),
+    /** 所属の有効/無効の変更と操作記録を1つのバッチで書く（どちらか片方だけの反映はRulesが拒否する） */
+    async applyMemberChange({ facilityId, auditId, memberUid, memberUpdate, log }) {
+      const batch = fs.writeBatch(db);
+      batch.update(fs.doc(db, "facilities", facilityId, "members", memberUid), { ...memberUpdate, updatedAt: fs.serverTimestamp() });
+      batch.set(fs.doc(db, "facilities", facilityId, "auditLogs", auditId), { ...log, at: fs.serverTimestamp() });
+      await batch.commit();
+    }
   };
 }

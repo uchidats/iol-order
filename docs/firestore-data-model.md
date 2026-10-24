@@ -77,3 +77,11 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 - メンバー招待フロー（現状は運営者/管理者が uid を指定して `members` を作る必要がある）
 - 複数施設に所属するユーザーの施設切替UI（現状は facilityId 昇順の先頭）
 - `createOrder`（orderId 発行・冪等化・メール送信）、IOLシール画像、ディーラー向けSN照合
+
+## 利用者管理（施設管理者）
+画面: 施設設定 > 利用者管理。所属ユーザーの氏名・メール・権限・状態を表示し、**一般注文者(orderer)** の無効化・再有効化ができる（確認ダイアログあり）。
+- 変更できるのは他人の orderer の `status` のみ。権限(role)の変更・管理者の変更・自分自身の変更・所属の作成/削除は、施設管理者にはできない（Rules で強制）。したがって有効な管理者が0人になる操作は構造的に不可能（運営者による操作を除く）。画面でも管理者の行には操作を出さない。
+- 無効化は即時に効く。`isMember()` が毎回 `status=active` を参照するため、既存のログイン中セッションも次のリクエストから、その施設の読み書き全てが拒否される。
+- **操作記録** `facilities/{fid}/auditLogs/{id}`: `action(member.disable|member.enable)`, `targetUid`, `targetRole`, `targetName?`, `actorUid`, `actorName?`, `fromStatus`, `toStatus`, `at`。追記のみ（更新・削除不可）、施設管理者と運営者だけが読める。所属の変更と**同じバッチでのみ**作成でき、所属側の `lastAuditId` と相互に突き合わせるため、記録なしの変更・変更なしの記録・操作者の偽装はできない。
+- `members/{uid}.email`: 参加・登録時にサーバーが確認済みメールを記録する（表示用）。この機能の導入前に作られた所属には無く、画面では「—」と表示される。
+- 無効化された人は、無効化より前に発行された招待コードでは再参加できない（Functions `acceptInvite`）。再び参加させるには、無効化の後に新しい招待を発行する。

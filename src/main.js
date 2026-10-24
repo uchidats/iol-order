@@ -103,6 +103,7 @@ async function bootstrapWithFirebase(config) {
         settingsApi: ctx.settingsApi,
         masters: IOL_MODELS,
         inviteApi: ctx.registrationApi,
+        currentUser: { uid: state.user.uid, displayName: state.user.displayName },
         onSaved: () => reloadFacilityOptions(),
         onClose: () => setOrderViewHidden(false)
       });

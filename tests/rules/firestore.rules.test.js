@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment, assertSucceeds, assertFails
 } from "@firebase/rules-unit-testing";
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, deleteField
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, deleteField, writeBatch, serverTimestamp
 } from "firebase/firestore";
 
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
@@ -172,9 +172,97 @@ test("施設管理者は admin 権限を付与・昇格できない（orderer �
   const db = as("adminA");
   await assertFails(setDoc(doc(db, "facilities/fA/members/newAdmin"), member("newAdmin", "admin")));
   await assertFails(updateDoc(doc(db, "facilities/fA/members/ordA"), { role: "admin" }));
-  await assertSucceeds(setDoc(doc(db, "facilities/fA/members/newOrd"), member("newOrd", "orderer")));
-  await assertSucceeds(updateDoc(doc(db, "facilities/fA/members/ordA"), { status: "disabled" }));
-  await assertSucceeds(deleteDoc(doc(db, "facilities/fA/members/newOrd")));
+  // 施設管理者は所属を直接作成・削除できない（参加は招待経由のサーバー処理のみ）
+  await assertFails(setDoc(doc(db, "facilities/fA/members/newOrd"), member("newOrd", "orderer")));
+  await assertFails(deleteDoc(doc(db, "facilities/fA/members/ordA")));
+  await assertSucceeds(toggle(db, "fA", "ordA", "active", "disabled"));
+});
+
+// ---------- 利用者管理(無効化・再有効化・操作記録) ----------
+const AUD = "aud0123456789abcdef";
+function toggle(db, fid, uid, from, to, { actorUid = "adminA", auditId = AUD, member: memberPatch = {}, log = {}, skipLog = false, skipMember = false } = {}) {
+  const b = writeBatch(db);
+  if (!skipMember) {
+    b.update(doc(db, `facilities/${fid}/members/${uid}`), { status: to, updatedAt: serverTimestamp(), lastAuditId: auditId, ...memberPatch });
+  }
+  if (!skipLog) {
+    b.set(doc(db, `facilities/${fid}/auditLogs/${auditId}`), {
+      action: to === "disabled" ? "member.disable" : "member.enable", targetUid: uid, targetRole: "orderer",
+      fromStatus: from, toStatus: to, actorUid, at: serverTimestamp(), ...log
+    });
+  }
+  return b.commit();
+}
+
+test("利用者管理: 無効化すると、その注文者の既存セッションでも自施設のデータにアクセスできなくなる。再有効化で戻る", async () => {
+  const ord = as("ordA");
+  await assertSucceeds(getDocs(collection(ord, "facilities/fA/orderers")));
+  await assertSucceeds(toggle(as("adminA"), "fA", "ordA", "active", "disabled"));
+  await assertFails(getDocs(collection(ord, "facilities/fA/orderers")));
+  await assertFails(getDocs(collection(ord, "facilities/fA/adoptedIols")));
+  await assertFails(getDocs(collection(ord, "facilities/fA/facilityDealers")));
+  await assertFails(getDoc(doc(ord, "facilities/fA")));
+  await assertFails(getDocs(collection(ord, "facilities/fA/orders")));
+  await assertSucceeds(toggle(as("adminA"), "fA", "ordA", "disabled", "active", { auditId: "aud0123456789abcdeg" }));
+  await assertSucceeds(getDocs(collection(ord, "facilities/fA/orderers")));
+});
+
+test("利用者管理: 操作記録が残り、施設管理者のみ読め、書き換え・削除はできない", async () => {
+  await assertSucceeds(toggle(as("adminA"), "fA", "ordA", "active", "disabled"));
+  const admin = as("adminA");
+  const snap = await assertSucceeds(getDoc(doc(admin, `facilities/fA/auditLogs/${AUD}`)));
+  const d = snap.data();
+  if (d.action !== "member.disable" || d.targetUid !== "ordA" || d.actorUid !== "adminA" || !d.at) throw new Error("audit log content");
+  await assertSucceeds(getDocs(collection(admin, "facilities/fA/auditLogs")));
+  await assertFails(updateDoc(doc(admin, `facilities/fA/auditLogs/${AUD}`), { toStatus: "active" }));
+  await assertFails(deleteDoc(doc(admin, `facilities/fA/auditLogs/${AUD}`)));
+  await assertFails(getDocs(collection(as("ordA"), "facilities/fA/auditLogs")));
+  await assertFails(getDocs(collection(as("adminB"), "facilities/fA/auditLogs")));
+  await assertFails(getDocs(collection(anon(), "facilities/fA/auditLogs")));
+});
+
+test("利用者管理: 操作記録なしの所属変更、所属変更なしの記録、記録内容の偽装は拒否", async () => {
+  const db = as("adminA");
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { skipLog: true }));
+  await assertFails(updateDoc(doc(db, "facilities/fA/members/ordA"), { status: "disabled" }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { skipMember: true }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { log: { actorUid: "someoneElse" } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { log: { toStatus: "active" } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { log: { action: "member.enable" } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { log: { targetUid: "ordZ" } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { log: { extra: 1 } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { member: { updatedAt: new Date("2020-01-01") } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { auditId: "short" }));
+  // 状態が変わらない操作・実際の状態と食い違う記録
+  await assertFails(toggle(db, "fA", "ordA", "active", "active", { log: { action: "member.disable", toStatus: "disabled" } }));
+  await assertFails(toggle(db, "fA", "offA", "active", "disabled"));
+});
+
+test("利用者管理: 権限(role)・他の項目は変更できない。自分自身・管理者・他施設の所属は変更できない", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "facilities/fA/members/adminA2"), member("adminA2", "admin"));
+  });
+  const db = as("adminA");
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { member: { role: "admin" } }));
+  await assertFails(toggle(db, "fA", "ordA", "active", "disabled", { member: { displayName: "改名" } }));
+  await assertFails(toggle(db, "fA", "adminA", "active", "disabled")); // 自分自身(最後の有効な管理者)
+  await assertFails(toggle(db, "fA", "adminA2", "active", "disabled", { log: { targetRole: "admin" } }));
+  await assertFails(toggle(db, "fA", "adminA2", "active", "disabled"));
+  await assertFails(toggle(as("adminB"), "fA", "ordA", "active", "disabled", { actorUid: "adminB" })); // 他施設の管理者
+  await assertFails(toggle(db, "fB", "ordB", "active", "disabled")); // 他施設の所属
+  await assertFails(toggle(as("ordA"), "fA", "offA", "disabled", "active", { actorUid: "ordA" })); // 注文者は管理操作不可
+  await assertFails(toggle(as("offA"), "fA", "ordA", "active", "disabled", { actorUid: "offA" })); // 無効化された管理操作者
+  // 結果として何も変わっていない
+  for (const p of ["facilities/fA/members/ordA", "facilities/fA/members/adminA", "facilities/fA/members/adminA2", "facilities/fB/members/ordB"]) {
+    if ((await getDoc(doc(platform(), p))).data().status !== "active") throw new Error("changed: " + p);
+  }
+});
+
+test("利用者管理: 所属一覧は自施設の管理者だけが読める", async () => {
+  await assertSucceeds(getDocs(collection(as("adminA"), "facilities/fA/members")));
+  await assertFails(getDocs(collection(as("adminA"), "facilities/fB/members")));
+  await assertFails(getDocs(collection(as("ordA"), "facilities/fA/members")));
+  await assertFails(getDocs(collection(as("offA"), "facilities/fA/members")));
 });
 
 test("所属ドキュメントの uid 偽装・不正フィールドは拒否", async () => {

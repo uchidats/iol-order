@@ -213,7 +213,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       });
       tx.create(memRef, {
         uid: user.uid, role: "admin", status: "active",
-        displayName: user.displayName, updatedAt: FieldValue.serverTimestamp()
+        displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
       });
       tx.set(quotaRef, { count: count + 1, keys: [...keys, key], updatedAt: FieldValue.serverTimestamp() });
       return { status: "created", facilityId };
@@ -274,11 +274,18 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       const [fac, mem] = await Promise.all([tx.get(facRef), tx.get(memRef)]);
       if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_INVITE);
 
+      // 管理者が無効化した後に使われる、無効化より前に発行された招待では再有効化しない（無効化の回避を防ぐ）。
+      // 再び参加させるには、無効化の後に新しい招待を発行する。
+      if (mem.exists && mem.get("status") === "disabled" && mem.get("updatedAt") && inv.get("createdAt")
+          && mem.get("updatedAt").toMillis() >= inv.get("createdAt").toMillis()) {
+        throw new RegistrationError("failed-precondition", INVALID_INVITE);
+      }
+
       // 既に admin の人を orderer に降格しない。それ以外は orderer として有効化
       if (!(mem.exists && mem.get("role") === "admin" && mem.get("status") === "active")) {
         tx.set(memRef, {
           uid: user.uid, role: "orderer", status: "active",
-          displayName: user.displayName, updatedAt: FieldValue.serverTimestamp()
+          displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
         });
       }
       tx.update(inviteRef, { status: "used", usedBy: user.uid, usedAt: FieldValue.serverTimestamp() });

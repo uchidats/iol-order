@@ -2,6 +2,7 @@ import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
+import { planMemberToggle, confirmMessage, memberLabel, sortMembers, newAuditId, buildMemberChange } from "../domain/member-admin.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
 
@@ -35,14 +36,15 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {Array<object>} deps.masters 共通IOLマスター（IOL_MODELS）
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
  * @param {() => void} deps.onClose
+ * @param {{uid:string, displayName?:string}} [deps.currentUser] 操作者（利用者管理の操作記録に使う）
  * @param {{createInvite:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
   let facility = null;
-  let data = { orderers: [], adopted: [], dealers: [] };
+  let data = { orderers: [], adopted: [], dealers: [], members: [] };
   let dirty = false;
   let open = false;
   const markDirty = () => { dirty = true; };
@@ -59,7 +61,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       repository.listAdoptedIols(facility.id),
       repository.listDealers(facility.id)
     ]);
-    data = { orderers, adopted, dealers };
+    data = { orderers, adopted, dealers, members: canManageMembers ? await repository.listMembers(facility.id) : [] };
   }
 
   // ---------- 注文者 ----------
@@ -237,6 +239,54 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     section.querySelector("[data-list]").replaceChildren(...data.dealers.map(dealerRow));
   }
 
+  // ---------- 利用者管理 ----------
+  const canManageMembers = Boolean(currentUser && repository.listMembers && settingsApi.applyMemberChange);
+
+  function memberSection() {
+    return h("section", { class: "settings-section", "data-section": "members" },
+      h("h3", {}, "利用者管理"),
+      h("p", { class: "form-hint" }, "この施設に所属するユーザーです。一般注文者は無効化・再有効化できます（無効化すると、この施設の注文画面・設定を利用できなくなります）。管理者の変更はできません。"),
+      h("div", { "data-list": "" }),
+      h("p", { class: "form-hint", "data-msg": "" }));
+  }
+
+  function renderMembers(section) {
+    const list = section.querySelector("[data-list]");
+    const rows = sortMembers(data.members).map((m) => {
+      const plan = planMemberToggle(data.members, m, currentUser.uid);
+      const active = m.status === "active";
+      const btn = plan.ok
+        ? h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "toggle-member" }, plan.to === "disabled" ? "無効化" : "再有効化")
+        : h("span", { class: "form-hint", title: plan.reason }, m.uid === currentUser.uid ? "（自分）" : "—");
+      const row = h("div", { class: "settings-row", "data-uid": m.uid },
+        h("span", { "data-f": "name" }, memberLabel(m)),
+        h("span", { "data-f": "email" }, m.email || "—"),
+        h("span", { "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者"),
+        h("span", { "data-f": "status", class: active ? "" : "error-message" }, active ? "有効" : "無効"),
+        btn);
+      if (plan.ok) {
+        btn.addEventListener("click", async () => {
+          if (!window.confirm(confirmMessage(m, plan))) return;
+          btn.disabled = true;
+          message(section, "更新しています…");
+          try {
+            const change = buildMemberChange({ facilityId: facility.id, target: m, plan, actor: currentUser, auditId: newAuditId() });
+            await settingsApi.applyMemberChange(change);
+            data.members = await repository.listMembers(facility.id);
+            renderMembers(section);
+            message(section, plan.to === "disabled" ? "無効化しました。" : "再度有効にしました。");
+          } catch (e) {
+            console.error("利用者の更新に失敗しました:", e);
+            message(section, "更新できませんでした。権限がない、またはネットワークの問題の可能性があります。", true);
+            btn.disabled = false;
+          }
+        });
+      }
+      return row;
+    });
+    list.replaceChildren(...(rows.length ? rows : [h("p", { class: "form-hint" }, "所属ユーザーはいません。")]));
+  }
+
   // ---------- メンバー招待 ----------
   function inviteSection() {
     const result = h("div", { "data-result": "" });
@@ -277,6 +327,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   // ---------- 画面全体 ----------
   const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
+  if (canManageMembers) sections.members = memberSection();
   if (inviteApi) sections.invites = inviteSection();
   const title = h("span", { class: "settings-facility" });
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnSettingsClose" }, "注文画面に戻る");
@@ -311,6 +362,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         renderOrderers(sections.orderers);
         renderIols(sections.iols);
         renderDealers(sections.dealers);
+        if (sections.members) renderMembers(sections.members);
         status.textContent = "";
         dirty = false;
       } catch (e) {
