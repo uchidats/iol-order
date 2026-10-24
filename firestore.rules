@@ -45,6 +45,19 @@ service cloud.firestore {
       return v is string && v.size() >= min && v.size() <= max;
     }
 
+    // 施設の位置情報（現在地による施設選択の補助用。アクセス権限の根拠にはしない）
+    // location: { lat, lng } / geoRadiusM: 判定距離(m)。値は管理者が登録し、ここでは妥当な範囲かだけを検証する。
+    function validGeo(d) {
+      return (!('location' in d)
+              || (d.location is map
+                  && d.location.keys().hasOnly(['lat', 'lng'])
+                  && d.location.keys().hasAll(['lat', 'lng'])
+                  && d.location.lat is number && d.location.lat >= -90 && d.location.lat <= 90
+                  && d.location.lng is number && d.location.lng >= -180 && d.location.lng <= 180))
+          && (!('geoRadiusM' in d)
+              || (d.geoRadiusM is number && d.geoRadiusM >= 10 && d.geoRadiusM <= 5000));
+    }
+
     // ---------- マスター ----------
     match /iolCatalog/{catalogIolId} {
       allow read: if signedIn();
@@ -62,11 +75,12 @@ service cloud.firestore {
       allow get: if isPlatformAdmin() || isMember(fid);
       allow list: if isPlatformAdmin();
       allow create: if isPlatformAdmin();
-      // 施設管理者は表示名のみ変更可（status 等は変更不可）
+      // 施設管理者は表示名と位置情報のみ変更可（status 等は変更不可）
       allow update: if isPlatformAdmin()
         || (isFacilityAdmin(fid)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt'])
-            && stringIn(request.resource.data.name, 1, 100));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'location', 'geoRadiusM', 'updatedAt'])
+            && stringIn(request.resource.data.name, 1, 100)
+            && validGeo(request.resource.data));
       allow delete: if false;
 
       // 所属メンバー

@@ -2,6 +2,7 @@
 //   node scripts/admin/run.mjs lookup --email <メール>
 //   node scripts/admin/run.mjs grant-platform-admin --uid <UID> [--apply --confirm-uid <UID>]
 //   node scripts/admin/run.mjs create-facility --facility-id <id> --facility-name <名称> [--apply --confirm-facility-id <id>]
+//   node scripts/admin/run.mjs set-facility-geo --facility-id <id> --lat <緯度> --lng <経度> --radius-m <判定距離m> [--apply --confirm-facility-id <id>]
 //   node scripts/admin/run.mjs add-facility-admin --facility-id <id> --uid <UID> [--apply --confirm-uid <UID>]
 // 既定は dry-run（何も書き込まない）。認証は Application Default Credentials のみ。
 import { parseArgs, buildPlan, ACTIONS, ALLOWED_PROJECT } from "./plan.mjs";
@@ -62,6 +63,16 @@ async function main() {
     if (!plan.apply) return console.log("DRY-RUN: 変更していません。");
     await ref.create({ ...op.data, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     console.log("施設を作成しました。");
+    return;
+  }
+
+  if (plan.action === ACTIONS.SET_FACILITY_GEO) {
+    const ref = db.doc(op.path);
+    console.log("実行内容:", op.type, op.path, op.data);
+    if (!(await ref.get()).exists) throw new Error("施設が存在しません");
+    if (!plan.apply) return console.log("DRY-RUN: 変更していません。");
+    await ref.update({ ...op.data, updatedAt: FieldValue.serverTimestamp() });
+    console.log("施設の位置情報を更新しました。");
     return;
   }
 

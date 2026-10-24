@@ -32,11 +32,33 @@ test("無効・不正な所属は許可しない", () => {
   }
 });
 
-test("有効な所属があれば許可し、施設IDと権限を返す", () => {
-  const r = decideAccess({ ...base, memberships: [m({ facilityId: "b" }), m({ facilityId: "a", role: "admin" })] });
+test("所属が1つなら選択なしで自動確定（権限も返す）", () => {
+  const r = decideAccess({ ...base, memberships: [m({ facilityId: "a", role: "admin" }), m({ facilityId: "x", status: "disabled" })] });
   assert.equal(r.state, ACCESS.GRANTED);
   assert.equal(r.facilityId, "a");
   assert.equal(r.role, "admin");
+});
+
+test("複数所属で選択が無ければ SELECT_FACILITY（有効な所属のみ）", () => {
+  const r = decideAccess({ ...base, memberships: [m({ facilityId: "b" }), m({ facilityId: "a" }), m({ facilityId: "c", status: "disabled" })] });
+  assert.equal(r.state, ACCESS.SELECT_FACILITY);
+  assert.deepEqual(r.memberships.map(x => x.facilityId), ["a", "b"]);
+});
+
+test("複数所属: 検証済みの所属に含まれる選択のみ採用する", () => {
+  const ms = [m({ facilityId: "a" }), m({ facilityId: "b", role: "admin" }), m({ facilityId: "c", status: "disabled" })];
+  const ok = decideAccess({ ...base, memberships: ms, selectedFacilityId: "b" });
+  assert.equal(ok.state, ACCESS.GRANTED);
+  assert.equal(ok.facilityId, "b");
+  assert.equal(ok.role, "admin");
+  // 端末の記憶値が所属に無い / 無効な所属 / 他人の施設 → 許可しない
+  for (const forged of ["zzz", "c", "", null]) {
+    assert.equal(decideAccess({ ...base, memberships: ms, selectedFacilityId: forged }).state, ACCESS.SELECT_FACILITY, String(forged));
+  }
+});
+
+test("所属ゼロのユーザーは、記憶された施設IDがあっても許可しない", () => {
+  assert.equal(decideAccess({ ...base, memberships: [], selectedFacilityId: "a" }).state, ACCESS.NO_MEMBERSHIP);
 });
 
 test("Firebase設定: 開発プロジェクトの値が揃っている（秘密鍵類は含まない）", () => {

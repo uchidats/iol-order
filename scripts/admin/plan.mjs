@@ -11,7 +11,8 @@ export const ACTIONS = Object.freeze({
   LOOKUP: "lookup",
   GRANT_PLATFORM_ADMIN: "grant-platform-admin",
   CREATE_FACILITY: "create-facility",
-  ADD_FACILITY_ADMIN: "add-facility-admin"
+  ADD_FACILITY_ADMIN: "add-facility-admin",
+  SET_FACILITY_GEO: "set-facility-geo"
 });
 
 const UID_RE = /^[A-Za-z0-9]{20,128}$/;
@@ -52,7 +53,7 @@ export function buildPlan(args) {
   if ([ACTIONS.GRANT_PLATFORM_ADMIN, ACTIONS.ADD_FACILITY_ADMIN].includes(action) && !UID_RE.test(args.uid || "")) {
     errors.push("--uid に有効なUIDを指定してください（lookup で確認）");
   }
-  if ([ACTIONS.CREATE_FACILITY, ACTIONS.ADD_FACILITY_ADMIN].includes(action) && !FACILITY_ID_RE.test(args.facilityId || "")) {
+  if ([ACTIONS.CREATE_FACILITY, ACTIONS.ADD_FACILITY_ADMIN, ACTIONS.SET_FACILITY_GEO].includes(action) && !FACILITY_ID_RE.test(args.facilityId || "")) {
     errors.push("--facility-id は小文字英数字とハイフンの3〜41文字にしてください");
   }
   if (action === ACTIONS.CREATE_FACILITY) {
@@ -60,10 +61,19 @@ export function buildPlan(args) {
     if (n.length < 1 || n.length > 100) errors.push("--facility-name は1〜100文字で指定してください");
   }
 
+  let geo = null;
+  if (action === ACTIONS.SET_FACILITY_GEO) {
+    const lat = Number(args.lat), lng = Number(args.lng), r = Number(args.radiusM);
+    if (args.lat === undefined || !Number.isFinite(lat) || lat < -90 || lat > 90) errors.push("--lat は -90〜90 の数値で指定してください");
+    if (args.lng === undefined || !Number.isFinite(lng) || lng < -180 || lng > 180) errors.push("--lng は -180〜180 の数値で指定してください");
+    if (args.radiusM === undefined || !Number.isFinite(r) || r < 10 || r > 5000) errors.push("--radius-m は 10〜5000 の数値で指定してください");
+    geo = { lat, lng, radiusM: r };
+  }
+
   const mutating = action && action !== ACTIONS.LOOKUP;
   if (mutating && args.apply && (!args.confirmUid || args.confirmUid !== args.uid)) {
     // create-facility は uid を取らないため、確認用に facility-id を要求する
-    if (action === ACTIONS.CREATE_FACILITY) {
+    if (action === ACTIONS.CREATE_FACILITY || action === ACTIONS.SET_FACILITY_GEO) {
       if (args.confirmFacilityId !== args.facilityId) errors.push("--apply には --confirm-facility-id <facility-id> の一致が必要です");
     } else {
       errors.push("--apply には --confirm-uid <対象UID> の一致が必要です");
@@ -91,6 +101,12 @@ export function buildPlan(args) {
         type: "firestore.create", path: `facilities/${args.facilityId}/members/${args.uid}`,
         data: { uid: args.uid, role: "admin", status: "active" }, failIfExists: true,
         requires: [`facilities/${args.facilityId} が存在する`, `Authユーザー ${args.uid} が存在する`]
+      });
+      break;
+    case ACTIONS.SET_FACILITY_GEO:
+      plan.operations.push({
+        type: "firestore.update", path: `facilities/${args.facilityId}`,
+        data: { location: { lat: geo.lat, lng: geo.lng }, geoRadiusM: geo.radiusM }, requires: [`facilities/${args.facilityId} が存在する`]
       });
       break;
   }

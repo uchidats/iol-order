@@ -162,3 +162,7 @@ tests/                      `npm test`（Node標準テストランナー）
 - **サービスアカウント秘密鍵・Admin SDK 認証情報は Git に置かないこと**（`.gitignore` で代表的なファイル名を除外済み）。Web 用の `firebaseConfig` は公開前提の識別情報で、秘密鍵とは別物です。
 
 詳細な運用手順（Console設定・ログイン接続テスト・管理者初期登録）は [docs/firebase-dev-runbook.md](docs/firebase-dev-runbook.md) を参照。
+
+### 施設選択と位置情報
+複数施設に所属するユーザーは、ログイン直後に施設を選択します（所属1つなら自動）。前回の施設は端末に記憶して自動復元、切替はヘッダーメニューから。
+位置情報（任意）は、同意した端末でログイン時に1回だけ取得し、施設の登録座標とブラウザ内で比較します。保存・送信・継続追跡はせず、アクセス権限の判断にも使いません。詳細は [docs/firestore-data-model.md](docs/firestore-data-model.md)。

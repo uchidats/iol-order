@@ -1377,3 +1377,85 @@ input[type="date"].form-control {
   from { opacity: 0; transform: translate(-50%, 15px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* ==========================================================================
+   ヘッダーメニュー・施設選択（Firebase有効時のみ使用）
+   ========================================================================== */
+.header-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.header-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.header-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 48px;
+  min-width: 220px;
+  padding: 8px;
+  color: #1f2937;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 20;
+}
+
+.header-menu-panel[hidden] {
+  display: none;
+}
+
+.header-menu-info {
+  padding: 4px 8px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.header-menu-label {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+.header-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 8px;
+  text-align: left;
+  font-size: 0.95rem;
+  color: #1f2937;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.header-menu-item:hover {
+  background-color: #f3f4f6;
+}
+
+.facility-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.facility-select-list .btn {
+  justify-content: flex-start;
+  text-align: left;
+}

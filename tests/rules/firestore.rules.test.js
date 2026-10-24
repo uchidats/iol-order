@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment, assertSucceeds, assertFails
 } from "@firebase/rules-unit-testing";
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, collectionGroup, query, where, deleteField
 } from "firebase/firestore";
 
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
@@ -231,4 +231,36 @@ test("未定義のコレクションは全拒否（users 等）", async () => {
   await assertFails(setDoc(doc(as("ordA"), "users/ordA"), { role: "admin" }));
   await assertFails(getDoc(doc(as("ordA"), "users/ordA")));
   await assertFails(getDoc(doc(platform(), "unknown/x")));
+});
+
+// ---------- 施設の位置情報（現在地による施設選択の補助データ） ----------
+test("施設管理者は自施設の位置情報と判定距離を登録・削除できる", async () => {
+  const db = as("adminA");
+  await assertSucceeds(updateDoc(doc(db, "facilities/fA"), { location: { lat: 35.0, lng: 139.0 }, geoRadiusM: 150 }));
+  await assertSucceeds(updateDoc(doc(db, "facilities/fA"), { geoRadiusM: 300 }));
+  await assertSucceeds(updateDoc(doc(db, "facilities/fA"), { location: deleteField(), geoRadiusM: deleteField() }));
+});
+
+test("位置情報の不正な値・余分なキーは拒否", async () => {
+  const db = as("adminA");
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: 200, lng: 139 } }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: 35, lng: -181 } }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: "35", lng: 139 } }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: 35 } }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: 35, lng: 139, alt: 1 } }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { geoRadiusM: 5 }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { geoRadiusM: 100000 }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { geoRadiusM: "150" }));
+});
+
+test("位置情報は orderer・他施設の管理者は変更できないが、所属メンバーは読める", async () => {
+  await assertFails(updateDoc(doc(as("ordA"), "facilities/fA"), { location: { lat: 35, lng: 139 } }));
+  await assertFails(updateDoc(doc(as("adminB"), "facilities/fA"), { location: { lat: 35, lng: 139 } }));
+  await assertSucceeds(updateDoc(doc(as("adminA"), "facilities/fA"), { location: { lat: 35, lng: 139 }, geoRadiusM: 100 }));
+  await assertSucceeds(getDoc(doc(as("ordA"), "facilities/fA")));
+  await assertFails(getDoc(doc(as("ordB"), "facilities/fA")));
+});
+
+test("位置情報と同時に status 等を変更することはできない", async () => {
+  await assertFails(updateDoc(doc(as("adminA"), "facilities/fA"), { location: { lat: 35, lng: 139 }, status: "suspended" }));
 });

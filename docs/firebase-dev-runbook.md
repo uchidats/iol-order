@@ -66,6 +66,14 @@ gcloud auth application-default set-quota-project medconf-iol-dev
    ```
 いずれも既存ドキュメントを上書きしない（`create` のみ）。
 
+### 4-3. 施設の位置情報（現在地による施設選択用・任意）
+座標と判定距離は施設ごとに運営者／施設管理者が登録する（推測値は登録しない）。複数施設に所属するユーザーの自動選択にのみ使われ、未登録の施設は判定対象外。
+```
+node scripts/admin/run.mjs set-facility-geo --facility-id <id> --lat <緯度> --lng <経度> --radius-m <判定距離m>
+node scripts/admin/run.mjs set-facility-geo --facility-id <id> --lat <緯度> --lng <経度> --radius-m <判定距離m> --apply --confirm-facility-id <id>
+```
+判定距離は後から同じコマンドで調整できる（10〜5000m）。Rules を更新したため、反映には `npm run deploy:dev:firestore` が必要。
+
 ## 5. 守ること
 - サービスアカウント鍵・Admin SDK 認証情報は作成・保存・commit しない。
 - 注文は dryrun のまま。Forms / 本番GAS / 本番Firebaseには触れない。

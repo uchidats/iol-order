@@ -12,6 +12,7 @@ let availableModels = [];
 let selectedModelData = null;
 let currentPendingOrderData = null;
 let currentAllowedPowers = [...GOOGLE_FORM_ALL_POWERS];
+let currentFacility = null; // { id, name }（Firebase有効時のみ）
 
 const el = {};
 
@@ -49,10 +50,12 @@ function cacheElements() {
  * @param {object} deps.config アプリ設定
  * @param {import("../data/schema.js").FacilityRepository} deps.repository
  * @param {string} deps.facilityId
+ * @param {{id:string, name:string}} [deps.facility] 注文確認画面に表示する施設（Firebase有効時）
  */
-export async function initOrderForm({ config, repository, facilityId }) {
+export async function initOrderForm({ config, repository, facilityId, facility = null }) {
   cacheElements();
   appConfig = config;
+  currentFacility = facility;
 
   const [adoptedIols, orderers] = await Promise.all([
     repository.listAdoptedIols(facilityId),
@@ -295,6 +298,10 @@ function handleFormSubmit(e) {
     // 同じ確認内容の再送では同一値を使う。
     clientRequestId: crypto.randomUUID()
   };
+  if (currentFacility) {
+    currentPendingOrderData.facilityId = currentFacility.id;
+    currentPendingOrderData.facilityName = currentFacility.name;
+  }
 
   showConfirmModal(currentPendingOrderData);
 }
@@ -367,6 +374,15 @@ function validateOrderForm() {
 // モーダル表示制御 & サマリー作成
 // ==========================================================================
 function showConfirmModal(data) {
+  // 発注先の取り違え防止のため、施設名を明示する
+  const facilityRow = $("summaryFacilityRow");
+  if (data.facilityName) {
+    facilityRow.style.display = "flex";
+    $("summaryFacility").textContent = data.facilityName;
+  } else {
+    facilityRow.style.display = "none";
+  }
+
   $("summaryModel").textContent = data.model;
 
   const toricRow = $("summaryToricRow");
@@ -490,4 +506,16 @@ function handleResetForNewOrder() {
   initSavedEmail();
   window.scrollTo({ top: 0, behavior: "smooth" });
   showToast("フォームをリセットしました");
+}
+
+/**
+ * 入力途中の内容があるか（施設切替時の破棄確認用）
+ * 保存済みメールアドレスや既定値だけの状態は「入力あり」とみなさない。
+ */
+export function isOrderFormDirty() {
+  if (!el.form) return false;
+  return Boolean(
+    el.modelSelect.value || el.ordererSelect.value || el.surgeryDateInput.value ||
+    el.notesInput.value.trim() || currentPendingOrderData
+  );
 }

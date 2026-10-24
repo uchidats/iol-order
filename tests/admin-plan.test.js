@@ -45,3 +45,17 @@ test("施設管理者の追加計画は create のみ（上書きしない）で
   assert.equal(op.path, `facilities/demo-clinic/members/${UID}`);
   assert.deepEqual(op.data, { uid: UID, role: "admin", status: "active" });
 });
+
+test("施設の位置情報登録: 座標・判定距離は明示指定が必須（既定値なし）", () => {
+  const base = ["set-facility-geo", "--facility-id", "demo-clinic"];
+  assert.equal(plan(...base).ok, false);
+  assert.equal(plan(...base, "--lat", "35", "--lng", "139").ok, false);
+  assert.equal(plan(...base, "--lat", "95", "--lng", "139", "--radius-m", "100").ok, false);
+  assert.equal(plan(...base, "--lat", "35", "--lng", "139", "--radius-m", "5").ok, false);
+  const r = plan(...base, "--lat", "35.5", "--lng", "-139.25", "--radius-m", "120");
+  assert.equal(r.ok, true);
+  assert.equal(r.plan.apply, false);
+  assert.deepEqual(r.plan.operations[0].data, { location: { lat: 35.5, lng: -139.25 }, geoRadiusM: 120 });
+  assert.equal(plan(...base, "--lat", "35", "--lng", "139", "--radius-m", "100", "--apply").ok, false);
+  assert.equal(plan(...base, "--lat", "35", "--lng", "139", "--radius-m", "100", "--apply", "--confirm-facility-id", "demo-clinic").ok, true);
+});
