@@ -52,6 +52,20 @@ Cloud Functions のデプロイには次が必要。**この変更では Firebas
 4. 検証: テスト用アカウント（メール確認済み）で `http://localhost:<port>/` にログイン →「新しい施設を登録」→ 施設設定へ進む。Console で `facilities/fac-…` と `members/<uid>(role=admin)` を確認。別アカウントで同名登録して警告を確認。管理者が招待コードを発行し、別アカウント（招待先メールでログイン）で参加できること、別メールでは拒否されることを確認。
 5. 運用: 費用・乱用の監視（Functions のログ、`registrationQuota`）。App Check 導入後に `enforceAppCheck` を有効化する。
 
+## デプロイ前チェック（medconf-iol-dev）
+- **リージョン**: `asia-northeast1`（`functions/index.js`）。Firestore のロケーションと合わせること（Console で確認）。
+- **ランタイム**: Node.js **22**（Node 20 は 2026-10-30 に Cloud Functions で廃止され、作成・更新できなくなる）。
+- **実行サービスアカウント**: 専用SA `iol-functions-dev@medconf-iol-dev.iam.gserviceaccount.com` で実行する（`functions/index.js` の `RUNTIME_SERVICE_ACCOUNT`、既定SAへはフォールバックしない）。**2026-10-24 時点で未作成**（`gcloud iam service-accounts list` で確認済み。存在するのは firebase-adminsdk のみ）。作成するまでデプロイはエラーになる。
+  - 実行権限（SAに付与）: `roles/datastore.user`（Firestore の読み書き・トランザクション・count。Admin SDK は Security Rules を経由しない）、`roles/logging.logWriter`（ログ出力）。これ以外は付与しない。Auth の ID トークン検証は関数基盤が行うため、Identity Toolkit 系の権限は不要。
+  - デプロイ権限（デプロイ実行者に付与。実行SAとは別）: `roles/cloudfunctions.developer`、`roles/run.admin`（呼び出し設定の更新）、`roles/artifactregistry.writer`、`roles/cloudbuild.builds.editor`、そして **実行SA 1つに限定した** `roles/iam.serviceAccountUser`（プロジェクト全体には付けない）。Firestore のルール／インデックスは `roles/firebaserules.admin`、`roles/datastore.indexAdmin`。実際に不足した権限はデプロイのエラーで確認し、Editor/Owner では代用しない。ビルドに使われるSA（Cloud Build 用）は実行SAとは別で、組織ポリシーにより必要な権限が異なる。
+  - 作成手順（実施時）: `gcloud iam service-accounts create iol-functions-dev --project medconf-iol-dev` → `gcloud projects add-iam-policy-binding medconf-iol-dev --member=serviceAccount:iol-functions-dev@medconf-iol-dev.iam.gserviceaccount.com --role=roles/datastore.user`（`roles/logging.logWriter` も同様）→ デプロイ実行者に対象SAへの `roles/iam.serviceAccountUser` を付与。別名にする場合は `functions/.env.medconf-iol-dev` に `RUNTIME_SERVICE_ACCOUNT=...` を設定。
+- **必要API**: cloudfunctions, cloudbuild, artifactregistry, run, eventarc（任意）, firestore, identitytoolkit。デプロイ実行者に Firebase Admin 相当と `iam.serviceAccounts.actAs`。
+- **インデックス**: `invites`（facilityId, status, expiresAt）の複合インデックスが必要。`npm run deploy:dev:firestore` を **functions より先に**実行（未作成だと招待発行が `failed-precondition` で内部エラーになる）。
+- **レート制限**: `rateLimits/{uid}_{action}`（1時間あたり 登録10 / 招待発行30 / 招待受諾20）。期限切れの未使用招待は上限（20件）に数えない。
+- **費用発生要因**: 呼び出し数・CPU/メモリ時間（`maxInstances: 5`）、Cloud Build と Artifact Registry の保管、Firestore の読み書き（重複検出は `facilities` を全件走査するため、登録1回あたり施設数ぶんの読取）、ログ保管。無料枠内に収まる想定だが、**Cloud Billing に予算アラートを設定**すること。
+- **既存施設の所属ユーザー**: ヘッダーメニューの「新しい施設を登録」「別の施設に参加」から利用できる（サーバー側の上限は3施設）。現在の施設・入力中の注文はそのまま維持され、追加した施設へはメニューの「施設を切り替える」で移動する。
+- **同じメールで複数施設**: 所属は UID 単位で施設ごとに独立。招待はメール（確認済み）と一致すれば使用可。
+
 ## 制限事項・今後
 - 重複候補の検出は `facilities` を走査する（現規模向け）。施設数が増えたら名前キーのインデックス化を検討。
 - 招待コードはメール送信しない（要件）。管理者が安全な方法で本人へ伝える。招待の取り消し・一覧画面は未実装（期限切れ／使用済みで無効化）。

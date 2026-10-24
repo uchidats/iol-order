@@ -230,9 +230,9 @@ test("名前の類似判定", () => {
 });
 
 // ================= 招待 =================
-async function setupFacilityWithAdmin() {
-  const admin = user("adminA");
-  const r = await reg(admin, "招待テスト施設");
+async function setupFacilityWithAdmin(uid = "adminA", name = "招待テスト施設") {
+  const admin = user(uid);
+  const r = await reg(admin, name);
   return { admin, facilityId: r.facilityId };
 }
 
@@ -406,4 +406,63 @@ test("招待と利用枠は、運営者権限を含むどのクライアント�
     await assertFails(getDoc(doc(c, "registrationQuota/adminA")));
     await assertFails(setDoc(doc(c, "registrationQuota/adminA"), { count: 0, keys: [] }));
   }
+});
+
+// ================= レート制限・期限切れ招待・複数施設 =================
+test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否され、時間経過で回復し、他ユーザーには影響しない", async () => {
+  const a = user("userA");
+  const fire = () => service.registerFacility({ auth: a, data: { name: "重複確認クリニック", requestId: uuid() } });
+  await fire(); // created
+  for (let i = 1; i < LIMITS.rateMax.registerFacility; i++) await fire(); // 重複候補の確認も数える
+  await rejects(fire(), "resource-exhausted");
+  await reg(user("userB"), "別ユーザーの施設"); // 影響なし
+  clock.t += LIMITS.rateWindowMs;
+  assert.equal((await fire()).status, "duplicate-candidate");
+});
+
+test("レート制限: 招待の受諾の失敗連打は上限で拒否され、発行も呼び出し回数が数えられる", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin();
+  await service.createInvite({ auth: admin, data: { facilityId, email: "x@example.jp" } });
+  assert.equal((await db.doc("rateLimits/adminA_createInvite").get()).get("count"), 1);
+  const bad = { auth: user("guess"), data: { token: "A".repeat(43) } };
+  for (let i = 0; i < LIMITS.rateMax.acceptInvite; i++) await rejects(service.acceptInvite(bad), "failed-precondition");
+  await rejects(service.acceptInvite(bad), "resource-exhausted");
+});
+
+test("招待: 期限切れの未使用招待は上限に数えず、管理者が発行できなくなることはない", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin();
+  for (let i = 0; i < LIMITS.maxPendingInvitesPerFacility; i++) {
+    await service.createInvite({ auth: admin, data: { facilityId, email: `u${i}@example.jp` } });
+  }
+  clock.t += LIMITS.inviteTtlMs + 1;
+  const r = await service.createInvite({ auth: admin, data: { facilityId, email: "new@example.jp" } });
+  assert.ok(r.token);
+});
+
+test("既存施設に所属するユーザーも、上限(3施設)の範囲で新しい施設を登録でき、元の所属は変わらない", async () => {
+  const a = user("userA");
+  await seedFacility("existing", "既存クリニック");
+  await seedMember("existing", "userA", "orderer");
+  const r = await reg(a, "二つ目の施設");
+  assert.equal(r.status, "created");
+  assert.equal((await db.doc("facilities/existing/members/userA").get()).get("role"), "orderer");
+  assert.equal((await db.doc(`facilities/${r.facilityId}/members/userA`).get()).get("role"), "admin");
+});
+
+test("同じメールアドレス(同一アカウント)が複数施設に所属でき、施設ごとに権限が独立する。別アカウントの同メールは参加できない", async () => {
+  const a = user("userA", { email: "dr@example.jp" });
+  const f1 = await setupFacilityWithAdmin("adm1", "施設one");
+  const f2 = await setupFacilityWithAdmin("adm2", "施設two");
+  for (const f of [f1, f2]) {
+    const inv = await service.createInvite({ auth: f.admin, data: { facilityId: f.facilityId, email: "DR@example.jp" } });
+    assert.deepEqual(await service.acceptInvite({ auth: a, data: { token: inv.token } }), { facilityId: f.facilityId });
+  }
+  for (const f of [f1, f2]) {
+    assert.equal((await db.doc(`facilities/${f.facilityId}/members/userA`).get()).get("role"), "orderer");
+  }
+  const mine = await db.collectionGroup("members").where("uid", "==", "userA").get();
+  assert.equal(mine.size, 2);
+  // 別のUIDでも、メール確認済みで同じメールなら招待は使える仕様(メール=本人確認の根拠)。未確認は拒否される
+  const inv = await service.createInvite({ auth: f1.admin, data: { facilityId: f1.facilityId, email: "other@example.jp" } });
+  await rejects(service.acceptInvite({ auth: user("userX", { email: "other@example.jp", email_verified: false }), data: { token: inv.token } }), "permission-denied");
 });

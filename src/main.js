@@ -54,7 +54,7 @@ async function bootstrapWithFirebase(config) {
   let notice = "";
   let error = "";
   let busy = false;
-  const registration = { busy: false, duplicate: null }; // 所属なしユーザーの施設登録・参加の状態
+  const registration = { busy: false, duplicate: null, open: null }; // 施設登録・参加の状態（open: 所属済みユーザーがメニューから開いた画面 "register"|"join"）
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
@@ -68,6 +68,7 @@ async function bootstrapWithFirebase(config) {
     onSelectFacility: (facilityId) => chooseFacility(facilityId),
     onRegister: (args) => handleRegister(args),
     onJoin: (args) => handleJoin(args),
+    onOnboardingClose: () => closeOnboarding(),
     onRegisterCancel: () => { registration.duplicate = null; error = ""; notice = ""; },
     onLocate: () => locateAndChoose({ userInitiated: true }),
     onSignOut: () => signOut()
@@ -82,6 +83,8 @@ async function bootstrapWithFirebase(config) {
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
     onOpenSettings: () => openSettings(),
+    onRegisterFacility: () => openOnboarding("register"),
+    onJoinFacility: () => openOnboarding("join"),
     onSignOut: () => signOut()
   });
 
@@ -106,6 +109,20 @@ async function bootstrapWithFirebase(config) {
     }
     setOrderViewHidden(true);
     await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
+  }
+
+  /** 所属済みユーザーが、現在の施設・注文画面を保ったまま登録・参加の画面を開く */
+  function openOnboarding(mode) {
+    if (decideAccess(state).state !== ACCESS.GRANTED) return;
+    if (settings && settings.isOpen()) settings.close();
+    registration.duplicate = null; error = ""; notice = "";
+    registration.open = mode;
+    render();
+  }
+
+  function closeOnboarding() {
+    registration.open = null; registration.duplicate = null; error = ""; notice = "";
+    render();
   }
 
   async function signOut() {
@@ -186,6 +203,30 @@ async function bootstrapWithFirebase(config) {
     if (openSettingsAfter && access.state === ACCESS.GRANTED && access.role === "admin") await openSettings();
   }
 
+  /**
+   * 所属済みのまま新しい所属が増えた場合: 現在の施設・入力中の注文はそのまま保ち、
+   * 所属一覧だけ更新する（新しい施設へはメニューの「施設を切り替える」で移動する）
+   */
+  async function refreshWhileGranted(newFacilityId) {
+    state.selectedFacilityId = decideAccess(state).facilityId; // 所属が増えても現在の施設から離れない
+    try {
+      state.memberships = await ctx.fetchMemberships(state.user.uid);
+      await loadFacilities();
+    } catch (e) {
+      console.error("所属情報の取得に失敗しました:", e);
+      error = "所属の反映を確認できませんでした。ページを再読み込みしてください。";
+    }
+    registration.open = null;
+    if (!error) {
+      if (activeMemberships(state.memberships).some(m => m.facilityId === newFacilityId)) {
+        notice = `「${facilityName(newFacilityId)}」を追加しました。メニューの「施設を切り替える」から移動できます。`;
+      } else {
+        error = "所属の反映を確認できませんでした。ページを再読み込みしてください。";
+      }
+    }
+    render();
+  }
+
   /** 新しい施設を登録する（施設・最初の管理者所属の作成はサーバー側で一括して行われる） */
   async function handleRegister({ name, confirmDuplicate }) {
     if (registration.busy) return;
@@ -205,6 +246,7 @@ async function bootstrapWithFirebase(config) {
         registrationFlow.clearRequestId(window.sessionStorage);
         registration.duplicate = null;
         registration.busy = false;
+        if (registration.open) { await refreshWhileGranted(r.facilityId); return; }
         await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: true });
         return;
       }
@@ -227,6 +269,7 @@ async function bootstrapWithFirebase(config) {
     try {
       const r = await ctx.registrationApi.acceptInvite({ token });
       registration.busy = false;
+      if (registration.open) { await refreshWhileGranted(r.facilityId); return; }
       await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: false });
       return;
     } catch (e) {

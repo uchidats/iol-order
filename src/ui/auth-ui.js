@@ -13,7 +13,7 @@ const GATED_ELEMENT_IDS = ["ocrFeatureCard", "iolOrderForm"];
  * @param {{onGoogle:()=>void, onEmailLink:(email:string)=>void,
  *          onSelectFacility:(facilityId:string)=>void, onLocate:()=>void, onSignOut:()=>void,
  *          onRegister:(a:{name:string, confirmDuplicate:boolean})=>void, onJoin:(a:{token:string})=>void,
- *          onRegisterCancel:()=>void}} handlers
+ *          onRegisterCancel:()=>void, onOnboardingClose:()=>void}} handlers
  */
 export function createAuthUi(handlers) {
   const main = document.querySelector("main.main-content");
@@ -33,9 +33,10 @@ export function createAuthUi(handlers) {
   // 所属なしユーザーの入力途中の値（再描画で消えないよう保持）
   const draft = { mode: null, name: "", token: "" };
   let lastArgs = null;
+  let lastOpen = null; // メニューから開いた登録・参加画面の直前の種別（開き直しでモードを初期化する）
 
   /** 所属なし: 「新しい施設を登録」または「招待コードで既存施設に参加」。招待なしでの参加はできない */
-  function renderOnboarding({ who, msg, user, registration }) {
+  function renderOnboarding({ who, msg, user, registration, embedded = false }) {
     const reg = registration || {};
     const unverified = Boolean(user) && user.emailVerified === false;
     const dupName = reg.duplicate ? reg.duplicate.forName : null;
@@ -68,22 +69,29 @@ export function createAuthUi(handlers) {
 
     panel.innerHTML = `
       <div class="feature-info">
-        <div class="feature-title-row"><span class="feature-title">施設への所属が確認できません</span></div>
-        <p class="feature-desc">${who} でログインしています。利用を始めるには、新しい施設を登録するか、招待を受けた施設に参加してください。</p>
+        <div class="feature-title-row"><span class="feature-title">${embedded ? "施設の登録・参加" : "施設への所属が確認できません"}</span></div>
+        <p class="feature-desc">${embedded
+          ? `${who} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録するか、招待を受けた別の施設に参加できます。`
+          : `${who} でログインしています。利用を始めるには、新しい施設を登録するか、招待を受けた施設に参加してください。`}</p>
         ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
         <div class="facility-select-list">
           <button type="button" class="btn btn-secondary" id="btnModeRegister" ${draft.mode === "register" ? 'aria-pressed="true"' : ""}>新しい施設を登録</button>
           <button type="button" class="btn btn-secondary" id="btnModeJoin" ${draft.mode === "join" ? 'aria-pressed="true"' : ""}>既存施設に参加する</button>
         </div>
         ${body}
-        <button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>
+        ${embedded
+          ? '<button type="button" class="btn btn-outline-sm" id="btnOnboardingClose">注文画面に戻る</button>'
+          : '<button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>'}
         ${msg}
       </div>`;
 
     const rerender = () => lastArgs && render(lastArgs);
     $("btnModeRegister").addEventListener("click", () => { draft.mode = "register"; handlers.onRegisterCancel(); rerender(); });
     $("btnModeJoin").addEventListener("click", () => { draft.mode = "join"; handlers.onRegisterCancel(); rerender(); });
-    $("btnAuthSignOut").addEventListener("click", () => handlers.onSignOut());
+    const signOutBtn = $("btnAuthSignOut");
+    if (signOutBtn) signOutBtn.addEventListener("click", () => handlers.onSignOut());
+    const closeBtn = $("btnOnboardingClose");
+    if (closeBtn) closeBtn.addEventListener("click", () => handlers.onOnboardingClose());
 
     const nameEl = $("regFacilityName");
     if (nameEl) nameEl.addEventListener("input", () => { draft.name = nameEl.value; });
@@ -116,13 +124,24 @@ export function createAuthUi(handlers) {
       return;
     }
 
-    setGated(state !== ACCESS.GRANTED);
+    // 所属済みユーザーがメニューから開いた登録・参加画面（registration.open は "register" | "join"）
+    const embeddedOpen = state === ACCESS.GRANTED && Boolean(registration && registration.open);
+    setGated(state !== ACCESS.GRANTED || embeddedOpen);
 
     const who = user ? escapeHtml(user.displayName || user.email || "ログイン中") : "";
     const msg = [
       error ? `<p class="error-message" role="alert">${escapeHtml(error)}</p>` : "",
       notice ? `<p class="form-hint" role="status">${escapeHtml(notice)}</p>` : ""
     ].join("");
+
+    if (embeddedOpen) {
+      if (lastOpen !== registration.open) draft.mode = registration.open;
+      lastOpen = registration.open;
+      panel.hidden = false;
+      renderOnboarding({ who, msg, user, registration, embedded: true });
+      return;
+    }
+    lastOpen = null;
 
     if (state === ACCESS.GRANTED) {
       // 通常の注文画面。メッセージがある時だけパネルを出す

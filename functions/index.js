@@ -10,6 +10,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { defineString } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
 
 initializeApp();
@@ -30,8 +31,18 @@ function wrap(handler) {
   };
 }
 
+// 実行サービスアカウント: 既定(Compute Engine 既定SA、通常は Editor で過大)ではなく専用SAで動かす。
+// 付与する権限は roles/datastore.user と roles/logging.logWriter のみ(docs/self-registration.md)。
+// SA が未作成の間はデプロイがエラーになる(既定SAへはフォールバックしない)。
+const RUNTIME_SERVICE_ACCOUNT = defineString("RUNTIME_SERVICE_ACCOUNT", {
+  default: "iol-functions-dev@medconf-iol-dev.iam.gserviceaccount.com"
+});
+
 // enforceAppCheck は App Check 導入後に true にする
-const options = { region: REGION, maxInstances: 5, enforceAppCheck: false };
+const options = {
+  region: REGION, maxInstances: 5, enforceAppCheck: false,
+  serviceAccount: RUNTIME_SERVICE_ACCOUNT
+};
 
 export const registerFacility = onCall(options, wrap(service.registerFacility));
 export const createInvite = onCall(options, wrap(service.createInvite));

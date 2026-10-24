@@ -13,7 +13,10 @@ export const LIMITS = Object.freeze({
   maxFacilitiesPerUser: 3,           // 1ユーザーがセルフ登録できる施設数の上限（乱用防止）
   inviteTtlMs: 7 * 24 * 60 * 60 * 1000,
   maxPendingInvitesPerFacility: 20,
-  emailMax: 254
+  emailMax: 254,
+  // 1ユーザー・1操作あたりの呼び出し回数の上限（固定ウィンドウ）。失敗した呼び出しも数える
+  rateWindowMs: 60 * 60 * 1000,
+  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20 })
 });
 
 /** クライアントに返すエラー。code は firebase-functions の HttpsError コードに対応 */
@@ -136,6 +139,22 @@ export function deriveFacilityId(uid, requestId) {
  * @param {(n:number) => Buffer} [deps.random]
  */
 export function createRegistrationService({ db, FieldValue, Timestamp, now = Date.now, random = randomBytes }) {
+  /** ユーザー単位のレート制限（トランザクションで数える）。上限超過は resource-exhausted */
+  async function consumeRate(uid, action) {
+    const ref = db.doc(`rateLimits/${uid}_${action}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const t = now();
+      let start = snap.exists ? snap.get("windowStart") : 0;
+      let n = snap.exists ? snap.get("count") || 0 : 0;
+      if (!snap.exists || t - start >= LIMITS.rateWindowMs) { start = t; n = 0; }
+      if (n >= LIMITS.rateMax[action]) {
+        throw new RegistrationError("resource-exhausted", "操作の回数が上限に達しました。しばらくしてからお試しください");
+      }
+      tx.set(ref, { windowStart: start, count: n + 1, updatedAt: FieldValue.serverTimestamp() });
+    });
+  }
+
   /** 既存施設との名前の重複候補。他施設の名前・IDは返さず、件数と完全一致の有無のみ返す */
   async function findNameCandidates(key) {
     const snap = await db.collection("facilities").select("name").get();
@@ -151,6 +170,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
   async function registerFacility({ auth, data }) {
     const user = assertVerifiedUser(auth);
     const input = parseRegisterInput(data);
+    await consumeRate(user.uid, "registerFacility");
     const key = nameKey(input.name);
     const facilityId = deriveFacilityId(user.uid, input.requestId);
     const facRef = db.doc(`facilities/${facilityId}`);
@@ -204,6 +224,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
   async function createInvite({ auth, data }) {
     const user = assertVerifiedUser(auth);
     const input = parseInviteInput(data);
+    await consumeRate(user.uid, "createInvite");
 
     const [fac, mem] = await Promise.all([
       db.doc(`facilities/${input.facilityId}`).get(),
@@ -217,7 +238,8 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     if (!fac.exists) throw new RegistrationError("not-found", "施設が見つかりません");
 
     const pending = await db.collection("invites")
-      .where("facilityId", "==", input.facilityId).where("status", "==", "pending").count().get();
+      .where("facilityId", "==", input.facilityId).where("status", "==", "pending")
+      .where("expiresAt", ">", Timestamp.fromMillis(now())).count().get(); // 期限切れの未使用招待は上限に数えない
     if (pending.data().count >= LIMITS.maxPendingInvitesPerFacility) {
       throw new RegistrationError("resource-exhausted", "未使用の招待が上限に達しています");
     }
@@ -236,6 +258,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
   async function acceptInvite({ auth, data }) {
     const user = assertVerifiedUser(auth);
     const input = parseAcceptInput(data);
+    await consumeRate(user.uid, "acceptInvite");
     const inviteRef = db.doc(`invites/${hashToken(input.token)}`);
 
     return db.runTransaction(async (tx) => {
