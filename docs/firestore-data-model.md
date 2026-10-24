@@ -36,6 +36,11 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 - `users` コレクションは作らない（Rules でも全拒否）。プロフィールが必要になった時点で設計する。
 - 病院側の在庫管理は持たない。
 
+## 施設のセルフ登録と招待（サーバー側のみ）
+施設の作成・招待による所属の作成は Cloud Functions だけが行う。詳細は [self-registration.md](self-registration.md)。
+- `facilities/{id}` にセルフ登録の場合 `createdBy` / `selfRegistered` / `createdAt` が付く。
+- `invites/{sha256(token)}`（招待。トークンのハッシュのみ保存）と `registrationQuota/{uid}`（利用枠）は **サーバー専用**（Rules で全クライアント拒否）。
+
 ## 施設設定（施設管理者のみ）
 画面: ヘッダーメニューの「施設設定」（`role=admin` のみ表示）。注文者 / 採用IOL / ディーラーを編集し、保存すると注文フォームの選択肢へ即時反映される。
 - **注文者**: 追加・名前/メール編集・有効/無効・並び替え（`sortOrder` は表示順×10）。削除は運営者のみ（通常は無効化）。同名（大文字小文字・全角半角の差を無視）は登録不可。

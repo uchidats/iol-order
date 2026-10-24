@@ -1567,3 +1567,15 @@ input[type="date"].form-control {
     grid-template-columns: 1fr;
   }
 }
+
+.settings-code {
+  display: block;
+  margin: 8px 0;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  user-select: all;
+  background: #f3f4f6;
+  border-radius: var(--radius-sm, 6px);
+}

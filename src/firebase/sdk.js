@@ -13,8 +13,9 @@ export async function loadFirebaseSdk() {
     cached = Promise.all([
       import(`${BASE}/firebase-app.js`),
       import(`${BASE}/firebase-auth.js`),
-      import(`${BASE}/firebase-firestore.js`)
-    ]).then(([app, auth, firestore]) => ({ app, auth, firestore }));
+      import(`${BASE}/firebase-firestore.js`),
+      import(`${BASE}/firebase-functions.js`)
+    ]).then(([app, auth, firestore, functions]) => ({ app, auth, firestore, functions }));
   }
   return cached;
 }

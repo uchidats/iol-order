@@ -1,5 +1,6 @@
 import { ACCESS } from "../domain/access.js";
 import { facilityGeo } from "../domain/geo.js";
+import { normalizeFacilityName } from "../domain/registration-flow.js";
 import { $, escapeHtml } from "./dom.js";
 
 // Firebase有効時に、所属確認と施設確定が済むまで隠す画面要素
@@ -10,7 +11,9 @@ const GATED_ELEMENT_IDS = ["ocrFeatureCard", "iolOrderForm"];
  * 施設選択は「ログイン直後に必要な場合だけ」表示し、施設確定後は表示しない（切替はヘッダーメニュー）。
  *
  * @param {{onGoogle:()=>void, onEmailLink:(email:string)=>void,
- *          onSelectFacility:(facilityId:string)=>void, onLocate:()=>void, onSignOut:()=>void}} handlers
+ *          onSelectFacility:(facilityId:string)=>void, onLocate:()=>void, onSignOut:()=>void,
+ *          onRegister:(a:{name:string, confirmDuplicate:boolean})=>void, onJoin:(a:{token:string})=>void,
+ *          onRegisterCancel:()=>void}} handlers
  */
 export function createAuthUi(handlers) {
   const main = document.querySelector("main.main-content");
@@ -27,11 +30,84 @@ export function createAuthUi(handlers) {
     });
   }
 
+  // 所属なしユーザーの入力途中の値（再描画で消えないよう保持）
+  const draft = { mode: null, name: "", token: "" };
+  let lastArgs = null;
+
+  /** 所属なし: 「新しい施設を登録」または「招待コードで既存施設に参加」。招待なしでの参加はできない */
+  function renderOnboarding({ who, msg, user, registration }) {
+    const reg = registration || {};
+    const unverified = Boolean(user) && user.emailVerified === false;
+    const dupName = reg.duplicate ? reg.duplicate.forName : null;
+    const showDup = Boolean(reg.duplicate) && dupName === normalizeFacilityName(draft.name);
+    const disabled = reg.busy || unverified ? "disabled" : "";
+
+    let body = "";
+    if (draft.mode === "register") {
+      body = `
+        <div class="form-group">
+          <label class="form-label" for="regFacilityName">施設名</label>
+          <input id="regFacilityName" class="form-control" type="text" maxlength="100" autocomplete="organization" value="${escapeHtml(draft.name)}">
+          <p class="form-hint">施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。</p>
+          ${showDup ? `
+            <p class="error-message" role="alert">${reg.duplicate.exact ? "同じ名前の施設が既に登録されています。" : "名前の似た施設が既に登録されています。"}
+            既存の施設に参加する場合は、その施設の管理者から招待コードを受け取ってください。別の施設の場合のみ、このまま登録できます。</p>
+            <button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
+            <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
+          : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`}
+        </div>`;
+    } else if (draft.mode === "join") {
+      body = `
+        <div class="form-group">
+          <label class="form-label" for="joinToken">招待コード</label>
+          <input id="joinToken" class="form-control" type="text" autocomplete="off" spellcheck="false" value="${escapeHtml(draft.token)}">
+          <p class="form-hint">施設の管理者から受け取った招待コードを入力します。招待されたメールアドレスでログインしている必要があります。招待がない場合は参加できません。</p>
+          <button type="button" class="btn btn-primary" id="btnJoinSubmit" ${disabled}>${reg.busy ? "確認しています…" : "参加する"}</button>
+        </div>`;
+    }
+
+    panel.innerHTML = `
+      <div class="feature-info">
+        <div class="feature-title-row"><span class="feature-title">施設への所属が確認できません</span></div>
+        <p class="feature-desc">${who} でログインしています。利用を始めるには、新しい施設を登録するか、招待を受けた施設に参加してください。</p>
+        ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
+        <div class="facility-select-list">
+          <button type="button" class="btn btn-secondary" id="btnModeRegister" ${draft.mode === "register" ? 'aria-pressed="true"' : ""}>新しい施設を登録</button>
+          <button type="button" class="btn btn-secondary" id="btnModeJoin" ${draft.mode === "join" ? 'aria-pressed="true"' : ""}>既存施設に参加する</button>
+        </div>
+        ${body}
+        <button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>
+        ${msg}
+      </div>`;
+
+    const rerender = () => lastArgs && render(lastArgs);
+    $("btnModeRegister").addEventListener("click", () => { draft.mode = "register"; handlers.onRegisterCancel(); rerender(); });
+    $("btnModeJoin").addEventListener("click", () => { draft.mode = "join"; handlers.onRegisterCancel(); rerender(); });
+    $("btnAuthSignOut").addEventListener("click", () => handlers.onSignOut());
+
+    const nameEl = $("regFacilityName");
+    if (nameEl) nameEl.addEventListener("input", () => { draft.name = nameEl.value; });
+    const submit = $("btnRegSubmit");
+    if (submit) submit.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: false }));
+    const confirmBtn = $("btnRegConfirm");
+    if (confirmBtn) confirmBtn.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: true }));
+    const cancel = $("btnRegCancel");
+    if (cancel) cancel.addEventListener("click", () => { handlers.onRegisterCancel(); rerender(); });
+
+    const tokenEl = $("joinToken");
+    if (tokenEl) tokenEl.addEventListener("input", () => { draft.token = tokenEl.value; });
+    const join = $("btnJoinSubmit");
+    if (join) join.addEventListener("click", () => handlers.onJoin({ token: tokenEl.value.trim() }));
+  }
+
   /**
    * @param {{access:object, user:object|null, notice?:string, error?:string,
-   *          facilities?:Array<{id:string,name:string,location?:object,geoRadiusM?:number}>, busy?:boolean}} s
+   *          facilities?:Array<{id:string,name:string,location?:object,geoRadiusM?:number}>, busy?:boolean,
+   *          registration?:{busy?:boolean, duplicate?:object|null}}} s
    */
-  function render({ access, user, notice, error, facilities = [], busy = false }) {
+  function render(args) {
+    lastArgs = args;
+    const { access, user, notice, error, facilities = [], busy = false, registration = null } = args;
     const state = access.state;
 
     if (state === ACCESS.LEGACY) {
@@ -83,15 +159,7 @@ export function createAuthUi(handlers) {
     }
 
     if (state === ACCESS.NO_MEMBERSHIP) {
-      panel.innerHTML = `
-        <div class="feature-info">
-          <div class="feature-title-row"><span class="feature-title">施設への所属が確認できません</span></div>
-          <p class="feature-desc">${who} はログインできていますが、利用できる施設が登録されていません。
-          注文・施設情報は表示されません。施設の管理者にご連絡ください。</p>
-          <button type="button" class="btn btn-secondary" id="btnAuthSignOut">ログアウト</button>
-          ${msg}
-        </div>`;
-      $("btnAuthSignOut").addEventListener("click", () => handlers.onSignOut());
+      renderOnboarding({ who, msg, user, registration });
       return;
     }
 

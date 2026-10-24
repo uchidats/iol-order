@@ -163,6 +163,9 @@ tests/                      `npm test`（Node標準テストランナー）
 
 詳細な運用手順（Console設定・ログイン接続テスト・管理者初期登録）は [docs/firebase-dev-runbook.md](docs/firebase-dev-runbook.md) を参照。
 
+### 施設のセルフ登録（Cloud Functions）
+所属施設のないユーザーは「新しい施設を登録」または「招待コードで既存施設に参加」を選べます。施設の作成・招待参加は信頼できるサーバー側（`functions/`）だけが行い、Security Rules はクライアントに許可していません。詳細・デプロイ前提は [docs/self-registration.md](docs/self-registration.md)。
+
 ### 施設設定（施設管理者のみ）
 ヘッダーメニューの「施設設定」から、注文者（追加・編集・無効化・並び替え）、採用IOL（共通マスターから選択）、ディーラー（発注用／使用報告用メールを別管理）を設定できます。設定は注文フォームの選択肢へ反映されます。権限と入力検証は Firestore Security Rules でも強制されます（[docs/firestore-data-model.md](docs/firestore-data-model.md)）。
 

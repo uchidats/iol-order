@@ -6,6 +6,8 @@ import { biometryState } from "./biometry/state.js";
 import { IOL_MODELS } from "./data/iol-models.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-config.js";
 import { decideAccess, activeMemberships, ACCESS } from "./domain/access.js";
+import * as registrationFlow from "./domain/registration-flow.js";
+import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
@@ -52,6 +54,7 @@ async function bootstrapWithFirebase(config) {
   let notice = "";
   let error = "";
   let busy = false;
+  const registration = { busy: false, duplicate: null }; // 所属なしユーザーの施設登録・参加の状態
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
@@ -63,6 +66,9 @@ async function bootstrapWithFirebase(config) {
       notice = "ログインリンクを送信しました。メール内のリンクをこの端末で開いてください。";
     }),
     onSelectFacility: (facilityId) => chooseFacility(facilityId),
+    onRegister: (args) => handleRegister(args),
+    onJoin: (args) => handleJoin(args),
+    onRegisterCancel: () => { registration.duplicate = null; error = ""; notice = ""; },
     onLocate: () => locateAndChoose({ userInitiated: true }),
     onSignOut: () => signOut()
   });
@@ -93,6 +99,7 @@ async function bootstrapWithFirebase(config) {
         repository: ctx.repository,
         settingsApi: ctx.settingsApi,
         masters: IOL_MODELS,
+        inviteApi: ctx.registrationApi,
         onSaved: () => reloadFacilityOptions(),
         onClose: () => setOrderViewHidden(false)
       });
@@ -113,7 +120,7 @@ async function bootstrapWithFirebase(config) {
 
   const render = () => {
     const access = decideAccess(state);
-    ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy });
+    ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy, registration });
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
@@ -154,6 +161,79 @@ async function bootstrapWithFirebase(config) {
         facility: { id: access.facilityId, name: facilityName(access.facilityId) }
       });
     }
+    return access;
+  }
+
+  /** 登録・参加の後に所属を取得し直し、新しい施設の画面へ進む（所属の確認は常にFirestoreで行う） */
+  async function refreshAfterMembershipChange(facilityId, { openSettingsAfter }) {
+    state.membershipsLoaded = false;
+    render();
+    try {
+      state.memberships = await ctx.fetchMemberships(state.user.uid);
+      await loadFacilities();
+    } catch (e) {
+      console.error("所属情報の取得に失敗しました:", e);
+      state.memberships = []; state.facilities = [];
+    }
+    state.membershipsLoaded = true;
+    if (activeMemberships(state.memberships).some(m => m.facilityId === facilityId)) {
+      state.selectedFacilityId = facilityId;
+      selection.remember(window.localStorage, state.user.uid, facilityId);
+    } else {
+      error = "所属の反映を確認できませんでした。ページを再読み込みしてください。";
+    }
+    const access = await enterFacilityIfGranted();
+    if (openSettingsAfter && access.state === ACCESS.GRANTED && access.role === "admin") await openSettings();
+  }
+
+  /** 新しい施設を登録する（施設・最初の管理者所属の作成はサーバー側で一括して行われる） */
+  async function handleRegister({ name, confirmDuplicate }) {
+    if (registration.busy) return;
+    error = ""; notice = "";
+    const invalid = registrationFlow.validateFacilityName(name);
+    if (invalid) { error = invalid; render(); return; }
+    if (state.user.emailVerified === false) { error = "メールアドレスの確認が済んでいないため、登録できません。"; render(); return; }
+
+    registration.busy = true; render();
+    try {
+      // 再試行しても同じ要求として扱われるよう、施設名ごとに要求IDを保持する
+      const requestId = registrationFlow.getRequestId(window.sessionStorage, name);
+      const r = await ctx.registrationApi.registerFacility({ name, requestId, confirmDuplicate });
+      if (r.status === "duplicate-candidate") {
+        registration.duplicate = { ...r, forName: registrationFlow.normalizeFacilityName(name) };
+      } else {
+        registrationFlow.clearRequestId(window.sessionStorage);
+        registration.duplicate = null;
+        registration.busy = false;
+        await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: true });
+        return;
+      }
+    } catch (e) {
+      console.error("施設の登録に失敗しました:", e);
+      error = describeCallableError(e);
+    }
+    registration.busy = false;
+    render();
+  }
+
+  /** 招待コードで既存施設に参加する（招待のない参加はサーバーが拒否する） */
+  async function handleJoin({ token }) {
+    if (registration.busy) return;
+    error = ""; notice = "";
+    if (!token) { error = "招待コードを入力してください"; render(); return; }
+    if (state.user.emailVerified === false) { error = "メールアドレスの確認が済んでいないため、参加できません。"; render(); return; }
+
+    registration.busy = true; render();
+    try {
+      const r = await ctx.registrationApi.acceptInvite({ token });
+      registration.busy = false;
+      await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: false });
+      return;
+    } catch (e) {
+      error = describeCallableError(e);
+    }
+    registration.busy = false;
+    render();
   }
 
   /**
@@ -243,7 +323,12 @@ async function bootstrapWithFirebase(config) {
     ctx = {
       service, db,
       repository: createFirestoreRepository(db, sdk.firestore),
-      settingsApi: createFirestoreSettingsApi(db, sdk.firestore)
+      settingsApi: createFirestoreSettingsApi(db, sdk.firestore),
+      registrationApi: createRegistrationApi({
+        functions: sdk.functions.getFunctions(app, "asia-northeast1"),
+        httpsCallable: sdk.functions.httpsCallable
+      }),
+      fetchMemberships: (uid) => fetchMemberships(db, sdk.firestore, uid)
     };
 
     // メールリンクからの復帰

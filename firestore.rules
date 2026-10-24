@@ -195,6 +195,14 @@ service cloud.firestore {
       }
     }
 
+    // 施設のセルフ登録・招待参加はサーバー側(Cloud Functions / Admin SDK)専用。クライアントからは一切読み書きできない
+    match /invites/{inviteId} {
+      allow read, write: if false;
+    }
+    match /registrationQuota/{uid} {
+      allow read, write: if false;
+    }
+
     // 自分の所属を調べる collectionGroup クエリ用（uid == 自分 の所属ドキュメントのみ）
     match /{path=**}/members/{uid} {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;

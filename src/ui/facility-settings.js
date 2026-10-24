@@ -2,6 +2,8 @@ import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
+import { isValidEmail } from "../domain/order-validation.js";
+import { describeCallableError } from "../data/registration-api.js";
 
 /** 要素生成の小さなヘルパー（ユーザー入力は textContent / value で扱い、HTMLとして解釈しない） */
 function h(tag, attrs = {}, ...children) {
@@ -33,8 +35,9 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {Array<object>} deps.masters 共通IOLマスター（IOL_MODELS）
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
  * @param {() => void} deps.onClose
+ * @param {{createInvite:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -234,8 +237,47 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     section.querySelector("[data-list]").replaceChildren(...data.dealers.map(dealerRow));
   }
 
+  // ---------- メンバー招待 ----------
+  function inviteSection() {
+    const result = h("div", { "data-result": "" });
+    const emailInput = h("input", { class: "form-control", type: "email", "data-f": "inviteEmail", placeholder: "招待するメールアドレス", "aria-label": "招待するメールアドレス" });
+    const btn = h("button", { type: "button", class: "btn btn-primary", "data-act": "invite" }, "招待コードを発行");
+    const section = h("section", { class: "settings-section", "data-section": "invites" },
+      h("h3", {}, "メンバーの招待"),
+      h("p", { class: "form-hint" }, "招待したメールアドレスでログインした本人だけが、注文者として参加できます。招待コードは発行時に1度だけ表示されます（有効期限7日）。メールは自動送信されません。安全な方法でご本人にお伝えください。"),
+      h("div", { class: "settings-actions" }, emailInput, btn),
+      result,
+      h("p", { class: "form-hint", "data-msg": "" }));
+    btn.addEventListener("click", async () => {
+      const email = emailInput.value.trim();
+      result.replaceChildren();
+      if (!isValidEmail(email)) return message(section, "メールアドレスの形式が正しくありません。", true);
+      btn.disabled = true;
+      message(section, "発行しています…");
+      try {
+        const r = await inviteApi.createInvite({ facilityId: facility.id, email });
+        const expires = new Date(r.expiresAt).toLocaleDateString("ja-JP");
+        const code = h("output", { class: "settings-code", "data-invite-code": "" }, r.token);
+        result.replaceChildren(
+          h("p", {}, `${r.email} 宛ての招待コード（${expires} まで有効）:`), code,
+          h("button", { type: "button", class: "btn btn-outline-sm" }, "コピー"));
+        result.querySelector("button").addEventListener("click", () => {
+          try { navigator.clipboard.writeText(r.token); message(section, "コピーしました。"); } catch (e) { /* 手動でコピー */ }
+        });
+        emailInput.value = "";
+        message(section, "招待コードを発行しました。この画面を閉じると再表示できません。");
+      } catch (e) {
+        message(section, describeCallableError(e), true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    return section;
+  }
+
   // ---------- 画面全体 ----------
   const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
+  if (inviteApi) sections.invites = inviteSection();
   const title = h("span", { class: "settings-facility" });
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnSettingsClose" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
@@ -243,7 +285,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     h("div", { class: "settings-head" }, h("h2", {}, "施設設定"), title, closeBtn),
     h("p", { class: "form-hint" }, "この画面は施設管理者のみ変更できます。"),
     status,
-    sections.orderers, sections.iols, sections.dealers);
+    ...Object.values(sections));
 
   closeBtn.addEventListener("click", () => {
     if (dirty && !window.confirm("保存していない変更があります。破棄して注文画面に戻りますか？")) return;
