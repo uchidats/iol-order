@@ -1,59 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  MEMBER_ACTION, planMemberToggle, isLastActiveAdmin, sortMembers, memberLabel, confirmMessage, newAuditId, buildMemberChange
-} from "../src/domain/member-admin.js";
+import { planMemberRemoval, memberLabel, sortMembers, confirmMessage } from "../src/domain/member-admin.js";
 
-const m = (uid, role, status = "active", extra = {}) => ({ uid, role, status, ...extra });
-const members = [m("a1", "admin", "active", { displayName: "管理者" }), m("o1", "orderer"), m("o2", "orderer", "disabled")];
+const m = (uid, role, extra = {}) => ({ uid, role, ...extra });
+const members = [m("a1", "admin", { displayName: "管理者" }), m("o1", "orderer", { displayName: "山田", email: "y@example.jp" }), m("o2", "orderer")];
 
-test("一般注文者は無効化・再有効化できる", () => {
-  assert.deepEqual(planMemberToggle(members, members[1], "a1"), { ok: true, action: MEMBER_ACTION.DISABLE, to: "disabled" });
-  assert.deepEqual(planMemberToggle(members, members[2], "a1"), { ok: true, action: MEMBER_ACTION.ENABLE, to: "active" });
+test("一般注文者の所属は削除できる(他人の orderer のみ)", () => {
+  assert.deepEqual(planMemberRemoval(members, members[1], "a1"), { ok: true });
+  assert.deepEqual(planMemberRemoval(members, members[2], "a1"), { ok: true });
 });
 
-test("自分自身・管理者・最後の有効な管理者・不明な権限は操作できない", () => {
-  assert.equal(planMemberToggle(members, members[1], "o1").ok, false);
-  const last = planMemberToggle(members, members[0], "someoneElse");
+test("自分自身・管理者・最後の管理者・不明な権限・不明な対象は削除できない", () => {
+  assert.equal(planMemberRemoval(members, members[1], "o1").ok, false);          // 自分自身
+  const last = planMemberRemoval(members, members[0], "someoneElse");            // 最後の管理者
   assert.equal(last.ok, false);
-  assert.match(last.reason, /最後の有効な管理者/);
+  assert.match(last.reason, /最後の管理者/);
   const two = [...members, m("a2", "admin")];
-  assert.match(planMemberToggle(two, two[0], "a2").reason, /管理者の変更はできません/);
-  assert.equal(planMemberToggle(members, m("x", "owner"), "a1").ok, false);
-  assert.equal(planMemberToggle(members, null, "a1").ok, false);
-  assert.equal(planMemberToggle(members, members[1], "").ok, false);
+  assert.match(planMemberRemoval(two, two[0], "a2").reason, /管理者の所属は削除できません/); // 管理者は何人いても不可
+  assert.equal(planMemberRemoval(members, m("x", "owner"), "a1").ok, false);
+  assert.equal(planMemberRemoval(members, null, "a1").ok, false);
+  assert.equal(planMemberRemoval(members, members[1], "").ok, false);
 });
 
-test("最後の有効な管理者の判定: 無効な管理者は数えない", () => {
-  const list = [m("a1", "admin"), m("a2", "admin", "disabled")];
-  assert.equal(isLastActiveAdmin(list, list[0]), true);
-  assert.equal(isLastActiveAdmin(list, list[1]), false);
-  assert.equal(isLastActiveAdmin([m("a1", "admin"), m("a2", "admin")], list[0]), false);
+test("画面に有効/無効の概念は残っていない(関数・表示名・状態)", async () => {
+  const mod = await import("../src/domain/member-admin.js");
+  for (const gone of ["planMemberToggle", "buildMemberChange", "newAuditId", "isLastActiveAdmin", "MEMBER_ACTION"]) assert.equal(gone in mod, false, gone);
 });
 
-test("一覧の並び: 管理者→有効な注文者→無効な注文者。氏名未登録は表示を補う", () => {
-  const list = sortMembers([m("o2", "orderer", "disabled"), m("o1", "orderer", "active", { displayName: "ぬ" }), m("a1", "admin")]);
+test("一覧の並び: 管理者 → 注文者、氏名。氏名未登録は表示を補う", () => {
+  const list = sortMembers([m("o2", "orderer", { displayName: "いろは" }), m("o1", "orderer", { displayName: "あいう" }), m("a1", "admin", { displayName: "ん" })]);
   assert.deepEqual(list.map(x => x.uid), ["a1", "o1", "o2"]);
   assert.equal(memberLabel(m("x", "orderer")), "（氏名未登録）");
-  assert.equal(memberLabel(m("x", "orderer", "active", { displayName: " 山田 " })), "山田");
+  assert.equal(memberLabel(m("x", "orderer", { displayName: " 山田 " })), "山田");
 });
 
-test("確認メッセージに対象と影響が含まれる", () => {
-  const t = m("o1", "orderer", "active", { displayName: "山田", email: "y@example.jp" });
-  assert.match(confirmMessage(t, { to: "disabled" }), /山田（y@example.jp）.*無効化.*利用できなくなります/s);
-  assert.match(confirmMessage(t, { to: "active" }), /再度有効/);
-});
-
-test("書き込み内容: 所属は status と記録IDだけ。記録に操作者・対象・前後の状態が入り、権限は含まれない", () => {
-  const target = m("o1", "orderer", "active", { displayName: "山田" });
-  const plan = planMemberToggle(members, target, "a1");
-  const id = newAuditId(() => "11111111-2222-3333-4444-555555555555");
-  assert.equal(id, "11111111222233334444555555555555");
-  const c = buildMemberChange({ facilityId: "f1", target, plan, actor: { uid: "a1", displayName: "管理者" }, auditId: id });
-  assert.deepEqual(c.memberUpdate, { status: "disabled", lastAuditId: id });
-  assert.deepEqual(c.log, {
-    action: "member.disable", targetUid: "o1", targetRole: "orderer", fromStatus: "active", toStatus: "disabled",
-    actorUid: "a1", targetName: "山田", actorName: "管理者"
-  });
-  assert.ok(!("role" in c.memberUpdate));
+test("確認メッセージに、対象・影響・再参加には新しい招待が必要なことが含まれる", () => {
+  const msg = confirmMessage(members[1]);
+  assert.match(msg, /山田（y@example\.jp）/);
+  assert.match(msg, /所属をこの施設から削除/);
+  assert.match(msg, /利用できなくなります/);
+  assert.match(msg, /新しい招待/);
+  assert.doesNotMatch(msg, /無効|有効/);
 });

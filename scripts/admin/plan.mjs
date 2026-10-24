@@ -99,7 +99,7 @@ export function buildPlan(args) {
     case ACTIONS.ADD_FACILITY_ADMIN:
       plan.operations.push({
         type: "firestore.create", path: `facilities/${args.facilityId}/members/${args.uid}`,
-        data: { uid: args.uid, role: "admin", status: "active" }, failIfExists: true,
+        data: { uid: args.uid, role: "admin" }, failIfExists: true,
         requires: [`facilities/${args.facilityId} が存在する`, `Authユーザー ${args.uid} が存在する`]
       });
       break;

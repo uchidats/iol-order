@@ -41,8 +41,7 @@ export async function fetchMemberships(db, fs, uid) {
   const snap = await fs.getDocs(q);
   return snap.docs.map(d => ({
     facilityId: d.ref.parent.parent.id,
-    role: d.data().role,
-    status: d.data().status
+    role: d.data().role
   }));
 }
 
@@ -69,12 +68,5 @@ export function createFirestoreSettingsApi(db, fs) {
     saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),
     /** 注文者マスターの削除（所属・認証ユーザー・注文履歴には触れない） */
     deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
-    /** 所属の有効/無効の変更と操作記録を1つのバッチで書く（どちらか片方だけの反映はRulesが拒否する） */
-    async applyMemberChange({ facilityId, auditId, memberUid, memberUpdate, log }) {
-      const batch = fs.writeBatch(db);
-      batch.update(fs.doc(db, "facilities", facilityId, "members", memberUid), { ...memberUpdate, updatedAt: fs.serverTimestamp() });
-      batch.set(fs.doc(db, "facilities", facilityId, "auditLogs", auditId), { ...log, at: fs.serverTimestamp() });
-      await batch.commit();
-    }
   };
 }

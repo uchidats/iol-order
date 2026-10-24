@@ -4,7 +4,7 @@
 Security Rules は [firestore.rules](../firestore.rules)、テストは `npm run test:rules`（エミュレータ、実プロジェクトには接続しない）。
 
 ## アクセスの原則
-1. **ログイン ≠ 利用許可。** ログイン後、`members` の有効な所属（`status=active` かつ `role=admin|orderer`）が確認できるまで、注文画面・施設情報は表示も取得もされない（画面側 `decideAccess`、サーバー側 Rules の両方で拒否）。
+1. **ログイン ≠ 利用許可。** ログイン後、`members` に所属ドキュメント（`role=admin|orderer`）が確認できるまで、注文画面・施設情報は表示も取得もされない（画面側 `decideAccess`、サーバー側 Rules の両方で拒否）。所属に有効/無効はなく、所属が削除されると既存のセッションでも次のリクエストから拒否される。
 2. 所属の取得に失敗した場合も許可しない（fail closed）。
 3. **権限は本人が付与できない。**
    - 自分の `members` ドキュメントは誰も（admin でも）クライアントから変更できない。
@@ -22,7 +22,7 @@ dealers/{dealerId}               ディーラー本体（運営者 + memberUids 
 
 facilities/{facilityId}          name, status: pending|active|suspended, updatedAt,
                                  location?: {lat, lng}, geoRadiusM?: number   ← 現在地による施設選択の補助（任意）
-  ├─ members/{uid}               uid, role: admin|orderer, status: active|disabled, displayName?, updatedAt
+  ├─ members/{uid}               uid, role: admin|orderer, displayName?, email?, updatedAt   ← 有効/無効(status)はない。削除=所属の解除
   ├─ orderers/{id}               facilityId, name(1-50), email?, sortOrder?, updatedAt   ← 有効/無効(active)はない
   ├─ adoptedIols/{catalogIolId}  facilityId, catalogIolId(=doc id, 共通マスターのID), dealerId?, enabled, updatedAt
   ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, active, sortOrder?, updatedAt,
@@ -49,7 +49,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
   Rules 内の許可IDの一覧は `IOL_MODELS` と同期が必要（`tests/rules-catalog-sync.test.js` が不一致を検出する）。マスターを Firestore の `iolCatalog` へ移す際にこの二重管理を解消する。
 - **ディーラー**: 名称・有効/無効・**発注用メール**と**使用報告用メール**（それぞれ最大5件、形式検証あり）。現時点では登録のみで、メール送信・ディーラー連携は未実装。
 - 検証は画面（`src/domain/facility-settings.js`）と Rules の両方で行う。権限は常に Rules が最終判定し、画面でメニューを隠すだけに依存しない。
-- 所属先以外の施設・orderer 権限・無効化された所属・未認証は、設定の読み書きができない（Rules テストで検証）。
+- 所属先以外の施設・orderer 権限・所属のない人・未認証は、設定の読み書きができない（Rules テストで検証）。
 
 ## 施設の選択と位置情報（GPS）
 施設の確定ルール（複数所属の場合のみ選択が発生する）:
@@ -80,9 +80,9 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 - `createOrder`（orderId 発行・冪等化・メール送信）、IOLシール画像、ディーラー向けSN照合
 
 ## 利用者管理（施設管理者）
-画面: 施設設定 > 利用者管理。所属ユーザーの氏名・メール・権限・状態を表示し、**一般注文者(orderer)** の無効化・再有効化ができる（確認ダイアログあり）。
-- 変更できるのは他人の orderer の `status` のみ。権限(role)の変更・管理者の変更・自分自身の変更・所属の作成/削除は、施設管理者にはできない（Rules で強制）。したがって有効な管理者が0人になる操作は構造的に不可能（運営者による操作を除く）。画面でも管理者の行には操作を出さない。
-- 無効化は即時に効く。`isMember()` が毎回 `status=active` を参照するため、既存のログイン中セッションも次のリクエストから、その施設の読み書き全てが拒否される。
-- **操作記録** `facilities/{fid}/auditLogs/{id}`: `action(member.disable|member.enable)`, `targetUid`, `targetRole`, `targetName?`, `actorUid`, `actorName?`, `fromStatus`, `toStatus`, `at`。追記のみ（更新・削除不可）、施設管理者と運営者だけが読める。所属の変更と**同じバッチでのみ**作成でき、所属側の `lastAuditId` と相互に突き合わせるため、記録なしの変更・変更なしの記録・操作者の偽装はできない。
-- `members/{uid}.email`: 参加・登録時にサーバーが確認済みメールを記録する（表示用）。この機能の導入前に作られた所属には無く、画面では「—」と表示される。
-- 無効化された人は、無効化より前に発行された招待コードでは再参加できない（Functions `acceptInvite`）。再び参加させるには、無効化の後に新しい招待を発行する。
+画面: 施設設定 > 利用者管理。所属ユーザーの氏名・メール・権限を表示し、**一般注文者(orderer)** の所属を削除できる（確認ダイアログあり）。有効/無効の状態はない。詳細・移行手順は [member-status-removal.md](member-status-removal.md)。
+- 所属の削除は Cloud Functions `removeMember` だけが行う（クライアントは所属を作成・変更・削除できない）。管理者（自分自身・最後の管理者を含む）の所属・他施設の所属は削除できない。
+- **所属の削除と操作記録 `facilities/{fid}/auditLogs/{id}` は1つのトランザクション**。記録は追記のみ（クライアントは作成・変更・削除不可）で、施設管理者と運営者だけが読める。
+- 削除後は、`isMember()` が毎回所属ドキュメントの存在を確認するため、ログイン中のセッションでも次のリクエストからアクセスできない。削除した人宛ての未使用の招待は取り消される。
+- `members/{uid}.email`: 参加・登録時にサーバーが確認済みメールを記録する（表示用）。古い所属には無く、画面では「—」と表示される。
+

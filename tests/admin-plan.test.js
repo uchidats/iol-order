@@ -43,7 +43,7 @@ test("施設管理者の追加計画は create のみ（上書きしない）で
   const op = r.plan.operations[0];
   assert.equal(op.failIfExists, true);
   assert.equal(op.path, `facilities/demo-clinic/members/${UID}`);
-  assert.deepEqual(op.data, { uid: UID, role: "admin", status: "active" });
+  assert.deepEqual(op.data, { uid: UID, role: "admin" });
 });
 
 test("施設の位置情報登録: 座標・判定距離は明示指定が必須（既定値なし）", () => {

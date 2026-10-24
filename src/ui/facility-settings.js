@@ -2,7 +2,7 @@ import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
-import { planMemberToggle, confirmMessage, memberLabel, sortMembers, newAuditId, buildMemberChange } from "../domain/member-admin.js";
+import { planMemberRemoval, confirmMessage, memberLabel, sortMembers } from "../domain/member-admin.js";
 import { createSectionHeading } from "./info-tip.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
@@ -341,11 +341,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 利用者管理 ----------
-  const canManageMembers = Boolean(currentUser && repository.listMembers && settingsApi.applyMemberChange);
+  // 所属に有効/無効はない。不要になった一般注文者は、所属を削除する(管理者の所属・自分自身は削除できない)
+  const canManageMembers = Boolean(currentUser && repository.listMembers && inviteApi && inviteApi.removeMember);
 
   function memberSection() {
     return h("section", { class: "settings-section", "data-section": "members" },
-      createSectionHeading("利用者管理", "この施設に所属するユーザーです。一般注文者は無効化・再有効化できます（無効化すると、この施設の注文画面・設定を利用できなくなります）。管理者の変更はできません。"),
+      createSectionHeading("利用者管理", "この施設の利用者を管理します。新しい利用者の招待と、不要になった利用者の所属削除ができます。"),
       h("div", { "data-list": "" }),
       h("p", { class: "form-hint", "data-msg": "" }));
   }
@@ -353,32 +354,29 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   function renderMembers(section) {
     const list = section.querySelector("[data-list]");
     const rows = sortMembers(data.members).map((m) => {
-      const plan = planMemberToggle(data.members, m, currentUser.uid);
-      const active = m.status === "active";
+      const plan = planMemberRemoval(data.members, m, currentUser.uid);
+      // 1段目: 氏名 + 右端に操作(一般注文者のみ「所属を削除」) / 2段目: メール・権限
       const btn = plan.ok
-        ? h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "toggle-member" }, plan.to === "disabled" ? "無効化" : "再有効化")
-        : h("span", { class: "form-hint", title: plan.reason }, m.uid === currentUser.uid ? "（自分）" : "—");
-      // 1段目: 氏名 + 右端に操作(一般注文者はボタン、管理者は状態の表示) / 2段目: メール・権限
-      const right = m.role === "admin" ? h("span", { "data-f": "status", class: active ? "" : "error-message" }, active ? "有効" : "無効") : btn;
-      const row = h("div", { class: "settings-row settings-row-member" + (active ? "" : " is-disabled"), "data-uid": m.uid },
+        ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "remove-member", "aria-label": `${memberLabel(m)} の所属を削除`, title: "所属を削除" }, trashIcon())
+        : null;
+      const row = h("div", { class: "settings-row settings-row-member", "data-uid": m.uid },
         h("span", { "data-f": "name" }, memberLabel(m)),
-        h("span", { class: "settings-member-action" }, right),
+        h("span", { class: "settings-member-action" }, btn),
         h("span", { class: "settings-member-meta" },
           h("span", { "data-f": "email" }, m.email || "—"), " ・ ", h("span", { "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者")));
-      if (plan.ok) {
+      if (btn) {
         btn.addEventListener("click", async () => {
-          if (!window.confirm(confirmMessage(m, plan))) return;
+          if (!window.confirm(confirmMessage(m))) return;
           btn.disabled = true;
-          message(section, "更新しています…");
+          message(section, "削除しています…");
           try {
-            const change = buildMemberChange({ facilityId: facility.id, target: m, plan, actor: currentUser, auditId: newAuditId() });
-            await settingsApi.applyMemberChange(change);
+            await inviteApi.removeMember({ facilityId: facility.id, uid: m.uid });
             data.members = await repository.listMembers(facility.id);
             renderMembers(section);
-            message(section, plan.to === "disabled" ? "無効化しました。" : "再度有効にしました。");
+            message(section, `${memberLabel(m)} の所属を削除しました。`);
           } catch (e) {
-            console.error("利用者の更新に失敗しました:", e);
-            message(section, "更新できませんでした。権限がない、またはネットワークの問題の可能性があります。", true);
+            console.error("所属の削除に失敗しました:", e);
+            message(section, describeCallableError(e), true);
             btn.disabled = false;
           }
         });

@@ -212,7 +212,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
         createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
       });
       tx.create(memRef, {
-        uid: user.uid, role: "admin", status: "active",
+        uid: user.uid, role: "admin",
         displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
       });
       tx.set(quotaRef, { count: count + 1, keys: [...keys, key], updatedAt: FieldValue.serverTimestamp() });
@@ -231,7 +231,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       db.doc(`facilities/${input.facilityId}/members/${user.uid}`).get()
     ]);
     const isAdmin = fac.exists && fac.get("status") === "active"
-      && mem.exists && mem.get("role") === "admin" && mem.get("status") === "active";
+      && mem.exists && mem.get("role") === "admin";
     if (!isAdmin && !user.isPlatformAdmin) {
       throw new RegistrationError("permission-denied", "この施設の管理者のみ招待できます");
     }
@@ -274,17 +274,11 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       const [fac, mem] = await Promise.all([tx.get(facRef), tx.get(memRef)]);
       if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_INVITE);
 
-      // 管理者が無効化した後に使われる、無効化より前に発行された招待では再有効化しない（無効化の回避を防ぐ）。
-      // 再び参加させるには、無効化の後に新しい招待を発行する。
-      if (mem.exists && mem.get("status") === "disabled" && mem.get("updatedAt") && inv.get("createdAt")
-          && mem.get("updatedAt").toMillis() >= inv.get("createdAt").toMillis()) {
-        throw new RegistrationError("failed-precondition", INVALID_INVITE);
-      }
-
-      // 既に admin の人を orderer に降格しない。それ以外は orderer として有効化
-      if (!(mem.exists && mem.get("role") === "admin" && mem.get("status") === "active")) {
-        tx.set(memRef, {
-          uid: user.uid, role: "orderer", status: "active",
+      // 既に所属している人(管理者を含む)は変更しない(降格しない・二重に作らない)。所属がなければ orderer として作成する。
+      // 所属を削除された人が再び参加するには、削除の後に新しい招待が必要(削除時に未使用の招待は取り消される: members.js)
+      if (!mem.exists) {
+        tx.create(memRef, {
+          uid: user.uid, role: "orderer",
           displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
         });
       }

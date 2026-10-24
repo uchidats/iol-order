@@ -28,11 +28,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/facilities/$(fid)).data.status == 'active';
     }
 
-    // 有効な所属（status=active かつ role が admin/orderer）で、施設も有効
+    // 所属（role が admin/orderer の所属ドキュメントがある）で、施設も有効。
+    // 所属に有効/無効の状態はない。所属が削除されると、ログイン中のセッションでも次のリクエストから拒否される。
     function isMember(fid) {
       return signedIn()
         && exists(memberPath(fid))
-        && get(memberPath(fid)).data.status == 'active'
         && get(memberPath(fid)).data.role in ['admin', 'orderer']
         && facilityIsActive(fid);
     }
@@ -118,65 +118,29 @@ service cloud.firestore {
       allow delete: if false;
 
       // 所属メンバー
+      // 所属の作成・変更・削除は、クライアントからは一切できない(運営者を除く)。
+      //  - 作成: セルフ登録・招待による参加(Cloud Functions)
+      //  - 削除: 施設管理者による利用者の所属削除(Cloud Functions removeMember。所属の削除と操作履歴を1トランザクションで行う)
+      // 所属に有効/無効の状態はなく、削除された所属は存在しない(=アクセスできない)。
       function validMemberShape(uid) {
-        return request.resource.data.keys().hasOnly(['uid', 'role', 'status', 'displayName', 'email', 'updatedAt', 'lastAuditId'])
-          && request.resource.data.keys().hasAll(['uid', 'role', 'status'])
+        return request.resource.data.keys().hasOnly(['uid', 'role', 'displayName', 'email', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['uid', 'role'])
           && request.resource.data.uid == uid
-          && request.resource.data.status in ['active', 'disabled'];
+          && request.resource.data.role in ['admin', 'orderer'];
       }
 
       match /members/{uid} {
-        // 自分の所属は読める（ログイン後の所属確認用）。他人の所属は施設管理者のみ。
+        // 自分の所属は読める(ログイン後の所属確認用)。他人の所属は施設管理者のみ。
         allow get: if signedIn() && (request.auth.uid == uid || isFacilityAdmin(fid) || isPlatformAdmin());
         allow list: if isFacilityAdmin(fid) || isPlatformAdmin();
-
-        // 所属の作成は運営者とサーバー(招待による参加・セルフ登録)のみ。施設管理者は作成・削除できない。
-        // 施設管理者ができるのは、他人の一般注文者(orderer)の status の切替(無効化・再有効化)だけで、
-        // 同じバッチで操作記録(auditLogs)を書くことを必須とする。権限(role)・uid・admin の所属は変更できない。
-        allow create: if isPlatformAdmin()
-          && validMemberShape(uid) && request.resource.data.role in ['admin', 'orderer'];
-        allow update: if (isPlatformAdmin()
-              && validMemberShape(uid) && request.resource.data.role in ['admin', 'orderer'])
-          || (isFacilityAdmin(fid) && uid != request.auth.uid
-              && resource.data.role == 'orderer'
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastAuditId'])
-              && request.resource.data.status in ['active', 'disabled']
-              && request.resource.data.status != resource.data.status
-              && request.resource.data.updatedAt == request.time
-              && stringIn(request.resource.data.lastAuditId, 10, 40)
-              && existsAfter(auditPath(fid, request.resource.data.lastAuditId))
-              && getAfter(auditPath(fid, request.resource.data.lastAuditId)).data.targetUid == uid
-              && getAfter(auditPath(fid, request.resource.data.lastAuditId)).data.toStatus == request.resource.data.status);
+        allow create, update: if isPlatformAdmin() && validMemberShape(uid);
         allow delete: if isPlatformAdmin();
       }
 
-      // 管理操作の記録（追記のみ。施設管理者と運営者だけが読める）
-      // 所属の変更と同じバッチでのみ作成でき、操作者・時刻はサーバー側の値で固定される。
-      function auditPath(fid2, id) {
-        return /databases/$(database)/documents/facilities/$(fid2)/auditLogs/$(id);
-      }
+      // 管理操作の記録（追記のみ。施設管理者と運営者だけが読める。書き込みはCloud Functionsのみ＝クライアントは作成・変更・削除できない）
       match /auditLogs/{logId} {
         allow read: if isFacilityAdmin(fid) || isPlatformAdmin();
-        allow create: if isFacilityAdmin(fid)
-          && request.resource.data.keys().hasOnly(['action', 'targetUid', 'targetRole', 'targetName', 'actorUid', 'actorName', 'fromStatus', 'toStatus', 'at'])
-          && request.resource.data.keys().hasAll(['action', 'targetUid', 'targetRole', 'actorUid', 'fromStatus', 'toStatus', 'at'])
-          && request.resource.data.actorUid == request.auth.uid
-          && request.resource.data.at == request.time
-          && request.resource.data.targetUid != request.auth.uid
-          && request.resource.data.targetRole == 'orderer'
-          && request.resource.data.action in ['member.disable', 'member.enable']
-          && (request.resource.data.action == 'member.disable'
-              ? (request.resource.data.fromStatus == 'active' && request.resource.data.toStatus == 'disabled')
-              : (request.resource.data.fromStatus == 'disabled' && request.resource.data.toStatus == 'active'))
-          && (!('targetName' in request.resource.data) || stringIn(request.resource.data.targetName, 1, 100))
-          && (!('actorName' in request.resource.data) || stringIn(request.resource.data.actorName, 1, 100))
-          && get(memberPathOf(fid, request.resource.data.targetUid)).data.status == request.resource.data.fromStatus
-          && getAfter(memberPathOf(fid, request.resource.data.targetUid)).data.status == request.resource.data.toStatus
-          && getAfter(memberPathOf(fid, request.resource.data.targetUid)).data.lastAuditId == logId;
-        allow update, delete: if false;
-      }
-      function memberPathOf(fid2, uid) {
-        return /databases/$(database)/documents/facilities/$(fid2)/members/$(uid);
+        allow write: if false;
       }
 
       // 注文者（施設管理者のみ変更・削除可）

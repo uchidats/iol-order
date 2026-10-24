@@ -201,7 +201,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
-        && mem.exists && mem.get("status") === "active" && ["admin", "orderer"].includes(mem.get("role"));
+        && mem.exists && ["admin", "orderer"].includes(mem.get("role")); // 所属があれば有効(削除された所属は存在しない)
       if (!allowed) throw new RegistrationError("permission-denied", "この施設から注文することはできません");
 
       if (existing.exists) {

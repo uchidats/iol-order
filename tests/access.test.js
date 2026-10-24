@@ -4,7 +4,7 @@ import { decideAccess, ACCESS } from "../src/domain/access.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured, missingFirebaseKeys } from "../src/firebase/firebase-config.js";
 
 const base = { configured: true, authReady: true, user: { uid: "u1" }, membershipsLoaded: true, memberships: [] };
-const m = (o) => ({ facilityId: "f1", role: "orderer", status: "active", ...o });
+const m = (o) => ({ facilityId: "f1", role: "orderer", ...o });
 
 test("Firebase未設定は従来モード", () => {
   assert.equal(decideAccess({ ...base, configured: false }).state, ACCESS.LEGACY);
@@ -23,30 +23,29 @@ test("ログイン済みでも所属が無ければ許可しない", () => {
   assert.equal(decideAccess(base).state, ACCESS.NO_MEMBERSHIP);
 });
 
-test("無効・不正な所属は許可しない", () => {
+test("不正な所属は許可しない(所属に有効/無効の状態はなく、role と施設IDがある所属だけが有効)", () => {
   for (const bad of [
-    m({ status: "disabled" }), m({ status: "pending" }), m({ role: "owner" }),
-    m({ role: undefined }), m({ facilityId: "" }), null
+    m({ role: "owner" }), m({ role: undefined }), m({ role: "viewer" }), m({ facilityId: "" }), m({ facilityId: undefined }), null
   ]) {
     assert.equal(decideAccess({ ...base, memberships: [bad] }).state, ACCESS.NO_MEMBERSHIP);
   }
 });
 
 test("所属が1つなら選択なしで自動確定（権限も返す）", () => {
-  const r = decideAccess({ ...base, memberships: [m({ facilityId: "a", role: "admin" }), m({ facilityId: "x", status: "disabled" })] });
+  const r = decideAccess({ ...base, memberships: [m({ facilityId: "a", role: "admin" }), m({ facilityId: "x", role: "owner" })] });
   assert.equal(r.state, ACCESS.GRANTED);
   assert.equal(r.facilityId, "a");
   assert.equal(r.role, "admin");
 });
 
-test("複数所属で選択が無ければ SELECT_FACILITY（有効な所属のみ）", () => {
-  const r = decideAccess({ ...base, memberships: [m({ facilityId: "b" }), m({ facilityId: "a" }), m({ facilityId: "c", status: "disabled" })] });
+test("複数所属で選択が無ければ SELECT_FACILITY（不正な所属は除く）", () => {
+  const r = decideAccess({ ...base, memberships: [m({ facilityId: "b" }), m({ facilityId: "a" }), m({ facilityId: "c", role: "owner" })] });
   assert.equal(r.state, ACCESS.SELECT_FACILITY);
   assert.deepEqual(r.memberships.map(x => x.facilityId), ["a", "b"]);
 });
 
 test("複数所属: 検証済みの所属に含まれる選択のみ採用する", () => {
-  const ms = [m({ facilityId: "a" }), m({ facilityId: "b", role: "admin" }), m({ facilityId: "c", status: "disabled" })];
+  const ms = [m({ facilityId: "a" }), m({ facilityId: "b", role: "admin" }), m({ facilityId: "c", role: "owner" })];
   const ok = decideAccess({ ...base, memberships: ms, selectedFacilityId: "b" });
   assert.equal(ok.state, ACCESS.GRANTED);
   assert.equal(ok.facilityId, "b");

@@ -16,7 +16,9 @@ export function createRegistrationApi({ functions, httpsCallable }) {
     /** @returns {Promise<{token:string, email:string, expiresAt:string}>} */
     createInvite: ({ facilityId, email }) => call("createInvite", { facilityId, email }),
     /** @returns {Promise<{facilityId:string}>} */
-    acceptInvite: ({ token }) => call("acceptInvite", { token })
+    acceptInvite: ({ token }) => call("acceptInvite", { token }),
+    /** 施設管理者が、一般注文者の所属を削除する(所属の削除と操作履歴の記録は、サーバーで1トランザクション) */
+    removeMember: ({ facilityId, uid }) => call("removeMember", { facilityId, uid })
   };
 }
 

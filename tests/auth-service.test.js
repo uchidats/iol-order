@@ -100,10 +100,10 @@ test("所属取得は members の collectionGroup を uid で絞る", async () =
     where: (f, op, v) => (where = [f, op, v]),
     query: (c, w) => ({ c, w }),
     getDocs: async (q) => ({
-      docs: [{ ref: { parent: { parent: { id: "f9" } } }, data: () => ({ role: "orderer", status: "active" }) }]
+      docs: [{ ref: { parent: { parent: { id: "f9" } } }, data: () => ({ role: "orderer" }) }]
     })
   };
   const r = await fetchMemberships({}, fs, "uid1");
   assert.deepEqual(where, ["uid", "==", "uid1"]);
-  assert.deepEqual(r, [{ facilityId: "f9", role: "orderer", status: "active" }]);
+  assert.deepEqual(r, [{ facilityId: "f9", role: "orderer" }]);
 });

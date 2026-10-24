@@ -36,7 +36,6 @@ beforeEach(async () => {
   await db.doc("facilities/fB").set({ name: "B眼科", status: "active" });
   await seedMember(F, "ordA", "orderer");
   await seedMember(F, "adminA", "admin");
-  await seedMember(F, "offA", "orderer", "disabled");
   await seedMember("fB", "ordB", "orderer");
   for (const f of [F, "fB"]) {
     for (const id of ["jj-dib00v", "jj-diwxxx-toric", "nidek-nsp-2", "alcon-mn60ma-yellow"]) {
@@ -49,7 +48,7 @@ beforeEach(async () => {
   await db.doc(`facilities/${F}/adoptedIols/alcon-cna0t0`).set({ facilityId: F, catalogIolId: "alcon-cna0t0", enabled: false }); // 採用解除
 });
 
-const seedMember = (fid, uid, role = "orderer", status = "active") => db.doc(`facilities/${fid}/members/${uid}`).set({ uid, role, status });
+const seedMember = (fid, uid, role = "orderer") => db.doc(`facilities/${fid}/members/${uid}`).set({ uid, role });
 const user = (uid, over = {}) => ({ uid, token: { email: `${uid}@login.jp`, email_verified: true, name: `ログイン-${uid}`, ...over } });
 const rid = () => crypto.randomUUID();
 const body = (over = {}) => ({
@@ -122,22 +121,22 @@ test("クライアントは注文番号・状態・作成者・価格・レン�
 });
 
 // ================= 認証・権限 =================
-test("未認証・メール未確認・所属なし・他施設・無効化されたユーザーは拒否され、何も保存されない", async () => {
+test("未認証・メール未確認・所属なし・他施設・所属を削除されたユーザーは拒否され、何も保存されない", async () => {
   await rejects(order(null, body()), "unauthenticated");
   await rejects(order(user("ordA", { email_verified: false }), body()), "permission-denied");
   await rejects(order(user("stranger"), body()), "permission-denied");
   await rejects(order(user("ordB"), body()), "permission-denied");          // 他施設の所属者が自施設以外へ
   await rejects(order(user("ordA"), body({ facilityId: "fB" })), "permission-denied"); // 自施設の所属者が他施設へ
-  await rejects(order(user("offA"), body()), "permission-denied");          // 無効化されたユーザー
+  await rejects(order(user("offA"), body()), "permission-denied");          // 所属を削除されたユーザー(所属ドキュメントがない)
   await db.doc(`facilities/${F}`).update({ status: "suspended" });
   await rejects(order(user("ordA"), body()), "permission-denied");          // 停止中の施設
   assert.equal((await orders()).length + (await orders("fB")).length, 0);
 });
 
-test("無効化された後の再送でも、既存の注文を返さず拒否する(権限は毎回再確認)", async () => {
+test("所属を削除された後の再送でも、既存の注文を返さず拒否する(権限は毎回再確認)", async () => {
   const d = body();
   await order(user("ordA"), d);
-  await db.doc(`facilities/${F}/members/ordA`).update({ status: "disabled" });
+  await db.doc(`facilities/${F}/members/ordA`).delete(); // 所属の削除
   await rejects(order(user("ordA"), d), "permission-denied");
 });
 
@@ -463,10 +462,10 @@ test("開発用受付: 許可外の施設・ユーザーは、有効な所属者
   assert.equal((await db.collection(`facilities/${F}/orderCounters`).get()).size, 0);
 });
 
-test("開発用受付: 許可ユーザーでも、その施設の有効な所属者でなければ拒否される(許可リストは所属確認の代わりにならない)", async () => {
+test("開発用受付: 許可ユーザーでも、その施設の所属者でなければ拒否される(許可リストは所属確認の代わりにならない)", async () => {
   const s = restrictedService({ facilityIds: [F], uids: ["adminA", "outsider"] });
   await rejects(s.createOrder({ auth: user("outsider"), data: body() }), "permission-denied");
-  await db.doc(`facilities/${F}/members/adminA`).update({ status: "disabled" });
+  await db.doc(`facilities/${F}/members/adminA`).delete(); // 所属の削除
   await rejects(s.createOrder({ auth: user("adminA"), data: body() }), "permission-denied");
   assert.equal((await orders()).length, 0);
 });

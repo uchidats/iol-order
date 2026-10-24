@@ -72,7 +72,7 @@ test("callable: メール確認済みのアカウントは施設を登録でき�
   assert.match(fid, /^fac-[0-9a-f]{24}$/);
   const mem = await getDoc(`facilities/${fid}/members/${verified.uid}`);
   assert.equal(mem.fields.role.stringValue, "admin");
-  assert.equal(mem.fields.status.stringValue, "active");
+  assert.equal(mem.fields.status, undefined, "membership has no status");
   const fac = await getDoc(`facilities/${fid}`);
   assert.equal(fac.fields.createdBy.stringValue, verified.uid);
 });
@@ -180,4 +180,28 @@ test("callable: createOrder は複数明細(まとめ発注)を受け付け、�
   const s2 = await call("createOrder", { ...base, requestId: "order-e2e-request-0103", lines: [lines[0]] }, owner2.idToken);
   assert.equal(s2.body.result.orderNumber, s1.body.result.orderNumber);
   assert.equal(s2.body.result.replayed, true);
+});
+
+test("callable: removeMember は管理者だけが一般注文者の所属を削除できる(履歴つき)。管理者の所属・他人は削除できない", async () => {
+  const owner3 = await createUser("rm-owner@example.jp", { verified: true });
+  const reg = await call("registerFacility", { name: "サクラ眼科クリニック", requestId: "rm-e2e-register-0001" }, owner3.idToken);
+  const fid = reg.body.result.facilityId;
+  const inv = await call("createInvite", { facilityId: fid, email: "rm-nurse@example.jp" }, owner3.idToken);
+  const nurse = await createUser("rm-nurse@example.jp", { verified: true });
+  assert.equal((await call("acceptInvite", { token: inv.body.result.token }, nurse.idToken)).http, 200);
+  const mem = await getDoc(`facilities/${fid}/members/${nurse.uid}`);
+  assert.equal(mem.fields.status, undefined, "membership has no status");
+
+  // 注文者は削除できない・管理者の所属は削除できない
+  assert.equal((await call("removeMember", { facilityId: fid, uid: owner3.uid }, nurse.idToken)).body.error.status, "PERMISSION_DENIED");
+  assert.equal((await call("removeMember", { facilityId: fid, uid: owner3.uid }, owner3.idToken)).body.error.status, "FAILED_PRECONDITION");
+  assert.equal((await call("removeMember", { facilityId: fid, uid: nurse.uid }, null)).body.error.status, "UNAUTHENTICATED");
+  // 管理者が一般注文者の所属を削除
+  const ok = await call("removeMember", { facilityId: fid, uid: nurse.uid }, owner3.idToken);
+  assert.equal(ok.body.result.removed, true);
+  assert.equal(await getDoc(`facilities/${fid}/members/${nurse.uid}`), null);
+  assert.equal((await call("removeMember", { facilityId: fid, uid: nurse.uid }, owner3.idToken)).body.error.status, "NOT_FOUND");
+  // 削除された人は、その施設の注文を作れない
+  const order = await call("createOrder", { facilityId: fid, requestId: "rm-e2e-order-000001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10), ordererId: "x" }, nurse.idToken);
+  assert.equal(order.body.error.status, "PERMISSION_DENIED");
 });

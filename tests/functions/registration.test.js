@@ -40,7 +40,7 @@ const reg = (auth, name, extra = {}) => service.registerFacility({ auth, data: {
 const rejects = (promise, code) => assert.rejects(promise, (e) => e.code === code, `expected ${code}`);
 const count = async (p) => (await db.collection(p).get()).size;
 const seedFacility = (id, name, extra = {}) => db.doc(`facilities/${id}`).set({ name, status: "active", ...extra });
-const seedMember = (fid, uid, role = "orderer", status = "active") => db.doc(`facilities/${fid}/members/${uid}`).set({ uid, role, status });
+const seedMember = (fid, uid, role = "orderer") => db.doc(`facilities/${fid}/members/${uid}`).set({ uid, role });
 
 // ================= 新規施設登録 =================
 test("正常系: 施設・最初の管理者の所属・利用枠が作成され、IDはサーバーが生成する", async () => {
@@ -60,7 +60,7 @@ test("正常系: 施設・最初の管理者の所属・利用枠が作成され
 
   const mem = (await db.doc(`facilities/${r.facilityId}/members/userA`).get()).data();
   assert.equal(mem.role, "admin");
-  assert.equal(mem.status, "active");
+  assert.equal("status" in mem, false, "membership has no status (no active/disabled concept)");
   assert.equal(mem.uid, "userA");
   assert.equal((await db.doc("registrationQuota/userA").get()).get("count"), 1);
   assert.equal(await count("facilities"), 1);
@@ -111,7 +111,7 @@ test("整合性: 途中で失敗したらロールバックされ(施設も利�
   const requestId = uuid();
   const fid = deriveFacilityId("userA", requestId);
   // 管理者所属の作成だけが失敗する状況を作る（所属ドキュメントが既に存在）
-  await db.doc(`facilities/${fid}/members/userA`).set({ uid: "userA", role: "orderer", status: "active" });
+  await db.doc(`facilities/${fid}/members/userA`).set({ uid: "userA", role: "orderer" });
   await assert.rejects(service.registerFacility({ auth: a, data: { name: "施設", requestId } }));
   assert.equal((await db.doc(`facilities/${fid}`).get()).exists, false, "施設だけが残ってはいけない");
   assert.equal((await db.doc("registrationQuota/userA").get()).exists, false, "利用枠だけが消費されてはいけない");
@@ -294,7 +294,7 @@ test("参加: 招待されたメールアドレスの確認済みアカウント
   const r = await service.acceptInvite({ auth: nurse, data: { token } });
   assert.deepEqual(r, { facilityId });
   const mem = (await db.doc(`facilities/${facilityId}/members/nurse1`).get()).data();
-  assert.deepEqual([mem.uid, mem.role, mem.status], ["nurse1", "orderer", "active"]);
+  assert.deepEqual([mem.uid, mem.role, "status" in mem], ["nurse1", "orderer", false]);
   const inv = (await db.doc(`invites/${hashToken(token)}`).get()).data();
   assert.equal(inv.status, "used");
   assert.equal(inv.usedBy, "nurse1");
@@ -335,7 +335,7 @@ test("参加: 同じ招待の同時使用は1回だけ成功する", async () =>
   assert.equal(await count(`facilities/${facilityId}/members`), 2);
 });
 
-test("参加: 招待で管理者を降格しない / 無効化されていた所属は orderer として再有効化 / 停止中の施設には参加できない", async () => {
+test("参加: 招待で管理者を降格しない / 既に所属している人の所属は変わらない / 停止中の施設には参加できない", async () => {
   const { admin, facilityId } = await setupFacilityWithAdmin();
   const mk = (email) => service.createInvite({ auth: admin, data: { facilityId, email } });
 
@@ -343,10 +343,18 @@ test("参加: 招待で管理者を降格しない / 無効化されていた所
   await service.acceptInvite({ auth: admin, data: { token: t1.token } });
   assert.equal((await db.doc(`facilities/${facilityId}/members/adminA`).get()).get("role"), "admin");
 
-  await seedMember(facilityId, "was-disabled", "orderer", "disabled");
-  const t2 = await mk("was-disabled@example.jp");
-  await service.acceptInvite({ auth: user("was-disabled"), data: { token: t2.token } });
-  assert.equal((await db.doc(`facilities/${facilityId}/members/was-disabled`).get()).get("status"), "active");
+  // 既に所属している人が招待を使っても、所属(role・作成日時)は変わらず、所属に status は付かない
+  await seedMember(facilityId, "already", "orderer");
+  const before = (await db.doc(`facilities/${facilityId}/members/already`).get()).data();
+  const t2 = await mk("already@example.jp");
+  await service.acceptInvite({ auth: user("already"), data: { token: t2.token } });
+  assert.deepEqual((await db.doc(`facilities/${facilityId}/members/already`).get()).data(), before);
+  // 新しく参加した人の所属は {uid, role, displayName, email, updatedAt} だけ(有効/無効の状態はない)
+  const t4 = await mk("fresh@example.jp");
+  await service.acceptInvite({ auth: user("fresh"), data: { token: t4.token } });
+  const fresh = (await db.doc(`facilities/${facilityId}/members/fresh`).get()).data();
+  assert.deepEqual(Object.keys(fresh).sort(), ["displayName", "email", "role", "uid", "updatedAt"]);
+  assert.equal(fresh.role, "orderer");
 
   const t3 = await mk("late@example.jp");
   await db.doc(`facilities/${facilityId}`).update({ status: "suspended" });
@@ -386,8 +394,8 @@ test("登録後: 新しい管理者は自施設の設定を読み書きでき、
   // 立川病院の管理者は新しい施設に入れない
   await assertFails(getDoc(doc(as("adminT"), `facilities/${fa}`)));
   // 自分で admin 権限を付与・自己参加はできない（登録経路を除く）
-  await assertFails(setDoc(doc(as("userA"), `facilities/${fb}/members/userA`), { uid: "userA", role: "admin", status: "active" }));
-  await assertFails(setDoc(doc(as("userA"), `facilities/${fa}/members/userA`), { uid: "userA", role: "admin", status: "active", extra: 1 }));
+  await assertFails(setDoc(doc(as("userA"), `facilities/${fb}/members/userA`), { uid: "userA", role: "admin" }));
+  await assertFails(setDoc(doc(as("userA"), `facilities/${fa}/members/userA`), { uid: "userA", role: "admin", extra: 1 }));
 });
 
 test("クライアント(運営者権限なし)は施設を作成できない", async () => {
@@ -408,21 +416,7 @@ test("招待と利用枠は、運営者権限を含むどのクライアント�
   }
 });
 
-// ================= 利用者管理との整合 =================
-test("無効化された後は、無効化より前に発行された招待で再有効化できない。無効化の後に発行した招待なら再有効化できる", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const old = await service.createInvite({ auth: admin, data: { facilityId, email: "ex@example.jp" } });
-  await seedMember(facilityId, "ex", "orderer");
-  await new Promise(r => setTimeout(r, 20));
-  await db.doc(`facilities/${facilityId}/members/ex`).update({ status: "disabled", updatedAt: FieldValue.serverTimestamp() }); // 管理者による無効化
-  await rejects(service.acceptInvite({ auth: user("ex"), data: { token: old.token } }), "failed-precondition");
-  assert.equal((await db.doc(`facilities/${facilityId}/members/ex`).get()).get("status"), "disabled");
-  await new Promise(r => setTimeout(r, 20));
-  const fresh = await service.createInvite({ auth: admin, data: { facilityId, email: "ex@example.jp" } });
-  await service.acceptInvite({ auth: user("ex"), data: { token: fresh.token } });
-  assert.equal((await db.doc(`facilities/${facilityId}/members/ex`).get()).get("status"), "active");
-});
-
+// ================= 所属の記録 =================
 test("所属ドキュメントに確認済みメールが記録される(利用者管理の表示用)", async () => {
   const { admin, facilityId } = await setupFacilityWithAdmin();
   assert.equal((await db.doc(`facilities/${facilityId}/members/adminA`).get()).get("email"), "admina@example.jp");

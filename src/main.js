@@ -5,7 +5,7 @@ import { initBiometry } from "./biometry/biometry-ui.js";
 import { biometryState } from "./biometry/state.js";
 import { IOL_MODELS } from "./data/iol-models.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-config.js";
-import { decideAccess, activeMemberships, ACCESS } from "./domain/access.js";
+import { decideAccess, validMemberships, ACCESS } from "./domain/access.js";
 import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
@@ -173,7 +173,7 @@ async function bootstrapWithFirebase(config) {
   /** 施設を確定して注文画面を表示する */
   async function chooseFacility(facilityId, { remember = true } = {}) {
     // 検証済みの所属に含まれない施設IDは採用しない（decideAccess も同様に判定する）
-    if (!activeMemberships(state.memberships).some(m => m.facilityId === facilityId)) return;
+    if (!validMemberships(state.memberships).some(m => m.facilityId === facilityId)) return;
     state.selectedFacilityId = facilityId;
     if (remember) selection.remember(window.localStorage, state.user.uid, facilityId);
     notice = ""; error = "";
@@ -207,7 +207,7 @@ async function bootstrapWithFirebase(config) {
       state.memberships = []; state.facilities = [];
     }
     state.membershipsLoaded = true;
-    if (activeMemberships(state.memberships).some(m => m.facilityId === facilityId)) {
+    if (validMemberships(state.memberships).some(m => m.facilityId === facilityId)) {
       state.selectedFacilityId = facilityId;
       selection.remember(window.localStorage, state.user.uid, facilityId);
     } else {
@@ -232,7 +232,7 @@ async function bootstrapWithFirebase(config) {
     }
     registration.open = null;
     if (!error) {
-      if (activeMemberships(state.memberships).some(m => m.facilityId === newFacilityId)) {
+      if (validMemberships(state.memberships).some(m => m.facilityId === newFacilityId)) {
         notice = `「${facilityName(newFacilityId)}」を追加しました。メニューの「施設を切り替える」から移動できます。`;
       } else {
         error = "所属の反映を確認できませんでした。ページを再読み込みしてください。";
@@ -324,7 +324,7 @@ async function bootstrapWithFirebase(config) {
 
   /** 所属ごとの施設ドキュメントを読む。読めない（停止中など）施設は所属から除外する */
   async function loadFacilities() {
-    const active = activeMemberships(state.memberships);
+    const active = validMemberships(state.memberships);
     const docs = await Promise.all(active.map(async (m) => {
       try {
         const f = await ctx.repository.getFacility(m.facilityId);
@@ -340,7 +340,7 @@ async function bootstrapWithFirebase(config) {
   /** 複数所属時の自動選択: 記憶 → （同意済みなら）現在地。決まらなければ手動選択 */
   async function autoSelectFacility() {
     const forced = selection.consumeForceSelect(window.sessionStorage);
-    const active = activeMemberships(state.memberships);
+    const active = validMemberships(state.memberships);
     if (active.length <= 1 || forced) return false; // 1施設はGPS不使用で自動確定
 
     const remembered = selection.readRemembered(window.localStorage, state.user.uid);

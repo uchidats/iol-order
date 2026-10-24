@@ -13,6 +13,8 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineString, defineBoolean } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
 import { createOrderService } from "./src/orders.js";
+import { createMemberService } from "./src/members.js";
+import { getAuth } from "firebase-admin/auth";
 
 initializeApp();
 
@@ -68,3 +70,10 @@ export const registerFacility = onCall(options, wrap(service.registerFacility));
 export const createInvite = onCall(options, wrap(service.createInvite));
 export const acceptInvite = onCall(options, wrap(service.acceptInvite));
 export const createOrder = onCall(options, wrap(orderService.createOrder));
+
+// 利用者の所属削除(施設管理者のみ)。所属の削除と操作履歴の記録を1つのトランザクションで行う
+const memberService = createMemberService({
+  db: getFirestore(), FieldValue, Timestamp,
+  lookupEmail: async (uid) => { try { return (await getAuth().getUser(uid)).email || null; } catch (e) { return null; } }
+});
+export const removeMember = onCall(options, wrap(memberService.removeMember));
