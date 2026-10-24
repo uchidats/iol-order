@@ -150,9 +150,13 @@ export function validateLens(model, input) {
  * @param {typeof import("firebase-admin/firestore").FieldValue} deps.FieldValue
  * @param {() => number} [deps.now]
  * @param {() => boolean} [deps.isEnabled] 注文受付の有効/無効(キルスイッチ)。未指定は有効
+ * @param {() => {unrestricted?:boolean, facilityIds?:string[], uids?:string[]}} [deps.getPolicy]
+ *   受付の対象の制限。既定は制限なし。`unrestricted` でない場合は「開発用受付」で、許可リストに載った施設とユーザー
+ *   (ログイン済み・メール確認済み)だけが注文でき(リストが空なら全員拒否)、保存される注文には testOrder: true が付く。
+ *   この制限はサーバー側で強制する(画面の設定には依存しない)。
  * @param {Array<object>} [deps.catalog]
  */
-export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, catalog = IOL_MODELS }) {
+export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, getPolicy = () => ({ unrestricted: true }), catalog = IOL_MODELS }) {
   async function consumeRate(uid) {
     const ref = db.doc(`rateLimits/${uid}_createOrder`);
     await db.runTransaction(async (tx) => {
@@ -170,6 +174,13 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     const user = assertVerifiedUser(auth);
     if (!isEnabled()) throw new RegistrationError("failed-precondition", "注文の受付は現在ご利用いただけません");
     const input = parseOrderInput(data, now());
+
+    // 開発用受付の制限(許可した施設・ユーザーのみ)。許可外は理由を明かさず拒否し、何も書き込まない
+    const policy = getPolicy() || {};
+    const restricted = policy.unrestricted !== true;
+    if (restricted && !((policy.facilityIds || []).includes(input.facilityId) && (policy.uids || []).includes(user.uid))) {
+      throw new RegistrationError("permission-denied", "この施設・ユーザーからの注文は、現在の開発用受付の対象外です");
+    }
     await consumeRate(user.uid);
 
     const fRef = db.doc(`facilities/${input.facilityId}`);
@@ -234,6 +245,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
+        testOrder: restricted, // 開発用受付で保存された注文(本番の注文と区別・後から削除を判断するための印)
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
         lines,
         lineCount: lines.length,

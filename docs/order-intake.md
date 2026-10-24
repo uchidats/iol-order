@@ -38,6 +38,16 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 ## Security Rules
 `facilities/{fid}/orders/**` は、自施設の有効な所属者と運営者だけが**読める**。**作成・変更・削除は全員不可**（Admin SDK＝Cloud Functions のみ）。注文番号のカウンター（`orderCounters`）とレート制限（`rateLimits`）はクライアントから見えない。
 
+## 開発用受付の制限(サーバー側で強制)
+`ORDER_INTAKE_ENABLED=true` にしても、次を**すべて**満たす注文だけを受け付ける(`functions/.env.<project>`)。ブラウザ側の設定では回避できない。
+- `ORDER_TEST_FACILITY_IDS`(カンマ区切り)に、注文先の施設IDが含まれる(開発環境: せんじゅ眼科 `fac-bafcbe1e6d6c6f6c3528cb11`)。
+- `ORDER_TEST_UIDS`(カンマ区切り)に、操作者のUIDが含まれる(開発環境: 運営者アカウント)。ログイン済み・メール確認済みも必須。
+- さらに従来どおり、その施設の有効な所属者であること(許可リストは所属確認の代わりにならない)。
+- どちらかのリストが空・未設定なら**全員拒否**(安全側)。`ORDER_INTAKE_UNRESTRICTED=true` にしたときだけ制限なしの受付になる(将来の本番用。エミュレータのE2Eでも使用)。
+- 許可外の呼び出しは、理由(許可リストの内容)を明かさず `permission-denied` で拒否し、何も書き込まない(利用枠・レート制限・注文番号も消費しない)。
+- 制限つきの受付で保存した注文には `testOrder: true` が付く(通常の受付は `false`)。ディーラー通知・GAS通信はどちらでも行わない。
+- テスト注文は自動では削除しない。一覧は `node scripts/admin/list-test-orders.mjs`(読み取り専用)で確認し、削除は内容を見てから人が判断する。
+
 ## 有効化（二重の安全装置）
 - **サーバー**: `ORDER_INTAKE_ENABLED`（既定 `false`）。`false` の間は認証済みの所属者でも `failed-precondition`。`functions/.env.medconf-iol-dev` で `true` にしてデプロイする。エミュレータのE2E（`demo-iol-e2e`）だけ `true`。
 - **画面**: 公開サイトは `dryrun` のまま。保存を試すには、**ローカルの** `src/config.local.js`（Git管理外）に `orderMode: "server-dev"` を設定する。バッジは「開発用受付」になり、完了画面は「開発用受付・ディーラー未通知」と表示する。

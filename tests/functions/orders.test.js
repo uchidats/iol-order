@@ -422,3 +422,63 @@ test("Rules: 注文はどのクライアントからも作成・変更・削除�
   await assertFails(getDoc(doc(ctx("adminA"), `facilities/${F}/orderCounters/20261024`)));
   await assertFails(setDoc(doc(ctx("adminA"), `facilities/${F}/orderCounters/20261024`), { count: 0 }));
 });
+
+// ================= 開発用受付の制限(サーバー側で強制) =================
+const restrictedService = (policy) => createOrderService({ db, FieldValue, now: () => clock.t, isEnabled: () => enabled.v, getPolicy: () => policy });
+const POLICY = { facilityIds: [F], uids: ["adminA"] };
+
+test("開発用受付: 許可した施設・ユーザーだけが注文でき、保存された注文には testOrder: true が付く(複数明細・再送も可)", async () => {
+  const s = restrictedService(POLICY);
+  const d = multi([line(), line({ modelId: "nidek-nsp-2", power: "+5.5D", surgeryDate: "2026-11-20" })]);
+  const a = await s.createOrder({ auth: user("adminA"), data: d });
+  assert.equal(a.lineCount, 2);
+  const o = (await db.doc(`facilities/${F}/orders/${a.orderId}`).get()).data();
+  assert.equal(o.testOrder, true);
+  assert.equal(o.status, "accepted");
+  const b = await s.createOrder({ auth: user("adminA"), data: d });
+  assert.equal(b.replayed, true);
+  assert.equal(b.orderNumber, a.orderNumber);
+  assert.equal((await orders()).length, 1);
+});
+
+test("開発用受付: 制限のない通常の受付で保存した注文は testOrder: false", async () => {
+  const r = await order(user("ordA"), body());
+  assert.equal((await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("testOrder"), false);
+});
+
+test("開発用受付: 許可外の施設・ユーザーは、有効な所属者でも拒否され、何も書き込まれない(利用枠・レート制限も含む)", async () => {
+  const s = restrictedService(POLICY);
+  await rejects(s.createOrder({ auth: user("ordA"), data: body() }), "permission-denied");                      // 許可外のユーザー(自施設の注文者)
+  await rejects(s.createOrder({ auth: user("adminA"), data: body({ facilityId: "fB" }) }), "permission-denied"); // 許可外の施設
+  await rejects(s.createOrder({ auth: user("ordB"), data: body({ facilityId: "fB" }) }), "permission-denied");   // どちらも許可外
+  await seedMember("fB", "adminA", "admin");
+  await rejects(s.createOrder({ auth: user("adminA"), data: body({ facilityId: "fB" }) }), "permission-denied"); // 許可ユーザーが別施設の所属者でも不可
+  assert.equal((await orders()).length + (await orders("fB")).length, 0);
+  assert.equal((await db.collection("rateLimits").get()).size, 0);
+  assert.equal((await db.collection(`facilities/${F}/orderCounters`).get()).size, 0);
+});
+
+test("開発用受付: 許可ユーザーでも、その施設の有効な所属者でなければ拒否される(許可リストは所属確認の代わりにならない)", async () => {
+  const s = restrictedService({ facilityIds: [F], uids: ["adminA", "outsider"] });
+  await rejects(s.createOrder({ auth: user("outsider"), data: body() }), "permission-denied");
+  await db.doc(`facilities/${F}/members/adminA`).update({ status: "disabled" });
+  await rejects(s.createOrder({ auth: user("adminA"), data: body() }), "permission-denied");
+  assert.equal((await orders()).length, 0);
+});
+
+test("開発用受付: 許可リストが空・未設定なら全員拒否(安全側)。メール未確認・未認証・キルスイッチも優先される", async () => {
+  for (const policy of [{ facilityIds: [], uids: [] }, { facilityIds: [F], uids: [] }, { facilityIds: [], uids: ["adminA"] }, {}, null, { unrestricted: "true" }]) {
+    await rejects(restrictedService(policy).createOrder({ auth: user("adminA"), data: body() }), "permission-denied");
+  }
+  const s = restrictedService(POLICY);
+  await rejects(s.createOrder({ auth: null, data: body() }), "unauthenticated");
+  await rejects(s.createOrder({ auth: user("adminA", { email_verified: false }), data: body() }), "permission-denied");
+  enabled.v = false;
+  await rejects(s.createOrder({ auth: user("adminA"), data: body() }), "failed-precondition");
+  assert.equal((await orders()).length, 0);
+});
+
+test("開発用受付: 拒否メッセージは許可リストの内容(施設ID・UID)を明かさない", async () => {
+  const s = restrictedService(POLICY);
+  await assert.rejects(s.createOrder({ auth: user("ordA"), data: body() }), (e) => !e.message.includes(F) && !e.message.includes("adminA"));
+});

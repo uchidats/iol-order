@@ -22,7 +22,21 @@ const service = createRegistrationService({ db: getFirestore(), FieldValue, Time
 // 注文受付(第1段階: 検証して保存するまで。ディーラーへの通知はしない)。
 // 明示的に有効化するまで受け付けない(キルスイッチ)。functions/.env.<project> で ORDER_INTAKE_ENABLED=true にする。
 const ORDER_INTAKE_ENABLED = defineBoolean("ORDER_INTAKE_ENABLED", { default: false });
-const orderService = createOrderService({ db: getFirestore(), FieldValue, isEnabled: () => ORDER_INTAKE_ENABLED.value() });
+// 開発用受付の制限(サーバー側で強制)。許可した施設ID・ユーザーUID(カンマ区切り)だけが注文でき、保存される注文には testOrder: true が付く。
+// ORDER_INTAKE_UNRESTRICTED=true にしない限り、リストが空なら誰も注文できない(安全側)。
+const ORDER_TEST_FACILITY_IDS = defineString("ORDER_TEST_FACILITY_IDS", { default: "" });
+const ORDER_TEST_UIDS = defineString("ORDER_TEST_UIDS", { default: "" });
+const ORDER_INTAKE_UNRESTRICTED = defineBoolean("ORDER_INTAKE_UNRESTRICTED", { default: false });
+const csv = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean);
+const orderService = createOrderService({
+  db: getFirestore(), FieldValue,
+  isEnabled: () => ORDER_INTAKE_ENABLED.value(),
+  getPolicy: () => ({
+    unrestricted: ORDER_INTAKE_UNRESTRICTED.value(),
+    facilityIds: csv(ORDER_TEST_FACILITY_IDS.value()),
+    uids: csv(ORDER_TEST_UIDS.value())
+  })
+});
 
 // 想定外のエラーの詳細はクライアントへ返さない（ログにのみ残す）
 function wrap(handler) {
