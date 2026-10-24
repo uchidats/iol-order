@@ -258,12 +258,12 @@ body {
 
 .badge-required {
   font-size: 0.68rem;
-  font-weight: 700;
-  background-color: var(--danger-bg);
-  color: var(--danger);
+  font-weight: 600;
+  background-color: #fdf4f4;
+  color: #b07070;
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid #fca5a5;
+  border: 1px solid #f3dede;
 }
 
 .badge-optional {

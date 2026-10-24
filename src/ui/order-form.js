@@ -73,20 +73,16 @@ export async function initOrderForm({ config, repository, facilityId, facility =
   initDefaultDate();
   initSavedEmail();
   setupEventListeners();
-  renderModeBanner();
+  renderModeBadge();
 }
 
 /**
- * 開発モード時の表示（実発注されないことを明示）
+ * ヘッダー右側の状態表示。HTML の既定は「開発モード」で、実送信が有効な設定(gas)のときだけ「実運用版」にする。
+ * 表示だけで、送信の可否は submitOrder(config.orderMode)で決まる。
  */
-function renderModeBanner() {
-  if (appConfig.orderMode === ORDER_MODES.GAS) return;
-  const banner = document.createElement("div");
-  banner.className = "modal-error-alert";
-  banner.setAttribute("role", "status");
-  banner.style.margin = "0 0 12px";
-  banner.textContent = "【開発モード】注文は送信されません。実際の発注は行われません。";
-  el.form.parentNode.insertBefore(banner, el.form);
+function renderModeBadge() {
+  const badge = document.getElementById("systemBadge");
+  if (badge) badge.textContent = appConfig.orderMode === ORDER_MODES.GAS ? "実運用版" : "開発モード";
 }
 
 function initModelSelect() {
