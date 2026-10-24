@@ -10,7 +10,8 @@ export const MAX_TOTAL_QUANTITY = 40; // 同上
 /** 明細の同一性(同じレンズ・型番・度数・手術日・担当医)。枚数は含めない */
 export const lineKey = (l) => JSON.stringify([
   l.lens ? l.lens.key : (l.modelId ? `${l.modelId}|${l.toricModel || ""}` : ""), l.power, l.surgeryDate,
-  l.doctor ? l.doctor.id : (l.doctorId || "")   // 担当医が違えば、同じレンズ・度数・手術日でも別の明細
+  l.doctor ? l.doctor.id : (l.doctorId || ""),   // 担当医が違えば、同じレンズ・度数・手術日でも別の明細
+  l.dealer ? l.dealer.id : (l.dealerId || "")    // 発注先が違えば別の明細
 ]);
 
 /** 重複している明細の添字(2回目以降)を返す */
@@ -44,6 +45,10 @@ export function toOrderLines(values) {
     quantity: v.quantity,
     surgeryDate: v.surgeryDate,
     // 担当医(明細ごと)。IDだけをサーバーへ送り、氏名・メールはサーバーがマスターから記録する(画面表示用にここで持つ)
-    doctorId: v.doctor.id, doctor: v.doctor.name, doctorEmail: v.doctor.email || ""
+    doctorId: v.doctor.id, doctor: v.doctor.name, doctorEmail: v.doctor.email || "",
+    // 発注先(明細ごと)。IDだけをサーバーへ送り、名前・メールはサーバーが登録ディーラーから記録する(確認画面の表示用にここで持つ)。
+    // 0社は発注先なし、1社は自動選択、2社以上は選択済み
+    dealerSelected: Boolean(v.dealerExplicit && v.dealer), // 利用者が複数社から選んだときだけ、IDをサーバーへ送る
+    dealerId: v.dealer ? v.dealer.id : "", dealerName: v.dealer ? v.dealer.name : "", dealerOrderEmails: v.dealer ? (v.dealer.orderEmails || []) : []
   }));
 }

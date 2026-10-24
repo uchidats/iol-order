@@ -43,7 +43,7 @@ export const ORDER_LIMITS = Object.freeze({
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate", "doctorId"];
+const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate", "doctorId", "dealerId"];
 // ordererId(トップレベル)は旧形式の互換: 明細に doctorId が無いとき、その担当医を全明細に使う。LINE_KEYS をトップレベルに置くのは従来の単一IOL形式
 const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", ...LINE_KEYS];
 
@@ -68,6 +68,9 @@ function parseLine(raw, n, nowMs, defaultDoctorId) {
   const { modelId, power, quantity, surgeryDate } = raw;
   const toricModel = raw.toricModel === undefined || raw.toricModel === null ? "" : raw.toricModel;
   const doctorId = raw.doctorId === undefined || raw.doctorId === null ? defaultDoctorId : raw.doctorId;
+  // 発注先ディーラー(明細ごと・任意): 施設の登録ディーラーが複数のときは必須(マスターとの突き合わせは resolveLineDealer)
+  const dealerId = raw.dealerId === undefined || raw.dealerId === null || raw.dealerId === "" ? "" : raw.dealerId;
+  if (dealerId !== "" && (typeof dealerId !== "string" || !ID.test(dealerId))) throw at("発注先が正しくありません");
 
   if (typeof doctorId !== "string" || !ID.test(doctorId)) throw at("担当医を選択してください");
   if (typeof modelId !== "string" || !ID.test(modelId)) throw at("IOLモデルを選択してください");
@@ -79,7 +82,7 @@ function parseLine(raw, n, nowMs, defaultDoctorId) {
   const limit = jstDate(nowMs + ORDER_LIMITS.maxDaysAhead * 24 * 60 * 60 * 1000);
   if (surgeryDate < today) throw at("手術日は本日以降を指定してください");
   if (surgeryDate > limit) throw at("手術日が先すぎます");
-  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, doctorId };
+  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, doctorId, dealerId };
 }
 
 /** 入力の形式検証と正規化(マスターとの突き合わせは別)。従来の単一IOL形式は1明細に正規化する */
@@ -109,7 +112,7 @@ export function parseOrderInput(data, nowMs) {
 
   const seen = new Set();
   lines.forEach((l, i) => {
-    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate, l.doctorId]);
+    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate, l.doctorId, l.dealerId]);
     if (seen.has(k)) throw bad(`明細${i + 1}: 同じレンズ・度数・手術日の明細が重複しています。枚数で指定してください`);
     seen.add(k);
   });
@@ -122,8 +125,36 @@ export function parseOrderInput(data, nowMs) {
 /** 注文内容(識別子・選択値)の正規化ハッシュ。同じ requestId での内容変更の検出に使う(単一IOL形式でも明細1件の形式でも同じ値になる) */
 export function contentHash(i) {
   return createHash("sha256")
-    .update(JSON.stringify([i.facilityId, i.notes, i.lines.map(l => [l.modelId, l.power, l.toricModel, l.quantity, l.surgeryDate, l.doctorId])]))
+    .update(JSON.stringify([i.facilityId, i.notes, i.lines.map(l => [l.modelId, l.power, l.toricModel, l.quantity, l.surgeryDate, l.doctorId, ...(l.dealerId ? [l.dealerId] : [])])]))
     .digest("hex");
+}
+
+const EMAIL = /^[^s@]+@[^s@]+.[^s@]+$/;
+
+/**
+ * 明細の発注先ディーラーを決める(施設の登録ディーラーだけが対象。採用IOLの dealerId には依存しない)。
+ *  - 0社: 発注先なし(null)。指定があればエラー
+ *  - 1社: そのディーラーを自動選択(指定がある場合は、その1社と一致すること)
+ *  - 2社以上: 明細ごとに指定が必須。勝手に決めない。登録にないIDはエラー
+ * 画面(src/domain/dealer-selection.js)と同じ規則(tests/dealer-selection.test.js で一致を確認)。
+ * @param {Array<{id:string, name?:string, orderEmails?:string[]}>} dealers 施設の登録ディーラー
+ * @returns {{ok:true, dealer:object|null}|{ok:false, error:"not-found"|"select"}}
+ */
+export function resolveLineDealer(dealers, requestedId) {
+  const want = requestedId || "";
+  if (dealers.length === 0) return want ? { ok: false, error: "not-found" } : { ok: true, dealer: null };
+  if (dealers.length === 1) return want && want !== dealers[0].id ? { ok: false, error: "not-found" } : { ok: true, dealer: dealers[0] };
+  if (!want) return { ok: false, error: "select" };
+  const d = dealers.find(x => x.id === want);
+  return d ? { ok: true, dealer: d } : { ok: false, error: "not-found" };
+}
+
+/** 実メール送信の可否。発注用メールが有効な形式で1件以上ある場合だけ送れる。ディーラーなしは送信不可 */
+export function dealerDispatch(dealer) {
+  if (!dealer) return { allowed: false, reason: "dealer-unset" };
+  const emails = Array.isArray(dealer.orderEmails) ? dealer.orderEmails : [];
+  return emails.some(e => typeof e === "string" && EMAIL.test(e.trim()))
+    ? { allowed: true, reason: null } : { allowed: false, reason: "no-order-email" };
 }
 
 /**
@@ -214,10 +245,9 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
       const modelIds = [...new Set(input.lines.map(l => l.modelId))];
       const adoptedSnaps = await Promise.all(modelIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/adoptedIols/${id}`))));
       const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
-      // 発注先ディーラー: 採用IOLに設定された dealerId が、この施設に今も登録されているものだけを使う(削除されたディーラーは発注先にならない)
-      const dealerIds = [...new Set(adoptedSnaps.map(a => a.exists ? a.get("dealerId") : null).filter(d => typeof d === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(d)))];
-      const dealerSnaps = await Promise.all(dealerIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/facilityDealers/${id}`))));
-      const dealerBy = new Map(dealerIds.map((id, i) => [id, dealerSnaps[i]]));
+      // 発注先ディーラー: この施設の登録ディーラー(facilityDealers)から決める。採用IOLの dealerId には依存しない
+      const dealerDocs = (await tx.get(db.collection(`facilities/${input.facilityId}/facilityDealers`))).docs
+        .map(d => ({ id: d.id, name: d.get("name") || "", orderEmails: d.get("orderEmails") }));
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
@@ -243,14 +273,11 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         const doc = doctorBy.get(l.doctorId);
         if (!doc.exists) throw bad(`明細${n}: 担当医が見つかりません`); // 担当医に有効/無効はない(旧形式の active フィールドは無視する)
         const docEmail = doc.get("email");
-        const dealerSnap = dealerBy.get(adopted.get("dealerId"));
-        const dealer = dealerSnap && dealerSnap.exists ? { id: dealerSnap.id, name: dealerSnap.get("name") || "" } : null;
-        // 将来の実メール送信の可否(現在は送信機能なし)。発注先が未設定、または「発注用」メールが未登録なら送らない。
-        // 使用報告用メール(usageReportEmails)は発注の送信先に使わない(別の用途)。メールアドレス自体はここに保存しない
-        const orderEmails = dealerSnap && dealerSnap.exists ? dealerSnap.get("orderEmails") : null;
-        const hasOrderEmail = Array.isArray(orderEmails) && orderEmails.some(e => typeof e === "string" && e);
-        const dispatch = !dealer ? { allowed: false, reason: "dealer-unset" } : !hasOrderEmail ? { allowed: false, reason: "no-order-email" } : { allowed: true, reason: null }; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
-        return {
+        const picked = resolveLineDealer(dealerDocs, l.dealerId);
+        if (!picked.ok) throw bad(picked.error === "select" ? `明細${n}: 発注先を選択してください` : `明細${n}: 発注先が見つかりません`);
+        const dealer = picked.dealer ? { id: picked.dealer.id, name: picked.dealer.name } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
+        // 将来の実メール送信の可否(現在は送信機能なし)。発注先なし・発注用メール未登録は送信不可。使用報告用メールは使わない。メールアドレス自体は保存しない
+        const dispatch = dealerDispatch(picked.dealer);        return {
           lineNo: n,
           status: ORDER_STATUS.ACCEPTED,
           item: {
