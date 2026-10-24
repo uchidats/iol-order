@@ -66,3 +66,21 @@ export function groupLinesBySurgeryDate(lines) {
   }
   return [...groups.keys()].sort().map(surgeryDate => ({ surgeryDate, lines: groups.get(surgeryDate) })); // YYYY-MM-DD は文字列順 = 日付順
 }
+
+/**
+ * 確認画面用: 「手術日 + 担当医」ごとにまとめる(表示のみ。注文データの並び順・送信・保存には使わない)。
+ * 手術日の早い順(既存の groupLinesBySurgeryDate を再利用)。同じ手術日の中は、担当医グループの初出順。同じ手術日でも担当医が違えば別グループ。
+ * 担当医の同一性は doctorId(なければ氏名)。各明細の lineNo(元のレンズ番号)・入力順は変えない。
+ * @returns {Array<{surgeryDate:string, doctor:string, lines:Array<object>}>}
+ */
+export function groupLinesByDateAndDoctor(lines) {
+  return groupLinesBySurgeryDate(lines).flatMap(day => {
+    const byDoctor = new Map();
+    for (const l of day.lines) {
+      const key = l.doctorId || l.doctor || "";
+      if (!byDoctor.has(key)) byDoctor.set(key, { surgeryDate: day.surgeryDate, doctor: l.doctor || "", lines: [] });
+      byDoctor.get(key).lines.push(l);
+    }
+    return [...byDoctor.values()];
+  });
+}
