@@ -1,5 +1,5 @@
 import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
-import { filterPowersByModel, defaultPowerLabel } from "../domain/power-filter.js";
+import { filterPowersByModel } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
 
@@ -38,7 +38,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     line.chkMf = h("input", { type: "checkbox", "data-f": "multifocal" });
     line.chkToric = h("input", { type: "checkbox", "data-f": "toric" });
     line.model = h("select", { id: id("lensModel"), class: "form-control", "data-f": "model" }, h("option", { value: "" }, "選択"));
-    line.power = h("select", { id: id("lensPower"), class: "form-control", "data-f": "power" }, h("option", { value: "" }, "選択してください"));
+    line.power = h("select", { id: id("lensPower"), class: "form-control", "data-f": "power" }, h("option", { value: "" }, "選択"));
     line.date = h("input", { id: id("lensDate"), type: "date", class: "form-control", "data-f": "date" });
     line.date.min = minDate();
     if (prefill.surgeryDate) line.date.value = prefill.surgeryDate; // 直前の明細の手術日を引き継ぐ(変更可)
@@ -69,7 +69,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].textContent : ""; // 表示しきれない長い名称は、ホバーで全文
-      clearErr(line, "model"); onModelChange(line); onChange();
+      clearErr(line, "model"); onModelChange(line, true); onChange();
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
@@ -99,19 +99,21 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     const kept = shown.some(o => o.key === prevKey);
     line.model.value = kept ? prevKey : "";
     line.model.title = line.model.selectedOptions[0] && line.model.value ? line.model.selectedOptions[0].textContent : "";
-    if (prevKey && !kept) line.power.value = "";
-    onModelChange(line);
+    onModelChange(line, !(kept && prevKey)); // 選択中のモデルが残る(絞り込みだけ変わった)ときは、パワーの選択も維持する
   }
 
-  /** モデルに応じて度数候補を作り直す。直前の度数が新しい候補に無ければ、既定値に戻す */
-  function onModelChange(line) {
+  /**
+   * モデルに応じて度数候補を作り直す(モデルごとの範囲・刻みの制限)。度数は自動で選ばない(初期表示は「選択」)。
+   * モデルを変えたとき(reset=true)は未選択に戻す。必須チェックは validate() が行う。
+   * 度数は +20.0D 付近が使われることが多いが、+20.0D を自動で確定することはしない。
+   */
+  function onModelChange(line, reset = true) {
     const lens = findLensOption(getOptions(), line.model.value);
     const powers = lens ? filterPowersByModel(lens.model) : GOOGLE_FORM_ALL_POWERS;
-    const def = lens ? defaultPowerLabel(lens.model) : "+20.0D";
     const prev = line.power.value;
     while (line.power.children.length > 1) line.power.removeChild(line.power.lastChild);
     powers.forEach(p => line.power.appendChild(h("option", { value: p }, p)));
-    line.power.value = prev && powers.includes(prev) ? prev : (powers.includes(def) ? def : "");
+    line.power.value = !reset && prev && powers.includes(prev) ? prev : "";
   }
 
   function renumber() {
