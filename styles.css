@@ -1975,3 +1975,34 @@ input[type="date"].form-control {
 .summary-parties .summary-dealer-lenses { font-size: 0.85rem; font-weight: 500; color: #334155; }
 .summary-parties { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }
 @media (max-width: 340px) { .summary-parties { grid-template-columns: minmax(0, 1fr); } }
+
+/* ===== スマホ幅のカスタムドロップダウン(レンズのモデル・度数)。PC幅は従来のネイティブ select。src/ui/custom-select.js ===== */
+.cs-trigger { display: none; }
+@media (max-width: 640px) {
+  .select-wrapper.cs-enhanced .cs-trigger {
+    display: flex; align-items: center; width: 100%; text-align: left; cursor: pointer;
+    padding-right: 40px; font-family: inherit; font-size: 1rem; color: var(--text-main);
+  }
+  .select-wrapper.cs-enhanced .cs-trigger.is-placeholder { color: var(--text-main); }
+  .select-wrapper.cs-enhanced .cs-trigger-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 元の select は値の保持用に残す(表示せず、タップも受けない) */
+  .select-wrapper.cs-enhanced select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
+}
+.cs-panel {
+  position: fixed; z-index: 1000; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain;
+  background: #ffffff; color: #1f2937; color-scheme: light;   /* ダークモードでも白背景・濃いグレーの文字に固定 */
+  border: 1px solid #d1d5db; border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  padding: 4px 0; -webkit-overflow-scrolling: touch; outline: none;
+}
+.cs-group + .cs-group { border-top: 1px solid #eef2f7; }
+.cs-group-label { padding: 8px 14px 4px; font-size: 0.78rem; font-weight: 700; color: #6b7280; letter-spacing: 0.02em; }
+.cs-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 42px; padding: 0 14px; box-sizing: border-box;   /* 1項目の高さ 42px */
+  font-size: 1rem; color: #1f2937; background: #ffffff; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.cs-option-text { min-width: 0; overflow-wrap: anywhere; }
+.cs-option.is-placeholder { color: #6b7280; }
+.cs-option.is-active { background: #f1f5f9; }
+.cs-option.is-selected { font-weight: 600; }
+.cs-check { flex: none; color: #2563eb; }   /* 選択中: 青いチェックマーク */

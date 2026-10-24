@@ -4,6 +4,7 @@ import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
 import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
+import { enhanceSelect } from "./custom-select.js";
 
 /** 要素生成の小さなヘルパー(表示文字列は textContent で扱い、HTMLとして解釈しない) */
 function h(tag, attrs = {}, ...children) {
@@ -99,6 +100,9 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       group("担当医", h("div", { class: "select-wrapper" }, line.doctor), "doctor", id("lensDoctor")),
       // 発注先: 施設の登録ディーラーが2社以上のときだけ表示(選択必須)。1社は自動、0社は「発注先未設定」
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
+    // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
+    enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
+    enhanceSelect(line.power, { ariaLabel: "IOLパワー" });
     line.dealerGroup = line.root.querySelector('[data-group="dealer"]');
     syncDealerGroup(line);
 
