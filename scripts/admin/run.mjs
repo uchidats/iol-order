@@ -35,7 +35,9 @@ const db = getFirestore(app);
 const describeUser = (u) => ({
   uid: u.uid, email: u.email, displayName: u.displayName,
   providers: u.providerData.map(p => p.providerId),
-  createdAt: u.metadata.creationTime, customClaims: u.customClaims || {}
+  emailVerified: u.emailVerified, disabled: u.disabled,
+  createdAt: u.metadata.creationTime, lastSignInAt: u.metadata.lastSignInTime,
+  customClaims: u.customClaims || {}
 });
 
 async function main() {
@@ -50,6 +52,8 @@ async function main() {
     const user = await auth.getUser(op.uid); // 存在しなければ例外
     console.log("対象ユーザー:", describeUser(user));
     console.log("実行内容: customClaims に platformAdmin=true を追加（既存クレームは保持）");
+    // 取り違え・なりすまし防止: メール確認済みで有効なアカウントにのみ付与する
+    if (!user.emailVerified || user.disabled) throw new Error("メール未確認または無効なアカウントには付与できません");
     if (!plan.apply) return console.log("DRY-RUN: 変更していません。");
     await auth.setCustomUserClaims(op.uid, { ...(user.customClaims || {}), platformAdmin: true });
     console.log("完了。対象ユーザーは再ログイン（またはトークン更新）後に反映されます。");
@@ -92,5 +96,8 @@ async function main() {
 
 main().catch(err => {
   console.error("失敗:", err.message);
+  if (/credential|access token|Could not load the default credentials/i.test(err.message)) {
+    console.error("認証情報(ADC)が見つかりません。`gcloud auth application-default login` を実行してください（docs/firebase-dev-runbook.md 4-1）。");
+  }
   process.exit(1);
 });
