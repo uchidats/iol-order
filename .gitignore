@@ -11,3 +11,6 @@ firestore-debug.log
 # 非機密の設定(実行サービスアカウント名)はコミットする
 !functions/.env.medconf-iol-dev
 !functions/.env.demo-iol-e2e
+
+# 移行前バックアップ(実データを含むためコミットしない)
+backups/
