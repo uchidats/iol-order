@@ -267,7 +267,7 @@ function showConfirmModal(data) {
     li.append(main, date);
     return li;
   }));
-  $("summaryTotal").textContent = `${data.lines.length}種類・合計${data.totalQuantity}枚`;
+  $("summaryTotal").textContent = `${data.lines.length}件・合計${data.totalQuantity}枚`; // 件数=レンズ明細の数、枚数=各明細の枚数の合計
 
   $("summaryOrderer").textContent = data.orderer;
   $("summaryEmail").textContent = data.email || "（未登録）";
@@ -374,7 +374,7 @@ function showCompleteModal(orderData, result) {
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
     ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)}</div>`).join("")}
-    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}種類・${escapeHtml(orderData.totalQuantity)}枚</div>
+    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}件・合計${escapeHtml(orderData.totalQuantity)}枚</div>
     <div style="margin-bottom: 4px;"><strong>注文者:</strong> ${escapeHtml(orderData.orderer)}</div>
     ${orderData.email ? `<div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>` : ""}
   `;
