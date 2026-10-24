@@ -16,4 +16,5 @@
 注文者と同じスクリプトを、`--collection facilityDealers` で使う。既定は dry-run。無効のディーラーがあれば、`--keep-inactive` / `--remove-inactive` で残す・削除するを明示しない限り実行できない。実行には `--execute --backup <新しいファイル> --confirm medconf-iol-dev` が必要。各ドキュメントは `updateTime` が変わっていない場合だけ更新・削除する。
 
 ## 反映の順序
-1. Cloud Functions(`createOrder` が `active` を見ず、ディーラーを施設の登録で確認)→ 2. Security Rules → 3. 画面(push)→ 4. 移行(`--collection facilityDealers`)。移行を先にしてはいけない(旧画面は `active` が無いと無効扱いになる)。
+**デプロイ・移行の順序は `docs/release-plan.md` に統一している（このファイルには順序を書かない）。** 順序は Rules → Functions → push → 公開サイトの新バージョン確認 → 移行。ディーラーの移行は `--collection facilityDealers`。**移行を先にしてはいけない**(旧画面は `active` が無いと無効扱いにする)。
+

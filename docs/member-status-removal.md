@@ -23,13 +23,6 @@
 - **phase 2**(新Rules・新画面のデプロイの**後**): 残った所属から `status` / `lastAuditId` を取り除く。無効の所属が残っていると実行できない(取り除くと有効になるため)。
 
 ## 反映の順序
-新Rulesは所属の `status` を見ない。**無効の所属が残ったまま新Rulesをデプロイすると、無効だった人が再びアクセスできてしまう**ため、順序を守る。
-1. **phase 1 の dry-run → 判断 → 実行**: 無効の所属を削除する(または明示的に有効に戻す)。この時点では旧Rules・旧画面のままで問題ない(有効な所属は `status: active` のまま)。
-2. **Cloud Functions をデプロイ**(`removeMember` を追加。`acceptInvite` などは `status` を作らない・見ない)。
-3. **Security Rules をデプロイ**し、続けて**画面(push)を反映**する(数分以内に続けて行う。画面が先だと「所属を削除」の呼び出し先が無く、Rules が先だと旧画面の「無効化」が拒否される)。
-4. **phase 2 の dry-run → 実行**: 所属から `status` / `lastAuditId` を取り除く。
-5. 確認: 施設の切り替え・注文・招待・利用者管理(所属削除)が動くこと。
+**デプロイ・移行の順序は `docs/release-plan.md` に統一している（このファイルには順序を書かない）。** 順序は Rules → Functions → push → 公開サイトの新バージョン確認 → 移行。所属は **phase 1(新Rulesの前: 無効な所属の処理)と phase 2(公開サイトの新バージョン確認の後: `status` の除去)** の2段階。無効の所属が残ったまま新Rulesをデプロイすると、無効だった人が再びアクセスできてしまう。**phase 2 を画面の反映より先にしてはいけない**(旧画面は `status` が無いと所属として扱わない)。
 
-**phase 2 を画面の反映より先にしてはいけない**: 旧画面は `status` が無いと所属として扱わない(アクセスできなくなる)。
-
-ロールバック: バックアップ(JSON)から所属ドキュメントを戻せる。画面・Functions・Rules は前のコミットへ戻してデプロイする。過去の操作履歴(`member.disable` / `member.enable`)は、そのまま残る。
+ロールバック: `docs/release-plan.md` の「バックアップからの復元」を参照(`scripts/admin/restore-from-backup.mjs`)。過去の操作履歴(`member.disable` / `member.enable`)は、そのまま残る。
