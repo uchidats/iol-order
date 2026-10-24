@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=6d4d8d10fb">
+  <link rel="stylesheet" href="styles.css?v=ff50b61bd6">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -20,21 +20,21 @@
       "./src/biometry/state.js": "./src/biometry/state.js?v=6bd254fb21",
       "./src/config.js": "./src/config.js?v=ccf7bde99c",
       "./src/config.local.example.js": "./src/config.local.example.js?v=c33444ab3e",
-      "./src/data/firestore-repository.js": "./src/data/firestore-repository.js?v=8c1e59409a",
+      "./src/data/firestore-repository.js": "./src/data/firestore-repository.js?v=fe7639a319",
       "./src/data/iol-models.js": "./src/data/iol-models.js?v=43312f6eb3",
       "./src/data/order-api.js": "./src/data/order-api.js?v=593c21c67b",
       "./src/data/registration-api.js": "./src/data/registration-api.js?v=4e459947e2",
-      "./src/data/schema.js": "./src/data/schema.js?v=d5a1377eb0",
+      "./src/data/schema.js": "./src/data/schema.js?v=2d8fd40edd",
       "./src/data/static-repository.js": "./src/data/static-repository.js?v=4f03615871",
       "./src/domain/access.js": "./src/domain/access.js?v=798e41000d",
       "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=7b9e10ba2d",
-      "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=764881bdbd",
+      "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=65e822c682",
       "./src/domain/geo.js": "./src/domain/geo.js?v=cc70776997",
       "./src/domain/lens-labels.js": "./src/domain/lens-labels.js?v=095e7149ab",
       "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=7ca06e7e90",
       "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=31603a3427",
-      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=9c77da1d89",
-      "./src/domain/order-request.js": "./src/domain/order-request.js?v=07167eca25",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=962c818172",
+      "./src/domain/order-request.js": "./src/domain/order-request.js?v=2e4a06a9ef",
       "./src/domain/order-validation.js": "./src/domain/order-validation.js?v=432a8bd522",
       "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=5439af84ee",
       "./src/domain/registration-flow.js": "./src/domain/registration-flow.js?v=f354be2979",
@@ -44,13 +44,13 @@
       "./src/main.js": "./src/main.js?v=845a7d6943",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=cd8d14c8b4",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
-      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=faf25b6194",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=c87d72c6f8",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=160fe8335e",
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
-      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=fbf75cad5e",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=331024c80c"
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=697d923b09",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=ba1effb3d0"
     }
   }
   </script>
@@ -110,20 +110,6 @@
                 <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
             </a>
-          </div>
-
-          <!-- 6. 注文者 -->
-          <div class="form-group" id="groupOrderer">
-            <label for="ordererSelect" class="form-label required">
-              注文者
-              <span class="badge-required">必須</span>
-            </label>
-            <div class="select-wrapper">
-              <select id="ordererSelect" name="orderer" class="form-control" required>
-                <option value="">選択</option>
-              </select>
-            </div>
-            <p class="error-message" id="err-ordererSelect"></p>
           </div>
 
           <!-- 7. 備考（フリーコメント） -->
@@ -232,7 +218,7 @@
           </div>
 
           <div class="summary-item summary-item-lines">
-            <dt class="summary-label">発注するレンズ</dt>
+            <dt class="summary-label">発注するレンズ(担当医・手術日・発注先)</dt>
             <dd class="summary-value">
               <ol class="summary-lines" id="summaryLines"></ol>
             </dd>
@@ -241,16 +227,6 @@
           <div class="summary-item">
             <dt class="summary-label">合計</dt>
             <dd class="summary-value highlight-value" id="summaryTotal">-</dd>
-          </div>
-
-          <div class="summary-item">
-            <dt class="summary-label">注文者</dt>
-            <dd class="summary-value" id="summaryOrderer">-</dd>
-          </div>
-
-          <div class="summary-item summary-item-sub">
-            <dt class="summary-label">注文者のメールアドレス</dt>
-            <dd class="summary-value" id="summaryEmail">-</dd>
           </div>
 
           <div class="summary-item">

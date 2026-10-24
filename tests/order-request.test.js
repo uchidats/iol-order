@@ -10,29 +10,33 @@ import { resolveConfig, ORDER_MODES } from "../src/config.js";
 
 const options = buildLensOptions(IOL_MODELS);
 const lens = (key) => findLensOption(options, key);
+const yamada = { id: "o1", name: "山田", email: "y@orderer.jp" };
+const sato = { id: "o2", name: "佐藤", email: "" };
 const values = [
-  { lens: lens("jj-dib00v"), power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10" },
-  { lens: lens("jj-diwxxx-toric|DIW300"), power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12" }
+  { lens: lens("jj-dib00v"), power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctor: yamada },
+  { lens: lens("jj-diwxxx-toric|DIW300"), power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12", doctor: sato }   // 担当医が異なる明細
 ];
 
 const pending = () => {
   const lines = toOrderLines(values);
   return {
     facilityId: "f1", clientRequestId: "req-0123456789abcdef", lines, totalQuantity: totalQuantity(lines),
-    orderer: "山田", ordererId: "o1", email: "y@orderer.jp", notes: "まとめ発注", facilityName: "A眼科", submittedAt: "x"
+    notes: "まとめ発注", facilityName: "A眼科", submittedAt: "x"
   };
 };
 
-test("サーバーへ送るのは識別子と選択値のみ。明細ごとに系列ID・正式型番・度数・枚数・手術日。表示名・注文者名・メール・施設名は送らない", () => {
-  assert.deepEqual(buildCreateOrderRequest(pending()), {
-    facilityId: "f1", requestId: "req-0123456789abcdef", ordererId: "o1", notes: "まとめ発注",
+test("サーバーへ送るのは識別子と選択値のみ。明細ごとに系列ID・正式型番・度数・枚数・手術日・担当医ID。氏名・メール・施設名・発注者の項目は送らない", () => {
+  const req = buildCreateOrderRequest(pending());
+  assert.deepEqual(req, {
+    facilityId: "f1", requestId: "req-0123456789abcdef", notes: "まとめ発注",
     lines: [
-      { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10" },
-      { modelId: "jj-diwxxx-toric", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12", toricModel: "DIW300" }
+      { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctorId: "o1" },
+      { modelId: "jj-diwxxx-toric", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12", doctorId: "o2", toricModel: "DIW300" }
     ]
   });
-  const json = JSON.stringify(buildCreateOrderRequest(pending()));
-  for (const forbidden of ["y@orderer.jp", "山田", "A眼科", "J&J / DIB00V", "label"]) assert.ok(!json.includes(forbidden), forbidden);
+  assert.equal("ordererId" in req, false, "no order-level orderer");
+  const json = JSON.stringify(req);
+  for (const forbidden of ["y@orderer.jp", "山田", "佐藤", "A眼科", "J&J / DIB00V", "label", "createdBy", "orderedBy", "proxy"]) assert.ok(!json.includes(forbidden), forbidden);
 });
 
 test("備考なしでは notes を送らない。トーリックでない明細に toricModel は付かない", () => {

@@ -15,6 +15,8 @@ let orderApi = null; // 開発用のサーバー受付(createOrder)。server-dev
 let availableModels = [];
 let lensOptions = [];           // 採用済み系列を、正式型番ごとの選択肢に展開したもの
 let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
+let doctors = [];               // 担当医マスター(施設設定の「担当医」)
+let dealerNameByModel = new Map(); // 系列ID → 発注先ディーラー名(確認画面の表示用。実際の発注先はサーバーが決める)
 let currentPendingOrderData = null;
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
 let facilityRepository = null;
@@ -29,7 +31,6 @@ function cacheElements() {
     btnAddLine: $("btnAddLine"),
     alconCalcArea: $("alconCalcArea"),
     alconCalcLink: $("alconCalcLink"),
-    ordererSelect: $("ordererSelect"),
     notesInput: $("notesInput"),
     confirmModal: $("confirmModal"),
     btnModalBack: $("btnModalBack"),
@@ -76,23 +77,34 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   facilityRepository = repository;
   facilityRepositoryId = facilityId;
 
-  const [adoptedIols, orderers] = await Promise.all([
+  const [adoptedIols, doctorList, dealers] = await Promise.all([
     repository.listAdoptedIols(facilityId),
-    repository.listOrderers(facilityId)
+    repository.listOrderers(facilityId),   // 担当医マスター(コレクション名は互換性のため orderers のまま)
+    repository.listDealers(facilityId)
   ]);
   availableModels = resolveAdoptedModels(adoptedIols);
+  doctors = doctorList;
+  dealerNameByModel = buildDealerNames(adoptedIols, dealers);
 
   lensOptions = buildLensOptions(availableModels);
   lensLines = createLensLines({
     container: el.lensLinesBox,
     addButton: el.btnAddLine,
     getOptions: () => lensOptions,
+    getDoctors: () => doctors,
     minDate: todayString,
     onChange: updateAlconGuide
   });
-  initOrdererSelect(orderers);
   setupEventListeners();
   renderModeBadge();
+}
+
+/** 採用IOLの発注先(dealerId)を、この施設に今も登録されているディーラー名に引く(登録がなければ入れない) */
+function buildDealerNames(adoptedIols, dealers) {
+  const byId = new Map(dealers.map(d => [d.id, d.name]));
+  const m = new Map();
+  for (const a of adoptedIols) if (a.enabled && a.dealerId && byId.has(a.dealerId)) m.set(a.catalogIolId, byId.get(a.dealerId));
+  return m;
 }
 
 /** 今日(端末のローカル日付)。手術日の最小値 */
@@ -120,30 +132,7 @@ function renderModeBadge() {
     : appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
 }
 
-/** 選択中の注文者のマスターに登録されたメールアドレス(未選択・未登録は空) */
-function selectedOrdererEmail() {
-  const opt = el.ordererSelect.selectedOptions && el.ordererSelect.selectedOptions[0];
-  return opt && opt.value ? (opt.dataset.email || "").trim() : "";
-}
-
-function selectedOrdererId() {
-  const opt = el.ordererSelect.selectedOptions && el.ordererSelect.selectedOptions[0];
-  return opt && opt.value ? (opt.dataset.id || "") : "";
-}
-
-function initOrdererSelect(orderers) {
-  orderers.forEach(o => {
-    const option = document.createElement("option");
-    option.value = o.name;
-    option.textContent = o.name;
-    option.dataset.id = o.id || "";
-    option.dataset.email = (o.email || "").trim(); // 注文者マスターのメール(ログインユーザーのメールではない)
-    el.ordererSelect.appendChild(option);
-  });
-}
-
 function setupEventListeners() {
-  el.ordererSelect.addEventListener("change", () => clearFieldError("ordererSelect"));
 
   el.form.addEventListener("submit", handleFormSubmit);
 
@@ -169,16 +158,10 @@ function handleFormSubmit(e) {
   if (!validateOrderForm()) return;
 
   const lines = toOrderLines(lensLines.values());
-  // 注文者のメールアドレスは、選択された注文者のマスターデータから取得する(ログインユーザーのメールとは別物)
-  const emailVal = selectedOrdererEmail();
-
   currentPendingOrderData = {
     // 明細(複数)。各明細は、系列名(model)・系列ID(modelId)・メーカー・トーリック正式型番(toricModel)・度数・枚数・手術日を持つ
     lines,
     totalQuantity: totalQuantity(lines),
-    orderer: el.ordererSelect.value,
-    ordererId: selectedOrdererId(),
-    email: emailVal,
     notes: el.notesInput.value.trim(),
     submittedAt: new Date().toISOString(),
     // 再送時の重複受付をサーバー側で検出するための識別子（注文番号ではない）。
@@ -189,6 +172,7 @@ function handleFormSubmit(e) {
     // 従来の単一IOL形式(旧経路・ログ)との互換: 1明細のときだけ、従来のトップレベルの項目も付ける
     const l = lines[0];
     Object.assign(currentPendingOrderData, {
+      orderer: l.doctor, email: l.doctorEmail, // 旧経路(GAS直接送信)の形式: 担当医を従来の項目に入れる
       model: l.model, modelId: l.modelId, manufacturer: l.manufacturer, toricModel: l.toricModel,
       power: l.power, quantity: `${l.quantity} 枚`, surgeryDate: l.surgeryDate
     });
@@ -212,12 +196,6 @@ function validateOrderForm() {
 
   const lens = lensLines.validate(); // 全明細(モデル・度数・枚数・手術日・重複)
   if (!lens.ok) invalid("lensLines", "", lens.firstInvalid);
-
-  if (!el.ordererSelect.value) {
-    invalid("ordererSelect", "注文者を選択してください", el.ordererSelect);
-  } else {
-    clearFieldError("ordererSelect");
-  }
 
   if (firstInvalidEl) {
     firstInvalidEl.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -257,13 +235,15 @@ function showConfirmModal(data) {
     const detail = document.createElement("div");
     detail.className = "summary-line-detail";
     detail.textContent = `${l.power} ・ ${l.quantity} 枚 ・ 手術日 ${formatDate(l.surgeryDate)}`;
-    li.append(title, detail);
+    const who = document.createElement("div");
+    who.className = "summary-line-detail";
+    const dealer = dealerNameByModel.get(l.modelId);
+    who.textContent = `担当医 ${l.doctor} ・ 発注先 ${dealer || "未設定"}`; // 担当医が違う明細も、明細ごとに正しく表示する
+    li.append(title, detail, who);
     return li;
   }));
   $("summaryTotal").textContent = `${data.lines.length}明細・合計 ${data.totalQuantity} 枚`;
 
-  $("summaryOrderer").textContent = data.orderer;
-  $("summaryEmail").textContent = data.email || "（未登録）";
   $("summaryNotes").textContent = data.notes || "（なし）";
 
   el.modalSubmitError.classList.add("hidden");
@@ -366,10 +346,8 @@ function showCompleteModal(orderData, result) {
   }
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
-    ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)}</div>`).join("")}
+    ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)} / 担当医 ${escapeHtml(l.doctor)}</div>`).join("")}
     <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}明細・${escapeHtml(orderData.totalQuantity)}枚</div>
-    <div style="margin-bottom: 4px;"><strong>注文者:</strong> ${escapeHtml(orderData.orderer)}</div>
-    ${orderData.email ? `<div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>` : ""}
   `;
 
   el.completeModal.classList.remove("hidden");
@@ -395,30 +373,27 @@ function handleResetForNewOrder() {
 export function isOrderFormDirty() {
   if (!el.form) return false;
   return Boolean(
-    lensLines.isDirty() || el.ordererSelect.value ||
+    lensLines.isDirty() ||
     el.notesInput.value.trim() || currentPendingOrderData
   );
 }
 
 /**
- * 施設設定の変更（注文者・採用IOL）を注文フォームの選択肢へ反映する。
+ * 施設設定の変更（担当医・採用IOL・ディーラー）を注文フォームの選択肢へ反映する。
  * 入力済みの値は、新しい選択肢にも存在する場合のみ維持する。
  */
 export async function reloadFacilityOptions() {
   if (!facilityRepository || !el.form) return;
-  const [adoptedIols, orderers] = await Promise.all([
+  const [adoptedIols, doctorList, dealers] = await Promise.all([
     facilityRepository.listAdoptedIols(facilityRepositoryId),
-    facilityRepository.listOrderers(facilityRepositoryId)
+    facilityRepository.listOrderers(facilityRepositoryId),
+    facilityRepository.listDealers(facilityRepositoryId)
   ]);
 
-  const prevOrderer = el.ordererSelect.value;
-
   availableModels = resolveAdoptedModels(adoptedIols);
-  while (el.ordererSelect.children.length > 1) el.ordererSelect.removeChild(el.ordererSelect.lastChild);
+  doctors = doctorList;
+  dealerNameByModel = buildDealerNames(adoptedIols, dealers);
   lensOptions = buildLensOptions(availableModels);
-  lensLines.refresh(); // 採用解除などで選択肢から外れた明細は、選択とパワーをリセットする
+  lensLines.refresh(); // 採用解除・担当医の削除などで選択肢から外れた明細は、選択を未選択に戻す
   updateAlconGuide();
-  initOrdererSelect(orderers);
-
-  el.ordererSelect.value = [...el.ordererSelect.options].some(o => o.value === prevOrderer) ? prevOrderer : "";
 }

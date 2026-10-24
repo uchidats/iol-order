@@ -12,7 +12,7 @@
  */
 
 /**
- * @typedef {Object} Orderer 注文者（施設のサブデータ）
+ * @typedef {Object} Orderer 担当医（施設のサブデータ。旧「注文者」。コレクション名は互換性のため orderers）
  * @property {string} id
  * @property {string} facilityId
  * @property {string} name

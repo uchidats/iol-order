@@ -42,7 +42,7 @@ const pencilIcon = () => icon("M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4
 const SAVE_ERROR = "保存できませんでした。権限がない、またはネットワークの問題の可能性があります。";
 
 /**
- * 施設設定画面（注文者 / 採用IOL / ディーラー）
+ * 施設設定画面（担当医 / 採用IOL / ディーラー）。担当医マスターの保存先は、互換性のため従来の orderers コレクション。
  * 表示は施設管理者のみ（呼び出し側で制御）。書き込み権限は Firestore Security Rules が最終判定する。
  *
  * @param {object} deps
@@ -80,7 +80,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     data = { orderers, adopted, dealers, members: canManageMembers ? await repository.listMembers(facility.id) : [] };
   }
 
-  // ---------- 注文者 ----------
+  // ---------- 担当医(旧「注文者」。コレクション名・関数名は互換性のため orderers のまま) ----------
   function ordererRow(o = { id: null, name: "", email: "" }) {
     // 通常は一覧表示(入力ボックスなし)。鉛筆を押した行だけ、名前とメールを編集できる。注文者に有効/無効はない。
     const row = h("div", { class: "orderer-item", "data-id": o.id || "" });
@@ -94,9 +94,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       btn("edit", "名前・メールを編集", pencilIcon()),
       btn("up", "上へ", "↑"),
       btn("down", "下へ", "↓"),
-      btn("delete", "この注文者を削除", trashIcon()));
-    const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.ordererNameMax, placeholder: "注文者名", "aria-label": "注文者名" });
-    const emailInput = h("input", { class: "form-control", "data-f": "email", type: "email", placeholder: "メールアドレス（注文に必要）", "aria-label": "メールアドレス" });
+      btn("delete", "この担当医を削除", trashIcon()));
+    const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.ordererNameMax, placeholder: "氏名（必須）", "aria-label": "氏名（必須）" });
+    const emailInput = h("input", { class: "form-control", "data-f": "email", type: "email", placeholder: "メールアドレス（任意）", "aria-label": "メールアドレス（任意）" });
     const editBox = h("div", { class: "orderer-edit", hidden: true },
       nameInput, emailInput,
       h("div", { class: "orderer-edit-actions" },
@@ -161,19 +161,19 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const writes = planOrdererWrites(data.orderers, v.cleaned, facility.id);
     if (!writes.length) return message(section, "変更はありません。");
     const ok = await saveWith(section, section.querySelector('[data-act="save"]'), () => settingsApi.saveOrderers(facility.id, writes));
-    if (ok) { renderOrderers(section); message(section, "注文者を保存しました。"); }
+    if (ok) { renderOrderers(section); message(section, "担当医を保存しました。"); }
   }
 
   /**
-   * 注文者の削除。保存済みの注文者はマスターのみ即時に削除する(所属・認証ユーザー・過去の注文は変更しない)。
+   * 担当医の削除。保存済みの担当医はマスターのみ即時に削除する(所属・認証ユーザー・過去の注文は変更しない)。
    * 他の行の未保存の編集は保持する。未保存の追加行は画面から外すだけ。
    */
   async function deleteOrdererRow(row) {
     const section = sections.orderers;
     const id = row.getAttribute("data-id");
-    const name = (row._state.name || "").trim() || "この注文者";
+    const name = (row._state.name || "").trim() || "この担当医";
     if (!id) { row.remove(); return; }
-    if (!window.confirm(`注文者「${name}」を削除しますか？
+    if (!window.confirm(`担当医「${name}」を削除しますか？
 注文フォームの選択肢から無くなります。過去の注文には影響しません。`)) return;
     const btn = row.querySelector('[data-act="delete"]');
     btn.disabled = true;
@@ -185,7 +185,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       await onSaved();
       message(section, `「${name}」を削除しました。`);
     } catch (e) {
-      console.error("注文者の削除に失敗しました:", e);
+      console.error("担当医の削除に失敗しました:", e);
       message(section, "削除できませんでした。権限がない、またはネットワークの問題の可能性があります。", true);
       btn.disabled = false;
     }
@@ -231,11 +231,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
-      createSectionHeading("注文者", "注文フォームの「注文者」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。"),
+      createSectionHeading("担当医", "注文フォームの「担当医」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "注文者を追加"),
-        h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "注文者を保存")),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "担当医を追加"),
+        h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "担当医を保存")),
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = ordererRow(); section.querySelector("[data-list]").appendChild(row); markDirty();

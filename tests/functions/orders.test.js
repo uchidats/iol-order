@@ -53,7 +53,7 @@ const user = (uid, over = {}) => ({ uid, token: { email: `${uid}@login.jp`, emai
 const rid = () => crypto.randomUUID();
 const body = (over = {}) => ({
   facilityId: F, requestId: rid(), modelId: "jj-dib00v", power: "+20.0D", quantity: 1,
-  surgeryDate: "2026-11-10", ordererId: "o1", notes: "右眼", ...over
+  surgeryDate: "2026-11-10", doctorId: "o1", notes: "右眼", ...over
 });
 const order = (auth, data) => service.createOrder({ auth, data });
 const rejects = (p, code) => assert.rejects(p, (e) => e.code === code, `expected ${code}`);
@@ -80,16 +80,18 @@ test("正常系: 検証して保存され、受付済み(accepted)・サーバ�
   assert.equal(o.lines[0].status, "accepted");
   assert.equal(o.lines[0].dealerId, null);
   assert.equal(o.lines[0].surgeryDate, "2026-11-10");
-  assert.deepEqual(o.orderer, { id: "o1", name: "山田", email: "y@orderer.jp" }); // マスターから取得
-  assert.deepEqual(o.createdBy, { uid: "ordA", email: "orda@login.jp", displayName: "ログイン-ordA" }); // 注文者とは別に記録
+  assert.deepEqual(o.lines[0].doctor, { id: "o1", name: "山田", email: "y@orderer.jp" }); // 担当医: マスターのスナップショット
+  assert.equal("orderer" in o, false, "no order-level orderer in the new format");
+  assert.deepEqual(o.doctorIds, ["o1"]);
+  assert.deepEqual(o.createdBy, { uid: "ordA", email: "orda@login.jp", displayName: "ログイン-ordA" }); // 担当医とは別に、実際の発注者を認証情報から記録
   assert.equal(o.notes, "右眼");
-  assert.ok(o.createdAt && o.acceptedAt && o.requestId === d.requestId && o.schemaVersion === 2);
+  assert.ok(o.createdAt && o.acceptedAt && o.requestId === d.requestId && o.schemaVersion === 3);
 });
 
-test("注文者のメールは任意: 未登録でも受け付けられ、null で保存される。管理者も注文できる", async () => {
-  const r = await order(user("adminA"), body({ ordererId: "o2" }));
+test("担当医のメールは任意: 未登録でも受け付けられ、null で保存される。管理者も注文できる(担当医とは別に、発注者として記録される)", async () => {
+  const r = await order(user("adminA"), body({ doctorId: "o2" }));
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.equal(o.orderer.email, null);
+  assert.equal(o.lines[0].doctor.email, null);
   assert.equal(o.createdBy.uid, "adminA");
 });
 
@@ -98,8 +100,8 @@ test("マスターを後で変更しても、過去の注文の内容は変わ�
   await db.doc(`facilities/${F}/orderers/o1`).update({ name: "改名", email: "new@x.jp" });
   await db.doc(`facilities/${F}`).update({ name: "改名眼科" });
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.equal(o.orderer.name, "山田");
-  assert.equal(o.orderer.email, "y@orderer.jp");
+  assert.equal(o.lines[0].doctor.name, "山田");
+  assert.equal(o.lines[0].doctor.email, "y@orderer.jp");
   assert.equal(o.facilityName, "A眼科");
 });
 
@@ -114,7 +116,7 @@ test("注文番号は日付ごと・施設ごとの連番で、サーバーが�
 });
 
 test("クライアントは注文番号・状態・作成者・価格・レンズ名・注文者名などを指定できない(未知のキーは拒否)", async () => {
-  for (const extra of [{ orderNumber: "X" }, { status: "notified" }, { createdBy: "evil" }, { price: 1 }, { displayName: "偽" }, { orderer: "偽" }, { email: "a@b.jp" }, { role: "admin" }]) {
+  for (const extra of [{ orderNumber: "X" }, { status: "notified" }, { createdBy: "evil" }, { price: 1 }, { displayName: "偽" }, { orderer: "偽" }, { orderedBy: "偽" }, { actorUid: "x" }, { proxy: true }, { proxyOrder: true }, { ordererName: "偽" }, { doctorName: "偽" }, { email: "a@b.jp" }, { role: "admin" }]) {
     await rejects(order(user("ordA"), body(extra)), "invalid-argument");
   }
   assert.equal((await orders()).length, 0);
@@ -212,22 +214,22 @@ test("手術日の「本日」は日本時間で判定する(UTCでは前日で�
   await order(user("ordA"), body({ surgeryDate: "2026-10-25" }));
 });
 
-test("注文者: 施設のマスターにいる注文者のみ。存在しない・他施設の注文者は拒否される。旧形式の active は判定に使わない", async () => {
-  await rejects(order(user("ordA"), body({ ordererId: "nobody" })), "invalid-argument");
+test("担当医: 施設のマスターにいる人のみ。存在しない・他施設の担当医は拒否される。旧形式の active は判定に使わない", async () => {
+  await rejects(order(user("ordA"), body({ doctorId: "nobody" })), "invalid-argument");
   // 旧形式(active=false)のドキュメントでも、新形式(active なし)と同じように注文できる(移行期間中の混在)
-  const legacy = await order(user("ordA"), body({ ordererId: "o3" }));
-  assert.equal((await db.doc(`facilities/${F}/orders/${legacy.orderId}`).get()).get("orderer.name"), "旧形式");
-  const fresh = await order(user("ordA"), body({ ordererId: "o2" }));
-  assert.equal((await db.doc(`facilities/${F}/orders/${fresh.orderId}`).get()).get("orderer.name"), "佐藤");
+  const legacy = await order(user("ordA"), body({ doctorId: "o3" }));
+  assert.equal((await db.doc(`facilities/${F}/orders/${legacy.orderId}`).get()).get("lines")[0].doctor.name, "旧形式");
+  const fresh = await order(user("ordA"), body({ doctorId: "o2" }));
+  assert.equal((await db.doc(`facilities/${F}/orders/${fresh.orderId}`).get()).get("lines")[0].doctor.name, "佐藤");
   await db.collection(`facilities/${F}/orders`).get().then(s => Promise.all(s.docs.map(d => d.ref.delete())));
   await db.doc("facilities/fB/orderers/onlyB").set({ facilityId: "fB", name: "他施設の人" });
-  await rejects(order(user("ordA"), body({ ordererId: "onlyB" })), "invalid-argument");
+  await rejects(order(user("ordA"), body({ doctorId: "onlyB" })), "invalid-argument");
   assert.equal((await orders()).length, 0);
 });
 
 // ================= 複数明細(まとめ発注) =================
-const line = (over = {}) => ({ modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", ...over });
-const multi = (lines, over = {}) => ({ facilityId: F, requestId: rid(), ordererId: "o1", notes: "まとめ発注", lines, ...over });
+const line = (over = {}) => ({ modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctorId: "o1", ...over });
+const multi = (lines, over = {}) => ({ facilityId: F, requestId: rid(), notes: "まとめ発注", lines, ...over });
 
 test("複数明細: 異なるモデル・度数・枚数・手術日をまとめて1つの注文として保存し、明細ごとにスナップショットとディーラー情報を持つ", async () => {
   await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "dealer-1" });
@@ -241,7 +243,7 @@ test("複数明細: 異なるモデル・度数・枚数・手術日をまとめ
   assert.equal(r.lineCount, 3);
   assert.equal(r.totalQuantity, 4);
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.equal(o.schemaVersion, 2);
+  assert.equal(o.schemaVersion, 3);
   assert.equal(o.lineCount, 3);
   assert.equal(o.totalQuantity, 4);
   assert.equal(o.firstSurgeryDate, "2026-11-10");
@@ -255,7 +257,7 @@ test("複数明細: 異なるモデル・度数・枚数・手術日をまとめ
   });
   assert.deepEqual(o.lines.map(l => l.dealerId), [null, null, "dealer-1"]); // 将来のディーラー振り分け用
   assert.deepEqual(o.lines.map(l => l.dealer), [null, null, { id: "dealer-1", name: "テスト商会" }]); // その時点のディーラー名のスナップショット
-  assert.equal(o.orderer.name, "山田");
+  assert.deepEqual(o.lines.map(l => l.doctor.name), ["山田", "山田", "山田"]);
   assert.equal("item" in o, false);
 });
 
@@ -320,8 +322,8 @@ test("複数明細: 同じ requestId の再送は同じ注文番号。明細の�
 test("互換性: 従来の単一IOL形式と、明細1件の形式は同じ内容として扱われ(再送しても二重登録にならない)、保存は明細の形式に統一される", async () => {
   const legacy = body();
   const a = await order(user("ordA"), legacy);
-  const asLines = { facilityId: F, requestId: legacy.requestId, ordererId: legacy.ordererId, notes: legacy.notes,
-    lines: [{ modelId: legacy.modelId, power: legacy.power, quantity: legacy.quantity, surgeryDate: legacy.surgeryDate }] };
+  const asLines = { facilityId: F, requestId: legacy.requestId, notes: legacy.notes,
+    lines: [{ modelId: legacy.modelId, power: legacy.power, quantity: legacy.quantity, surgeryDate: legacy.surgeryDate, doctorId: legacy.doctorId }] };
   const b = await order(user("ordA"), asLines);
   assert.equal(b.replayed, true);
   assert.equal(b.orderNumber, a.orderNumber);
@@ -355,7 +357,7 @@ test("同じ requestId・同じ内容の再送は、既存の注文番号を返�
 test("同じ requestId で内容が違う場合は拒否され、元の注文は変わらない", async () => {
   const d = body();
   const a = await order(user("ordA"), d);
-  for (const change of [{ power: "+21.0D" }, { quantity: 2 }, { surgeryDate: "2026-11-11" }, { ordererId: "o2" }, { modelId: "nidek-nsp-2" }, { notes: "左眼" }]) {
+  for (const change of [{ power: "+21.0D" }, { quantity: 2 }, { surgeryDate: "2026-11-11" }, { doctorId: "o2" }, { modelId: "nidek-nsp-2" }, { notes: "左眼" }]) {
     await rejects(order(user("ordA"), { ...d, ...change }), "already-exists");
   }
   const o = (await db.doc(`facilities/${F}/orders/${a.orderId}`).get()).data();
@@ -520,4 +522,73 @@ test("ディーラー: 旧形式(active つき)のディーラーでも、有効
   await db.doc(`facilities/${F}/facilityDealers/legacy-d`).set({ facilityId: F, name: "旧形式", active: false });
   const r = await order(user("ordA"), multi([line({ modelId: "nidek-nsp-2", power: "+5.5D" })]));
   assert.equal((await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("lines")[0].dealer.name, "旧形式");
+});
+
+// ================= 担当医(明細ごと)・実際の発注者 =================
+test("担当医が異なる複数レンズを、1回の注文で扱える。明細ごとに担当医のID・氏名をスナップショットし、重複判定は担当医も区別する", async () => {
+  const d = multi([
+    line({ doctorId: "o1" }),
+    line({ doctorId: "o2" }),                                  // 同じレンズ・度数・手術日でも、担当医が違えば別の明細
+    line({ modelId: "nidek-nsp-2", power: "+5.5D", doctorId: "o2", surgeryDate: "2026-11-20" })
+  ]);
+  const r = await order(user("ordA"), d);
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.deepEqual(o.lines.map(l => l.doctor), [
+    { id: "o1", name: "山田", email: "y@orderer.jp" }, { id: "o2", name: "佐藤", email: null }, { id: "o2", name: "佐藤", email: null }
+  ]);
+  assert.deepEqual(o.doctorIds.sort(), ["o1", "o2"]);
+  assert.deepEqual(o.createdBy.uid, "ordA", "one real orderer for the whole order");
+  // 同じ担当医・同じレンズ・度数・手術日の重複は拒否
+  await rejects(order(user("ordA"), multi([line({ doctorId: "o1" }), line({ doctorId: "o1" })])), "invalid-argument");
+});
+
+test("実際の発注者(createdBy)は、サーバーが認証情報から記録する。クライアントが申告する発注者・代理発注の項目は受け付けない", async () => {
+  const r = await order(user("adminA", { name: "管理者 太郎" }), multi([line({ doctorId: "o2" })]));
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.deepEqual(o.createdBy, { uid: "adminA", email: "admina@login.jp", displayName: "管理者 太郎" });
+  assert.equal(o.lines[0].doctor.name, "佐藤", "doctor and orderer are separate");
+  for (const forged of [{ createdBy: { uid: "ordA" } }, { orderedBy: "x" }, { actorUid: "ordA" }, { proxy: true }, { proxyOrder: true }, { ordererName: "x" }, { doctorName: "x" }, { orderer: { name: "x" } }]) {
+    await rejects(order(user("adminA"), multi([line()], forged)), "invalid-argument");
+    await rejects(order(user("adminA"), multi([{ ...line(), ...forged }])), "invalid-argument");
+  }
+});
+
+test("担当医の検証は明細ごと: 存在しない・他施設の担当医は、明細番号つきで注文全体を拒否し、何も保存しない。担当医の指定がない明細は拒否", async () => {
+  await db.doc("facilities/fB/orderers/onlyB").set({ facilityId: "fB", name: "他施設の人" });
+  for (const bad of ["nobody", "onlyB", "a/b"]) {
+    await assert.rejects(order(user("ordA"), multi([line(), line({ doctorId: bad, power: "+21.0D" })])), (e) => e.code === "invalid-argument" && /明細2/.test(e.message), bad);
+  }
+  const noDoctor = line(); delete noDoctor.doctorId;
+  await assert.rejects(order(user("ordA"), multi([noDoctor])), (e) => e.code === "invalid-argument" && /明細1.*担当医/.test(e.message));
+  await rejects(order(user("ordA"), multi([line({ doctorId: null })])), "invalid-argument");
+  await rejects(order(user("ordA"), multi([line({ doctorId: 5 })])), "invalid-argument");
+  assert.equal((await orders()).length, 0);
+});
+
+test("冪等性: 同じ requestId で担当医が変わった再送は拒否される。同じ内容の再送は同じ注文番号", async () => {
+  const d = multi([line({ doctorId: "o1" }), line({ doctorId: "o2", power: "+21.0D" })]);
+  const a = await order(user("ordA"), d);
+  assert.equal((await order(user("ordA"), JSON.parse(JSON.stringify(d)))).orderNumber, a.orderNumber);
+  await rejects(order(user("ordA"), { ...d, lines: [d.lines[0], { ...d.lines[1], doctorId: "o1" }] }), "already-exists");
+  assert.equal((await orders()).length, 1);
+});
+
+test("互換性(旧クライアント): トップレベルの ordererId は、担当医を指定していない全明細の担当医として扱われる", async () => {
+  const noDoc = (o = {}) => { const l = line(o); delete l.doctorId; return l; };
+  const r = await order(user("ordA"), multi([noDoc(), { ...noDoc({ power: "+21.0D" }), doctorId: "o2" }], { ordererId: "o1" }));
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.deepEqual(o.lines.map(l => l.doctor.id), ["o1", "o2"]);       // 明細の指定が優先
+  assert.equal("orderer" in o, false);
+  await rejects(order(user("ordA"), multi([noDoc()], { ordererId: "nobody" })), "invalid-argument");
+});
+
+test("互換性(読み込み): 旧形式の注文(注文全体の orderer)も、各明細の担当医として読める。新形式はそのまま。実際の発注者は createdBy", () => {
+  const v2 = { schemaVersion: 2, orderer: { id: "o1", name: "山田", email: null }, createdBy: { uid: "u1" },
+    lines: [{ lineNo: 1, item: { modelId: "jj-dib00v" } }, { lineNo: 2, item: { modelId: "x" } }] };
+  assert.deepEqual(orderLinesOf(v2).map(l => l.doctor), [{ id: "o1", name: "山田", email: null }, { id: "o1", name: "山田", email: null }]);
+  const v1 = { status: "accepted", item: { modelId: "jj-dib00v" }, surgeryDate: "2026-11-10", orderer: { id: "o9", name: "旧", email: null } };
+  assert.equal(orderLinesOf(v1)[0].doctor.name, "旧");
+  const v3 = { schemaVersion: 3, createdBy: { uid: "u1" }, lines: [{ lineNo: 1, doctor: { id: "o2", name: "佐藤", email: null } }, { lineNo: 2, doctor: { id: "o1", name: "山田", email: null } }] };
+  assert.deepEqual(orderLinesOf(v3).map(l => l.doctor.name), ["佐藤", "山田"]);
+  assert.deepEqual(orderLinesOf({ status: "x" }), []);
 });

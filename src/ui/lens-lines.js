@@ -26,10 +26,11 @@ let seq = 0; // ラベルの for / radio の name を明細ごとに一意にす
  * @param {HTMLElement} deps.container 明細を並べる場所
  * @param {HTMLElement} deps.addButton 「レンズを追加」ボタン
  * @param {() => Array<object>} deps.getOptions 採用済みIOLの選択肢(buildLensOptions の結果)
+ * @param {() => Array<{id:string, name:string, email?:string}>} deps.getDoctors 担当医(施設のマスター)
  * @param {() => string} deps.minDate 手術日の最小値(YYYY-MM-DD)
  * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新)
  */
-export function createLensLines({ container, addButton, getOptions, minDate, onChange = () => {} }) {
+export function createLensLines({ container, addButton, getOptions, getDoctors, minDate, onChange = () => {} }) {
   const lines = [];
 
   function buildLine(prefill = {}) {
@@ -43,6 +44,8 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     line.date = h("input", { id: id("lensDate"), type: "date", class: "form-control", "data-f": "date" });
     line.date.min = minDate();
     if (prefill.surgeryDate) line.date.value = prefill.surgeryDate; // 直前の明細の手術日を引き継ぐ(変更可)
+    line.doctor = h("select", { id: id("lensDoctor"), class: "form-control", "data-f": "doctor" }, h("option", { value: "" }, "選択"));
+    fillDoctors(line, prefill.doctorId || ""); // 直前の明細の担当医を引き継ぐ(変更可)
     line.qty = [1, 2].map(q => h("input", { type: "radio", name: `lensQty-${n}`, value: String(q), "data-f": "quantity" }));
     line.qty[0].checked = true;
     line.errs = {};
@@ -67,7 +70,8 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
         h("div", { class: "quantity-selector", role: "radiogroup", "aria-label": "枚数選択" },
           line.qty.map(r => h("label", { class: "quantity-option" }, r, h("span", { class: "quantity-btn" }, `${r.value} 枚`)))),
         err("quantity")),
-      group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate")));
+      group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate")),
+      group("担当医", h("div", { class: "select-wrapper" }, line.doctor), "doctor", id("lensDoctor")));
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
@@ -75,6 +79,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
+    line.doctor.addEventListener("change", () => clearErr(line, "doctor"));
     line.qty.forEach(r => r.addEventListener("change", () => clearErr(line, "quantity")));
     const onFilter = () => { rebuildModels(line, line.model.value); onChange(); };
     line.chkMf.addEventListener("change", onFilter);
@@ -83,7 +88,18 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     return line;
   }
 
-  const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : null)?.classList.remove("is-invalid"); };
+  const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : k === "doctor" ? line.doctor : null)?.classList.remove("is-invalid"); };
+
+  /** 担当医の選択肢を作り直す。選択中の担当医がマスターに残っていれば維持し、無ければ未選択に戻す */
+  function fillDoctors(line, selectedId) {
+    while (line.doctor.children.length > 1) line.doctor.removeChild(line.doctor.lastChild);
+    for (const d of getDoctors()) {
+      const o = h("option", { value: d.id }, d.name);
+      if (d.email) o.title = d.email;
+      line.doctor.appendChild(o);
+    }
+    line.doctor.value = [...line.doctor.options].some(o => o.value === selectedId) ? selectedId : "";
+  }
   const setErr = (line, k, msg, ctl) => { line.errs[k].textContent = msg; ctl?.classList.add("is-invalid"); };
 
   /** 絞り込み後の選択肢でIOLモデルを作り直す。選択が外れたら、モデルとパワーを持ち越さない */
@@ -147,7 +163,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
 
   addButton.addEventListener("click", () => {
     const last = lines[lines.length - 1];
-    const added = addLine({ surgeryDate: last ? last.date.value : "" });
+    const added = addLine({ surgeryDate: last ? last.date.value : "", doctorId: last ? last.doctor.value : "" });
     if (added) added.model.focus();
   });
 
@@ -160,7 +176,8 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
         lens: findLensOption(getOptions(), l.model.value),
         power: l.power.value,
         quantity: parseInt((l.qty.find(r => r.checked) || {}).value || "0", 10),
-        surgeryDate: l.date.value
+        surgeryDate: l.date.value,
+        doctor: getDoctors().find(d => d.id === l.doctor.value) || null
       }));
     },
     /** 全明細の入力検証。最初の不備の要素を返す */
@@ -174,6 +191,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
         v.power ? clearErr(l, "power") : fail("power", "IOLパワー (ディオプター) を選択してください", l.power);
         v.quantity ? clearErr(l, "quantity") : fail("quantity", "枚数を選択してください", l.qty[0]);
         v.surgeryDate ? clearErr(l, "date") : fail("date", "手術日を選択してください", l.date);
+        v.doctor ? clearErr(l, "doctor") : fail("doctor", "担当医を選択してください", l.doctor);
       });
       // 同じレンズ・度数・手術日の重複(枚数で指定する)
       if (!first) {
@@ -184,13 +202,13 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
       }
       return { ok: !first, firstInvalid: first };
     },
-    refresh() { lines.forEach(l => rebuildModels(l, l.model.value)); },
+    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); }); },
     /** 初期状態(1明細・両チェックOFF)に戻す */
     reset() {
       lines.splice(0).forEach(l => l.root.remove());
       addLine();
     },
-    isDirty() { return lines.some(l => l.model.value || l.date.value); },
+    isDirty() { return lines.some(l => l.model.value || l.date.value || l.doctor.value); },
     count: () => lines.length,
     /** いずれかの明細が ALCON のトーリックなら、その計算ツールのURL(案内表示用) */
     alconCalculator() {

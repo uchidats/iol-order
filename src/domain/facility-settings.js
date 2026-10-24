@@ -1,5 +1,5 @@
 /**
- * 施設設定（注文者・採用IOL・ディーラー）の入力検証と書き込み計画（純粋関数）
+ * 施設設定（担当医・採用IOL・ディーラー）の入力検証と書き込み計画（純粋関数）
  *
  * ここでの検証は画面でのエラー表示用。最終的な強制は Firestore Security Rules（firestore.rules）が行う。
  * 両者の制限値は同じにしてある（変更時は rules とテストも更新すること）。
@@ -42,7 +42,7 @@ export function parseEmailList(text) {
   return { emails, errors };
 }
 
-// ---------- 注文者 ----------
+// ---------- 担当医(旧「注文者」。コレクション名・関数名は互換性のため orderers のまま) ----------
 /**
  * @param {Array<{id?:string|null, name:string, email?:string}>} rows 画面の並び順
  */
@@ -53,9 +53,9 @@ export function validateOrderers(rows) {
   rows.forEach((r, index) => {
     const name = norm(r.name);
     const email = String(r.email ?? "").trim();
-    if (!name) errors.push({ index, field: "name", message: "注文者名を入力してください" });
-    else if (name.length > LIMITS.ordererNameMax) errors.push({ index, field: "name", message: `注文者名は${LIMITS.ordererNameMax}文字までです` });
-    else if (names.has(keyOf(name))) errors.push({ index, field: "name", message: `注文者名が重複しています: ${name}` });
+    if (!name) errors.push({ index, field: "name", message: "氏名を入力してください" });
+    else if (name.length > LIMITS.ordererNameMax) errors.push({ index, field: "name", message: `氏名は${LIMITS.ordererNameMax}文字までです` });
+    else if (names.has(keyOf(name))) errors.push({ index, field: "name", message: `氏名が重複しています: ${name}` });
     else names.set(keyOf(name), index);
 
     if (email && (email.length > LIMITS.emailMax || !isValidEmail(email))) {

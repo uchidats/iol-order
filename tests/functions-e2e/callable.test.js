@@ -128,7 +128,7 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
 
-  const data = { facilityId: fid, requestId: "order-e2e-request-0001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), ordererId: "o1" };
+  const data = { facilityId: fid, requestId: "order-e2e-request-0001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), doctorId: "o1" };
   const ok = await call("createOrder", data, verified.idToken);
   assert.equal(ok.http, 200);
   assert.equal(ok.body.result.status, "accepted");
@@ -137,7 +137,9 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   const saved = await getDoc(`facilities/${fid}/orders/${ok.body.result.orderId}`);
   assert.equal(saved.fields.status.stringValue, "accepted");
   assert.equal(saved.fields.createdBy.mapValue.fields.uid.stringValue, verified.uid);
-  assert.equal(saved.fields.orderer.mapValue.fields.name.stringValue, "山田");
+  const l0 = saved.fields.lines.arrayValue.values[0].mapValue.fields;
+  assert.equal(l0.doctor.mapValue.fields.name.stringValue, "山田");   // 担当医(明細のスナップショット)
+  assert.equal(saved.fields.orderer, undefined, "no order-level orderer");
 
   const again = await call("createOrder", data, verified.idToken);
   assert.equal(again.body.result.orderNumber, ok.body.result.orderNumber);
@@ -160,10 +162,10 @@ test("callable: createOrder は複数明細(まとめ発注)を受け付け、�
   const fid = reg.body.result.facilityId;
   for (const id of ["jj-dib00v", "nidek-nsp-2"]) await putDoc(`facilities/${fid}/adoptedIols/${id}`, { facilityId: fid, catalogIolId: id, enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: false });
-  const base = { facilityId: fid, requestId: "order-e2e-request-0101", ordererId: "o1" };
+  const base = { facilityId: fid, requestId: "order-e2e-request-0101" };
   const lines = [
-    { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(14) },
-    { modelId: "nidek-nsp-2", power: "+5.5D", quantity: 2, surgeryDate: future(21) }
+    { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(14), doctorId: "o1" },
+    { modelId: "nidek-nsp-2", power: "+5.5D", quantity: 2, surgeryDate: future(21), doctorId: "o1" }
   ];
   const ok = await call("createOrder", { ...base, lines }, owner2.idToken);
   assert.equal(ok.body.result.lineCount, 2);

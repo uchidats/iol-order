@@ -7,7 +7,9 @@
  *
  * 方針:
  * - 認証必須。所属・権限・施設の状態・採用IOL・注文者は、すべてサーバー側で Firestore から再確認する。
- * - クライアントが送るのは「何を選んだか」の識別子(modelId / ordererId / 度数 など)だけ。
+ * - クライアントが送るのは「何を選んだか」の識別子(modelId / doctorId / 度数 など)だけ。
+ * - 担当医(各明細の doctorId)は施設のマスター(orderers コレクション。画面では「担当医」)から引き、IDと氏名を明細にスナップショットする。
+ *   実際の発注者(ログインしたGoogleアカウント)は createdBy に、サーバーが認証情報から記録する(クライアントの申告は受け取らない)。
  *   レンズ名・メーカー・注文者名・メールなどは、サーバーがマスターから引いてスナップショットとして保存する。
  * - 冪等性: 注文ドキュメントIDを (操作ユーザー, requestId) から決め、トランザクション内で存在確認する。
  *   同じ内容の再送は既存の注文番号を返し、同じ requestId で内容が違う場合は拒否する。
@@ -41,8 +43,9 @@ export const ORDER_LIMITS = Object.freeze({
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate"];
-const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", ...LINE_KEYS]; // LINE_KEYS をトップレベルに置くのは従来の単一IOL形式
+const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate", "doctorId"];
+// ordererId(トップレベル)は旧形式の互換: 明細に doctorId が無いとき、その担当医を全明細に使う。LINE_KEYS をトップレベルに置くのは従来の単一IOL形式
+const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", ...LINE_KEYS];
 
 const bad = (message = "入力内容を確認してください") => new RegistrationError("invalid-argument", message);
 
@@ -58,13 +61,15 @@ function validDate(s) {
 }
 
 /** 1明細の形式検証と正規化。n は画面に出す明細番号(1始まり) */
-function parseLine(raw, n, nowMs) {
+function parseLine(raw, n, nowMs, defaultDoctorId) {
   const at = (m) => bad(`明細${n}: ${m}`);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw at("入力内容を確認してください");
   for (const k of Object.keys(raw)) if (!LINE_KEYS.includes(k)) throw at("入力内容を確認してください");
   const { modelId, power, quantity, surgeryDate } = raw;
   const toricModel = raw.toricModel === undefined || raw.toricModel === null ? "" : raw.toricModel;
+  const doctorId = raw.doctorId === undefined || raw.doctorId === null ? defaultDoctorId : raw.doctorId;
 
+  if (typeof doctorId !== "string" || !ID.test(doctorId)) throw at("担当医を選択してください");
   if (typeof modelId !== "string" || !ID.test(modelId)) throw at("IOLモデルを選択してください");
   if (typeof power !== "string" || power.length < 1 || power.length > 10) throw at("IOLパワーを選択してください");
   if (typeof toricModel !== "string" || toricModel.length > 60) throw at("トーリック型番が正しくありません");
@@ -74,7 +79,7 @@ function parseLine(raw, n, nowMs) {
   const limit = jstDate(nowMs + ORDER_LIMITS.maxDaysAhead * 24 * 60 * 60 * 1000);
   if (surgeryDate < today) throw at("手術日は本日以降を指定してください");
   if (surgeryDate > limit) throw at("手術日が先すぎます");
-  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate };
+  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, doctorId };
 }
 
 /** 入力の形式検証と正規化(マスターとの突き合わせは別)。従来の単一IOL形式は1明細に正規化する */
@@ -82,12 +87,13 @@ export function parseOrderInput(data, nowMs) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw bad();
   for (const k of Object.keys(data)) if (!ALLOWED_KEYS.includes(k)) throw bad();
 
-  const { facilityId, requestId, ordererId } = data;
+  const { facilityId, requestId } = data;
+  const legacyDoctorId = data.ordererId === undefined || data.ordererId === null ? undefined : data.ordererId;
+  if (legacyDoctorId !== undefined && (typeof legacyDoctorId !== "string" || !ID.test(legacyDoctorId))) throw bad("担当医を選択してください");
   const notes = data.notes === undefined || data.notes === null ? "" : data.notes;
 
   if (typeof facilityId !== "string" || !ID.test(facilityId)) throw bad();
   if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) throw bad("注文の識別子が正しくありません");
-  if (typeof ordererId !== "string" || !ID.test(ordererId)) throw bad("注文者を選択してください");
   if (typeof notes !== "string" || notes.trim().length > ORDER_LIMITS.notesMax) throw bad(`備考は${ORDER_LIMITS.notesMax}文字以内で入力してください`);
 
   let rawLines;
@@ -99,31 +105,38 @@ export function parseOrderInput(data, nowMs) {
   } else {
     rawLines = [Object.fromEntries(LINE_KEYS.filter(k => data[k] !== undefined).map(k => [k, data[k]]))];
   }
-  const lines = rawLines.map((l, i) => parseLine(l, i + 1, nowMs));
+  const lines = rawLines.map((l, i) => parseLine(l, i + 1, nowMs, legacyDoctorId));
 
   const seen = new Set();
   lines.forEach((l, i) => {
-    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate]);
+    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate, l.doctorId]);
     if (seen.has(k)) throw bad(`明細${i + 1}: 同じレンズ・度数・手術日の明細が重複しています。枚数で指定してください`);
     seen.add(k);
   });
   const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0);
   if (totalQuantity > ORDER_LIMITS.maxTotalQuantity) throw bad(`合計枚数は${ORDER_LIMITS.maxTotalQuantity}枚までです`);
 
-  return { facilityId, requestId, ordererId, notes: notes.trim(), lines, totalQuantity };
+  return { facilityId, requestId, notes: notes.trim(), lines, totalQuantity };
 }
 
 /** 注文内容(識別子・選択値)の正規化ハッシュ。同じ requestId での内容変更の検出に使う(単一IOL形式でも明細1件の形式でも同じ値になる) */
 export function contentHash(i) {
   return createHash("sha256")
-    .update(JSON.stringify([i.facilityId, i.ordererId, i.notes, i.lines.map(l => [l.modelId, l.power, l.toricModel, l.quantity, l.surgeryDate])]))
+    .update(JSON.stringify([i.facilityId, i.notes, i.lines.map(l => [l.modelId, l.power, l.toricModel, l.quantity, l.surgeryDate, l.doctorId])]))
     .digest("hex");
 }
 
-/** 保存済みの注文を明細の配列として読む(従来の単一IOL形式の注文=schemaVersion 1 も含む) */
+/**
+ * 保存済みの注文を明細の配列として読む。新旧の形式をそろえて返す:
+ *  - 現行(schemaVersion 3): 各明細に doctor(担当医のスナップショット)がある
+ *  - 旧(schemaVersion 2): 明細に doctor が無く、注文全体の orderer(注文者) → その担当医として扱う
+ *  - 旧(schemaVersion 1): トップレベルの item / surgeryDate / orderer
+ * 実際の発注者は、どの形式でも order.createdBy(uid / email / displayName)。
+ */
 export function orderLinesOf(order) {
-  if (Array.isArray(order.lines)) return order.lines;
-  if (order.item) return [{ lineNo: 1, status: order.status, item: order.item, surgeryDate: order.surgeryDate, dealerId: null }];
+  const fallback = order.orderer || null;
+  if (Array.isArray(order.lines)) return order.lines.map(l => ({ ...l, doctor: l.doctor ?? fallback }));
+  if (order.item) return [{ lineNo: 1, status: order.status, item: order.item, surgeryDate: order.surgeryDate, dealerId: null, doctor: fallback }];
   return [];
 }
 
@@ -185,7 +198,6 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
 
     const fRef = db.doc(`facilities/${input.facilityId}`);
     const mRef = db.doc(`facilities/${input.facilityId}/members/${user.uid}`);
-    const oRef = db.doc(`facilities/${input.facilityId}/orderers/${input.ordererId}`);
     const orderId = deriveOrderId(user.uid, input.requestId);
     const orderRef = db.doc(`facilities/${input.facilityId}/orders/${orderId}`);
     const hash = contentHash(input);
@@ -193,8 +205,12 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     const counterRef = db.doc(`facilities/${input.facilityId}/orderCounters/${day}`);
 
     return db.runTransaction(async (tx) => {
-      const [fac, mem, orderer, existing, counter] = await Promise.all(
-        [fRef, mRef, oRef, orderRef, counterRef].map(r => tx.get(r)));
+      const [fac, mem, existing, counter] = await Promise.all(
+        [fRef, mRef, orderRef, counterRef].map(r => tx.get(r)));
+      // 担当医: この施設のマスター(orderers)にいる人だけ。明細ごとに異なってよい
+      const doctorIds = [...new Set(input.lines.map(l => l.doctorId))];
+      const doctorSnaps = await Promise.all(doctorIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/orderers/${id}`))));
+      const doctorBy = new Map(doctorIds.map((id, i) => [id, doctorSnaps[i]]));
       const modelIds = [...new Set(input.lines.map(l => l.modelId))];
       const adoptedSnaps = await Promise.all(modelIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/adoptedIols/${id}`))));
       const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
@@ -224,6 +240,9 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           throw bad(`明細${n}: この施設で採用されていないIOLモデルです`);
         }
         try { validateLens(model, l); } catch (e) { throw bad(`明細${n}: ${e.message}`); }
+        const doc = doctorBy.get(l.doctorId);
+        if (!doc.exists) throw bad(`明細${n}: 担当医が見つかりません`); // 担当医に有効/無効はない(旧形式の active フィールドは無視する)
+        const docEmail = doc.get("email");
         const dealerSnap = dealerBy.get(adopted.get("dealerId"));
         const dealer = dealerSnap && dealerSnap.exists ? { id: dealerSnap.id, name: dealerSnap.get("name") || "" } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
         return {
@@ -235,19 +254,17 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
             power: l.power, quantity: l.quantity
           },
           surgeryDate: l.surgeryDate,
+          doctor: { id: doc.id, name: doc.get("name"), email: typeof docEmail === "string" && docEmail ? docEmail : null }, // 担当医のスナップショット
           dealerId: dealer ? dealer.id : null, // 将来、ディーラーごとに明細を振り分けるための情報
           dealer                              // ディーラーのスナップショット(未設定・削除済みは null)
         };
       });
-      if (!orderer.exists) throw bad("注文者が見つかりません"); // 注文者に有効/無効はない(旧形式の active フィールドは無視する)
-
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
       const orderNumber = `IOL-${day}-${String(seq).padStart(4, "0")}`;
-      const email = orderer.get("email");
 
       tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp() });
       tx.create(orderRef, {
-        schemaVersion: 2,
+        schemaVersion: 3,
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
@@ -258,9 +275,9 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         totalQuantity: input.totalQuantity,
         firstSurgeryDate: lines.map(l => l.surgeryDate).sort()[0],
         lastSurgeryDate: lines.map(l => l.surgeryDate).sort().slice(-1)[0],
-        orderer: { id: input.ordererId, name: orderer.get("name"), email: typeof email === "string" && email ? email : null },
+        doctorIds,   // この注文に含まれる担当医(明細ごとの詳細は lines[].doctor)
         notes: input.notes,
-        // 操作したログインユーザー(注文者とは別の情報)
+        // 実際に発注したログインユーザー(担当医とは別の情報。サーバーが認証情報から記録し、クライアントの申告は受け取らない)
         createdBy: { uid: user.uid, email: user.email, displayName: user.displayName },
         createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp()
       });
