@@ -48,3 +48,18 @@ test("トーリックモデルは型番を持つ", () => {
   }
   assert.ok(GOOGLE_FORM_ALL_POWERS.length > 0);
 });
+
+import { keepPowerIfAvailable } from "../src/domain/power-filter.js";
+
+test("モデル変更時の度数: 変更後の選択肢にあれば維持、なければ未選択、変更前が未選択なら未選択のまま。表記の違い(+20D)も同じ度数として扱う", () => {
+  const powers = ["+19.5D", "+20.0D", "+20.5D", "0D", "-5.0D"];
+  assert.equal(keepPowerIfAvailable("+20.0D", powers), "+20.0D");
+  assert.equal(keepPowerIfAvailable("+21.0D", powers), "");
+  assert.equal(keepPowerIfAvailable("", powers), "");
+  assert.equal(keepPowerIfAvailable(undefined, powers), "");
+  assert.equal(keepPowerIfAvailable("+20D", powers), "+20.0D", "数値が同じなら、変更後の選択肢の表記に合わせる");
+  assert.equal(keepPowerIfAvailable("0.0D", powers), "0D");
+  assert.equal(keepPowerIfAvailable("-5D", powers), "-5.0D");
+  assert.equal(keepPowerIfAvailable("abc", powers), "");
+  assert.equal(keepPowerIfAvailable("+20.0D", []), "");
+});

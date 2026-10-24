@@ -3,22 +3,21 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 「Alcon Online Toric Calculator」の表示を、小さなテキストリンク+外部リンクアイコンに簡素化(表示のみ)
-- **ブランチ**: `feature/alcon-link`(`origin/main` 7c259cf から作成)→ `main` へ push
+- **作業**: IOLモデル変更時の度数の維持(変更後のモデルにも存在すれば維持。入力画面のみ)
+- **ブランチ**: `feature/keep-power`(`origin/main` 75d698d から作成)→ `main` へ push
 
 ## 変更内容
-- 大きな緑の案内カード(「連携準備中」のバッジ・説明文・「Calculatorを別タブで開く」ボタン)を廃止。
-- 「Alcon Toric Calculator」という小さなテキストリンクに変更し、右側に外部リンクアイコン(SVGの external-link。矢印文字「↗」は不使用)を配置。テキストとアイコン全体がリンクで、従来どおり別タブで開く(`target=_blank` + `rel=noopener noreferrer`)。リンク先URLは従来と同じ(`https://www.myalcon-toriccalc.com`)。
-- 表示位置は、該当レンズ(明細)の「トーリック」「多焦点」チェックボックスの右(同じ行。幅が足りなければ自然に折り返す)。表示条件は従来どおり、**ALCONのトーリックIOLを選択したレンズだけ**(明細ごとに独立)。
-- 将来のカリキュレーター連携に必要な内部処理は維持(`lensLines.alconCalculator()`・`updateAlconGuide` が対象のURLを保持)。「各社Calculator関連リンク」(備考の下の折りたたみ)は変更なし。
-- 変更: `index.html`(案内カードの削除)、`src/ui/lens-lines.js`(リンクの生成と表示切替)、`src/ui/order-form.js`、`styles.css`。レンズ選択・度数選択・注文処理・保存内容・Firebase は変更なし。
+- **原因**: レンズ明細のモデルを変えると、度数の選択が必ず「選択」に戻る実装だった(`onModelChange(line, true)` が常にリセット)。絞り込み(トーリック・多焦点)でモデルが外れる場合も同様。
+- **仕様どおりに修正**: モデル(または絞り込み)の変更時、変更前の度数が変更後のモデルの選択肢にあれば維持し、なければ「選択」に戻す。変更前が未選択なら未選択のまま。トーリック・多焦点の切り替えでモデルが変わる場合も同じ原則(モデルが外れて度数の選択肢が全度数になる間は度数を維持し、その後選んだモデルに度数がなければ未選択に戻る)。
+- 度数の比較は、選択肢と同じ数値の読み方(`filterPowersByModel` と同じ `parseFloat`)で行う純粋関数 `keepPowerIfAvailable`(`src/domain/power-filter.js`)を追加し、表記の違い(+20D / +20.0D)も同じ度数として扱う。`functions/src/power-filter.js` は `npm run sync:catalog` で同期(サーバー側の度数検証ロジックは変更なし)。
+- 変更: `src/domain/power-filter.js`、`src/ui/lens-lines.js`(度数の維持の判定のみ)。他の入力項目・注文データ・送信処理・Firebase は変更なし。サーバーは従来どおり、モデルごとの度数の範囲を検証する(維持された度数が範囲外になることはない)。
 
 ## commit ID
-- 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。基準: `7c259cf`
+- 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。基準: `75d698d`
 
 ## テスト結果
-- unit 173 / ブラウザ回帰 24(Chromium・Firefox・WebKit)すべて成功。新規 `tests/browser/alcon-link.pw.mjs`: 緑のカード・「連携準備中」が無いこと / ALCONのトーリック選択時だけ表示(未選択・ALCONの非トーリック・他社のトーリックでは非表示、明細ごとに独立) / テキスト+SVGアイコン(「↗」なし)・リンク先・別タブ・小さな文字 / チェックボックスの右の同じ行 / テキストでもアイコンでもクリックで別タブが開く / 内部のURL取得処理が維持されていること / スマホ幅(390/320)で枠内・横スクロールなし。
-- 注文画面を実際に開く画面テスト(複数レンズ・担当医・送信内容)も成功。390px での折り返しを目視確認。
+- unit 174(`keepPowerIfAvailable`: 維持・なければ未選択・未選択のまま・表記の違い・不正値)/ Functions 91 / ブラウザ回帰 27(Chromium・Firefox・WebKit)すべて成功。新規 `tests/browser/keep-power.pw.mjs`: 未選択のままモデルを変えても未選択 / 変更後のモデルにもあれば維持 / なければ「選択」に戻り、戻したあとは自動で復活しない / トーリック・多焦点の切り替えでモデルが外れても度数は維持され、その後のモデルに度数がなければ未選択。
+- 注文画面を実際に開く画面テスト(複数レンズ・度数の独立・送信内容)も成功。
 
 ## push状況
 - `main` へ push(Web画面のみ。GitHub Pages で公開)。

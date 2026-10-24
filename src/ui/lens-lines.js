@@ -1,5 +1,5 @@
 import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
-import { filterPowersByModel } from "../domain/power-filter.js";
+import { filterPowersByModel, keepPowerIfAvailable } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -102,7 +102,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
-      clearErr(line, "model"); onModelChange(line, true); onChange();
+      clearErr(line, "model"); onModelChange(line); onChange();
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
@@ -154,15 +154,15 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     const kept = shown.some(o => o.key === prevKey);
     line.model.value = kept ? prevKey : "";
     line.model.title = line.model.selectedOptions[0] && line.model.value ? line.model.selectedOptions[0].title : "";
-    onModelChange(line, !(kept && prevKey)); // 選択中のモデルが残る(絞り込みだけ変わった)ときは、パワーの選択も維持する
+    onModelChange(line); // 絞り込みでモデルが外れても、度数は「変更後に存在すれば維持」の原則で扱う
   }
 
   /**
    * モデルに応じて度数候補を作り直す(モデルごとの範囲・刻みの制限)。度数は自動で選ばない(初期表示は「選択」)。
-   * モデルを変えたとき(reset=true)は未選択に戻す。必須チェックは validate() が行う。
+   * モデルを変えたときは、変更前の度数が変更後のモデルにもあれば維持し、なければ未選択に戻す。必須チェックは validate() が行う。
    * 度数は +20.0D 付近が使われることが多いが、+20.0D を自動で確定することはしない。
    */
-  function onModelChange(line, reset = true) {
+  function onModelChange(line) {
     const lens = findLensOption(getOptions(), line.model.value);
     line.badges.replaceChildren(...(lens ? lensBadgeElements(lens.model) : []));
     const alcon = Boolean(lens && lens.manufacturer === "ALCON" && lens.isToric);   // 表示条件は従来どおり(ALCONのトーリックを選択したときだけ)
@@ -172,7 +172,9 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     const prev = line.power.value;
     while (line.power.children.length > 1) line.power.removeChild(line.power.lastChild);
     powers.forEach(p => line.power.appendChild(h("option", { value: p }, p)));
-    line.power.value = !reset && prev && powers.includes(prev) ? prev : "";
+    // 変更前の度数が、変更後のモデルの選択肢にもあれば維持し、なければ「選択」に戻す(未選択なら未選択のまま)。
+    // モデルの変更でも、トーリック・多焦点の絞り込みによるモデルの変更でも、同じ原則
+    line.power.value = keepPowerIfAvailable(prev, powers);
   }
 
   function renumber() {

@@ -31,6 +31,19 @@ export function filterPowersByModel(modelData, allPowers = GOOGLE_FORM_ALL_POWER
 }
 
 /**
+ * モデル(または絞り込み)を変えたとき、変更前の度数を維持できるか。変更後の度数の選択肢にあれば維持し、なければ未選択("")。
+ * 変更前が未選択なら未選択のまま。比較は選択肢と同じ数値の読み方(filterPowersByModel と同じ parseFloat)で行うため、"+20.0D" と "+20D" のような表記の違いも同じ度数として扱う。
+ * @returns {string} 変更後の選択肢の中の値(維持する度数)。維持できなければ ""
+ */
+export function keepPowerIfAvailable(prev, powers) {
+  if (!prev) return "";
+  if (powers.includes(prev)) return prev;
+  const n = parseFloat(String(prev).replace("D", ""));
+  if (Number.isNaN(n)) return "";
+  return powers.find(p => Math.abs(parseFloat(p.replace("D", "")) - n) < 0.001) || "";
+}
+
+/**
  * モデルの既定度数を選択肢文字列（例: "+20.0D"）で返す
  */
 export function defaultPowerLabel(modelData) {
