@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:browser": "node --test tests/browser/*.pw.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-iol-rules \"node --test tests/rules/*.test.js\"",
     "deploy:dev:firestore": "firebase deploy --only firestore --project medconf-iol-dev",
     "test:functions": "firebase emulators:exec --only firestore --project demo-iol-functions \"node --test --test-concurrency=1 tests/functions/*.test.js\"",
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
     "firebase": "^10.14.1",
-    "firebase-admin": "^12.7.0"
+    "firebase-admin": "^12.7.0",
+    "playwright-core": "^1.64.1"
   }
 }
