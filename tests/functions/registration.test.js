@@ -374,13 +374,13 @@ test("登録後: 新しい管理者は自施設の設定を読み書きでき、
 
   // 自施設: 読める・設定を書ける
   await assertSucceeds(getDoc(doc(as("userA"), `facilities/${fa}`)));
-  await assertSucceeds(setDoc(doc(as("userA"), `facilities/${fa}/orderers/o1`), { facilityId: fa, name: "新規注文者", active: true }));
+  await assertSucceeds(setDoc(doc(as("userA"), `facilities/${fa}/orderers/o1`), { facilityId: fa, name: "新規注文者" }));
   await assertSucceeds(getDocs(collection(as("userA"), `facilities/${fa}/members`)));
   // 他施設（立川病院・他の新規施設）は読めない・書けない
   for (const other of ["tachikawa-hospital", fb]) {
     await assertFails(getDoc(doc(as("userA"), `facilities/${other}`)));
     await assertFails(getDocs(collection(as("userA"), `facilities/${other}/orderers`)));
-    await assertFails(setDoc(doc(as("userA"), `facilities/${other}/orderers/evil`), { facilityId: other, name: "x", active: true }));
+    await assertFails(setDoc(doc(as("userA"), `facilities/${other}/orderers/evil`), { facilityId: other, name: "x" }));
     await assertFails(getDocs(collection(as("userA"), `facilities/${other}/members`)));
   }
   // 立川病院の管理者は新しい施設に入れない

@@ -24,8 +24,7 @@ export function createStaticRepository() {
       return ORDERER_NAMES.map((name, i) => ({
         id: `orderer-${i + 1}`,
         facilityId,
-        name,
-        active: true
+        name
       }));
     },
     async listAdoptedIols(facilityId = DEFAULT_FACILITY_ID) {

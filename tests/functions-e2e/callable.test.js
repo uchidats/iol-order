@@ -126,7 +126,7 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   const reg = await call("registerFacility", { name: "注文E2E医院", requestId: "order-e2e-register-01" }, verified.idToken);
   const fid = reg.body.result.facilityId;
   await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
-  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
 
   const data = { facilityId: fid, requestId: "order-e2e-request-0001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), ordererId: "o1" };
   const ok = await call("createOrder", data, verified.idToken);
@@ -159,7 +159,7 @@ test("callable: createOrder は複数明細(まとめ発注)を受け付け、�
   const reg = await call("registerFacility", { name: "ネリマ眼科クリニック", requestId: "order-e2e-register-02" }, owner2.idToken);
   const fid = reg.body.result.facilityId;
   for (const id of ["jj-dib00v", "nidek-nsp-2"]) await putDoc(`facilities/${fid}/adoptedIols/${id}`, { facilityId: fid, catalogIolId: id, enabled: true });
-  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: false });
   const base = { facilityId: fid, requestId: "order-e2e-request-0101", ordererId: "o1" };
   const lines = [
     { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(14) },

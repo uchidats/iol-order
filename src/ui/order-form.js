@@ -89,7 +89,7 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     minDate: todayString,
     onChange: updateAlconGuide
   });
-  initOrdererSelect(orderers.filter(o => o.active));
+  initOrdererSelect(orderers);
   setupEventListeners();
   renderModeBadge();
 }
@@ -416,7 +416,7 @@ export async function reloadFacilityOptions() {
   lensOptions = buildLensOptions(availableModels);
   lensLines.refresh(); // 採用解除などで選択肢から外れた明細は、選択とパワーをリセットする
   updateAlconGuide();
-  initOrdererSelect(orderers.filter(o => o.active));
+  initOrdererSelect(orderers);
 
   el.ordererSelect.value = [...el.ordererSelect.options].some(o => o.value === prevOrderer) ? prevOrderer : "";
 }

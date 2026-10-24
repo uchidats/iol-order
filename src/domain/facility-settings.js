@@ -44,7 +44,7 @@ export function parseEmailList(text) {
 
 // ---------- 注文者 ----------
 /**
- * @param {Array<{id?:string|null, name:string, email?:string, active:boolean}>} rows 画面の並び順
+ * @param {Array<{id?:string|null, name:string, email?:string}>} rows 画面の並び順
  */
 export function validateOrderers(rows) {
   const errors = [];
@@ -61,22 +61,21 @@ export function validateOrderers(rows) {
     if (email && (email.length > LIMITS.emailMax || !isValidEmail(email))) {
       errors.push({ index, field: "email", message: "メールアドレスの形式が正しくありません" });
     }
-    cleaned.push({ id: r.id || null, name, email, active: Boolean(r.active) });
+    cleaned.push({ id: r.id || null, name, email });
   });
   return { ok: errors.length === 0, errors, cleaned };
 }
 
-/** 並び順 = 配列順。変更・新規のみを書き込み対象にする */
+/** 並び順 = 配列順。変更・新規のみを書き込み対象にする(注文者に有効/無効はない。ドキュメントは name / email / sortOrder だけ) */
 export function planOrdererWrites(original, cleaned, facilityId) {
   const byId = new Map(original.map(o => [o.id, o]));
   const writes = [];
   cleaned.forEach((c, i) => {
     const sortOrder = (i + 1) * LIMITS.sortStep;
-    const data = { facilityId, name: c.name, active: c.active, sortOrder };
+    const data = { facilityId, name: c.name, sortOrder };
     if (c.email) data.email = c.email;
     const o = c.id ? byId.get(c.id) : null;
-    const changed = !o || o.name !== c.name || (o.email || "") !== c.email
-      || Boolean(o.active) !== c.active || o.sortOrder !== sortOrder;
+    const changed = !o || o.name !== c.name || (o.email || "") !== c.email || o.sortOrder !== sortOrder;
     if (changed) writes.push({ id: c.id, data });
   });
   return writes;

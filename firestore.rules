@@ -183,11 +183,10 @@ service cloud.firestore {
       match /orderers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'active', 'sortOrder', 'updatedAt'])
-          && request.resource.data.keys().hasAll(['facilityId', 'name', 'active'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'sortOrder', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 50)
-          && request.resource.data.active is bool
           && (!('email' in request.resource.data) || emailOk(request.resource.data.email))
           && validSortOrder(request.resource.data);
         // 注文者マスターのみ、自施設の施設管理者も削除できる（所属・認証ユーザー・注文履歴には影響しない）

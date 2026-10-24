@@ -78,17 +78,15 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 注文者 ----------
-  function ordererRow(o = { id: null, name: "", email: "", active: true }) {
-    // 通常は一覧表示(入力ボックスなし)。鉛筆を押した行だけ、名前とメールを編集できる。
-    // 有効/無効は画面では操作しない。新規は有効(active=true)、既存の値はそのまま保持する(互換性)
+  function ordererRow(o = { id: null, name: "", email: "" }) {
+    // 通常は一覧表示(入力ボックスなし)。鉛筆を押した行だけ、名前とメールを編集できる。注文者に有効/無効はない。
     const row = h("div", { class: "orderer-item", "data-id": o.id || "" });
-    row._state = { id: o.id || null, name: o.name || "", email: o.email || "", active: o.active !== false };
+    row._state = { id: o.id || null, name: o.name || "", email: o.email || "" };
     let editing = false;
 
     const btn = (act, label, child) => h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": act, "aria-label": label, title: label }, child);
     const nameView = h("span", { class: "orderer-name", "data-v": "name" });
     const emailView = h("span", { class: "orderer-email", "data-v": "email" });
-    const inactive = h("span", { class: "orderer-inactive", title: "注文フォームの選択肢には表示されません" }, "無効");
     const actions = h("span", { class: "orderer-actions" },
       btn("edit", "名前・メールを編集", pencilIcon()),
       btn("up", "上へ", "↑"),
@@ -102,13 +100,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存"),
         h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル")));
     const err = h("p", { class: "error-message", "data-err": "" });
-    row.append(h("div", { class: "orderer-view" }, h("span", { class: "orderer-namebox" }, nameView, inactive), emailView, actions), editBox, err);
+    row.append(h("div", { class: "orderer-view" }, h("span", { class: "orderer-namebox" }, nameView), emailView, actions), editBox, err);
 
     function paint() {
       nameView.textContent = row._state.name || "（名称未入力）";
       emailView.textContent = row._state.email || "メール未登録";
       emailView.classList.toggle("is-empty", !row._state.email);
-      inactive.hidden = row._state.active;
       row.querySelector(".orderer-view").hidden = editing;
       editBox.hidden = !editing;
       row.classList.toggle("is-editing", editing);
@@ -199,8 +196,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const readOrdererRows = (section) => [...section.querySelectorAll(".orderer-item")].map(r => ({
     id: r._state.id,
     name: r._state.name,
-    email: r._state.email,
-    active: r._state.active
+    email: r._state.email
   }));
 
   function showRowErrors(section, errors) {

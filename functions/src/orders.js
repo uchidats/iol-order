@@ -233,7 +233,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           dealerId: typeof dealerId === "string" && dealerId ? dealerId : null // 将来、ディーラーごとに明細を振り分けるための情報
         };
       });
-      if (!orderer.exists || orderer.get("active") !== true) throw bad("注文者が見つかりません");
+      if (!orderer.exists) throw bad("注文者が見つかりません"); // 注文者に有効/無効はない(旧形式の active フィールドは無視する)
 
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
       const orderNumber = `IOL-${day}-${String(seq).padStart(4, "0")}`;

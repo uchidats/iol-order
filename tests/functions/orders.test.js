@@ -42,9 +42,9 @@ beforeEach(async () => {
     for (const id of ["jj-dib00v", "jj-diwxxx-toric", "nidek-nsp-2", "alcon-mn60ma-yellow"]) {
       await db.doc(`facilities/${f}/adoptedIols/${id}`).set({ facilityId: f, catalogIolId: id, enabled: true });
     }
-    await db.doc(`facilities/${f}/orderers/o1`).set({ facilityId: f, name: "山田", email: "y@orderer.jp", active: true });
-    await db.doc(`facilities/${f}/orderers/o2`).set({ facilityId: f, name: "佐藤", active: true });
-    await db.doc(`facilities/${f}/orderers/o3`).set({ facilityId: f, name: "休止", active: false });
+    await db.doc(`facilities/${f}/orderers/o1`).set({ facilityId: f, name: "山田", email: "y@orderer.jp" });
+    await db.doc(`facilities/${f}/orderers/o2`).set({ facilityId: f, name: "佐藤" });
+    await db.doc(`facilities/${f}/orderers/o3`).set({ facilityId: f, name: "旧形式", active: false }); // 移行前の旧形式(active フィールドは無視される)
   }
   await db.doc(`facilities/${F}/adoptedIols/alcon-cna0t0`).set({ facilityId: F, catalogIolId: "alcon-cna0t0", enabled: false }); // 採用解除
 });
@@ -213,10 +213,15 @@ test("手術日の「本日」は日本時間で判定する(UTCでは前日で�
   await order(user("ordA"), body({ surgeryDate: "2026-10-25" }));
 });
 
-test("注文者: 施設のマスターにいる有効な注文者のみ。存在しない・休止・他施設の注文者は拒否される", async () => {
+test("注文者: 施設のマスターにいる注文者のみ。存在しない・他施設の注文者は拒否される。旧形式の active は判定に使わない", async () => {
   await rejects(order(user("ordA"), body({ ordererId: "nobody" })), "invalid-argument");
-  await rejects(order(user("ordA"), body({ ordererId: "o3" })), "invalid-argument"); // active=false
-  await db.doc("facilities/fB/orderers/onlyB").set({ facilityId: "fB", name: "他施設の人", active: true });
+  // 旧形式(active=false)のドキュメントでも、新形式(active なし)と同じように注文できる(移行期間中の混在)
+  const legacy = await order(user("ordA"), body({ ordererId: "o3" }));
+  assert.equal((await db.doc(`facilities/${F}/orders/${legacy.orderId}`).get()).get("orderer.name"), "旧形式");
+  const fresh = await order(user("ordA"), body({ ordererId: "o2" }));
+  assert.equal((await db.doc(`facilities/${F}/orders/${fresh.orderId}`).get()).get("orderer.name"), "佐藤");
+  await db.collection(`facilities/${F}/orders`).get().then(s => Promise.all(s.docs.map(d => d.ref.delete())));
+  await db.doc("facilities/fB/orderers/onlyB").set({ facilityId: "fB", name: "他施設の人" });
   await rejects(order(user("ordA"), body({ ordererId: "onlyB" })), "invalid-argument");
   assert.equal((await orders()).length, 0);
 });

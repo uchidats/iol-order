@@ -23,7 +23,7 @@ dealers/{dealerId}               ディーラー本体（運営者 + memberUids 
 facilities/{facilityId}          name, status: pending|active|suspended, updatedAt,
                                  location?: {lat, lng}, geoRadiusM?: number   ← 現在地による施設選択の補助（任意）
   ├─ members/{uid}               uid, role: admin|orderer, status: active|disabled, displayName?, updatedAt
-  ├─ orderers/{id}               facilityId, name(1-50), email?, active, sortOrder?, updatedAt
+  ├─ orderers/{id}               facilityId, name(1-50), email?, sortOrder?, updatedAt   ← 有効/無効(active)はない
   ├─ adoptedIols/{catalogIolId}  facilityId, catalogIolId(=doc id, 共通マスターのID), dealerId?, enabled, updatedAt
   ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, active, sortOrder?, updatedAt,
   │                              orderEmails[<=5]?（発注用）, usageReportEmails[<=5]?（使用報告用。発注用とは別管理）
@@ -44,7 +44,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 
 ## 施設設定（施設管理者のみ）
 画面: ヘッダーメニューの「施設設定」（`role=admin` のみ表示）。注文者 / 採用IOL / ディーラーを編集し、保存すると注文フォームの選択肢へ即時反映される。
-- **注文者**: 追加・名前/メール編集・有効/無効・並び替え（`sortOrder` は表示順×10）。削除（ゴミ箱アイコン・確認ダイアログあり）は自施設の施設管理者と運営者が可能。削除するのは注文者マスターのみで、所属・認証ユーザー・過去の注文には影響しない。一時的に外すだけなら無効化を使う。同名（大文字小文字・全角半角の差を無視）は登録不可。
+- **注文者**: 追加・名前/メール編集・並び替え（`sortOrder` は表示順×10）。削除（ゴミ箱アイコン・確認ダイアログあり）は自施設の施設管理者と運営者が可能。削除するのは注文者マスターのみで、所属・認証ユーザー・過去の注文には影響しない。一時的に外すだけなら無効化を使う。同名（大文字小文字・全角半角の差を無視）は登録不可。
 - **採用IOL**: 共通IOLマスター（`src/data/iol-models.js` の `IOL_MODELS[].id`）から選ぶ。ドキュメントID＝マスターID（重複採用を構造的に防ぐ）。解除は `enabled=false`。マスターに無いIDは Rules が拒否する。
   Rules 内の許可IDの一覧は `IOL_MODELS` と同期が必要（`tests/rules-catalog-sync.test.js` が不一致を検出する）。マスターを Firestore の `iolCatalog` へ移す際にこの二重管理を解消する。
 - **ディーラー**: 名称・有効/無効・**発注用メール**と**使用報告用メール**（それぞれ最大5件、形式検証あり）。現時点では登録のみで、メール送信・ディーラー連携は未実装。

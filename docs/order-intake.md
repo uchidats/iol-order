@@ -10,7 +10,7 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
    - `adoptedIols/{modelId}` が有効（`enabled=true`）で、サーバー側のIOLマスターに存在すること。
    - 度数がモデルの範囲・刻み（区間ごとの刻みを含む）に合うこと。トーリックは型番が必須で、そのモデルの型番のみ。非トーリックに型番は付けられない。
    - 枚数は 1 か 2。手術日は実在する日付で、日本時間の今日から366日以内。備考は1000文字以内。
-   - 注文者は `orderers/{ordererId}` にいる有効（`active=true`）な人。注文者のメールは**任意**。
+   - 注文者は `orderers/{ordererId}` にいる人(注文者に有効/無効はない。旧形式の `active` フィールドが残っていても無視する)。注文者のメールは**任意**。
 3. 保存先 `facilities/{facilityId}/orders/{orderId}`。`orderId` は (操作ユーザー, `requestId`) から決まる。注文番号 `IOL-YYYYMMDD-NNNN`（日本時間・施設ごと・日ごとの連番）はサーバーが発行する。
 
 ## 保存内容（スナップショット）

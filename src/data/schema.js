@@ -17,7 +17,6 @@
  * @property {string} facilityId
  * @property {string} name
  * @property {string} [email]
- * @property {boolean} active
  */
 
 /**
