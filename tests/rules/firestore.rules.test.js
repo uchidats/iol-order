@@ -472,3 +472,28 @@ test("ディーラーに有効/無効はない: active を含む書き込みは�
   await assertFails(updateDoc(doc(as("adminA"), "facilities/fA/facilityDealers/legacy"), { name: "旧2" }));
   await assertSucceeds(setDoc(doc(as("adminA"), "facilities/fA/facilityDealers/legacy"), { facilityId: "fA", name: "旧2" }));
 });
+
+// ---------- IOLモデルの表示順(displaySettings/iolOrder) ----------
+test("表示順: 施設管理者だけが自施設の表示順を保存できる。所属メンバーは読める", async () => {
+  const body = { makerOrder: ["J&J", "ALCON"], modelOrder: ["jj-dib00v", "alcon-cna0t0"], updatedAt: serverTimestamp() };
+  await assertSucceeds(setDoc(doc(as("adminA"), "facilities/fA/displaySettings/iolOrder"), body));
+  await assertSucceeds(updateDoc(doc(as("adminA"), "facilities/fA/displaySettings/iolOrder"), { makerOrder: ["ALCON"] }));
+  await assertSucceeds(getDoc(doc(as("ordA"), "facilities/fA/displaySettings/iolOrder")));
+  await assertSucceeds(getDoc(doc(platform(), "facilities/fA/displaySettings/iolOrder")));
+  await assertFails(setDoc(doc(as("ordA"), "facilities/fA/displaySettings/iolOrder"), body));
+  await assertFails(setDoc(doc(as("adminB"), "facilities/fA/displaySettings/iolOrder"), body));
+  await assertFails(setDoc(doc(anon(), "facilities/fA/displaySettings/iolOrder"), body));
+  await assertFails(getDoc(doc(as("ordB"), "facilities/fA/displaySettings/iolOrder")));
+  await assertFails(getDoc(doc(anon(), "facilities/fA/displaySettings/iolOrder")));
+});
+
+test("表示順: 形式の検証(別のドキュメントID・余計なキー・不正な型は拒否)", async () => {
+  const db = as("adminA");
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/other"), { makerOrder: [], modelOrder: [] }));
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [], modelOrder: [], enabled: true }));
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: "x", modelOrder: [] }));
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [] }));
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [], modelOrder: Array(201).fill("a") }));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), { makerOrder: [], modelOrder: [] }));
+  await assertSucceeds(deleteDoc(doc(db, "facilities/fA/displaySettings/iolOrder")));
+});

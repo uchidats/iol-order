@@ -5,6 +5,7 @@ import {
 import { planMemberRemoval, confirmMessage, memberLabel, sortMembers } from "../domain/member-admin.js";
 import { createSectionHeading } from "./info-tip.js";
 import { baseModelName } from "../domain/lens-labels.js";
+import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
 import { lensBadgeElements } from "./lens-badges.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
@@ -77,7 +78,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       repository.listAdoptedIols(facility.id),
       repository.listDealers(facility.id)
     ]);
-    data = { orderers, adopted, dealers, members: canManageMembers ? await repository.listMembers(facility.id) : [] };
+    const iolOrder = repository.getIolOrder ? await repository.getIolOrder(facility.id) : null;
+    data = { orderers, adopted, dealers, iolOrder, members: canManageMembers ? await repository.listMembers(facility.id) : [] };
   }
 
   // ---------- 担当医(旧「注文者」。コレクション名・関数名は互換性のため orderers のまま) ----------
@@ -254,7 +256,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 採用IOL ----------
   function iolSection() {
     const section = h("section", { class: "settings-section", "data-section": "iols" },
-      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。"),
+      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。↑↓でメーカーとモデルの表示順を変更できます。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" }, h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "採用IOLを保存")),
       h("p", { class: "form-hint", "data-msg": "" }));
@@ -264,27 +266,58 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const v = validateAdoption(selected, masters);
       if (!v.ok) return message(section, "マスターに存在しないIOLは登録できません。", true);
       const writes = planAdoptedWrites(masters, data.adopted, selected, facility.id);
-      if (!writes.length) return message(section, "変更はありません。");
-      const ok = await saveWith(section, saveBtn, () => settingsApi.saveAdoptedIols(facility.id, writes));
-      if (ok) { renderIols(section); message(section, "採用IOLを保存しました。"); }
+      // 表示順(メーカーの順番・モデルの順番)は、画面に並んでいる順番をそのまま保存する。並べ替えていなければ書かない
+      const order = buildIolOrderSetting(masters,
+        [...section.querySelectorAll("details.iol-maker")].map(d => d.getAttribute("data-maker")),
+        [...section.querySelectorAll('.iol-model-row input[type="checkbox"]')].map(c => c.value));
+      const orderChanged = Boolean(section._orderDirty) && Boolean(settingsApi.saveIolOrder);
+      if (!writes.length && !orderChanged) return message(section, "変更はありません。");
+      const ok = await saveWith(section, saveBtn, async () => {
+        if (writes.length) await settingsApi.saveAdoptedIols(facility.id, writes);
+        if (orderChanged) await settingsApi.saveIolOrder(facility.id, order);
+      });
+      if (ok) { section._orderDirty = false; renderIols(section); message(section, "採用IOLを保存しました。"); }
     });
     return section;
   }
 
   function renderIols(section) {
     const enabled = new Set(data.adopted.filter(a => a.enabled).map(a => a.catalogIolId));
-    const groups = new Map();
-    masters.forEach(m => { if (!groups.has(m.manufacturer)) groups.set(m.manufacturer, []); groups.get(m.manufacturer).push(m); });
-    // メーカーごとに折りたたみ(初期はすべて閉じる)。見出しの右側に「採用数/登録数」。チェックと保存は従来どおり
-    const nodes = [...groups.entries()].map(([mfg, items]) => {
+    // メーカーごとに折りたたみ(初期はすべて閉じる)。見出しの右側に「採用数/登録数」と、並べ替えの↑↓。チェックと保存は従来どおり。
+    // 並び順は施設ごとの設定(未設定は標準の順番)。新しいメーカー・モデルは既存の順番の末尾
+    const mover = (act, label, text, move) => {
+      const b = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon iol-move", "data-act": act, "aria-label": label, title: label }, text);
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); move(); section._orderDirty = true; markDirty(); }); // summary の開閉は起こさない
+      return b;
+    };
+    const swap = (el, delta) => {
+      const sib = delta < 0 ? el.previousElementSibling : el.nextElementSibling;
+      if (!sib) return;
+      if (delta < 0) el.parentNode.insertBefore(el, sib); else el.parentNode.insertBefore(sib, el);
+    };
+    const nodes = orderedMakers(masters, data.iolOrder).map((mfg) => {
+      const items = orderedModelsOf(masters, mfg, data.iolOrder);
       const count = h("span", { class: "iol-maker-count" });
-      const group = h("details", { class: "iol-maker", "data-maker": mfg },
-        h("summary", { class: "iol-maker-summary" }, h("span", { class: "iol-maker-name" }, mfg), count),
+      let group;
+      const makerMoves = h("span", { class: "iol-moves" },
+        mover("maker-up", `${mfg}を上へ`, "↑", () => swap(group, -1)),
+        mover("maker-down", `${mfg}を下へ`, "↓", () => swap(group, 1)));
+      group = h("details", { class: "iol-maker", "data-maker": mfg },
+        h("summary", { class: "iol-maker-summary" }, h("span", { class: "iol-maker-name" }, mfg), count, makerMoves),
         h("div", { class: "iol-maker-list" },
-          items.map(m => h("label", { class: "settings-check" },
-            h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
-            h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
-            lensBadgeElements(m)))));                              // 特徴は isToric / isMultifocal のバッジで1回だけ
+          items.map(m => {
+            let row;
+            const moves = h("span", { class: "iol-moves" },
+              mover("model-up", `${baseModelName(m)}を上へ`, "↑", () => swap(row, -1)),
+              mover("model-down", `${baseModelName(m)}を下へ`, "↓", () => swap(row, 1)));
+            row = h("div", { class: "iol-model-row", "data-model": m.id },
+              h("label", { class: "settings-check" },
+                h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
+                h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
+                lensBadgeElements(m)),                                 // 特徴は isToric / isMultifocal のバッジで1回だけ
+              moves);
+            return row;
+          })));
       group._updateCount = () => {
         const adopted = group.querySelectorAll('input[type="checkbox"]:checked').length;
         count.textContent = `${adopted}/${items.length}`;

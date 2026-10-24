@@ -86,3 +86,5 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 - 削除後は、`isMember()` が毎回所属ドキュメントの存在を確認するため、ログイン中のセッションでも次のリクエストからアクセスできない。削除した人宛ての未使用の招待は取り消される。
 - `members/{uid}.email`: 参加・登録時にサーバーが確認済みメールを記録する（表示用）。古い所属には無く、画面では「—」と表示される。
 
+
+- IOLモデルの表示順: `facilities/{fid}/displaySettings/iolOrder` = `{ makerOrder, modelOrder, updatedAt }`（詳細は docs/iol-display-order.md）

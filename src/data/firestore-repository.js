@@ -25,6 +25,19 @@ export function createFirestoreRepository(db, fs) {
     },
     listOrderers: async (facilityId) => (await listSub(facilityId, "orderers")).sort(bySortOrder),
     listAdoptedIols: (facilityId) => listSub(facilityId, "adoptedIols"),
+    /**
+     * 施設ごとのIOLモデルの表示順(未設定は null)。順番だけの設定なので、読めない・壊れている場合も null にして標準の順番で動かす
+     * (注文フォームを止めない)
+     */
+    async getIolOrder(facilityId) {
+      try {
+        const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "iolOrder"));
+        return snap.exists() ? snap.data() : null;
+      } catch (e) {
+        console.warn("IOLの表示順を読み込めませんでした。標準の順番で表示します:", e);
+        return null;
+      }
+    },
     listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
     /** 所属ユーザー（施設管理者のみ読める）。id = uid */
     listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id }))
@@ -67,6 +80,10 @@ export function createFirestoreSettingsApi(db, fs) {
     saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
     saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),
     /** 担当医マスター(コレクション orderers)の削除（所属・認証ユーザー・注文履歴には触れない） */
+    /** IOLモデルの表示順の保存(施設管理者のみ。Rules が検証する)。採用状態・注文内容には影響しない */
+    saveIolOrder: (facilityId, { makerOrder, modelOrder }) => fs.setDoc(
+      fs.doc(db, "facilities", facilityId, "displaySettings", "iolOrder"),
+      { makerOrder, modelOrder, updatedAt: fs.serverTimestamp() }),
     deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
     /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
     deleteDealer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "facilityDealers", id)),

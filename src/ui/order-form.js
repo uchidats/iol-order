@@ -1,5 +1,6 @@
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
+import { applyIolOrder } from "../domain/iol-order.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -77,12 +78,13 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   facilityRepository = repository;
   facilityRepositoryId = facilityId;
 
-  const [adoptedIols, doctorList, dealers] = await Promise.all([
+  const [adoptedIols, doctorList, dealers, iolOrder] = await Promise.all([
     repository.listAdoptedIols(facilityId),
     repository.listOrderers(facilityId),   // 担当医マスター(コレクション名は互換性のため orderers のまま)
-    repository.listDealers(facilityId)
+    repository.listDealers(facilityId),
+    repository.getIolOrder ? repository.getIolOrder(facilityId) : null   // 施設ごとのIOLの表示順(未設定は標準の順番)
   ]);
-  availableModels = resolveAdoptedModels(adoptedIols);
+  availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
   dealerNameByModel = buildDealerNames(adoptedIols, dealers);
 
@@ -391,13 +393,14 @@ export function isOrderFormDirty() {
  */
 export async function reloadFacilityOptions() {
   if (!facilityRepository || !el.form) return;
-  const [adoptedIols, doctorList, dealers] = await Promise.all([
+  const [adoptedIols, doctorList, dealers, iolOrder] = await Promise.all([
     facilityRepository.listAdoptedIols(facilityRepositoryId),
     facilityRepository.listOrderers(facilityRepositoryId),
-    facilityRepository.listDealers(facilityRepositoryId)
+    facilityRepository.listDealers(facilityRepositoryId),
+    facilityRepository.getIolOrder ? facilityRepository.getIolOrder(facilityRepositoryId) : null
   ]);
 
-  availableModels = resolveAdoptedModels(adoptedIols);
+  availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
   dealerNameByModel = buildDealerNames(adoptedIols, dealers);
   lensOptions = buildLensOptions(availableModels);

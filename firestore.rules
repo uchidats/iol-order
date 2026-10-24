@@ -187,6 +187,19 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
       }
 
+      // 表示設定(施設ごとのIOLモデルの表示順)。順番だけの設定で、採用状態・注文内容には影響しない。
+      // 読めるのは所属メンバー(注文画面が使う)、書けるのは自施設の施設管理者のみ(設定担当者の権限は未実装)。
+      match /displaySettings/{docId} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+          && docId == 'iolOrder'
+          && request.resource.data.keys().hasOnly(['makerOrder', 'modelOrder', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['makerOrder', 'modelOrder'])
+          && request.resource.data.makerOrder is list && request.resource.data.makerOrder.size() <= 50
+          && request.resource.data.modelOrder is list && request.resource.data.modelOrder.size() <= 200;
+        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+      }
+
       // 注文（サーバーのみが作成。クライアントは読取のみ）
       match /orders/{orderId} {
         allow read: if isPlatformAdmin() || isMember(fid);
