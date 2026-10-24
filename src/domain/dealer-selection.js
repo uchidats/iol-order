@@ -40,3 +40,23 @@ export function dealerLabel(dealer) {
   const d = dealerDispatch(dealer);
   return d.allowed ? `発注先 ${dealer.name}` : `発注先 ${dealer.name}(発注用メール未登録のため自動送信不可)`;
 }
+
+/**
+ * 確認画面の「発注先」カード用の集計。明細(dealerId / dealerName / dealerOrderEmails を持つ)を発注先ごとにまとめる。
+ * 1社だけなら名称を1回だけ(allSame)、複数なら発注先ごとに対象のレンズ番号をまとめる。順番は最初に出た順。
+ * @returns {{allSame:boolean, groups:Array<{dealerId:string, name:string|null, lineNos:number[], warning:string|null}>}}
+ */
+export function summarizeDealers(lines) {
+  const byKey = new Map();
+  for (const l of lines) {
+    const key = l.dealerId || "";
+    if (!byKey.has(key)) {
+      const dealer = key ? { id: key, name: l.dealerName, orderEmails: l.dealerOrderEmails } : null;
+      byKey.set(key, { dealerId: key, name: dealer ? dealer.name : null, lineNos: [],
+        warning: !dealer ? "発注先未設定" : dealerDispatch(dealer).allowed ? null : "発注用メール未登録のため自動送信不可" });
+    }
+    byKey.get(key).lineNos.push(l.lineNo);
+  }
+  const groups = [...byKey.values()];
+  return { allSame: groups.length <= 1, groups };
+}

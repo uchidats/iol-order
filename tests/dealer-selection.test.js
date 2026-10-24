@@ -71,3 +71,23 @@ test("メールdry-run との一致: 注文時に決まった発注先・送信�
   assert.deepEqual(p.mails.map(m => [m.dealerId, m.status, m.blockedReason]), [["dA", "ready", null], ["dB", "blocked", "no-order-email"]]);
   assert.deepEqual(stamped.map(l => l.dispatch.allowed), p.mails.map(m => m.status === "ready"), "注文時の dispatch と、メール生成時の判定が一致");
 });
+
+import { summarizeDealers } from "../src/domain/dealer-selection.js";
+
+test("確認画面の発注先カード: 1社は1回だけ(allSame)・複数社は発注先ごとにレンズ番号をまとめる・未設定/メール未登録の警告", () => {
+  const ln = (lineNo, d) => ({ lineNo, dealerId: d ? d.id : "", dealerName: d ? d.name : "", dealerOrderEmails: d ? d.orderEmails : [] });
+  // 1社(全明細が同じ): 名称は1つだけ
+  const one = summarizeDealers([ln(1, A), ln(2, A), ln(3, A)]);
+  assert.deepEqual([one.allSame, one.groups.length, one.groups[0].name, one.groups[0].lineNos, one.groups[0].warning], [true, 1, "A商会", [1, 2, 3], null]);
+  // 複数社: 最初に出た順。ディーラーごとにレンズ番号をまとめる(明細の順序が入り混じっても)
+  const multi = summarizeDealers([ln(1, A), ln(2, B), ln(3, A), ln(4, B)]);
+  assert.equal(multi.allSame, false);
+  assert.deepEqual(multi.groups.map(g => [g.name, g.lineNos, g.warning]), [["A商会", [1, 3], null], ["B医療", [2, 4], "発注用メール未登録のため自動送信不可"]]);
+  // 発注先未設定(0社): 警告は「発注先未設定」。複数社と未設定の混在もまとめる
+  const none = summarizeDealers([ln(1, null), ln(2, null)]);
+  assert.deepEqual([none.allSame, none.groups[0].name, none.groups[0].lineNos, none.groups[0].warning], [true, null, [1, 2], "発注先未設定"]);
+  const mixed = summarizeDealers([ln(1, A), ln(2, null)]);
+  assert.deepEqual(mixed.groups.map(g => [g.name, g.lineNos]), [["A商会", [1]], [null, [2]]]);
+  // 発注用メールが有効なら警告なし(判定は dealerDispatch と同じ)
+  assert.equal(summarizeDealers([ln(1, C)]).groups[0].warning, null);
+});

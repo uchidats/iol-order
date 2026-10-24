@@ -1,7 +1,7 @@
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
-import { dealerLabel } from "../domain/dealer-selection.js";
+import { summarizeDealers } from "../domain/dealer-selection.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -240,19 +240,44 @@ function showConfirmModal(data) {
     date.textContent = `手術日 ${formatDate(l.surgeryDate)}`;
     const who = document.createElement("div");
     who.className = "summary-line-detail";
-    // 発注先: 画面の判定(dealer-selection.js)はサーバーと同じ規則。発注用メールがないディーラーは自動送信不可と明示する
-    who.textContent = `担当医 ${l.doctor} ・ ${dealerLabel(l.dealerId ? { id: l.dealerId, name: l.dealerName, orderEmails: l.dealerOrderEmails } : null)}`; // 担当医が違う明細も、明細ごとに正しく表示する
+    who.textContent = `担当医 ${l.doctor}`; // 担当医が違う明細も、明細ごとに正しく表示する(発注先は、下の「発注先」カードにまとめる)
     li.append(main, date, who);
     return li;
   }));
   $("summaryTotal").textContent = `${data.lines.length}件・合計${data.totalQuantity}枚`; // 件数=レンズ明細の数、枚数=各明細の枚数の合計
 
   $("summaryNotes").textContent = data.notes || "（なし）";
+  renderDealersCard(data.lines);
 
   el.modalSubmitError.classList.add("hidden");
 
   el.confirmModal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
+}
+
+/**
+ * 「発注先」カード。1社なら名称を1回だけ、複数社ならディーラーごとにレンズ番号をまとめて表示する。
+ * 発注先未設定・発注用メール未登録(自動送信不可)の警告も、このカードの中に出す。判定(dealer-selection.js)・送信データは変更しない。
+ */
+function renderDealersCard(lines) {
+  const { allSame, groups } = summarizeDealers(lines);
+  const box = $("summaryDealers");
+  box.replaceChildren(...groups.map(g => {
+    const item = document.createElement("div");
+    item.className = "summary-dealer";
+    const title = document.createElement("div");
+    title.className = "summary-dealer-name";
+    const nos = g.lineNos.map(n => `レンズ${n}`).join("・");
+    title.textContent = g.name ? (allSame ? g.name : `${g.name}: ${nos}`) : (allSame ? "発注先未設定" : `発注先未設定: ${nos}`);
+    item.append(title);
+    if (g.name && g.warning) {
+      const w = document.createElement("div");
+      w.className = "summary-dealer-warning";
+      w.textContent = g.warning;
+      item.append(w);
+    }
+    return item;
+  }));
 }
 
 function hideConfirmModal() {

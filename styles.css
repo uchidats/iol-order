@@ -1963,3 +1963,8 @@ input[type="date"].form-control {
 .dealer-edit { grid-template-columns: minmax(0, 1fr); }
 .dealer-edit .form-label { display: block; margin: 0; font-size: 0.9rem; }
 .dealer-edit textarea.form-control { margin-top: 4px; width: 100%; }
+
+/* 確認画面の「発注先」カード(1社は名称1回、複数社はディーラーごとにレンズ番号) */
+.summary-dealer + .summary-dealer { margin-top: 6px; }
+.summary-dealer-name { font-weight: 600; overflow-wrap: anywhere; }
+.summary-dealer-warning { font-size: 0.9rem; color: #475569; }

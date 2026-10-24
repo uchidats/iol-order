@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=860f257b84">
+  <link rel="stylesheet" href="styles.css?v=75bfea7033">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -27,7 +27,7 @@
       "./src/data/schema.js": "./src/data/schema.js?v=2d8fd40edd",
       "./src/data/static-repository.js": "./src/data/static-repository.js?v=4f03615871",
       "./src/domain/access.js": "./src/domain/access.js?v=798e41000d",
-      "./src/domain/dealer-selection.js": "./src/domain/dealer-selection.js?v=eca315f808",
+      "./src/domain/dealer-selection.js": "./src/domain/dealer-selection.js?v=0e5c48e88f",
       "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=7b9e10ba2d",
       "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=65e822c682",
       "./src/domain/geo.js": "./src/domain/geo.js?v=cc70776997",
@@ -55,7 +55,7 @@
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
       "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=dfb55d71bf",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=af8f0f7e37",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=2d47288a88",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=268f0c542c"
     }
   }
@@ -224,7 +224,7 @@
           </div>
 
           <div class="summary-item summary-item-lines">
-            <dt class="summary-label">発注するレンズ(担当医・手術日・発注先)</dt>
+            <dt class="summary-label">発注するレンズ(担当医・手術日)</dt>
             <dd class="summary-value">
               <ol class="summary-lines" id="summaryLines"></ol>
             </dd>
@@ -238,6 +238,11 @@
           <div class="summary-item">
             <dt class="summary-label">備考（フリーコメント）</dt>
             <dd class="summary-value text-break" id="summaryNotes">（なし）</dd>
+          </div>
+
+          <div class="summary-item" id="summaryDealersRow">
+            <dt class="summary-label">発注先</dt>
+            <dd class="summary-value" id="summaryDealers"></dd>
           </div>
         </dl>
 
