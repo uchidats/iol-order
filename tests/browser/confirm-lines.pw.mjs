@@ -79,9 +79,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 各レンズ: メーカー・モデル・度数・枚数だけ。Dr. と手術日は各レンズの行に出ない(見出しにまとめる)。「担当医」の文言は出ない
       const rows = await page.locator(".summary-line").evaluateAll(ls => ls.map(l => [...l.querySelector(".summary-line-main").children].map(c => c.textContent.trim()).join(" ")));
       assert.deepEqual(rows, [
-        "レンズ2 J&J DIW300 トーリック +18.5D 2枚", "レンズ4 NIDEK NSP-2 +5.5D 1枚",
+        "レンズ2 J&J DIW300 +18.5D 2枚", "レンズ4 NIDEK NSP-2 +5.5D 1枚",
         "レンズ1 ALCON CNA0T0 +18.0D 1枚", "レンズ5 SANTEN NX-70S +20.0D 1枚", "レンズ3 HOYA XY1 +19.5D 1枚"]);
       assert.equal(await page.locator(".summary-line", { hasText: "Dr." }).count(), 0, "各レンズの行に Dr. は出ない");
+      assert.equal(await page.locator(".summary-line .lens-badge").count(), 0, "「トーリック」「多焦点」のバッジは出ない");
+      assert.equal(await page.locator(".summary-line", { hasText: /トーリック|多焦点/ }).count(), 0);
       assert.equal(await page.locator(".summary-line", { hasText: "手術日" }).count(), 0, "手術日は各レンズに繰り返さない");
       assert.equal(await page.locator("#summaryLines", { hasText: "担当医" }).count(), 0);
       // 見出しの担当医は控えめな色

@@ -1,5 +1,4 @@
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
-import { lensBadgeElements } from "./lens-badges.js";
 import { summarizeDealers } from "../domain/dealer-selection.js";
 
 const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
@@ -22,7 +21,6 @@ function lineItem(l) {
     span("lens-no-badge", `レンズ${l.lineNo}`),                 // 元のレンズ番号(表示順で振り直さない)
     span("summary-maker", l.manufacturer),
     span("summary-model", l.modelName),
-    ...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal }), // 特徴はバッジ(判定は isToric / isMultifocal)
     span("summary-power", l.power),
     span("summary-qty", `${l.quantity}枚`));
   li.append(main);
