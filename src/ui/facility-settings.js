@@ -429,15 +429,16 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const list = section.querySelector("[data-list]");
     const rows = sortMembers(data.members).map((m) => {
       const plan = planMemberRemoval(data.members, m, currentUser.uid);
-      // 1段目: 氏名 + 右端に操作(一般注文者のみ「所属を削除」) / 2段目: メール・権限
+      // 1段目: 氏名 + 権限バッジ + 右端に操作(一般注文者のみ「所属を削除」) / 2段目: メール(登録がある場合のみ)
       const btn = plan.ok
         ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "remove-member", "aria-label": `${memberLabel(m)} の所属を削除`, title: "所属を削除" }, trashIcon())
         : null;
       const row = h("div", { class: "settings-row settings-row-member", "data-uid": m.uid },
-        h("span", { "data-f": "name" }, memberLabel(m)),
+        h("span", { class: "settings-member-title" },
+          h("span", { "data-f": "name" }, memberLabel(m)),
+          h("span", { class: "member-role-badge", "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者")),
         h("span", { class: "settings-member-action" }, btn),
-        h("span", { class: "settings-member-meta" },
-          h("span", { "data-f": "email" }, m.email || "—"), " ・ ", h("span", { "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者")));
+        m.email ? h("span", { class: "settings-member-meta" }, h("span", { "data-f": "email" }, m.email)) : null);
       if (btn) {
         btn.addEventListener("click", async () => {
           if (!window.confirm(confirmMessage(m))) return;

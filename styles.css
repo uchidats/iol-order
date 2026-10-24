@@ -505,12 +505,21 @@ body {
 
 .lens-line .form-group { max-width: 20rem; margin-bottom: 14px; }
 /* 2項目を同じ行に並べる。各項目は必要な幅だけ(全幅にしない)。足りない画面では折り返して縦並び。上端をそろえる */
-.lens-row { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 20px; }
+.lens-row { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 22px; }
 .lens-row .form-group { flex: 0 1 auto; min-width: 0; }
 .lens-row .form-group .form-label { min-height: 1.5em; }
 .lens-row [data-group="model"] { flex-basis: 220px; }   /* 幅は従来どおり(モデル約220px・パワー12rem・手術日14rem) */
 .lens-row [data-group="power"] { flex-basis: 12rem; }
 .lens-row [data-group="date"] { flex-basis: 14rem; }
+/* 枚数: 「1枚」「2枚」は横並びにする前と同じ大きさ(幅120px・高さ48px・間隔12px)。縮めない */
+.lens-row [data-group="quantity"] { flex: 0 0 auto; }
+.lens-line .quantity-selector { gap: 12px; }
+.lens-line .quantity-option { flex: 0 0 120px; }
+.lens-line .quantity-btn { min-height: 48px; }
+@media (max-width: 340px) { .lens-line .quantity-option { flex: 1 1 0; min-width: 0; } .lens-row [data-group="quantity"] { flex: 1 1 100%; max-width: none; } }
+/* 担当医: 約200px(狭い画面では画面幅まで) */
+.lens-line [data-group="doctor"] { max-width: 200px; }
+.lens-line [data-group="doctor"] .form-control { width: 100%; min-width: 0; }
 .lens-line [data-group="model"] { max-width: 220px; }   /* IOLモデル: 約220px(選択欄と展開した一覧の幅をそろえる)。狭い画面では画面幅まで */
 .lens-line [data-group="model"] .form-control { width: 100%; min-width: 0; }
 /* メーカー見出し(optgroup): 斜体を解除し、太字は維持(文字サイズ・色・余白は既定のまま) */
@@ -1783,8 +1792,27 @@ input[type="date"].form-control {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 8px;
   margin: 0;
-  padding: 6px 0;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 0;
+  align-items: center;
+}
+
+/* 区切り線は利用者の間だけ(最後の行の下には出さない) */
+.settings-row-member + .settings-row-member { border-top: 1px solid #e5e7eb; }
+
+.settings-member-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+
+.member-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .settings-row-member [data-f="name"] {
