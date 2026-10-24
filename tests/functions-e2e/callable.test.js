@@ -110,3 +110,46 @@ test("callable: 招待の発行→別アカウントでの参加。招待なし�
   const reuse = await call("acceptInvite", { token }, nurse.idToken);
   assert.equal(reuse.body.error.status, "FAILED_PRECONDITION");
 });
+
+// ---------- 注文受付(createOrder) ----------
+const putDoc = async (p, fields) => {
+  const toValue = (v) => typeof v === "boolean" ? { booleanValue: v } : { stringValue: v };
+  const r = await fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${p}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, toValue(v)])) })
+  });
+  assert.equal(r.status, 200);
+};
+const future = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+test("callable: createOrder は検証して保存し(accepted)、再送は同じ注文番号、別内容は拒否。未認証・他人は拒否", async () => {
+  const reg = await call("registerFacility", { name: "注文E2E医院", requestId: "order-e2e-register-01" }, verified.idToken);
+  const fid = reg.body.result.facilityId;
+  await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: true });
+
+  const data = { facilityId: fid, requestId: "order-e2e-request-0001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), ordererId: "o1" };
+  const ok = await call("createOrder", data, verified.idToken);
+  assert.equal(ok.http, 200);
+  assert.equal(ok.body.result.status, "accepted");
+  assert.match(ok.body.result.orderNumber, /^IOL-\d{8}-0001$/);
+
+  const saved = await getDoc(`facilities/${fid}/orders/${ok.body.result.orderId}`);
+  assert.equal(saved.fields.status.stringValue, "accepted");
+  assert.equal(saved.fields.createdBy.mapValue.fields.uid.stringValue, verified.uid);
+  assert.equal(saved.fields.orderer.mapValue.fields.name.stringValue, "山田");
+
+  const again = await call("createOrder", data, verified.idToken);
+  assert.equal(again.body.result.orderNumber, ok.body.result.orderNumber);
+  assert.equal(again.body.result.replayed, true);
+
+  const changed = await call("createOrder", { ...data, power: "+21.0D" }, verified.idToken);
+  assert.equal(changed.body.error.status, "ALREADY_EXISTS");
+  const badPower = await call("createOrder", { ...data, requestId: "order-e2e-request-0002", power: "+20.2D" }, verified.idToken);
+  assert.equal(badPower.body.error.status, "INVALID_ARGUMENT");
+
+  assert.equal((await call("createOrder", data, null)).body.error.status, "UNAUTHENTICATED");
+  assert.equal((await call("createOrder", data, unverified.idToken)).body.error.status, "PERMISSION_DENIED");
+  const outsider = await createUser("order-outsider@example.jp", { verified: true });
+  assert.equal((await call("createOrder", { ...data, requestId: "order-e2e-request-0003" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
+});

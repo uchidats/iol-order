@@ -6,8 +6,9 @@
     "test": "node --test tests/*.test.js",
     "test:rules": "firebase emulators:exec --only firestore --project demo-iol-rules \"node --test tests/rules/*.test.js\"",
     "deploy:dev:firestore": "firebase deploy --only firestore --project medconf-iol-dev",
-    "test:functions": "firebase emulators:exec --only firestore --project demo-iol-functions \"node --test tests/functions/*.test.js\"",
+    "test:functions": "firebase emulators:exec --only firestore --project demo-iol-functions \"node --test --test-concurrency=1 tests/functions/*.test.js\"",
     "test:functions:e2e": "firebase emulators:exec --only functions,firestore,auth --project demo-iol-e2e \"node --test tests/functions-e2e/*.test.js\"",
+    "sync:catalog": "node scripts/sync-catalog.mjs",
     "deploy:dev:functions": "firebase deploy --only functions --project medconf-iol-dev"
   },
   "devDependencies": {

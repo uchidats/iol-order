@@ -1,13 +1,15 @@
 import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { filterPowersByModel, defaultPowerLabel } from "../domain/power-filter.js";
-import { isValidEmail } from "../domain/order-validation.js";
 import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
+import { buildCreateOrderRequest } from "../domain/order-request.js";
+import { describeCallableError } from "../data/registration-api.js";
 import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.js";
 
 // 現在の状態
 let appConfig = null;
+let orderApi = null; // 開発用のサーバー受付(createOrder)。server-dev のときだけ使う
 let availableModels = [];
 let selectedModelData = null;
 let currentPendingOrderData = null;
@@ -48,10 +50,12 @@ function cacheElements() {
  * @param {import("../data/schema.js").FacilityRepository} deps.repository
  * @param {string} deps.facilityId
  * @param {{id:string, name:string}} [deps.facility] 注文確認画面に表示する施設（Firebase有効時）
+ * @param {{createOrder:Function}} [deps.orderApi] サーバー受付(server-dev のときのみ使用)
  */
-export async function initOrderForm({ config, repository, facilityId, facility = null }) {
+export async function initOrderForm({ config, repository, facilityId, facility = null, orderApi: api = null }) {
   cacheElements();
   appConfig = config;
+  orderApi = api;
   currentFacility = facility;
   facilityRepository = repository;
   facilityRepositoryId = facilityId;
@@ -76,7 +80,9 @@ export async function initOrderForm({ config, repository, facilityId, facility =
  */
 function renderModeBadge() {
   const badge = document.getElementById("systemBadge");
-  if (badge) badge.textContent = appConfig.orderMode === ORDER_MODES.GAS ? "実運用版" : "開発モード";
+  if (!badge) return;
+  badge.textContent = appConfig.orderMode === ORDER_MODES.GAS ? "実運用版"
+    : appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
 }
 
 function initModelSelect() {
@@ -105,11 +111,17 @@ function selectedOrdererEmail() {
   return opt && opt.value ? (opt.dataset.email || "").trim() : "";
 }
 
+function selectedOrdererId() {
+  const opt = el.ordererSelect.selectedOptions && el.ordererSelect.selectedOptions[0];
+  return opt && opt.value ? (opt.dataset.id || "") : "";
+}
+
 function initOrdererSelect(orderers) {
   orderers.forEach(o => {
     const option = document.createElement("option");
     option.value = o.name;
     option.textContent = o.name;
+    option.dataset.id = o.id || "";
     option.dataset.email = (o.email || "").trim(); // 注文者マスターのメール(ログインユーザーのメールではない)
     el.ordererSelect.appendChild(option);
   });
@@ -241,12 +253,14 @@ function handleFormSubmit(e) {
 
   currentPendingOrderData = {
     model: el.modelSelect.value,
+    modelId: selectedModelData ? selectedModelData.id : "",
     manufacturer: selectedModelData ? selectedModelData.manufacturer : "",
     toricModel: selectedModelData && selectedModelData.isToric ? el.toricModelSelect.value : "",
     power: el.powerSelect.value,
     quantity: quantityEl ? quantityEl.value : "1 枚",
     surgeryDate: el.surgeryDateInput.value,
     orderer: el.ordererSelect.value,
+    ordererId: selectedOrdererId(),
     email: emailVal,
     notes: el.notesInput.value.trim(),
     submittedAt: new Date().toISOString(),
@@ -305,8 +319,6 @@ function validateOrderForm() {
 
   if (!el.ordererSelect.value) {
     invalid("ordererSelect", "注文者を選択してください", el.ordererSelect);
-  } else if (!isValidEmail(selectedOrdererEmail())) {
-    invalid("ordererSelect", "この注文者のメールアドレスが登録されていません。施設管理者に、施設設定での登録を依頼してください", el.ordererSelect);
   } else {
     clearFieldError("ordererSelect");
   }
@@ -353,7 +365,7 @@ function showConfirmModal(data) {
   $("summarySurgeryDate").textContent = formattedDate;
 
   $("summaryOrderer").textContent = data.orderer;
-  $("summaryEmail").textContent = data.email;
+  $("summaryEmail").textContent = data.email || "（未登録）";
   $("summaryNotes").textContent = data.notes || "（なし）";
 
   el.modalSubmitError.classList.add("hidden");
@@ -374,6 +386,10 @@ function hideConfirmModal() {
 const RETAIN_NOTE = "入力内容は保持されています。";
 
 function describeOrderError(err) {
+  if (appConfig.orderMode === ORDER_MODES.SERVER_DEV) {
+    // 開発用のサーバー受付: 再送しても、同じ注文の識別子(clientRequestId)で二重登録にはならない
+    return `${describeCallableError(err)} 同じ内容で再送信しても二重には登録されません。${RETAIN_NOTE}`;
+  }
   if (!(err instanceof OrderError)) {
     return `送信中に予期しないエラーが発生しました。${RETAIN_NOTE}`;
   }
@@ -388,8 +404,11 @@ function describeOrderError(err) {
   }
 }
 
+let submitting = false; // 連続クリックによる重複送信の防止
+
 async function handleExecuteOrder() {
-  if (!currentPendingOrderData) return;
+  if (!currentPendingOrderData || submitting) return;
+  submitting = true;
 
   el.btnModalSubmit.disabled = true;
   el.btnModalBack.disabled = true;
@@ -397,10 +416,18 @@ async function handleExecuteOrder() {
   el.modalSubmitError.classList.add("hidden");
 
   try {
-    if (appConfig.orderMode !== ORDER_MODES.GAS) {
-      console.log("【dryrun】送信予定のペイロード（送信はしていません）:", currentPendingOrderData);
+    let result;
+    if (appConfig.orderMode === ORDER_MODES.SERVER_DEV) {
+      // 開発用テスト経路: サーバーで検証して保存する(ディーラーへは通知されない)
+      if (!orderApi) throw new Error("サーバーに接続できません");
+      const r = await orderApi.createOrder(buildCreateOrderRequest(currentPendingOrderData));
+      result = { orderId: r.orderNumber, message: "開発用受付・ディーラー未通知", serverDev: true };
+    } else {
+      if (appConfig.orderMode !== ORDER_MODES.GAS) {
+        console.log("【dryrun】送信予定のペイロード（送信はしていません）:", currentPendingOrderData);
+      }
+      result = await submitOrder(currentPendingOrderData, appConfig);
     }
-    const result = await submitOrder(currentPendingOrderData, appConfig);
 
     // サーバーが受付番号を返した場合のみ完了扱い
     el.btnModalSubmit.disabled = false;
@@ -416,6 +443,7 @@ async function handleExecuteOrder() {
     el.modalSubmitErrorText.textContent = describeOrderError(err);
     el.modalSubmitError.classList.remove("hidden");
   } finally {
+    submitting = false;
     el.btnModalSubmit.disabled = false;
     el.btnModalBack.disabled = false;
     el.btnModalSubmit.innerHTML = `
@@ -429,6 +457,11 @@ async function handleExecuteOrder() {
 }
 
 function showCompleteModal(orderData, result) {
+  if (result.serverDev) {
+    // 受付(accepted)まで。ディーラーへは通知していないので「発注済み」とは表示しない
+    $("completeTitle").textContent = "注文を受け付けました（開発用）";
+    $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+  }
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
     <div style="margin-bottom: 4px;"><strong>IOLモデル:</strong> ${escapeHtml(orderData.model)}</div>
@@ -436,7 +469,7 @@ function showCompleteModal(orderData, result) {
     <div style="margin-bottom: 4px;"><strong>度数 / 枚数:</strong> ${escapeHtml(orderData.power)} / ${escapeHtml(orderData.quantity)}</div>
     <div style="margin-bottom: 4px;"><strong>手術予定日:</strong> ${escapeHtml(orderData.surgeryDate)}</div>
     <div style="margin-bottom: 4px;"><strong>注文者:</strong> ${escapeHtml(orderData.orderer)}</div>
-    <div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>
+    ${orderData.email ? `<div><strong>メールアドレス:</strong> ${escapeHtml(orderData.email)}</div>` : ""}
   `;
 
   el.completeModal.classList.remove("hidden");

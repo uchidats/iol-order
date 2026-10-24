@@ -8,6 +8,7 @@ import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-confi
 import { decideAccess, activeMemberships, ACCESS } from "./domain/access.js";
 import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
+import { createOrderApi } from "./data/order-api.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
@@ -185,6 +186,7 @@ async function bootstrapWithFirebase(config) {
       formUid = state.user.uid;
       await initOrderForm({
         config,
+        orderApi: ctx.orderApi,
         repository: ctx.repository,
         facilityId: access.facilityId,
         facility: { id: access.facilityId, name: facilityName(access.facilityId) }
@@ -379,6 +381,10 @@ async function bootstrapWithFirebase(config) {
       service, db,
       repository: createFirestoreRepository(db, sdk.firestore),
       settingsApi: createFirestoreSettingsApi(db, sdk.firestore),
+      orderApi: createOrderApi({
+        functions: sdk.functions.getFunctions(app, "asia-northeast1"),
+        httpsCallable: sdk.functions.httpsCallable
+      }),
       registrationApi: createRegistrationApi({
         functions: sdk.functions.getFunctions(app, "asia-northeast1"),
         httpsCallable: sdk.functions.httpsCallable

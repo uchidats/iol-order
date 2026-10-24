@@ -8,7 +8,8 @@
 
 export const ORDER_MODES = Object.freeze({
   DRYRUN: "dryrun", // 送信しない。入力内容の確認のみ（開発既定）
-  GAS: "gas"        // GAS Webアプリへ実際にPOSTする
+  GAS: "gas",       // GAS Webアプリへ実際にPOSTする【廃止予定】サーバー受付(createOrder)へ移行後に削除する
+  SERVER_DEV: "server-dev" // 開発用: Cloud Functions で検証して保存する(ディーラー通知なし)。src/config.local.js でのみ有効化できる
 });
 
 const DEFAULT_CONFIG = Object.freeze({
@@ -27,7 +28,12 @@ export const STORAGE_KEY_EMAIL = "iol_order_saved_email";
 export function resolveConfig(overrides = {}) {
   const merged = { ...DEFAULT_CONFIG, ...overrides };
 
+  if (merged.orderMode === ORDER_MODES.SERVER_DEV) {
+    return { ...merged, orderApiUrl: "" }; // サーバー経由。GASのURLは使わない
+  }
+
   if (merged.orderMode === ORDER_MODES.GAS) {
+    console.warn("orderMode=gas(ブラウザからGASへ直接送信)は廃止予定です。サーバー受付(server-dev)へ移行してください。");
     const url = String(merged.orderApiUrl || "");
     if (!url.startsWith(ALLOWED_API_PREFIX)) {
       console.warn("orderApiUrl が未設定または許可されない形式のため、dryrun に切り替えました。");

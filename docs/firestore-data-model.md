@@ -27,7 +27,8 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
   ├─ adoptedIols/{catalogIolId}  facilityId, catalogIolId(=doc id, 共通マスターのID), dealerId?, enabled, updatedAt
   ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, active, sortOrder?, updatedAt,
   │                              orderEmails[<=5]?（発注用）, usageReportEmails[<=5]?（使用報告用。発注用とは別管理）
-  └─ orders/{orderId}            サーバー発行のみ（クライアント書込不可）
+  ├─ orders/{orderId}            サーバー(createOrder)発行のみ・クライアント書込不可。詳細は order-intake.md
+  └─ orderCounters/{yyyymmdd}    注文番号の連番(サーバー専用)
 ```
 
 - `members/{uid}` のドキュメントIDは Firebase Auth の uid。`uid` フィールドと一致必須。

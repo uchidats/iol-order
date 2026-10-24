@@ -10,13 +10,19 @@
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineString } from "firebase-functions/params";
+import { defineString, defineBoolean } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
+import { createOrderService } from "./src/orders.js";
 
 initializeApp();
 
 const REGION = "asia-northeast1";
 const service = createRegistrationService({ db: getFirestore(), FieldValue, Timestamp });
+
+// 注文受付(第1段階: 検証して保存するまで。ディーラーへの通知はしない)。
+// 明示的に有効化するまで受け付けない(キルスイッチ)。functions/.env.<project> で ORDER_INTAKE_ENABLED=true にする。
+const ORDER_INTAKE_ENABLED = defineBoolean("ORDER_INTAKE_ENABLED", { default: false });
+const orderService = createOrderService({ db: getFirestore(), FieldValue, isEnabled: () => ORDER_INTAKE_ENABLED.value() });
 
 // 想定外のエラーの詳細はクライアントへ返さない（ログにのみ残す）
 function wrap(handler) {
@@ -47,3 +53,4 @@ const options = {
 export const registerFacility = onCall(options, wrap(service.registerFacility));
 export const createInvite = onCall(options, wrap(service.createInvite));
 export const acceptInvite = onCall(options, wrap(service.acceptInvite));
+export const createOrder = onCall(options, wrap(orderService.createOrder));
