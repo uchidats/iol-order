@@ -60,14 +60,17 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
       h("div", { class: "lens-filter", role: "group", "aria-label": "レンズの種類" },
         h("label", { class: "lens-filter-check" }, line.chkToric, " トーリック"),
         h("label", { class: "lens-filter-check" }, line.chkMf, " 多焦点")),
-      group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel"), line.badges),
-      group("IOLパワー", h("div", { class: "select-wrapper" }, line.power), "power", id("lensPower")),
-      h("div", { class: "form-group", "data-group": "quantity" },
-        h("span", { class: "form-label required" }, "枚数 ", h("span", { class: "badge-required" }, "必須")),
-        h("div", { class: "quantity-selector", role: "radiogroup", "aria-label": "枚数選択" },
-          line.qty.map(r => h("label", { class: "quantity-option" }, r, h("span", { class: "quantity-btn" }, `${r.value} 枚`)))),
-        err("quantity")),
-      group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate")));
+      // 2行: [IOLモデル | IOLパワー] [枚数 | 手術日]。横幅が足りない画面では自然に縦に折り返す(CSS の flex-wrap)
+      h("div", { class: "lens-row" },
+        group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel"), line.badges),
+        group("IOLパワー", h("div", { class: "select-wrapper" }, line.power), "power", id("lensPower"))),
+      h("div", { class: "lens-row" },
+        h("div", { class: "form-group", "data-group": "quantity" },
+          h("span", { class: "form-label required" }, "枚数 ", h("span", { class: "badge-required" }, "必須")),
+          h("div", { class: "quantity-selector", role: "radiogroup", "aria-label": "枚数選択" },
+            line.qty.map(r => h("label", { class: "quantity-option" }, r, h("span", { class: "quantity-btn" }, `${r.value} 枚`)))),
+          err("quantity")),
+        group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate"))));
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
