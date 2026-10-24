@@ -405,56 +405,19 @@ body {
   border: 1.5px dashed #93c5fd;
 }
 
-/* Alcon Toric Calculator 連携エリア */
-.alcon-calc-card {
-  background: #f0fdf4;
-  border: 1.5px solid #86efac;
-  border-radius: var(--radius-md);
-  padding: 14px;
-  margin-bottom: 18px;
-  transition: all 0.25s ease;
-}
-
-.alcon-calc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.alcon-calc-title {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #166534;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.alcon-calc-desc {
-  font-size: 0.78rem;
-  color: #14532d;
-  margin-bottom: 10px;
-  line-height: 1.4;
-}
-
+/* Alcon Toric Calculator: 小さなテキストリンク + 外部リンクアイコン(テキストとアイコン全体がリンク。幅が足りなければ折り返す) */
 .alcon-calc-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.78rem;
-  color: #15803d;
-  background-color: #ffffff;
-  border: 1px solid #86efac;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  min-height: 32px;
+  font-size: 0.85rem;
+  color: var(--primary);
   text-decoration: none;
-  font-weight: 600;
 }
-
-.alcon-calc-link:hover {
-  background-color: #dcfce7;
-}
+.alcon-calc-link:hover { text-decoration: underline; }
+.alcon-calc-link[hidden] { display: none; }
+.alcon-calc-link svg { flex: none; }
 
 /* レンズ選択: 左揃え・縦並び。各項目は必要な幅に制限する(狭い画面では画面幅まで) */
 .lens-filter {

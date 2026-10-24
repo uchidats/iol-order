@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=a4f9e276c0">
+  <link rel="stylesheet" href="styles.css?v=3d5936c760">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -55,8 +55,8 @@
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=857aaf30da",
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
-      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=dfb55d71bf",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=2cdb774f2e",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=83842e42bb",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=525c358dc2",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=268f0c542c"
     }
   }
@@ -87,37 +87,6 @@
             <button type="button" class="btn btn-secondary" id="btnAddLine">＋ レンズを追加</button>
           </div>
           <p class="error-message" id="err-lensLines"></p>
-
-          <!-- 将来機能: Alcon Toric Calculator 連携エリア (Alcon Toric選択時のみ表示) -->
-          <div class="alcon-calc-card hidden" id="alconCalcArea">
-            <div class="alcon-calc-header">
-              <div class="alcon-calc-title">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="4" y="2" width="16" height="20" rx="2"></rect>
-                  <line x1="8" y1="6" x2="16" y2="6"></line>
-                  <line x1="16" y1="14" x2="16" y2="18"></line>
-                  <path d="M16 10h.01"></path>
-                  <path d="M12 10h.01"></path>
-                  <path d="M8 10h.01"></path>
-                  <path d="M12 14h.01"></path>
-                  <path d="M8 14h.01"></path>
-                  <path d="M12 18h.01"></path>
-                  <path d="M8 18h.01"></path>
-                </svg>
-                Alcon Online Toric Calculator
-              </div>
-              <span class="badge badge-warning">連携準備中</span>
-            </div>
-            <p class="alcon-calc-desc">Alcon製トーリックIOLの計算データ転記および結果反映を連携予定です。</p>
-            <a href="https://www.myalcon-toriccalc.com" target="_blank" rel="noopener noreferrer" class="btn btn-outline-sm alcon-calc-link" id="alconCalcLink">
-              Calculatorを別タブで開く
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-            </a>
-          </div>
 
           <!-- 7. 備考（フリーコメント） -->
           <div class="form-group" id="groupNotes">

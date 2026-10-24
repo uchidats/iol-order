@@ -17,6 +17,7 @@ let availableModels = [];
 let lensOptions = [];           // 採用済み系列を、正式型番ごとの選択肢に展開したもの
 let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let doctors = [];               // 担当医マスター(施設設定の「担当医」)
+let alconCalculatorUrl = null;  // ALCONのトーリックを選択中なら、計算ツールのURL(将来の連携用に保持。画面の表示は各レンズのリンク)
 let dealers = [];               // 施設の登録ディーラー(0社=発注先なし / 1社=自動 / 2社以上=明細ごとに選択)
 let currentPendingOrderData = null;
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
@@ -30,8 +31,6 @@ function cacheElements() {
     form: $("iolOrderForm"),
     lensLinesBox: $("lensLines"),
     btnAddLine: $("btnAddLine"),
-    alconCalcArea: $("alconCalcArea"),
-    alconCalcLink: $("alconCalcLink"),
     notesInput: $("notesInput"),
     confirmModal: $("confirmModal"),
     btnModalBack: $("btnModalBack"),
@@ -112,8 +111,8 @@ function todayString() {
 function updateAlconGuide() {
   if (!lensLines) return; // 明細の入力欄を作っている最中
   const url = lensLines.alconCalculator();
-  el.alconCalcArea.classList.toggle("hidden", url === null);
-  if (url) el.alconCalcLink.href = url;
+  // 表示は、各レンズ(明細)のチェックボックスの右にある小さなリンク(lens-lines.js)。ここでは、将来のカリキュレーター連携用に、対象のURLを保持する
+  alconCalculatorUrl = url;
 }
 
 /**
