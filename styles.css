@@ -1604,6 +1604,27 @@ input[type="date"].form-control {
   margin: 0;
 }
 
+/* IOLの特徴バッジ(多焦点・トーリック): 小さな楕円形・控えめな色。情報表示のみ */
+.lens-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: #475569;
+  background-color: #f1f5f9;
+  border: 1px solid #d6dde8;
+  border-radius: 999px;
+}
+
+.lens-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.lens-badges:empty { display: none; }
+.iol-name { margin-right: 6px; }
+.settings-iol-group .settings-check { flex-wrap: wrap; gap: 4px 6px; }
+.summary-line-title .lens-badge { margin-left: 2px; }
+
 /* 見出し右側のⓘ(説明は押したときだけ表示する共通部品: info-tip.js) */
 .settings-heading {
   position: relative;

@@ -4,6 +4,8 @@ import {
 } from "../domain/facility-settings.js";
 import { planMemberToggle, confirmMessage, memberLabel, sortMembers, newAuditId, buildMemberChange } from "../domain/member-admin.js";
 import { createSectionHeading } from "./info-tip.js";
+import { baseModelName } from "../domain/lens-labels.js";
+import { lensBadgeElements } from "./lens-badges.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
 
@@ -282,8 +284,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         h("legend", {}, mfg),
         items.map(m => h("label", { class: "settings-check" },
           h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
-          m.displayName.replace(/^[^/]+\/\s*/, ""),
-          m.isToric ? " （トーリック）" : ""))));
+          h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
+          lensBadgeElements(m)))));                              // 特徴は isToric / isMultifocal のバッジで1回だけ
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...nodes);
     list.addEventListener("change", markDirty);

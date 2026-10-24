@@ -35,6 +35,7 @@ export function toOrderLines(values) {
     manufacturer: v.lens.manufacturer,
     toricModel: v.lens.isToric ? v.lens.toricModel : "",
     label: v.lens.label, // 画面表示用(メーカー / 型番)
+    isToric: v.lens.model.isToric, isMultifocal: v.lens.model.isMultifocal, // 画面表示用(バッジ)。サーバーには送らない
     power: v.power,
     quantity: v.quantity,
     surgeryDate: v.surgeryDate

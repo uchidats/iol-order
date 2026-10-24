@@ -2,6 +2,7 @@ import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
+import { lensBadgeElements } from "./lens-badges.js";
 import { ORDER_MODES } from "../config.js";
 import { submitOrder, OrderError } from "../api/order-client.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
@@ -252,6 +253,7 @@ function showConfirmModal(data) {
     const title = document.createElement("div");
     title.className = "summary-line-title";
     title.textContent = `${l.lineNo}. ${l.label}`; // メーカー / 具体的な型番
+    title.append(" ", ...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal })); // 特徴はバッジ(判定は isToric / isMultifocal)
     const detail = document.createElement("div");
     detail.className = "summary-line-detail";
     detail.textContent = `${l.power} ・ ${l.quantity} 枚 ・ 手術日 ${formatDate(l.surgeryDate)}`;

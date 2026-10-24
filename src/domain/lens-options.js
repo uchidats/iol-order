@@ -10,6 +10,8 @@
  * @param {Array<object>} models 採用済みの系列(resolveAdoptedModels の結果)
  * @returns {Array<{key:string, label:string, manufacturer:string, model:object, toricModel:string, isToric:boolean, isMultifocal:boolean}>}
  */
+import { displayLabel } from "./lens-labels.js";
+
 export function buildLensOptions(models) {
   const out = [];
   for (const m of models) {
@@ -19,7 +21,7 @@ export function buildLensOptions(models) {
         out.push({ key: `${m.id}|${t}`, label: `${m.manufacturer} / ${t}`, manufacturer: m.manufacturer, model: m, toricModel: t, isToric: true, isMultifocal: m.isMultifocal });
       }
     } else {
-      out.push({ key: m.id, label: m.displayName, manufacturer: m.manufacturer, model: m, toricModel: "", isToric: false, isMultifocal: m.isMultifocal });
+      out.push({ key: m.id, label: displayLabel(m), manufacturer: m.manufacturer, model: m, toricModel: "", isToric: false, isMultifocal: m.isMultifocal });
     }
   }
   return out;
