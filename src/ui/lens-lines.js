@@ -115,7 +115,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
     // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
-    enhanceSelect(line.power, { ariaLabel: "IOLパワー" });
+    enhanceSelect(line.power, { ariaLabel: "IOLパワー", matchWidth: true });   // 度数は幅の狭い選択ボックス。展開メニューも同じ幅
     line.dealerGroup = line.root.querySelector('[data-group="dealer"]');
     syncDealerGroup(line);
 

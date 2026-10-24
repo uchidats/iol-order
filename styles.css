@@ -472,7 +472,7 @@ body {
 .lens-row .form-group { flex: 0 1 auto; min-width: 0; }
 .lens-row .form-group .form-label { min-height: 1.5em; }
 .lens-row [data-group="model"] { flex-basis: 220px; }   /* 幅は従来どおり(モデル約220px・パワー12rem・手術日14rem) */
-.lens-row [data-group="power"] { flex-basis: 12rem; }
+.lens-row [data-group="power"] { flex-basis: 8rem; }   /* IOLパワー: 従来(12rem)の約2/3。選択ボックスと展開メニューの幅は同じ */
 .lens-row [data-group="date"] { flex-basis: 14rem; }
 /* 枚数: 「1枚」「2枚」は幅80px・高さ48px・間隔10px。枚数と手術日は幅が足りなければ折り返す(重ならない) */
 .lens-row [data-group="quantity"] { flex: 0 0 auto; }
@@ -486,7 +486,7 @@ body {
 .lens-line [data-group="model"] .form-control { width: 100%; min-width: 0; }
 /* メーカー見出し(optgroup): 斜体を解除し、太字は維持(文字サイズ・色・余白は既定のまま) */
 .lens-line select optgroup { font-style: normal; font-weight: 700; }
-.lens-line [data-group="power"] { max-width: 12rem; }
+.lens-line [data-group="power"] { max-width: 8rem; }
 .lens-line [data-group="quantity"] { max-width: 16rem; }
 .lens-line .date-input-wrapper { max-width: 14rem; }
 .lens-lines-actions { margin: 4px 0 14px; }

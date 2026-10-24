@@ -137,7 +137,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       // 度数(モデルに応じた選択肢)。選ぶと値・表示が変わる。別のモデルに変えても、同じ度数があれば維持(既存の処理)
       await powerTrigger.click(); await panel.waitFor();
-      assert.ok((await rect(panel)).width >= 240);
+      // IOLパワー: 選択ボックス(約2/3の幅=128px)と展開メニューの幅が同じ。IOLモデルのメニューは従来の幅
+      const pw = await rect(panel), pt = await rect(powerTrigger);
+      assert.ok(Math.abs(pt.width - 128) <= 1, `IOLパワーの幅 ${pt.width}`);
+      assert.ok(Math.abs(pw.width - pt.width) <= 1 && Math.abs(pw.left - pt.left) <= 1, `メニューの幅・位置がボタンと同じ: ${JSON.stringify({ pw, pt })}`);
+      assert.ok(pw.right <= 390 - 7.5);
+      assert.ok(await panel.locator('.cs-option').first().evaluate(o => o.getBoundingClientRect().height >= 40 && o.getBoundingClientRect().height <= 44), "項目の高さは従来どおり");
       await panel.locator('.cs-option[data-value="+20.0D"]').scrollIntoViewIfNeeded();
       await panel.locator('.cs-option[data-value="+20.0D"]').click();
       assert.equal(await powerSelect.inputValue(), "+20.0D");
@@ -179,6 +184,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.setViewportSize({ width: 1100, height: 800 });
       assert.equal(await modelTrigger.isHidden(), true);
       assert.equal(await modelSelect.evaluate(s => getComputedStyle(s).opacity), "1");
+      // 幅: IOLパワーだけ約2/3(128px)。IOLモデル(220px)・担当医(200px)は変更なし
+      const ws = await page.evaluate(() => Object.fromEntries(["model", "power", "doctor"].map(k => [k, Math.round(document.querySelector(`.lens-line [data-f=${k}]`).getBoundingClientRect().width)])));
+      assert.deepEqual(ws, { model: 220, power: 128, doctor: 200 }, "PC幅の選択ボックスの幅");
       assert.deepEqual(errors, []);
       await context.close();
     } finally { await browser.close(); }

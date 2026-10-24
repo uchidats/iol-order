@@ -33,9 +33,9 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 /**
  * select をカスタムドロップダウンに対応させる(トリガーボタンを追加するだけ。表示の切り替えは CSS)。
  * @param {HTMLSelectElement} select 親は .select-wrapper
- * @param {{ariaLabel:string}} opts
+ * @param {{ariaLabel:string, matchWidth?:boolean}} opts matchWidth: メニューの幅をボタンの幅に揃える(幅の狭い選択ボックス用。既定は 240〜280px)
  */
-export function enhanceSelect(select, { ariaLabel = "" } = {}) {
+export function enhanceSelect(select, { ariaLabel = "", matchWidth = false } = {}) {
   const wrapper = select.parentElement;
   if (!wrapper || select._customSelect) return;
   wrapper.classList.add("cs-enhanced");
@@ -104,7 +104,7 @@ export function enhanceSelect(select, { ariaLabel = "" } = {}) {
     if (!panel) return;
     const vw = document.documentElement.clientWidth, vh = window.innerHeight;
     const r = trigger.getBoundingClientRect();
-    const width = Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, r.width), vw - EDGE * 2);
+    const width = matchWidth ? Math.min(r.width, vw - EDGE * 2) : Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, r.width), vw - EDGE * 2);
     panel.style.width = `${width}px`;
     panel.style.maxHeight = "none";
     const content = panel.scrollHeight;
