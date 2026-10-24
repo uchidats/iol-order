@@ -511,6 +511,21 @@ body {
 #groupOrderer { max-width: 200px; }
 #groupNotes { max-width: 36rem; }
 
+/* 備考・各社Calculator関連リンク・計測結果の読み取りは、備考欄(#groupNotes)と同じ幅・同じ左右端にそろえる */
+#groupNotes .textarea-field,
+#groupNotes .ref-links-accordion,
+#ocrFeatureCard {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+#ocrFeatureCard {
+  max-width: 36rem;
+  margin: 0 0 18px;   /* 他の入力項目(.form-group)と同じ縦の間隔 */
+}
+
+#groupNotes .ref-links-accordion { margin-top: 10px; }
+
 /* 確認画面の明細一覧 */
 .summary-lines { margin: 0; padding-left: 0; list-style: none; }
 .summary-line { padding: 4px 0; border-bottom: 1px solid #eef2f7; }
