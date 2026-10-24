@@ -59,6 +59,7 @@ async function bootstrapWithFirebase(config) {
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
+  let orderHistory = null;  // 注文履歴（所属メンバー全員。閲覧のみ・初回表示時に生成）
 
   const ui = createAuthUi({
     onGoogle: () => run(() => ctx.service.signInWithGoogle()),
@@ -83,6 +84,7 @@ async function bootstrapWithFirebase(config) {
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
+    onOpenHistory: () => openHistory(),
     onOpenSettings: () => openSettings(),
     onRegisterFacility: () => openOnboarding("register"),
     onJoinFacility: () => openOnboarding("join"),
@@ -91,6 +93,23 @@ async function bootstrapWithFirebase(config) {
 
   const ORDER_VIEW_IDS = ["iolOrderForm", "ocrFeatureCard"];
   const setOrderViewHidden = (hidden) => ORDER_VIEW_IDS.forEach(id => document.getElementById(id).classList.toggle("hidden", hidden));
+
+  /** 注文履歴を開く(閲覧のみ)。表示するのは選択中の施設の注文だけ。権限は Firestore Rules でも検証される */
+  async function openHistory() {
+    const access = decideAccess(state);
+    if (access.state !== ACCESS.GRANTED) return;
+    if (settings && settings.isOpen()) settings.close();
+    if (!orderHistory) {
+      const { createOrderHistory } = await import("./ui/order-history.js");
+      orderHistory = createOrderHistory({
+        mount: document.querySelector("main.main-content"),
+        repository: ctx.repository,
+        onClose: () => setOrderViewHidden(false)
+      });
+    }
+    setOrderViewHidden(true);
+    await orderHistory.open({ id: access.facilityId, name: facilityName(access.facilityId) });
+  }
 
   /** 施設設定を開く。表示は施設管理者のみ（書き込みはFirestoreルールでも検証される） */
   async function openSettings() {
@@ -109,6 +128,7 @@ async function bootstrapWithFirebase(config) {
         onClose: () => setOrderViewHidden(false)
       });
     }
+    if (orderHistory && orderHistory.isOpen()) orderHistory.close();
     setOrderViewHidden(true);
     await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
   }
@@ -117,6 +137,7 @@ async function bootstrapWithFirebase(config) {
   function openOnboarding(mode) {
     if (decideAccess(state).state !== ACCESS.GRANTED) return;
     if (settings && settings.isOpen()) settings.close();
+    if (orderHistory && orderHistory.isOpen()) orderHistory.close();
     registration.duplicate = null; error = ""; notice = "";
     registration.open = mode;
     render();
@@ -156,7 +177,7 @@ async function bootstrapWithFirebase(config) {
         user: state.user, facilityName: facilityName(access.facilityId),
         canSwitch: access.memberships.length > 1, canSettings: access.role === "admin"
       });
-      if (settings && settings.isOpen()) setOrderViewHidden(true); // 設定画面の表示中は注文画面を隠したまま
+      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       menu.update(null);
     }
