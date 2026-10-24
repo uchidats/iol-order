@@ -247,7 +247,7 @@ function showConfirmModal(data) {
     const who = document.createElement("div");
     who.className = "summary-line-detail";
     const dealer = dealerNameByModel.get(l.modelId);
-    who.textContent = `担当医 ${l.doctor} ・ 発注先 ${dealer || "未設定"}`; // 担当医が違う明細も、明細ごとに正しく表示する
+    who.textContent = `担当医 ${l.doctor} ・ ${dealer ? `発注先 ${dealer}` : "発注先未設定"}`; // 担当医が違う明細も、明細ごとに正しく表示する
     li.append(main, date, who);
     return li;
   }));

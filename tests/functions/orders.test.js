@@ -509,6 +509,24 @@ test("ディーラー: 削除されたディーラーは発注先にならない
   assert.equal(l.dealer, null);
 });
 
+test("ディーラー: 実メール送信の可否(dispatch)。発注先未設定・発注用メール未登録は送信不可。使用報告用メールは発注先に使わない。メールアドレスは注文に保存しない", async () => {
+  await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "d-ok" });
+  await db.doc(`facilities/${F}/adoptedIols/alcon-mn60ma-yellow`).update({ dealerId: "d-usage" });
+  await db.doc(`facilities/${F}/facilityDealers/d-ok`).set({ facilityId: F, name: "OK商会", orderEmails: ["order@example.jp"], usageReportEmails: ["report@example.jp"] });
+  await db.doc(`facilities/${F}/facilityDealers/d-usage`).set({ facilityId: F, name: "報告のみ商会", usageReportEmails: ["report@example.jp"] }); // 発注用メールなし
+  const r = await order(user("ordA"), multi([
+    line({ modelId: "nidek-nsp-2", power: "+5.5D" }),
+    line({ modelId: "alcon-mn60ma-yellow", power: "-5.0D", surgeryDate: "2026-11-12" }),
+    line({ modelId: "jj-dib00v", power: "+20.0D", surgeryDate: "2026-11-13" })   // 発注先未設定
+  ]));
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.deepEqual(o.lines.map(l => l.dispatch), [
+    { allowed: true, reason: null }, { allowed: false, reason: "no-order-email" }, { allowed: false, reason: "dealer-unset" }]);
+  assert.equal(o.dispatchAllowed, false, "one blocked line blocks the order");
+  assert.deepEqual(o.lines.map(l => l.dealer && l.dealer.name), ["OK商会", "報告のみ商会", null]);
+  assert.ok(!JSON.stringify(o).includes("@example.jp"), "no dealer e-mail addresses stored in the order");
+});
+
 test("ディーラー: 他の施設のディーラーは発注先にならない(IDが同じでも、自施設に登録されたものだけ)", async () => {
   await db.doc(`facilities/${F}/adoptedIols/nidek-nsp-2`).update({ dealerId: "shared-id" });
   await db.doc("facilities/fB/facilityDealers/shared-id").set({ facilityId: "fB", name: "他施設のディーラー" });

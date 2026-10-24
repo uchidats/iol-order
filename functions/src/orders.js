@@ -244,7 +244,12 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         if (!doc.exists) throw bad(`明細${n}: 担当医が見つかりません`); // 担当医に有効/無効はない(旧形式の active フィールドは無視する)
         const docEmail = doc.get("email");
         const dealerSnap = dealerBy.get(adopted.get("dealerId"));
-        const dealer = dealerSnap && dealerSnap.exists ? { id: dealerSnap.id, name: dealerSnap.get("name") || "" } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
+        const dealer = dealerSnap && dealerSnap.exists ? { id: dealerSnap.id, name: dealerSnap.get("name") || "" } : null;
+        // 将来の実メール送信の可否(現在は送信機能なし)。発注先が未設定、または「発注用」メールが未登録なら送らない。
+        // 使用報告用メール(usageReportEmails)は発注の送信先に使わない(別の用途)。メールアドレス自体はここに保存しない
+        const orderEmails = dealerSnap && dealerSnap.exists ? dealerSnap.get("orderEmails") : null;
+        const hasOrderEmail = Array.isArray(orderEmails) && orderEmails.some(e => typeof e === "string" && e);
+        const dispatch = !dealer ? { allowed: false, reason: "dealer-unset" } : !hasOrderEmail ? { allowed: false, reason: "no-order-email" } : { allowed: true, reason: null }; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
         return {
           lineNo: n,
           status: ORDER_STATUS.ACCEPTED,
@@ -256,7 +261,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           surgeryDate: l.surgeryDate,
           doctor: { id: doc.id, name: doc.get("name"), email: typeof docEmail === "string" && docEmail ? docEmail : null }, // 担当医のスナップショット
           dealerId: dealer ? dealer.id : null, // 将来、ディーラーごとに明細を振り分けるための情報
-          dealer                              // ディーラーのスナップショット(未設定・削除済みは null)
+          dealer,                             // ディーラーのスナップショット(未設定・削除済みは null)
+          dispatch                            // 実メール送信の可否。allowed=false の明細は、将来も送信してはいけない
         };
       });
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
@@ -272,6 +278,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
         lines,
         lineCount: lines.length,
+        dispatchAllowed: lines.every(l => l.dispatch.allowed), // 1つでも送れない明細(発注先未設定など)があれば false
         totalQuantity: input.totalQuantity,
         firstSurgeryDate: lines.map(l => l.surgeryDate).sort()[0],
         lastSurgeryDate: lines.map(l => l.surgeryDate).sort().slice(-1)[0],

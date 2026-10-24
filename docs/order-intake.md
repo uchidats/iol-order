@@ -67,3 +67,11 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 - 目的: 正規のアプリ（`iol.medconf.jp` と開発用 `localhost`）以外からの callable 呼び出し（スクリプトによる濫用）を減らす。認可の代わりにはならない。
 - 手順: ① Firebase Console で Web アプリに reCAPTCHA Enterprise（または v3）を登録 ② クライアントで `initializeAppCheck` をSDKの初期化直後に実行（`src/firebase/sdk.js` にApp Check SDKの読み込みを追加）③ **まず `enforceAppCheck: false` のまま**、Console の指標で未検証リクエストの割合を観察 ④ 問題なければ `functions/index.js` の `options.enforceAppCheck` を `true` にしてデプロイ。
 - 注意: enforce にすると、App Check トークンを持たない古いクライアント・curl・エミュレータのテストは拒否される（エミュレータ用に debug token が必要）。リファラ制限した API キーと併用する。
+
+## 発注先・実メール送信の可否(dispatch)
+- 各明細は `dealerId` / `dealer`(その時点の `{id, name}` のスナップショット。後でディーラーを改名・削除しても過去の注文は変わらない)と、`dispatch: { allowed, reason }` を持つ。
+  - `allowed=true`: 発注先が施設に登録されていて、**発注用メール(`orderEmails`)が1件以上**ある。
+  - `allowed=false`: `reason` が `dealer-unset`(発注先未設定・削除済み)または `no-order-email`(発注用メール未登録)。
+- 注文全体の `dispatchAllowed` は、全明細が `allowed=true` のときだけ true。
+- **将来の実メール送信は、`dispatch.allowed=true` の明細だけを対象にし、使用報告用メール(`usageReportEmails`)を発注の送信先に使わない。** メールアドレスは注文には保存しない(送信時点のディーラー設定を参照するか、その設計時に別途決める)。
+- 現在は送信機能なし(`ORDER_INTAKE_ENABLED=false`)。画面の確認では、発注先がない明細に「発注先未設定」と表示する。
