@@ -96,3 +96,91 @@ test("暫定テンプレートは正式版として扱わない: 各メールに
   assert.deepEqual([p.mails[0].templateStatus, p.mails[0].reviewRequired, p.mails[0].notes], ["draft-unconfirmed", true, "備考テキスト"]);
   assert.equal(isTemplateConfirmed(), false, "確認済みになるまで、実送信の処理から使ってはいけない");
 });
+
+// ================= 現行GAS(立川病院)形式の再現 =================
+import { TACHIKAWA_GAS_PROFILE, GENERIC_DRAFT_PROFILE, resolveMailProfile } from "../src/domain/order-mail-profiles.js";
+
+const KURIHARA = { id: "dK", name: "栗原医療器械店" };
+const gasSettings = { dK: { name: "栗原医療器械店", orderEmails: ["kurihara-order@example.jp"], usageReportEmails: ["kurihara-report@example.jp"] } };
+const gasOpts = { profile: TACHIKAWA_GAS_PROFILE, confirmationEmails: ["confirm@example.jp"], dealers: gasSettings, facilityName: "立川病院" };
+
+test("GAS形式: 件名は固定、宛名は「ディーラー名御中」、本文は「質問名: 回答」を入力順に列挙し、定型文と署名で終わる", () => {
+  const p = buildOrderMailPreview(order([
+    line(1, KURIHARA, { item: { displayName: "ALCON / CNA0T0", manufacturer: "ALCON", model: "CNA0T0", power: "+18.0D" } }),
+    line(2, KURIHARA, { item: { displayName: "J&J / DIWxxx (トーリック)", isToric: true, toricModel: "DIW300", power: "+18.5D", quantity: 2 }, doctor: "佐藤", surgeryDate: "2026-11-12" })
+  ], { notes: "備考テキスト" }), gasOpts);
+  assert.equal(p.templateStatus, "gas-compatible");
+  const m = p.mails[0];
+  assert.equal(m.subject, "【立川病院】IOL注文：ご確認のほどよろしくお願いします");
+  assert.equal(m.body, [
+    "栗原医療器械店御中",
+    "",
+    "レンズ1",
+    "メーカー名 / IOLモデル: ALCON / CNA0T0",
+    "IOLパワー (ディオプター): +18.0D",
+    "枚数: 1 枚",
+    "手術日: 2026-11-10",
+    "担当医: 山田",
+    "",
+    "レンズ2",
+    "メーカー名 / IOLモデル: J&J / DIWxxx (トーリック)",
+    "トーリックの場合は型番を選択: DIW300",
+    "IOLパワー (ディオプター): +18.5D",
+    "枚数: 2 枚",
+    "手術日: 2026-11-12",
+    "担当医: 佐藤",
+    "",
+    "メールアドレス: login@example.jp",
+    "備考: 備考テキスト",
+    "",
+    "大変お世話になっております。",
+    "上記の眼内レンズを注文させていただきたく存じます。",
+    "お忙しいところ大変恐縮ですが、何卒よろしくお願い申し上げます。",
+    "",
+    "〒190-8531 東京都立川市錦町4-2-22",
+    "国家公務員共済組合連合会　立川病院　眼科"
+  ].join("\n"));
+});
+
+test("GAS形式の宛先: ディーラーの発注用 + 固定の確認先 + 発注者 をすべて To に。CC・BCC は使わない。使用報告用メールは入らない", () => {
+  const m = buildOrderMailPreview(order([line(1, KURIHARA)]), gasOpts).mails[0];
+  assert.deepEqual(m.to, ["kurihara-order@example.jp", "confirm@example.jp", "login@example.jp"]);
+  assert.deepEqual(m.recipients, { dealer: ["kurihara-order@example.jp"], confirmation: ["confirm@example.jp"], orderer: ["login@example.jp"] });
+  assert.deepEqual([m.cc, m.bcc], [[], []]);
+  assert.ok(!JSON.stringify(m).includes("kurihara-report@example.jp"));
+  // 重複する宛先は1つにまとめる(発注者が確認先と同じ場合など)
+  const dup = buildOrderMailPreview(order([line(1, KURIHARA)], { createdBy: { email: "CONFIRM@example.jp", displayName: "x" } }), gasOpts).mails[0];
+  assert.deepEqual(dup.to, ["kurihara-order@example.jp", "confirm@example.jp"]);
+});
+
+test("確認先・発注者は、ディーラー宛とは別の概念: ディーラーの発注用メールがなければ、確認先・発注者がいても送信不可(宛先なし)", () => {
+  const p = buildOrderMailPreview(order([line(1, KURIHARA)]), { ...gasOpts, dealers: { dK: { name: "栗原医療器械店", usageReportEmails: ["kurihara-report@example.jp"] } } });
+  assert.deepEqual([p.mails[0].status, p.mails[0].blockedReason, p.mails[0].to], ["blocked", "no-order-email", []]);
+  assert.equal(p.allReady, false);
+  // 確認先が未設定でも、ディーラー宛と発注者宛は生成できる(確認先はコードに固定しない)
+  const noConfirm = buildOrderMailPreview(order([line(1, KURIHARA)]), { ...gasOpts, confirmationEmails: [] }).mails[0];
+  assert.deepEqual(noConfirm.to, ["kurihara-order@example.jp", "login@example.jp"]);
+});
+
+test("GAS形式: 発注者のメールが記録されていない場合は警告。複数ディーラーの注文は、ディーラーごとに同じ件名・別の宛名と明細", () => {
+  const p = buildOrderMailPreview(order([line(1, KURIHARA), line(2, B)], { createdBy: { displayName: "メールなし" } }),
+    { ...gasOpts, dealers: { ...gasSettings, dB: settings.dB } });
+  assert.deepEqual(p.mails.map(m => m.subject), Array(2).fill("【立川病院】IOL注文：ご確認のほどよろしくお願いします"));
+  assert.ok(p.mails[0].body.startsWith("栗原医療器械店御中") && p.mails[1].body.startsWith("B医療御中"));
+  assert.ok(p.mails[0].body.includes("レンズ1") && !p.mails[0].body.includes("レンズ2"));
+  assert.match(p.mails[0].warnings.join("\n"), /発注者のメールアドレスが記録されていない/);
+  assert.deepEqual(p.mails[1].recipients.orderer, []);
+});
+
+test("形式は施設ごと: 立川病院はGAS形式(確認済み)、定義のない施設は暫定(未確認・実送信不可)。形式の定義にメールアドレスは含まれない", () => {
+  assert.equal(resolveMailProfile("tachikawa-hospital"), TACHIKAWA_GAS_PROFILE);
+  assert.equal(resolveMailProfile("other-facility"), GENERIC_DRAFT_PROFILE);
+  assert.equal(isTemplateConfirmed(TACHIKAWA_GAS_PROFILE), true);
+  assert.equal(isTemplateConfirmed(resolveMailProfile("other-facility")), false);
+  assert.equal(isTemplateConfirmed(), false);
+  assert.ok(!/@/.test(JSON.stringify(TACHIKAWA_GAS_PROFILE)), "no e-mail address in the profile");
+  // 暫定形式は従来どおり(確認先・発注者は宛先に入らない)
+  const g = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, confirmationEmails: ["confirm@example.jp"] }).mails[0];
+  assert.deepEqual(g.to, ["order-a@example.jp", "confirm@example.jp"]);
+  assert.equal(g.templateStatus, "draft-unconfirmed");
+});

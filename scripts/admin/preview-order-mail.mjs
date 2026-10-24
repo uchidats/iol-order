@@ -1,15 +1,19 @@
 // 保存済みの注文から、発注メールのプレビューを表示する。【読み取り専用・メールは送信しない】何も変更しない。
 //   node scripts/admin/preview-order-mail.mjs --facility <施設ID> --latest
 //   node scripts/admin/preview-order-mail.mjs --facility <施設ID> --order <注文ID>
+//   --confirm-to a@example.jp,b@example.jp   固定の確認先メール(ディーラー宛とは別。コードに固定せず、ここで渡す。省略可)
+// メール形式は施設ごと(立川病院は現行GASの再現。それ以外は暫定)。
 // 件名・本文は暫定の下書き(現行GASの形式が未確認。src/domain/order-mail.js を参照)。medconf-iol-dev のみ。
 import { execFileSync } from "node:child_process";
 import { buildOrderMailPreview } from "../../src/domain/order-mail.js";
+import { resolveMailProfile } from "../../src/domain/order-mail-profiles.js";
 
 const PROJECT = "medconf-iol-dev";
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const facility = opt("--facility"), orderId = opt("--order"), latest = args.includes("--latest");
-const unknown = args.filter((a, i) => a.startsWith("--") && !["--facility", "--order", "--latest"].includes(a));
+const confirmTo = (opt("--confirm-to") || "").split(",").map(s => s.trim()).filter(Boolean);
+const unknown = args.filter((a, i) => a.startsWith("--") && !["--facility", "--order", "--latest", "--confirm-to"].includes(a));
 if (!facility || (!orderId && !latest) || unknown.length || !/^[A-Za-z0-9_-]{1,128}$/.test(facility)) {
   console.error("使い方: node scripts/admin/preview-order-mail.mjs --facility <施設ID> (--latest | --order <注文ID>)");
   process.exit(2);
@@ -57,12 +61,14 @@ const order = orderId
   : (await list(`facilities/${facility}/orders`)).map(decode).sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0))[0];
 if (!order) { console.error("注文がありません。"); process.exit(1); }
 
-const p = buildOrderMailPreview(order, { facilityName: fac.name, dealers });
-console.log(`【プレビュー(送信しません)】 テンプレート: ${p.templateStatus}(現行GASの形式は未確認の暫定版。正式版ではない・実送信には使えない)`);
+const profile = resolveMailProfile(facility);
+const p = buildOrderMailPreview(order, { facilityName: fac.name, dealers, profile, confirmationEmails: confirmTo });
+console.log(`【プレビュー(送信しません)】 形式: ${profile.id} / ${p.templateStatus}${profile.confirmed ? "(現行GASの再現)" : "(暫定版。正式版ではない・実送信には使えない)"}`);
 console.log(`注文 ${p.orderNumber}  ディーラー宛のメール ${p.mails.length} 通 / 発注先未設定の明細 ${p.unrouted.length} 件 / 全て送信可: ${p.allReady}\n`);
 for (const m of p.mails) {
   console.log(`=== ${m.dealerName} (${m.status}${m.blockedReason ? ": " + m.blockedReason : ""}) ===`);
-  console.log(`宛先: ${m.to.length ? m.to.join(", ") : "(なし)"}`);
+  console.log(`宛先(すべてTo。CC/BCCなし): ${m.to.length ? m.to.join(", ") : "(なし)"}`);
+  console.log(`  内訳: ディーラー ${m.recipients.dealer.length} / 確認先 ${m.recipients.confirmation.length} / 発注者 ${m.recipients.orderer.length}`);
   console.log(`件名: ${m.subject}`);
   if (m.notes) console.log(`備考(注文時の自由記述。実送信の前に人が確認する): ${m.notes}`);
   if (m.warnings.length) console.log(`警告: ${m.warnings.join(" / ")}`);

@@ -6,17 +6,20 @@
  *  - 発注時に保存した dispatch.allowed は参考情報。生成時点のディーラー設定(存在・発注用メール)を改めて検証する。
  *  - 発注先が未設定の明細は、メールにしない(blocked: dealer-unset)。
  *
- * 【未確定】現行 Google Forms + GAS が送っているメールの件名・本文の形式は、このリポジトリの資料・コードには無い
- * (GAS側のコードは管理外)。ここでの件名・本文は暫定の下書き(TEMPLATE_STATUS)。形式が確定したら、
- * buildSubject / buildBody だけを差し替える。宛先の決定・振り分け・検証のロジックは形式に依存しない。
+ * 形式(件名・宛名・本文・署名)は「メール形式の設定(profile。order-mail-profiles.js)」で決まる。
+ *  - 立川病院: 現行 Google Forms + GAS の形式を再現(件名固定・「質問名: 回答」の列挙・定型文・署名)。
+ *  - 設定のない施設: 暫定の下書き(draft-unconfirmed)。実送信には使えない。
+ * 宛先は3種類の別の概念: ①ディーラー(発注用メール) ②固定の確認先(設定から渡す。コードに書かない) ③発注者(ログインしたユーザー)。
+ * すべて To に指定し、CC・BCC は使わない(常に空)。①が1件もなければ、②③があっても送信不可。担当医への確認メールは対象外。
  */
+import { GENERIC_DRAFT_PROFILE } from "./order-mail-profiles.js";
 import { orderLinesOf, describeLine, formatDateTimeJst, orderedByLabel } from "./order-history.js";
 import { isValidEmail } from "./order-validation.js";
 
 export const TEMPLATE_STATUS = "draft-unconfirmed"; // 現行GASの形式が未確認の暫定テンプレート(正式版として扱わない)
 
-/** 件名・本文のテンプレートが、現行GASの形式で確認済みか。**false の間は、実送信の処理から使ってはいけない**(将来の送信処理はここを必ず確認する) */
-export const isTemplateConfirmed = () => false;
+/** 形式が、現行GASの形式で確認済みか。**false の間は、実送信の処理から使ってはいけない**(引数なし・暫定の既定は false) */
+export const isTemplateConfirmed = (profile = GENERIC_DRAFT_PROFILE) => Boolean(profile && profile.confirmed === true);
 
 const oneLine = (s) => String(s ?? "").replace(/[\r\n]+/g, " ").trim(); // 件名・宛先にヘッダー注入(改行)を入れない
 
@@ -48,6 +51,29 @@ export function buildBody({ facilityName, orderNumber, orderedAtLabel, orderedBy
   ].join("\n");
 }
 
+/** 現行GAS形式の本文: Google Forms の質問名と回答を入力順に「質問名: 回答」で列挙し、定型文・署名を付ける。複数レンズはレンズごとに1ブロック */
+export function buildGasStyleBody({ dealerName, lines, ordererEmail, notes, profile }) {
+  const out = [`${dealerName}${profile.salutationSuffix}`, ""];
+  for (const l of lines) {
+    out.push(`レンズ${l.lineNo}`, `メーカー名 / IOLモデル: ${l.displayName}`);
+    if (l.isToric && l.toricModel) out.push(`トーリックの場合は型番を選択: ${l.toricModel}`);
+    out.push(`IOLパワー (ディオプター): ${l.power}`, `枚数: ${l.quantity} 枚`, `手術日: ${l.surgeryDate}`, `担当医: ${l.doctorName}`, "");
+  }
+  out.push(`メールアドレス: ${ordererEmail || "（なし）"}`, `備考: ${notes ? String(notes).trim() : ""}`, "");
+  out.push(...profile.closing, "", ...profile.signature);
+  return out.join("\n");
+}
+
+/** 確認先・発注者などの宛先を整理する(小文字・重複・不正な形式を除く) */
+export function cleanEmails(list) {
+  const out = [];
+  for (const e of Array.isArray(list) ? list : []) {
+    const v = oneLine(e).toLowerCase();
+    if (v && isValidEmail(v) && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
 /** 発注用メールの一覧(重複・不正な形式を除く)。使用報告用メールは見ない */
 export function orderRecipients(dealerSetting) {
   const list = Array.isArray(dealerSetting && dealerSetting.orderEmails) ? dealerSetting.orderEmails : [];
@@ -65,7 +91,7 @@ export function orderRecipients(dealerSetting) {
  *        dealers: 生成時点の施設のディーラー設定(キーは facilityDealers のID)
  * @returns {{templateStatus:string, orderNumber:string, mails:Array<object>, unrouted:Array<object>, allReady:boolean}}
  */
-export function buildOrderMailPreview(order, { facilityName = order.facilityName || "", dealers = {} } = {}) {
+export function buildOrderMailPreview(order, { facilityName = order.facilityName || "", dealers = {}, profile = GENERIC_DRAFT_PROFILE, confirmationEmails = [] } = {}) {
   const lines = orderLinesOf(order).map((l, i) => ({ raw: l, view: describeLine(l, i) }));
   const orderNumber = order.orderNumber || "";
   const groups = new Map();   // dealerId → 明細
@@ -80,11 +106,14 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
     const current = dealers[dealerId] || null;
     const snapshotName = ls[0].raw.dealer && ls[0].raw.dealer.name;
     const dealerName = oneLine((current && current.name) || snapshotName || "");
-    const to = current ? orderRecipients(current) : [];
+    const dealerTo = current ? orderRecipients(current) : [];   // ① ディーラーの発注用メール
+    const confirmTo = cleanEmails(confirmationEmails);            // ② 固定の確認先(設定から渡す。コードに固定しない)
+    const ordererEmail = oneLine(order.createdBy && order.createdBy.email).toLowerCase();
+    const ordererTo = profile.sendToOrderer ? cleanEmails([ordererEmail]) : [];   // ③ 発注者(サーバーが記録したログイン情報)
     const warnings = [];
     let blocked = null;
     if (!current) blocked = "dealer-deleted";               // 発注後にディーラーが削除された
-    else if (!to.length) blocked = "no-order-email";        // 発注用メールがない(使用報告用だけの場合を含む)
+    else if (!dealerTo.length) blocked = "no-order-email";        // 発注用メールがない(使用報告用だけの場合を含む)
     if (current && snapshotName && current.name && snapshotName !== current.name) warnings.push(`発注時のディーラー名「${snapshotName}」から「${current.name}」に変更されています`);
     // 発注時の判定(参考)と、生成時点の判定が食い違うとき
     const snapAllowed = ls.every(l => !l.raw.dispatch || l.raw.dispatch.allowed === true);
@@ -92,13 +121,16 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
     if (blocked && snapAllowed && ls.some(l => l.raw.dispatch)) warnings.push("発注時は送信可と判定されましたが、現在のディーラー設定では送信できません");
     const lineViews = ls.map(l => l.view);
     const totalQuantity = lineViews.reduce((s, l) => s + l.quantity, 0);
-    const subject = buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity });
-    const body = buildBody({
+    if (profile.sendToOrderer && !ordererTo.length) warnings.push("発注者のメールアドレスが記録されていないため、発注者宛の確認は含まれません");
+    const gas = profile.format === "gas-questions";
+    const subject = gas ? oneLine(profile.subject) : buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity });
+    const body = gas ? buildGasStyleBody({ dealerName, lines: lineViews, ordererEmail: ordererTo[0] || ordererEmail, notes: order.notes, profile }) : buildBody({
       facilityName, orderNumber, orderedAtLabel: formatDateTimeJst(order.createdAt), orderedBy: orderedByLabel(order),
       dealerName, lines: lineViews, totalQuantity, notes: order.notes
     });
     // 備考は注文時の自由記述。実送信の前に人が内容を確認できるよう、本文とは別にも返す(reviewRequired: 実送信の前に必ず確認する)
-    return { dealerId, dealerName, templateStatus: TEMPLATE_STATUS, reviewRequired: true, notes: order.notes ? String(order.notes).trim() : "", status: blocked ? "blocked" : "ready", blockedReason: blocked, to: blocked ? [] : to, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
+    const to = blocked ? [] : [...new Set([...dealerTo, ...confirmTo, ...ordererTo])];   // すべて To。CC・BCC は使わない
+    return { dealerId, dealerName, templateStatus: profile.confirmed ? "gas-compatible" : TEMPLATE_STATUS, profileId: profile.id, reviewRequired: true, notes: order.notes ? String(order.notes).trim() : "", status: blocked ? "blocked" : "ready", blockedReason: blocked, to, cc: [], bcc: [], recipients: blocked ? { dealer: [], confirmation: [], orderer: [] } : { dealer: dealerTo, confirmation: confirmTo, orderer: ordererTo }, subject, body, lineNos: lineViews.map(l => l.lineNo), totalQuantity, warnings };
   });
-  return { templateStatus: TEMPLATE_STATUS, orderNumber, mails, unrouted, allReady: mails.length > 0 && unrouted.length === 0 && mails.every(m => m.status === "ready") };
+  return { templateStatus: profile.confirmed ? "gas-compatible" : TEMPLATE_STATUS, profileId: profile.id, orderNumber, mails, unrouted, allReady: mails.length > 0 && unrouted.length === 0 && mails.every(m => m.status === "ready") };
 }

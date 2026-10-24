@@ -50,6 +50,7 @@ export function describeLine(line, index = 0) {
   return {
     lineNo: line.lineNo || index + 1,
     maker: item.manufacturer || "",
+    displayName: item.displayName || [item.manufacturer, item.model].filter(Boolean).join(" / "), toricModel: item.toricModel || "",
     model: item.toricModel || baseModelName({ displayName: item.displayName, model: item.model }),
     isToric: item.isToric === true, isMultifocal: item.isMultifocal === true,
     power: item.power || "", quantity: Number(item.quantity) || 0,
