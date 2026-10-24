@@ -77,14 +77,15 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   // ---------- 注文者 ----------
   function ordererRow(o = { id: null, name: "", email: "", active: true }) {
-    const row = h("div", { class: "settings-row", "data-id": o.id || "" },
+    // 有効/無効は画面では操作しない。新規は有効(active=true)、既存の値はそのまま保持する(互換性)
+    const row = h("div", { class: "settings-row settings-row-orderer", "data-id": o.id || "", "data-active": o.active ? "1" : "0" },
       h("input", { class: "form-control", "data-f": "name", type: "text", value: o.name, maxlength: LIMITS.ordererNameMax, placeholder: "注文者名", "aria-label": "注文者名" }),
       h("input", { class: "form-control", "data-f": "email", type: "email", value: o.email || "", placeholder: "メールアドレス（任意）", "aria-label": "メールアドレス" }),
-      h("label", { class: "settings-check" }, h("input", { "data-f": "active", type: "checkbox", checked: o.active }), "有効"),
       h("span", { class: "settings-move" },
+        o.active ? null : h("span", { class: "form-hint", title: "注文フォームの選択肢には表示されません" }, "無効"),
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "up", "aria-label": "上へ" }, "↑"),
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "down", "aria-label": "下へ" }, "↓")),
-      h("button", { type: "button", class: "btn btn-outline-sm settings-delete", "data-act": "delete", "aria-label": "この注文者を削除", title: "削除" }, trashIcon()),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "down", "aria-label": "下へ" }, "↓"),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "delete", "aria-label": "この注文者を削除", title: "削除" }, trashIcon())),
       h("p", { class: "error-message", "data-err": "" }));
     row.addEventListener("input", markDirty);
     row.addEventListener("change", markDirty);
@@ -131,7 +132,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     id: r.getAttribute("data-id") || null,
     name: r.querySelector('[data-f="name"]').value,
     email: r.querySelector('[data-f="email"]').value,
-    active: r.querySelector('[data-f="active"]').checked
+    active: r.getAttribute("data-active") !== "0"
   }));
 
   function showRowErrors(section, errors) {
@@ -164,7 +165,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
       h("h3", {}, "注文者"),
-      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。無効にすると選択肢から外れます（過去の注文には影響しません）。ゴミ箱で削除すると一覧から無くなります。並び順は上から順です。"),
+      h("p", { class: "form-hint" }, "注文フォームの「注文者」に表示されます。ゴミ箱で削除すると一覧から無くなります（過去の注文には影響しません）。並び順は上から順です。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "注文者を追加"),

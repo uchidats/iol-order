@@ -1517,7 +1517,25 @@ input[type="date"].form-control {
 
 .settings-move {
   display: inline-flex;
+  align-items: center;
   gap: 4px;
+}
+
+/* 注文者の行: 名前・メール・↑↓・ゴミ箱を1行に。狭い画面では名前を1段目、メールと操作ボタンを2段目に配置 */
+.settings-row-orderer {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.settings-row-orderer .form-control {
+  min-width: 0;
+}
+
+.settings-row-orderer .btn-outline-sm {
+  padding-left: 8px;
+  padding-right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .settings-card {
@@ -1565,6 +1583,14 @@ input[type="date"].form-control {
 @media (max-width: 560px) {
   .settings-row {
     grid-template-columns: 1fr;
+  }
+
+  .settings-row-orderer {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .settings-row-orderer [data-f="name"] {
+    grid-column: 1 / -1;
   }
 }
 
