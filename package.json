@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-iol-rules \"node --test tests/rules/*.test.js\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-iol-rules \"node --test tests/rules/*.test.js\"",
+    "deploy:dev:firestore": "firebase deploy --only firestore --project medconf-iol-dev"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
-    "firebase": "^10.14.1"
+    "firebase": "^10.14.1",
+    "firebase-admin": "^12.7.0"
   }
 }

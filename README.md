@@ -160,3 +160,5 @@ tests/                      `npm test`（Node標準テストランナー）
 - Security Rules: `firestore.rules`。権限設計は [docs/firestore-data-model.md](docs/firestore-data-model.md)。
 - テスト: `npm test`（単体）、`npm run test:rules`（Firestoreエミュレータ。Java と firebase-tools が必要。`demo-` プロジェクトで実行し、実プロジェクトには接続しません）。
 - **サービスアカウント秘密鍵・Admin SDK 認証情報は Git に置かないこと**（`.gitignore` で代表的なファイル名を除外済み）。Web 用の `firebaseConfig` は公開前提の識別情報で、秘密鍵とは別物です。
+
+詳細な運用手順（Console設定・ログイン接続テスト・管理者初期登録）は [docs/firebase-dev-runbook.md](docs/firebase-dev-runbook.md) を参照。

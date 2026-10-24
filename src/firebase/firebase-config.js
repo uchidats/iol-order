@@ -7,7 +7,7 @@
  *   従来どおりの静的モード（dryrun）で動作する。値を推測して埋めないこと。
  */
 export const FIREBASE_CONFIG = Object.freeze({
-  apiKey: "", // TODO: Firebase Console「プロジェクトの設定 > マイアプリ」の値を設定
+  apiKey: "AIzaSyCC3xOe6BtUNkFN8xR8hyuwvDa10r83lR0", // Webアプリ用の公開キー（Firebase CLI apps:sdkconfig の値と照合済み）
   authDomain: "medconf-iol-dev.firebaseapp.com",
   projectId: "medconf-iol-dev",
   appId: "1:591596535765:web:d7a336aa6c6bb3d229875c"

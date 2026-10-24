@@ -39,11 +39,15 @@ test("有効な所属があれば許可し、施設IDと権限を返す", () => 
   assert.equal(r.role, "admin");
 });
 
-test("apiKey が未提供の間は Firebase 未設定として扱い、値を推測しない", () => {
+test("Firebase設定: 開発プロジェクトの値が揃っている（秘密鍵類は含まない）", () => {
   assert.equal(FIREBASE_CONFIG.projectId, "medconf-iol-dev");
+  assert.equal(FIREBASE_CONFIG.authDomain, "medconf-iol-dev.firebaseapp.com");
   assert.equal(FIREBASE_CONFIG.appId, "1:591596535765:web:d7a336aa6c6bb3d229875c");
-  assert.equal(FIREBASE_CONFIG.apiKey, "");
-  assert.equal(isFirebaseConfigured(), false);
-  assert.deepEqual(missingFirebaseKeys(), ["apiKey"]);
-  assert.equal(isFirebaseConfigured({ ...FIREBASE_CONFIG, apiKey: "x" }), true);
+  assert.match(FIREBASE_CONFIG.apiKey, /^AIza[0-9A-Za-z_-]{35}$/);
+  assert.equal(isFirebaseConfigured(), true);
+  assert.deepEqual(missingFirebaseKeys(), []);
+  assert.equal(isFirebaseConfigured({ ...FIREBASE_CONFIG, apiKey: "" }), false);
+  assert.deepEqual(missingFirebaseKeys({ ...FIREBASE_CONFIG, apiKey: "" }), ["apiKey"]);
+  const keys = Object.keys(FIREBASE_CONFIG);
+  assert.ok(!keys.some(k => /private|secret|client_email|serviceAccount/i.test(k)));
 });
