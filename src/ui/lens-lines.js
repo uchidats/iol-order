@@ -37,7 +37,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     const line = { n };
     line.chkMf = h("input", { type: "checkbox", "data-f": "multifocal" });
     line.chkToric = h("input", { type: "checkbox", "data-f": "toric" });
-    line.model = h("select", { id: id("lensModel"), class: "form-control", "data-f": "model" }, h("option", { value: "" }, "選択してください"));
+    line.model = h("select", { id: id("lensModel"), class: "form-control", "data-f": "model" }, h("option", { value: "" }, "選択"));
     line.power = h("select", { id: id("lensPower"), class: "form-control", "data-f": "power" }, h("option", { value: "" }, "選択してください"));
     line.date = h("input", { id: id("lensDate"), type: "date", class: "form-control", "data-f": "date" });
     line.date.min = minDate();
@@ -88,7 +88,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
   function rebuildModels(line, prevKey = "") {
     const shown = filterLensOptions(getOptions(), { multifocal: line.chkMf.checked, toric: line.chkToric.checked });
     while (line.model.children.length > 1) line.model.removeChild(line.model.lastChild);
-    line.model.firstElementChild.textContent = shown.length ? "選択してください" : "該当するIOLがありません";
+    line.model.firstElementChild.textContent = shown.length ? "選択" : "該当するIOLがありません";
     const byMaker = new Map();
     shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
     byMaker.forEach((list, maker) => {
@@ -115,7 +115,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
   }
 
   function renumber() {
-    lines.forEach((l, i) => { l.title.textContent = `レンズ ${i + 1}`; l.removeBtn.hidden = lines.length <= 1; });
+    lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.hidden = lines.length <= 1; });
     addButton.disabled = lines.length >= MAX_LINES;
   }
 
