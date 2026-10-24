@@ -3,7 +3,7 @@ import { escapeHtml } from "./dom.js";
 /**
  * ヘッダーのメニュー（ログイン中のユーザー・施設名・施設の切り替え・ログアウト）
  * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。
- * @param {{onSwitchFacility:()=>void, onSignOut:()=>void}} handlers
+ * @param {{onSwitchFacility:()=>void, onOpenSettings:()=>void, onSignOut:()=>void}} handlers
  */
 export function createHeaderMenu(handlers) {
   const inner = document.querySelector(".header-inner");
@@ -31,7 +31,7 @@ export function createHeaderMenu(handlers) {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
 
   return {
-    /** @param {{user:object, facilityName:string, canSwitch:boolean}|null} info nullで非表示 */
+    /** @param {{user:object, facilityName:string, canSwitch:boolean, canSettings:boolean}|null} info nullで非表示（canSettings は施設管理者のみ true） */
     update(info) {
       if (!info) { wrap.hidden = true; setOpen(false); return; }
       wrap.hidden = false;
@@ -41,8 +41,11 @@ export function createHeaderMenu(handlers) {
           <div class="header-menu-label">ログイン中</div><div>${who}</div>
           <div class="header-menu-label">施設</div><div>${escapeHtml(info.facilityName)}</div>
         </div>
+        ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
+      const st = panel.querySelector("#menuFacilitySettings");
+      if (st) st.addEventListener("click", () => { setOpen(false); handlers.onOpenSettings(); });
       const sw = panel.querySelector("#menuSwitchFacility");
       if (sw) sw.addEventListener("click", () => { setOpen(false); handlers.onSwitchFacility(); });
       panel.querySelector("#menuSignOut").addEventListener("click", () => { setOpen(false); handlers.onSignOut(); });

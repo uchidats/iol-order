@@ -13,6 +13,8 @@ let selectedModelData = null;
 let currentPendingOrderData = null;
 let currentAllowedPowers = [...GOOGLE_FORM_ALL_POWERS];
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
+let facilityRepository = null;
+let facilityRepositoryId = null;
 
 const el = {};
 
@@ -56,6 +58,8 @@ export async function initOrderForm({ config, repository, facilityId, facility =
   cacheElements();
   appConfig = config;
   currentFacility = facility;
+  facilityRepository = repository;
+  facilityRepositoryId = facilityId;
 
   const [adoptedIols, orderers] = await Promise.all([
     repository.listAdoptedIols(facilityId),
@@ -518,4 +522,33 @@ export function isOrderFormDirty() {
     el.modelSelect.value || el.ordererSelect.value || el.surgeryDateInput.value ||
     el.notesInput.value.trim() || currentPendingOrderData
   );
+}
+
+/**
+ * 施設設定の変更（注文者・採用IOL）を注文フォームの選択肢へ反映する。
+ * 入力済みの値は、新しい選択肢にも存在する場合のみ維持する。
+ */
+export async function reloadFacilityOptions() {
+  if (!facilityRepository || !el.form) return;
+  const [adoptedIols, orderers] = await Promise.all([
+    facilityRepository.listAdoptedIols(facilityRepositoryId),
+    facilityRepository.listOrderers(facilityRepositoryId)
+  ]);
+
+  const prevModel = el.modelSelect.value;
+  const prevOrderer = el.ordererSelect.value;
+
+  availableModels = resolveAdoptedModels(adoptedIols);
+  while (el.modelSelect.children.length > 1) el.modelSelect.removeChild(el.modelSelect.lastChild);
+  while (el.ordererSelect.children.length > 1) el.ordererSelect.removeChild(el.ordererSelect.lastChild);
+  initModelSelect();
+  initOrdererSelect(orderers.filter(o => o.active));
+
+  el.ordererSelect.value = [...el.ordererSelect.options].some(o => o.value === prevOrderer) ? prevOrderer : "";
+  if (prevModel && !availableModels.some(m => m.displayName === prevModel)) {
+    el.modelSelect.value = "";
+    handleModelChange(); // 採用解除されたモデルが選ばれていた場合はリセット
+  } else {
+    el.modelSelect.value = prevModel;
+  }
 }

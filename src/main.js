@@ -1,8 +1,9 @@
 import { loadConfig } from "./config.js";
 import { createStaticRepository, DEFAULT_FACILITY_ID } from "./data/static-repository.js";
-import { initOrderForm, isOrderFormDirty } from "./ui/order-form.js";
+import { initOrderForm, isOrderFormDirty, reloadFacilityOptions } from "./ui/order-form.js";
 import { initBiometry } from "./biometry/biometry-ui.js";
 import { biometryState } from "./biometry/state.js";
+import { IOL_MODELS } from "./data/iol-models.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-config.js";
 import { decideAccess, activeMemberships, ACCESS } from "./domain/access.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
@@ -52,7 +53,8 @@ async function bootstrapWithFirebase(config) {
   let error = "";
   let busy = false;
   let formUid = null; // 注文画面を初期化済みのユーザー
-  let ctx = null;     // { service, db, repository }
+  let ctx = null;     // { service, db, repository, settingsApi }
+  let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
 
   const ui = createAuthUi({
     onGoogle: () => run(() => ctx.service.signInWithGoogle()),
@@ -73,8 +75,31 @@ async function bootstrapWithFirebase(config) {
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
+    onOpenSettings: () => openSettings(),
     onSignOut: () => signOut()
   });
+
+  const ORDER_VIEW_IDS = ["iolOrderForm", "ocrFeatureCard"];
+  const setOrderViewHidden = (hidden) => ORDER_VIEW_IDS.forEach(id => document.getElementById(id).classList.toggle("hidden", hidden));
+
+  /** 施設設定を開く。表示は施設管理者のみ（書き込みはFirestoreルールでも検証される） */
+  async function openSettings() {
+    const access = decideAccess(state);
+    if (access.state !== ACCESS.GRANTED || access.role !== "admin") return;
+    if (!settings) {
+      const { createFacilitySettings } = await import("./ui/facility-settings.js");
+      settings = createFacilitySettings({
+        mount: document.querySelector("main.main-content"),
+        repository: ctx.repository,
+        settingsApi: ctx.settingsApi,
+        masters: IOL_MODELS,
+        onSaved: () => reloadFacilityOptions(),
+        onClose: () => setOrderViewHidden(false)
+      });
+    }
+    setOrderViewHidden(true);
+    await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
+  }
 
   async function signOut() {
     selection.clearRemembered(window.localStorage); // 再ログイン時は施設を選び直す
@@ -90,7 +115,11 @@ async function bootstrapWithFirebase(config) {
     const access = decideAccess(state);
     ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy });
     if (access.state === ACCESS.GRANTED) {
-      menu.update({ user: state.user, facilityName: facilityName(access.facilityId), canSwitch: access.memberships.length > 1 });
+      menu.update({
+        user: state.user, facilityName: facilityName(access.facilityId),
+        canSwitch: access.memberships.length > 1, canSettings: access.role === "admin"
+      });
+      if (settings && settings.isOpen()) setOrderViewHidden(true); // 設定画面の表示中は注文画面を隠したまま
     } else {
       menu.update(null);
     }
@@ -196,7 +225,7 @@ async function bootstrapWithFirebase(config) {
   render(); // LOADING
 
   try {
-    const [{ loadFirebaseSdk }, { createAuthService }, { createFirestoreRepository, fetchMemberships }] =
+    const [{ loadFirebaseSdk }, { createAuthService }, { createFirestoreRepository, createFirestoreSettingsApi, fetchMemberships }] =
       await Promise.all([
         import("./firebase/sdk.js"),
         import("./firebase/auth-service.js"),
@@ -211,7 +240,11 @@ async function bootstrapWithFirebase(config) {
       currentUrl: () => location.origin + location.pathname,
       storage: window.localStorage
     });
-    ctx = { service, db, repository: createFirestoreRepository(db, sdk.firestore) };
+    ctx = {
+      service, db,
+      repository: createFirestoreRepository(db, sdk.firestore),
+      settingsApi: createFirestoreSettingsApi(db, sdk.firestore)
+    };
 
     // メールリンクからの復帰
     if (service.isEmailLink(location.href)) {

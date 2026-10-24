@@ -120,11 +120,10 @@ test("注文者(orderer)は他メンバーの一覧を読めず、設定も変�
 test("施設管理者は自施設の注文者・採用IOL・ディーラーを管理できる", async () => {
   const db = as("adminA");
   await assertSucceeds(setDoc(doc(db, "facilities/fA/orderers/n1"), { facilityId: "fA", name: "新規", active: true }));
-  await assertSucceeds(setDoc(doc(db, "facilities/fA/adoptedIols/n1"), { facilityId: "fA", catalogIolId: "c", enabled: true }));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/adoptedIols/hoya-xy1"), { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true }));
   await assertSucceeds(setDoc(doc(db, "facilities/fA/facilityDealers/n1"), {
     facilityId: "fA", dealerId: "d", name: "n", active: true, orderEmails: ["a@example.jp"]
   }));
-  await assertSucceeds(deleteDoc(doc(db, "facilities/fA/orderers/o1")));
   await assertSucceeds(getDocs(collection(db, "facilities/fA/members")));
 });
 
@@ -263,4 +262,91 @@ test("位置情報は orderer・他施設の管理者は変更できないが、
 
 test("位置情報と同時に status 等を変更することはできない", async () => {
   await assertFails(updateDoc(doc(as("adminA"), "facilities/fA"), { location: { lat: 35, lng: 139 }, status: "suspended" }));
+});
+
+// ---------- 施設設定（注文者・採用IOL・ディーラー） ----------
+const ok = (db, p, data) => assertSucceeds(setDoc(doc(db, p), data));
+const ng = (db, p, data) => assertFails(setDoc(doc(db, p), data));
+
+test("注文者: 並び順(sortOrder)とメールの検証", async () => {
+  const db = as("adminA");
+  const base = { facilityId: "fA", name: "注文者", active: true };
+  await ok(db, "facilities/fA/orderers/s1", { ...base, sortOrder: 10, email: "doctor@example.jp" });
+  await ok(db, "facilities/fA/orderers/s2", { ...base, sortOrder: 0 });
+  for (const bad of [-1, 1.5, "10", 100001]) await ng(db, "facilities/fA/orderers/s3", { ...base, sortOrder: bad });
+  for (const bad of ["not-an-email", "a@b", "@example.jp", "a b@example.jp", "", 123]) {
+    await ng(db, "facilities/fA/orderers/s4", { ...base, email: bad });
+  }
+  await ng(db, "facilities/fA/orderers/s5", { ...base, name: "あ".repeat(51) });
+});
+
+test("採用IOL: ドキュメントIDと catalogIolId が一致し、共通マスターのIDのみ許可", async () => {
+  const db = as("adminA");
+  await ok(db, "facilities/fA/adoptedIols/alcon-cna0t0", { facilityId: "fA", catalogIolId: "alcon-cna0t0", enabled: true });
+  await ok(db, "facilities/fA/adoptedIols/alcon-cna0t0", { facilityId: "fA", catalogIolId: "alcon-cna0t0", enabled: false }); // 採用解除
+  await ok(db, "facilities/fA/adoptedIols/hoya-xy1", { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true, dealerId: "dealer-1" });
+  // 存在しないIOL / ID不一致 / 他施設ID / 余分なフィールド
+  await ng(db, "facilities/fA/adoptedIols/unknown-iol", { facilityId: "fA", catalogIolId: "unknown-iol", enabled: true });
+  await ng(db, "facilities/fA/adoptedIols/hoya-xy1", { facilityId: "fA", catalogIolId: "nidek-nsp-2", enabled: true });
+  await ng(db, "facilities/fA/adoptedIols/auto-id-1", { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true });
+  await ng(db, "facilities/fA/adoptedIols/hoya-py-60ad", { facilityId: "fB", catalogIolId: "hoya-py-60ad", enabled: true });
+  await ng(db, "facilities/fA/adoptedIols/hoya-py-60ad", { facilityId: "fA", catalogIolId: "hoya-py-60ad", enabled: true, price: 1 });
+  await ng(db, "facilities/fA/adoptedIols/hoya-py-60ad", { facilityId: "fA", catalogIolId: "hoya-py-60ad", enabled: "true" });
+});
+
+test("ディーラー: 発注用と使用報告用のメールを別々に管理し、形式を検証", async () => {
+  const db = as("adminA");
+  const base = { facilityId: "fA", name: "ディーラーX", active: true };
+  await ok(db, "facilities/fA/facilityDealers/d-ok", {
+    ...base, orderEmails: ["order@example.jp"], usageReportEmails: ["report1@example.jp", "report2@example.jp"], sortOrder: 20
+  });
+  await ok(db, "facilities/fA/facilityDealers/d-min", base); // メール未設定でも登録可
+  await ok(db, "facilities/fA/facilityDealers/d-link", { ...base, dealerId: "global-dealer-1", orderEmails: [], usageReportEmails: [] });
+  const five = ["1", "2", "3", "4", "5"].map(n => n + "@example.jp");
+  await ok(db, "facilities/fA/facilityDealers/d-five", { ...base, orderEmails: five });
+  for (const field of ["orderEmails", "usageReportEmails"]) {
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: ["ok@example.jp", "broken"] });
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: ["broken"] });
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: [...five.slice(0, 4), "bad"] }); // 5件目も検証される
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: [...five, "6@example.jp"] });
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: "order@example.jp" }); // リスト以外
+    await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, [field]: [123] });
+  }
+  await ng(db, "facilities/fA/facilityDealers/d-bad", { facilityId: "fA", active: true }); // name 必須
+  await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, secretNote: "x" });
+});
+
+test("施設設定は所属先の施設管理者だけが変更できる", async () => {
+  const orderer = { facilityId: "fA", name: "新規", active: true };
+  const iol = { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true };
+  const dealer = { facilityId: "fA", name: "D", active: true };
+  const targets = [
+    ["facilities/fA/orderers/z1", orderer],
+    ["facilities/fA/adoptedIols/hoya-xy1", iol],
+    ["facilities/fA/facilityDealers/z1", dealer]
+  ];
+  for (const [p, data] of targets) {
+    await ng(as("ordA"), p, data);       // 同施設の orderer 権限
+    await ng(as("adminB"), p, data);     // 他施設の管理者
+    await ng(as("stranger"), p, data);   // 所属なし
+    await ng(as("offA"), p, data);       // 無効化された所属
+    await ng(anon(), p, data);           // 未認証
+    await ok(as("adminA"), p, data);     // 所属先の管理者
+  }
+});
+
+test("設定ドキュメントの削除は運営者のみ（施設管理者は無効化で運用）", async () => {
+  for (const p of ["facilities/fA/orderers/o1", "facilities/fA/adoptedIols/a1", "facilities/fA/facilityDealers/d1"]) {
+    await assertFails(deleteDoc(doc(as("adminA"), p)));
+    await assertFails(deleteDoc(doc(as("ordA"), p)));
+  }
+  await assertSucceeds(deleteDoc(doc(platform(), "facilities/fA/orderers/o1")));
+});
+
+test("設定の読取は所属メンバーのみ。他施設の設定は読めない", async () => {
+  for (const sub of ["orderers", "adoptedIols", "facilityDealers"]) {
+    await assertSucceeds(getDocs(collection(as("ordA"), "facilities/fA/" + sub)));
+    await assertFails(getDocs(collection(as("ordA"), "facilities/fB/" + sub)));
+    await assertFails(getDocs(collection(as("stranger"), "facilities/fA/" + sub)));
+  }
 });

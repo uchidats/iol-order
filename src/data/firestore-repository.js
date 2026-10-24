@@ -6,6 +6,11 @@
  * @param {object} db  Firestore インスタンス
  * @param {object} fs  firebase-firestore のモジュラー関数群
  */
+// 並び順: sortOrder の昇順（未設定は末尾）→ 名前
+const bySortOrder = (a, b) =>
+  (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
+  || String(a.name || "").localeCompare(String(b.name || ""), "ja");
+
 export function createFirestoreRepository(db, fs) {
   const listSub = async (facilityId, name) => {
     const snap = await fs.getDocs(fs.collection(db, "facilities", facilityId, name));
@@ -18,9 +23,9 @@ export function createFirestoreRepository(db, fs) {
       if (!snap.exists()) throw new Error("施設情報を取得できません");
       return { id: snap.id, ...snap.data() };
     },
-    listOrderers: (facilityId) => listSub(facilityId, "orderers"),
+    listOrderers: async (facilityId) => (await listSub(facilityId, "orderers")).sort(bySortOrder),
     listAdoptedIols: (facilityId) => listSub(facilityId, "adoptedIols"),
-    listDealers: (facilityId) => listSub(facilityId, "facilityDealers")
+    listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder)
   };
 }
 
@@ -37,4 +42,28 @@ export async function fetchMemberships(db, fs, uid) {
     role: d.data().role,
     status: d.data().status
   }));
+}
+
+/**
+ * 施設設定の書き込みAPI（施設管理者のみ。実際の権限は Security Rules が検証する）
+ * writes: [{ id: string|null, data: object }]（id が null なら新規ドキュメント）
+ * 1回の保存を writeBatch で原子的に反映する。
+ */
+export function createFirestoreSettingsApi(db, fs) {
+  const commit = async (facilityId, sub, writes) => {
+    if (!writes.length) return;
+    const batch = fs.writeBatch(db);
+    for (const w of writes) {
+      const ref = w.id
+        ? fs.doc(db, "facilities", facilityId, sub, w.id)
+        : fs.doc(fs.collection(db, "facilities", facilityId, sub));
+      batch.set(ref, { ...w.data, updatedAt: fs.serverTimestamp() });
+    }
+    await batch.commit();
+  };
+  return {
+    saveOrderers: (facilityId, writes) => commit(facilityId, "orderers", writes),
+    saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
+    saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes)
+  };
 }

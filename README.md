@@ -163,6 +163,9 @@ tests/                      `npm test`（Node標準テストランナー）
 
 詳細な運用手順（Console設定・ログイン接続テスト・管理者初期登録）は [docs/firebase-dev-runbook.md](docs/firebase-dev-runbook.md) を参照。
 
+### 施設設定（施設管理者のみ）
+ヘッダーメニューの「施設設定」から、注文者（追加・編集・無効化・並び替え）、採用IOL（共通マスターから選択）、ディーラー（発注用／使用報告用メールを別管理）を設定できます。設定は注文フォームの選択肢へ反映されます。権限と入力検証は Firestore Security Rules でも強制されます（[docs/firestore-data-model.md](docs/firestore-data-model.md)）。
+
 ### 施設選択と位置情報
 複数施設に所属するユーザーは、ログイン直後に施設を選択します（所属1つなら自動）。前回の施設は端末に記憶して自動復元、切替はヘッダーメニューから。
 位置情報（任意）は、同意した端末でログイン時に1回だけ取得し、施設の登録座標とブラウザ内で比較します。保存・送信・継続追跡はせず、アクセス権限の判断にも使いません。詳細は [docs/firestore-data-model.md](docs/firestore-data-model.md)。

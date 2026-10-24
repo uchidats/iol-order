@@ -23,9 +23,10 @@ dealers/{dealerId}               ディーラー本体（運営者 + memberUids 
 facilities/{facilityId}          name, status: pending|active|suspended, updatedAt,
                                  location?: {lat, lng}, geoRadiusM?: number   ← 現在地による施設選択の補助（任意）
   ├─ members/{uid}               uid, role: admin|orderer, status: active|disabled, displayName?, updatedAt
-  ├─ orderers/{id}               facilityId, name, email?, active, updatedAt
-  ├─ adoptedIols/{id}            facilityId, catalogIolId, dealerId?, enabled, updatedAt
-  ├─ facilityDealers/{id}        facilityId, dealerId, name, orderEmails[<=5]?, active, updatedAt
+  ├─ orderers/{id}               facilityId, name(1-50), email?, active, sortOrder?, updatedAt
+  ├─ adoptedIols/{catalogIolId}  facilityId, catalogIolId(=doc id, 共通マスターのID), dealerId?, enabled, updatedAt
+  ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, active, sortOrder?, updatedAt,
+  │                              orderEmails[<=5]?（発注用）, usageReportEmails[<=5]?（使用報告用。発注用とは別管理）
   └─ orders/{orderId}            サーバー発行のみ（クライアント書込不可）
 ```
 
@@ -34,6 +35,15 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
   Rules は自分の所属ドキュメントのみ許可。`firestore.indexes.json` で `members.uid` の collection group インデックスを定義。
 - `users` コレクションは作らない（Rules でも全拒否）。プロフィールが必要になった時点で設計する。
 - 病院側の在庫管理は持たない。
+
+## 施設設定（施設管理者のみ）
+画面: ヘッダーメニューの「施設設定」（`role=admin` のみ表示）。注文者 / 採用IOL / ディーラーを編集し、保存すると注文フォームの選択肢へ即時反映される。
+- **注文者**: 追加・名前/メール編集・有効/無効・並び替え（`sortOrder` は表示順×10）。削除は運営者のみ（通常は無効化）。同名（大文字小文字・全角半角の差を無視）は登録不可。
+- **採用IOL**: 共通IOLマスター（`src/data/iol-models.js` の `IOL_MODELS[].id`）から選ぶ。ドキュメントID＝マスターID（重複採用を構造的に防ぐ）。解除は `enabled=false`。マスターに無いIDは Rules が拒否する。
+  Rules 内の許可IDの一覧は `IOL_MODELS` と同期が必要（`tests/rules-catalog-sync.test.js` が不一致を検出する）。マスターを Firestore の `iolCatalog` へ移す際にこの二重管理を解消する。
+- **ディーラー**: 名称・有効/無効・**発注用メール**と**使用報告用メール**（それぞれ最大5件、形式検証あり）。現時点では登録のみで、メール送信・ディーラー連携は未実装。
+- 検証は画面（`src/domain/facility-settings.js`）と Rules の両方で行う。権限は常に Rules が最終判定し、画面でメニューを隠すだけに依存しない。
+- 所属先以外の施設・orderer 権限・無効化された所属・未認証は、設定の読み書きができない（Rules テストで検証）。
 
 ## 施設の選択と位置情報（GPS）
 施設の確定ルール（複数所属の場合のみ選択が発生する）:
@@ -53,7 +63,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 ## 現行コードとの対応
 | 現行 | 実装 |
 |---|---|
-| `IOL_MODELS`（コード内） | 当面コード内。`adoptedIols.catalogIolId` が `displayName` を指す。`iolCatalog` への移行は今後 |
+| `IOL_MODELS`（コード内） | 当面コード内。各モデルの不変の `id` を `adoptedIols`（ドキュメントID / `catalogIolId`）が参照する。`iolCatalog` への移行は今後 |
 | `StaticRepository`（Firebase未設定時） | `FirestoreRepository`（`src/data/firestore-repository.js`）。UI層は `FacilityRepository` のみに依存 |
 | 注文送信 | 引き続き dryrun。`orders` と `createOrder` Functions は未実装 |
 

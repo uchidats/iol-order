@@ -1,5 +1,6 @@
 /**
  * IOLモデル・度数マスター（Google Form準拠）
+ * id は施設の採用IOL（adoptedIols のドキュメントID / catalogIolId）が参照する不変の識別子。変更・再利用しないこと。
  * 将来は Firestore の iolCatalog コレクションへ移行する（docs/firestore-data-model.md 参照）。
  */
 
@@ -21,6 +22,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "J&J",
     model: "DIB00V",
+    id: "jj-dib00v",
     displayName: "J&J / DIB00V",
     isToric: false,
     toricModels: [],
@@ -32,6 +34,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "J&J",
     model: "DIWxxx (トーリック)",
+    id: "jj-diwxxx-toric",
     displayName: "J&J / DIWxxx (トーリック)",
     isToric: true,
     toricModels: [
@@ -51,6 +54,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "ALCON",
     model: "CNA0T0",
+    id: "alcon-cna0t0",
     displayName: "ALCON / CNA0T0",
     isToric: false,
     toricModels: [],
@@ -62,6 +66,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "ALCON",
     model: "CNA0Tx / CNW0Tx (トーリック)",
+    id: "alcon-cna0tx-cnw0tx-toric",
     displayName: "ALCON / CNA0Tx / CNW0Tx (トーリック)",
     isToric: true,
     toricModels: [
@@ -82,6 +87,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "SANTEN",
     model: "NX-70S",
+    id: "santen-nx-70s",
     displayName: "SANTEN / NX-70S",
     isToric: false,
     toricModels: [],
@@ -93,6 +99,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "SANTEN",
     model: "LS-313MF15",
+    id: "santen-ls-313mf15",
     displayName: "SANTEN / LS-313MF15",
     isToric: false,
     toricModels: [],
@@ -104,6 +111,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "SANTEN",
     model: "LS-313MF15 Tx (トーリック)",
+    id: "santen-ls-313mf15-tx-toric",
     displayName: "SANTEN / LS-313MF15 Tx (トーリック)",
     isToric: true,
     toricModels: [
@@ -119,6 +127,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "NIDEK",
     model: "NSP-2",
+    id: "nidek-nsp-2",
     displayName: "NIDEK / NSP-2",
     isToric: false,
     toricModels: [],
@@ -140,6 +149,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "NIDEK",
     model: "NP-Tx (トーリック)",
+    id: "nidek-np-tx-toric",
     displayName: "NIDEK / NP-Tx (トーリック)",
     isToric: true,
     toricModels: [
@@ -167,6 +177,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "HOYA",
     model: "XY1",
+    id: "hoya-xy1",
     displayName: "HOYA / XY1",
     isToric: false,
     toricModels: [],
@@ -178,6 +189,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "HOYA",
     model: "PY-60AD",
+    id: "hoya-py-60ad",
     displayName: "HOYA / PY-60AD",
     isToric: false,
     toricModels: [],
@@ -189,6 +201,7 @@ export const IOL_MODELS = [
   {
     manufacturer: "ALCON",
     model: "MN60MA (イエロー)",
+    id: "alcon-mn60ma-yellow",
     displayName: "ALCON / MN60MA (イエロー)",
     isToric: false,
     toricModels: [],

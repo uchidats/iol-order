@@ -58,6 +58,40 @@ service cloud.firestore {
               || (d.geoRadiusM is number && d.geoRadiusM >= 10 && d.geoRadiusM <= 5000));
     }
 
+    // 共通IOLマスターのID（src/data/iol-models.js の IOL_MODELS[].id と一致させる。tests/rules-catalog-sync.test.js が検証）
+    function validCatalogIolId(v) {
+      return v in [
+        'jj-dib00v',
+        'jj-diwxxx-toric',
+        'alcon-cna0t0',
+        'alcon-cna0tx-cnw0tx-toric',
+        'santen-nx-70s',
+        'santen-ls-313mf15',
+        'santen-ls-313mf15-tx-toric',
+        'nidek-nsp-2',
+        'nidek-np-tx-toric',
+        'hoya-xy1',
+        'hoya-py-60ad',
+        'alcon-mn60ma-yellow'
+      ];
+    }
+
+    // メールアドレス（形式チェック）。リストは最大5件（先頭から5要素を個別に検証）
+    function emailOk(v) {
+      return v is string && v.size() <= 254 && v.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+    function emailAt(l, i) {
+      return l.size() <= i || emailOk(l[i]);
+    }
+    function validEmailList(l) {
+      return l is list && l.size() <= 5
+        && emailAt(l, 0) && emailAt(l, 1) && emailAt(l, 2) && emailAt(l, 3) && emailAt(l, 4);
+    }
+
+    function validSortOrder(d) {
+      return !('sortOrder' in d) || (d.sortOrder is int && d.sortOrder >= 0 && d.sortOrder <= 100000);
+    }
+
     // ---------- マスター ----------
     match /iolCatalog/{catalogIolId} {
       allow read: if signedIn();
@@ -110,42 +144,48 @@ service cloud.firestore {
           || (isFacilityAdmin(fid) && uid != request.auth.uid && resource.data.role == 'orderer');
       }
 
-      // 注文者
+      // 注文者（施設管理者のみ変更可。削除は運営者のみ＝通常は無効化 active=false で運用）
       match /orderers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'active', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'active', 'sortOrder', 'updatedAt'])
           && request.resource.data.keys().hasAll(['facilityId', 'name', 'active'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 50)
-          && request.resource.data.active is bool;
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+          && request.resource.data.active is bool
+          && (!('email' in request.resource.data) || emailOk(request.resource.data.email))
+          && validSortOrder(request.resource.data);
+        allow delete: if isPlatformAdmin();
       }
 
-      // 採用IOL
+      // 採用IOL（ドキュメントID = 共通IOLマスターのID。マスターに無いIDは登録不可）
       match /adoptedIols/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'catalogIolId', 'dealerId', 'enabled', 'updatedAt'])
           && request.resource.data.keys().hasAll(['facilityId', 'catalogIolId', 'enabled'])
           && request.resource.data.facilityId == fid
-          && stringIn(request.resource.data.catalogIolId, 1, 200)
-          && request.resource.data.enabled is bool;
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+          && request.resource.data.catalogIolId == id
+          && validCatalogIolId(request.resource.data.catalogIolId)
+          && request.resource.data.enabled is bool
+          && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100));
+        allow delete: if isPlatformAdmin();
       }
 
-      // 施設が使うディーラー（発注先設定）
+      // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'active', 'updatedAt'])
-          && request.resource.data.keys().hasAll(['facilityId', 'dealerId', 'name', 'active'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'active', 'sortOrder', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['facilityId', 'name', 'active'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 100)
           && request.resource.data.active is bool
-          && (!('orderEmails' in request.resource.data)
-              || (request.resource.data.orderEmails is list && request.resource.data.orderEmails.size() <= 5));
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+          && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
+          && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
+          && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
+          && validSortOrder(request.resource.data);
+        allow delete: if isPlatformAdmin();
       }
 
       // 注文（サーバーのみが作成。クライアントは読取のみ）

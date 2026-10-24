@@ -30,9 +30,9 @@ export function createStaticRepository() {
     },
     async listAdoptedIols(facilityId = DEFAULT_FACILITY_ID) {
       return IOL_MODELS.map(m => ({
-        id: m.displayName,
+        id: m.id,
         facilityId,
-        catalogIolId: m.displayName,
+        catalogIolId: m.id,
         enabled: true
       }));
     },
@@ -49,6 +49,6 @@ export function createStaticRepository() {
 export function resolveAdoptedModels(adoptedIols, catalog = IOL_MODELS) {
   return adoptedIols
     .filter(a => a.enabled)
-    .map(a => catalog.find(m => m.displayName === a.catalogIolId))
+    .map(a => catalog.find(m => m.id === a.catalogIolId))
     .filter(Boolean);
 }
