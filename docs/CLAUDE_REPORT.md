@@ -3,35 +3,38 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 作業報告の仕組みの導入(`CLAUDE.md` と本ファイルの追加)
+- **作業**: 注文履歴画面 / 発注メールの dry-run 生成
+- **ブランチ**: `feature/order-history`(`main` へは未merge)
 
 ## 変更内容
-- `CLAUDE.md` を新規作成: 報告の更新ルールと、常に守る安全ルール。
-- `docs/CLAUDE_REPORT.md` を新規作成(本ファイル)。
-- 既存の `docs/WORK_LOG.md` は存在しないため、役割の整理は不要(報告はこの1ファイルに集約)。
-- 注文処理・Firebase設定・画面には変更なし。
-
-## 直近の作業(参考。詳細は git log)
-- 注文明細に実メール送信の可否(`dispatch`)を記録、確認画面に「発注先未設定」を明示(commit `2f5f515`)。
-- 枚数と手術日の重なり修正(`7cd864e`)と、Chromium/Firefox/WebKit の回帰テスト(`34b6ebf`、`npm run test:browser`)。
+1. **注文履歴画面**(閲覧のみ。編集・削除・再注文なし)
+   - ヘッダーメニュー「注文履歴」(所属メンバー全員)。選択中の施設の注文を新しい順(最大50件)に表示。
+   - 一覧: 注文日時(JST)・発注者(ログイン情報 `createdBy`)・「N件・合計M枚」。詳細: 明細ごとにメーカー・モデル・度数・枚数・手術日・担当医・発注先(未設定は「発注先未設定」)。
+   - 新旧の注文形式(schemaVersion 1/2/3、旧 `orderer`)を同じ形で読む(`src/domain/order-history.js`。サーバーの `orderLinesOf` と同じ結果であることをテストで確認)。
+   - 施設間のアクセス制御は既存の Firestore Rules のまま(自施設の所属メンバーと運営者のみ読取・書込不可)。履歴の一覧クエリを Rules テストに追加。
+2. **発注メールの dry-run 生成**(送信機能なし)
+   - `src/domain/order-mail.js`: 発注先ディーラーごとに振り分け、件名・本文・宛先(**発注用メールのみ**)を生成。複数ディーラー対応。`dispatch.allowed` は参考情報とし、生成時点のディーラー設定(存在・発注用メール)を再検証。ヘッダー注入(改行)対策あり。
+   - `scripts/admin/preview-order-mail.mjs`: 保存済み注文のプレビューを表示(読み取り専用)。
+   - 仕様は `docs/order-intake.md` に追記。
 
 ## commit ID
-- 本作業: 本ファイルを含む最新の commit(`git log -1 -- docs/CLAUDE_REPORT.md`)
-- 直前の作業 commit: `2f5f515`
+- 注文履歴画面: `9956654`
+- 発注メール dry-run: 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)
 
 ## テスト結果
-- unit 139件・Functions 87件・E2E 8件 成功(`2f5f515` 時点)。今回は文書のみの変更。
+- unit 151 / Rules 43 / ブラウザ(Chromium・Firefox・WebKit)6 すべて成功。Functions は今回変更なし。
 
 ## push状況
-- `main` は `origin/main` より **1 commit 先行(`2f5f515` と、本作業の commit は未push)**。
+- `feature/order-history` を push(`main` は未変更)。
 
 ## Firebaseデプロイ状況
-- 実施済み(2026-10-24): Rules・Functions(`medconf-iol-dev`)。`ORDER_INTAKE_ENABLED=false` のまま。
-- **未デプロイ**: `2f5f515` の Functions 変更(`dispatch` の記録)。
+- 今回なし。`ORDER_INTAKE_ENABLED=false` のまま。
+- 未デプロイ(前回から継続): `2f5f515` の Functions 変更(`dispatch` の記録)。注文履歴は Rules・Functions の変更なしで動く。
 
 ## 残課題
-- 注文履歴を一覧・表示する画面がない(データは新旧形式とも読める)。
-- 実メール送信は未実装。実装時は `dispatch.allowed` を必ず参照し、使用報告用メールを発注先に使わない(`docs/order-intake.md`)。
+- 発注メールの件名・本文の形式の確定(現行GAS側の形式が必要)。
+- 実メール送信の設計(送信時点のディーラー設定の扱い・失敗時の再送・送信履歴)。
+- 注文履歴: 50件を超える場合のページング、`createdAt` が無い古い注文の表示(Firestore の並び替えで除外される)。
 
 ## 判断待ち事項
-- なし。
+- 現行 Google Forms + GAS の発注メールの件名・本文・宛先の形式(サンプルまたは GAS のテンプレート)を共有いただければ、暫定テンプレートを差し替えます。

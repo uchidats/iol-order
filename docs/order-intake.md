@@ -75,3 +75,11 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 - 注文全体の `dispatchAllowed` は、全明細が `allowed=true` のときだけ true。
 - **将来の実メール送信は、`dispatch.allowed=true` の明細だけを対象にし、使用報告用メール(`usageReportEmails`)を発注の送信先に使わない。** メールアドレスは注文には保存しない(送信時点のディーラー設定を参照するか、その設計時に別途決める)。
 - 現在は送信機能なし(`ORDER_INTAKE_ENABLED=false`)。画面の確認では、発注先がない明細に「発注先未設定」と表示する。
+
+## 発注メールのdry-run生成(プレビューのみ・送信しない)
+- `src/domain/order-mail.js`(純粋関数)と `scripts/admin/preview-order-mail.mjs`(読み取り専用)。**メールの送信機能は実装していない。**
+- 1回の注文の明細を、発注先ディーラーごとに振り分けて、ディーラーごとに1通分の 件名・本文・宛先を作る。担当医・手術日・度数が異なる明細も、そのまま対応付く。
+- 宛先は、**生成時点の**施設のディーラー設定の発注用メール(`orderEmails`)だけ(重複・不正な形式は除く)。使用報告用メールは宛先にも本文にも使わない。
+- 注文に保存された `dispatch.allowed` は参考情報。生成時点で、ディーラーが存在すること・発注用メールが1件以上あることを再検証する。食い違うときは警告を付け、判定は現在の設定で行う。発注先未設定の明細はメールにせず(`unrouted`)、1通でも送れないものがあれば `allReady=false`。
+- **【保留】件名・本文の形式は未確定。** 現行 Google Forms + GAS が送るメールの形式は、このリポジトリの資料・コードに無い(GAS側は管理外)。現在の件名・本文は暫定の下書き(`templateStatus: "draft-unconfirmed"`)。形式が確定したら `buildSubject` / `buildBody` だけを差し替える(宛先の決定・振り分け・検証は形式に依存しない)。
+- 使い方: `node scripts/admin/preview-order-mail.mjs --facility <施設ID> --latest`(medconf-iol-dev・読み取りのみ)。
