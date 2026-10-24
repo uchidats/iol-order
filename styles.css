@@ -823,32 +823,35 @@ input[type="date"].form-control {
   border: 1px solid var(--border-light);
 }
 
-@media (min-width: 480px) {
-  .summary-item {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-  }
+/* 確認画面は入力画面と同じく、項目名を小さく上に、内容をその下に左揃えで表示する(PC・スマホ共通) */
+.summary-item {
+  align-items: flex-start;
+  min-width: 0;
 }
 
 .summary-label {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-muted);
+  text-align: left;
 }
 
 .summary-value {
   font-size: 1rem;
   font-weight: 700;
   color: var(--text-main);
-  margin-top: 4px;
+  margin: 2px 0 0;
+  text-align: left;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
-@media (min-width: 480px) {
-  .summary-value {
-    margin-top: 0;
-    text-align: right;
-  }
+/* 補足的な項目(注文者のメール)は目立たせない */
+.summary-item-sub .summary-value {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 .highlight-value {
