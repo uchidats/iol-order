@@ -70,7 +70,7 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
       group("手術日", h("div", { class: "date-input-wrapper" }, line.date), "date", id("lensDate")));
 
     line.model.addEventListener("change", () => {
-      line.model.title = line.model.value ? line.model.selectedOptions[0].textContent : ""; // 表示しきれない長い名称は、ホバーで全文
+      line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
       clearErr(line, "model"); onModelChange(line, true); onChange();
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
@@ -95,12 +95,13 @@ export function createLensLines({ container, addButton, getOptions, minDate, onC
     shown.forEach(o => { if (!byMaker.has(o.manufacturer)) byMaker.set(o.manufacturer, []); byMaker.get(o.manufacturer).push(o); });
     byMaker.forEach((list, maker) => {
       const group = h("optgroup", { label: maker });
-      list.forEach(o => group.appendChild(h("option", { value: o.key, title: o.label }, o.label))); // 長い名称は title で全文を確認できる
+      // 表示はモデル名だけ(メーカーは見出し)。メーカー込みの全文は title で確認できる。値(key)・注文データは変わらない
+      list.forEach(o => group.appendChild(h("option", { value: o.key, title: o.label }, o.shortLabel)));
       line.model.appendChild(group);
     });
     const kept = shown.some(o => o.key === prevKey);
     line.model.value = kept ? prevKey : "";
-    line.model.title = line.model.selectedOptions[0] && line.model.value ? line.model.selectedOptions[0].textContent : "";
+    line.model.title = line.model.selectedOptions[0] && line.model.value ? line.model.selectedOptions[0].title : "";
     onModelChange(line, !(kept && prevKey)); // 選択中のモデルが残る(絞り込みだけ変わった)ときは、パワーの選択も維持する
   }
 

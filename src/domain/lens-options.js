@@ -10,7 +10,7 @@
  * @param {Array<object>} models 採用済みの系列(resolveAdoptedModels の結果)
  * @returns {Array<{key:string, label:string, manufacturer:string, model:object, toricModel:string, isToric:boolean, isMultifocal:boolean}>}
  */
-import { displayLabel } from "./lens-labels.js";
+import { displayLabel, baseModelName } from "./lens-labels.js";
 
 export function buildLensOptions(models) {
   const out = [];
@@ -18,12 +18,16 @@ export function buildLensOptions(models) {
     if (typeof m.isMultifocal !== "boolean") continue; // 分類が無い系列は推測せず表示しない
     if (m.isToric) {
       for (const t of m.toricModels) {
-        out.push({ key: `${m.id}|${t}`, label: `${m.manufacturer} / ${t}`, manufacturer: m.manufacturer, model: m, toricModel: t, isToric: true, isMultifocal: m.isMultifocal });
+        out.push({ key: `${m.id}|${t}`, label: `${m.manufacturer} / ${t}`, shortLabel: t, manufacturer: m.manufacturer, model: m, toricModel: t, isToric: true, isMultifocal: m.isMultifocal });
       }
     } else {
-      out.push({ key: m.id, label: displayLabel(m), manufacturer: m.manufacturer, model: m, toricModel: "", isToric: false, isMultifocal: m.isMultifocal });
+      out.push({ key: m.id, label: displayLabel(m), shortLabel: baseModelName(m), manufacturer: m.manufacturer, model: m, toricModel: "", isToric: false, isMultifocal: m.isMultifocal });
     }
   }
+  // プルダウン用の短い表示(モデル名だけ。メーカーは見出しで分かる)。異なるメーカーでモデル名が重複する場合は、識別できるよう「メーカー / モデル名」にする
+  const makers = new Map();
+  for (const o of out) { if (!makers.has(o.shortLabel)) makers.set(o.shortLabel, new Set()); makers.get(o.shortLabel).add(o.manufacturer); }
+  for (const o of out) if (makers.get(o.shortLabel).size > 1) o.shortLabel = o.label;
   return out;
 }
 
