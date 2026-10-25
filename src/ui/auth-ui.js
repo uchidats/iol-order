@@ -171,19 +171,61 @@ export function createAuthUi(handlers) {
     if (join) join.addEventListener("click", () => handlers.onJoin({ token: tokenEl.value.trim() }));
   }
 
+  /** 参加確認: 施設名と役割を示し、施設ごとに「参加する」「参加しない」を選ぶ(承認・辞退の検証はサーバー) */
+  function renderPendingConfirm({ user, pendingInvites, pendingBusy, error, notice }) {
+    const who = escapeHtml(user.email || user.displayName || "ログイン中");
+    const disabled = pendingBusy ? "disabled" : "";
+    const items = pendingInvites.map(p => `
+      <li class="pending-invite" data-pending="${escapeHtml(p.pendingId)}">
+        <div class="pending-invite-facility">${escapeHtml(p.facilityName || "（名称未設定）")}</div>
+        <div class="pending-invite-meta">役割 <span class="member-role-badge">${escapeHtml(p.roleLabel || "")}</span>${p.invitedByName ? ` ・ 登録者 ${escapeHtml(p.invitedByName)}` : ""}</div>
+        <div class="onboarding-actions">
+          <div class="onboarding-primary"><button type="button" class="btn btn-primary" data-act="accept" ${disabled}>参加する</button></div>
+          <button type="button" class="btn btn-secondary" data-act="decline" ${disabled}>参加しない</button>
+        </div>
+      </li>`).join("");
+    panel.innerHTML = `
+      <div class="feature-info">
+        <div class="feature-title-row"><span class="feature-title">施設への参加の確認</span></div>
+        <p class="feature-desc">${who} 宛てに、次の施設から利用者の登録があります。参加する施設を選んでください。</p>
+        <ul class="pending-invite-list">${items}</ul>
+        ${error ? `<p class="error-message" role="alert">${escapeHtml(error)}</p>` : ""}
+        ${notice ? `<p class="form-hint" role="status">${escapeHtml(notice)}</p>` : ""}
+      </div>`;
+    panel.querySelectorAll(".pending-invite").forEach((li) => {
+      const pendingId = li.getAttribute("data-pending");
+      const p = pendingInvites.find(x => x.pendingId === pendingId);
+      li.querySelector('[data-act="accept"]').addEventListener("click", () => handlers.onRespondPending({ pendingId, accept: true }));
+      li.querySelector('[data-act="decline"]').addEventListener("click", () => {
+        if (!window.confirm(`「${(p && p.facilityName) || "この施設"}」に参加しませんか？\n参加しない場合、もう一度参加するには施設の管理者に再登録を依頼してください。`)) return;
+        handlers.onRespondPending({ pendingId, accept: false });
+      });
+    });
+  }
+
   /**
    * @param {{access:object, user:object|null, notice?:string, error?:string,
    *          facilities?:Array<{id:string,name:string,location?:object,geoRadiusM?:number}>, busy?:boolean,
-   *          registration?:{busy?:boolean, duplicate?:object|null}}} s
+   *          registration?:{busy?:boolean, duplicate?:object|null},
+   *          pendingInvites?:Array<{pendingId:string, facilityName:string, roleLabel:string, invitedByName?:string|null, expiresAt:string}>,
+   *          pendingBusy?:boolean}} s
    */
   function render(args) {
     lastArgs = args;
-    const { access, user, notice, error, facilities = [], busy = false, registration = null } = args;
+    const { access, user, notice, error, facilities = [], busy = false, registration = null, pendingInvites = [], pendingBusy = false } = args;
     const state = access.state;
 
     if (state === ACCESS.LEGACY) {
       panel.hidden = true;
       setGated(false);
+      return;
+    }
+
+    // 事前登録された施設への参加確認(ログイン後、本人宛ての参加待ちがある間は、ほかの画面より先に表示する)
+    if (user && pendingInvites.length && state !== ACCESS.LOADING && state !== ACCESS.SIGNED_OUT) {
+      setGated(true);
+      panel.hidden = false;
+      renderPendingConfirm({ user, pendingInvites, pendingBusy, error, notice });
       return;
     }
 

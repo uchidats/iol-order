@@ -33,6 +33,16 @@ test("一覧: 注文日時(日本時間)・発注者(ログイン情報)・件�
   assert.equal(summarizeOrder(v1).orderedBy, "（不明）");
 });
 
+test("入力者の役割(createdBy.role): 代行入力者の注文を区別する。旧注文(役割なし)は従来どおり", () => {
+  const proxy = summarizeOrder({ ...v3, createdBy: { ...v3.createdBy, role: "proxy" } });
+  assert.deepEqual([proxy.isProxyEntry, proxy.enteredByRole, proxy.orderedBy], [true, "代行入力者", "ログイン太郎"]);
+  assert.ok(proxy.lines.every(l => l.doctorName && l.doctorName !== "ログイン太郎"), "担当医は入力者とは別");
+  const ord = summarizeOrder({ ...v3, createdBy: { ...v3.createdBy, role: "orderer" } });
+  assert.deepEqual([ord.isProxyEntry, ord.enteredByRole], [false, "注文者"]);
+  for (const old of [v3, v2, v1]) assert.deepEqual([summarizeOrder(old).isProxyEntry, summarizeOrder(old).enteredByRole], [false, null]);
+  assert.equal(summarizeOrder({ ...v3, createdBy: { role: "viewer" } }).enteredByRole, null);
+});
+
 test("詳細: 明細ごとのメーカー・モデル・度数・枚数・手術日・担当医・発注先。トーリックは型番を表示、発注先なしは null", () => {
   const [a, b] = summarizeOrder(v3).lines;
   assert.deepEqual([a.maker, a.model, a.power, a.quantity, a.surgeryDate, a.doctorName, a.dealerName], ["J&J", "DIB00V", "+20.0D", 1, "2026-11-10", "山田", "A商会"]);

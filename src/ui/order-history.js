@@ -69,7 +69,7 @@ export function createOrderHistory({ mount, repository, onClose }) {
     body.replaceChildren(h("ul", { class: "history-list" }, orders.map(o => {
       const btn = h("button", { type: "button", class: "history-row", "data-order": o.id },
         h("span", { class: "history-date" }, o.createdAtLabel),
-        h("span", { class: "history-by" }, o.orderedBy),
+        h("span", { class: "history-by" }, o.isProxyEntry ? `${o.orderedBy}（代行入力）` : o.orderedBy),
         h("span", { class: "history-count" }, `${o.lineCount}件・合計${o.totalQuantity}枚`),
         o.testOrder ? h("span", { class: "lens-badge" }, "テスト") : null);
       btn.addEventListener("click", () => renderDetail(o.id));
@@ -87,7 +87,10 @@ export function createOrderHistory({ mount, repository, onClose }) {
       back,
       h("div", { class: "history-detail-head" },
         h("div", {}, h("strong", {}, o.orderNumber || "（注文番号なし）"), o.testOrder ? " " : null, o.testOrder ? h("span", { class: "lens-badge" }, "テスト") : null),
-        h("div", { class: "form-hint" }, `注文日時 ${o.createdAtLabel} ・ 発注者 ${o.orderedBy}`)),
+        // 代行入力者の注文は「入力者 氏名（代行入力者）」。担当医は明細ごとに別表示(lineView)
+        h("div", { class: "form-hint" }, o.isProxyEntry
+          ? `注文日時 ${o.createdAtLabel} ・ 入力者 ${o.orderedBy}（${o.enteredByRole}）`
+          : `注文日時 ${o.createdAtLabel} ・ 発注者 ${o.orderedBy}`)),
       h("ul", { class: "summary-lines history-lines" }, o.lines.map(lineView)),
       h("p", { class: "history-total" }, `${o.lineCount}件・合計${o.totalQuantity}枚`));
   }

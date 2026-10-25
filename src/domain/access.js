@@ -7,6 +7,8 @@
  * Firestoreで検証済みの有効な所属に含まれる場合にのみ採用する。
  * 位置情報（GPS）は施設の「選択」を補助するだけで、アクセス権限の根拠にはしない。
  */
+import { MEMBER_ROLES } from "./member-admin.js";
+
 export const ACCESS = Object.freeze({
   LEGACY: "legacy",               // Firebase未設定: 従来の静的モード
   LOADING: "loading",             // 認証状態 / 所属を確認中
@@ -16,10 +18,10 @@ export const ACCESS = Object.freeze({
   GRANTED: "granted"              // 所属確認済み・施設確定
 });
 
-/** 所属(role が admin / orderer のもの)を facilityId 昇順で返す。所属に有効/無効の状態はない(削除された所属は存在しない) */
+/** 所属(role が admin / subadmin / orderer / proxy のもの)を facilityId 昇順で返す。所属に有効/無効の状態はない(削除された所属は存在しない) */
 export function validMemberships(memberships) {
   return (memberships || [])
-    .filter(m => m && (m.role === "admin" || m.role === "orderer") && m.facilityId)
+    .filter(m => m && MEMBER_ROLES.includes(m.role) && m.facilityId)
     .sort((a, b) => a.facilityId.localeCompare(b.facilityId));
 }
 

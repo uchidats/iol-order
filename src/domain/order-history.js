@@ -36,6 +36,8 @@ export function formatDateTimeJst(v) {
   return `${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+const ENTRY_ROLE_LABELS = Object.freeze({ admin: "管理者", subadmin: "副管理者", orderer: "注文者", proxy: "代行入力者" });
+
 /** 実際の発注者(ログインしていた人)の表示名。氏名 → メール → 不明 */
 export function orderedByLabel(order) {
   const c = order.createdBy;
@@ -69,6 +71,9 @@ export function summarizeOrder(order) {
     createdAtMs: toMillis(order.createdAt),
     createdAtLabel: formatDateTimeJst(order.createdAt),
     orderedBy: orderedByLabel(order),
+    // 入力者の役割(注文時点。createdBy.role)。旧注文には無い(null)。代行入力者の注文は入力者名と役割を表示する
+    enteredByRole: ENTRY_ROLE_LABELS[order.createdBy && order.createdBy.role] || null,
+    isProxyEntry: Boolean(order.createdBy && order.createdBy.role === "proxy"),
     lineCount: lines.length,
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
     testOrder: order.testOrder === true,

@@ -2,7 +2,10 @@ import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
-import { planMemberRemoval, confirmMessage, memberLabel, sortMembers } from "../domain/member-admin.js";
+import {
+  planMemberRemoval, confirmMessage, memberLabel, sortMembers, roleLabel, roleChoices, assignableRoles, canManageRole, isManagerRole,
+  pendingState, sortPending, formatExpiry, PENDING_STATE_LABELS
+} from "../domain/member-admin.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { baseModelName } from "../domain/lens-labels.js";
 import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
@@ -54,11 +57,12 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
  * @param {() => void} deps.onClose
  * @param {{uid:string, displayName?:string}} [deps.currentUser] 操作者（利用者管理の操作記録に使う）
+ * @param {"admin"|"subadmin"} [deps.actorRole] 操作者のこの施設での役割(画面の出し分け用。権限の最終判定はサーバー・Rules)
  * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
  * @param {{createInvite:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, onRenamed = () => {}, onDeleted = () => {} }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, onDeleted = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -133,7 +137,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       repository.listDealers(facility.id)
     ]);
     const iolOrder = repository.getIolOrder ? await repository.getIolOrder(facility.id) : null;
-    data = { orderers, adopted, dealers, iolOrder, members: canManageMembers ? await repository.listMembers(facility.id) : [] };
+    data = { orderers, adopted, dealers, iolOrder, members: [], pending: [] };
+    if (canManageMembers) await reloadMembers();
   }
 
   // ---------- 担当医(旧「注文者」。コレクション名・関数名は互換性のため orderers のまま) ----------
@@ -567,87 +572,167 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 利用者管理 ----------
-  // 所属に有効/無効はない。不要になった一般注文者は、所属を削除する(管理者の所属・自分自身は削除できない)
-  const canManageMembers = Boolean(currentUser && repository.listMembers && inviteApi && inviteApi.removeMember);
+  // 所属に有効/無効はない。参加済みの利用者(所属)と、事前登録した参加待ちを1つの一覧で管理する。
+  // 管理者はすべての役割、副管理者は注文者・代行入力者だけを操作できる(最終判定はサーバー)。
+  const canManageMembers = Boolean(currentUser && isManagerRole(actorRole) && repository.listMembers && inviteApi && inviteApi.removeMember);
+  const canPreregister = Boolean(canManageMembers && inviteApi.addMember && repository.listPendingMembers);
 
   function memberSection() {
-    return h("section", { class: "settings-section", "data-section": "members" },
-      createSectionHeading("利用者管理", "この施設の利用者を管理します。新しい利用者の招待と、不要になった利用者の所属削除ができます。"),
+    const nameIn = h("input", { class: "form-control", type: "text", maxlength: "50", "data-f": "addName", placeholder: "名前", "aria-label": "名前", autocomplete: "off" });
+    const emailIn = h("input", { class: "form-control", type: "email", maxlength: "254", "data-f": "addEmail", placeholder: "メールアドレス", "aria-label": "メールアドレス", autocomplete: "off" });
+    const roleIn = h("select", { class: "form-control", "data-f": "addRole", "aria-label": "役割" },
+      assignableRoles(actorRole).map(r => h("option", { value: r }, roleLabel(r))));
+    if (assignableRoles(actorRole).includes("orderer")) roleIn.value = "orderer";
+    const submit = h("button", { type: "button", class: "btn btn-primary", "data-act": "add-submit" }, "登録");
+    const cancel = h("button", { type: "button", class: "btn btn-secondary", "data-act": "add-cancel" }, "キャンセル");
+    const form = h("div", { class: "member-add-form", hidden: true },
+      nameIn, emailIn, roleIn, h("div", { class: "form-row" }, submit, cancel));
+    const addBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加");
+    const section = h("section", { class: "settings-section", "data-section": "members" },
+      createSectionHeading("利用者管理", "この施設の利用者を管理します。「追加」で名前・メールアドレス・役割を登録すると、本人がそのメールアドレスでログインしたときに、参加の確認画面が表示されます(登録から30日間有効)。期限切れ・辞退の場合は再登録できます。"),
       h("div", { "data-list": "" }),
+      canPreregister ? form : null,
+      canPreregister ? h("div", { class: "settings-actions" }, addBtn) : null,
       h("p", { class: "form-hint", "data-msg": "" }));
+    if (!canPreregister) return section;
+
+    const reset = () => { nameIn.value = ""; emailIn.value = ""; if (roleIn.querySelector('option[value="orderer"]')) roleIn.value = "orderer"; };
+    addBtn.addEventListener("click", () => { form.hidden = false; addBtn.hidden = true; message(section, ""); nameIn.focus(); });
+    cancel.addEventListener("click", () => { form.hidden = true; addBtn.hidden = false; reset(); message(section, ""); });
+    let adding = false;
+    submit.addEventListener("click", async () => {
+      if (adding) return;
+      const name = nameIn.value.replace(/\s+/g, " ").trim();
+      const email = emailIn.value.trim();
+      if (!name) return message(section, "名前を入力してください。", true);
+      if (!isValidEmail(email)) return message(section, "メールアドレスの形式が正しくありません。", true);
+      adding = true; submit.disabled = true;
+      message(section, "登録しています…");
+      try {
+        const r = await inviteApi.addMember({ facilityId: facility.id, name, email, role: roleIn.value });
+        await reloadMembers();
+        renderMembers(section);
+        form.hidden = true; addBtn.hidden = false; reset();
+        message(section, `${r.name}（${r.email}）を${roleLabel(r.role)}として登録しました。本人がこのメールアドレスでログインすると、参加を確認できます（${formatExpiry(r.expiresAt)} まで）。`);
+      } catch (e) {
+        message(section, describeCallableError(e), true);
+      } finally {
+        adding = false; submit.disabled = false;
+      }
+    });
+    return section;
+  }
+
+  async function reloadMembers() {
+    data.members = await repository.listMembers(facility.id);
+    data.pending = canPreregister ? await repository.listPendingMembers(facility.id) : [];
+  }
+
+  /** 行の操作を実行し、一覧を読み込み直す(失敗時は理由を表示し、ボタンを戻す) */
+  async function runRowAction(section, btns, busyText, fn, doneText) {
+    btns.forEach(b => { b.disabled = true; });
+    message(section, busyText);
+    try {
+      await fn();
+      await reloadMembers();
+      renderMembers(section);
+      message(section, doneText);
+    } catch (e) {
+      console.error("利用者管理の操作に失敗しました:", e);
+      message(section, describeCallableError(e), true);
+      btns.forEach(b => { b.disabled = false; });
+    }
+  }
+
+  function memberRow(section, m) {
+    const plan = planMemberRemoval(data.members, m, currentUser.uid, actorRole);
+    const choices = roleChoices(data.members, m, actorRole);   // 副管理者は自分を含め副管理者を変更できない。最後の管理者は降格できない
+    const label = memberLabel(m);
+    const edit = choices.length
+      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "edit-role", "aria-label": `${label} の役割を変更`, title: "役割を変更" }, pencilIcon())
+      : null;
+    const del = plan.ok
+      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "remove-member", "aria-label": `${label} の所属を削除`, title: "所属を削除" }, trashIcon())
+      : null;
+    // 1段目: 氏名 + 役割バッジ + 右端に操作 / 2段目: メール(登録がある場合のみ)
+    const row = h("div", { class: "settings-row settings-row-member", "data-uid": m.uid },
+      h("span", { class: "settings-member-title" },
+        h("span", { "data-f": "name" }, label),
+        h("span", { class: "member-role-badge", "data-f": "role", "data-role": m.role }, roleLabel(m.role))),
+      h("span", { class: "settings-member-action" }, edit, del),
+      m.email ? h("span", { class: "settings-member-meta" }, h("span", { "data-f": "email" }, m.email)) : null);
+    if (edit) {
+      edit.addEventListener("click", () => {
+        if (row.querySelector(".member-role-edit")) return;
+        const sel = h("select", { class: "form-control", "aria-label": `${label} の役割` }, choices.map(r => h("option", { value: r }, roleLabel(r))));
+        sel.value = m.role;
+        const save = h("button", { type: "button", class: "btn btn-primary", "data-act": "role-save" }, "変更");
+        const back = h("button", { type: "button", class: "btn btn-secondary", "data-act": "role-cancel" }, "キャンセル");
+        const box = h("div", { class: "member-role-edit" }, sel, save, back);
+        row.appendChild(box);
+        sel.focus();
+        back.addEventListener("click", () => box.remove());
+        save.addEventListener("click", () => {
+          if (sel.value === m.role) { box.remove(); return; }
+          if (sel.value === "admin" && !window.confirm(`${label} を管理者にしますか？\n管理者は、施設名の変更・施設削除・管理者や副管理者の権限管理ができます。`)) return;
+          runRowAction(section, [save, back, sel], "変更しています…",
+            () => inviteApi.changeMemberRole({ facilityId: facility.id, uid: m.uid, role: sel.value }),
+            `${label} の役割を${roleLabel(sel.value)}に変更しました。`);
+        });
+      });
+    }
+    if (del) {
+      del.addEventListener("click", () => {
+        if (!window.confirm(confirmMessage(m))) return;
+        runRowAction(section, [del].concat(edit ? [edit] : []), "削除しています…",
+          () => inviteApi.removeMember({ facilityId: facility.id, uid: m.uid }),
+          `${label} の所属を削除しました。`);
+      });
+    }
+    return row;
+  }
+
+  function pendingRow(section, p) {
+    const st = pendingState(p);
+    const label = memberLabel(p);
+    const manageable = canManageRole(actorRole, p.role);
+    const renew = manageable && st !== "pending" && inviteApi.renewPendingMember
+      ? h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "renew" }, "再登録")
+      : null;
+    const cancelBtn = manageable && inviteApi.cancelPendingMember
+      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "cancel-pending", "aria-label": `${label} の登録を取り消す`, title: "登録を取り消す" }, trashIcon())
+      : null;
+    const meta = [p.email, st === "pending" ? `${formatExpiry(p.expiresAt)} まで有効` : null].filter(Boolean).join(" ・ ");
+    const row = h("div", { class: "settings-row settings-row-member is-pending", "data-pending": p.id, "data-state": st },
+      h("span", { class: "settings-member-title" },
+        h("span", { "data-f": "name" }, label),
+        h("span", { class: "member-role-badge", "data-f": "role", "data-role": p.role }, roleLabel(p.role)),
+        h("span", { class: `member-state-badge is-${st}`, "data-f": "state" }, PENDING_STATE_LABELS[st])),
+      h("span", { class: "settings-member-action" }, renew, cancelBtn),
+      meta ? h("span", { class: "settings-member-meta" }, meta) : null);
+    if (renew) {
+      renew.addEventListener("click", () => runRowAction(section, [renew].concat(cancelBtn ? [cancelBtn] : []), "再登録しています…",
+        () => inviteApi.renewPendingMember({ facilityId: facility.id, pendingId: p.id }),
+        `${label} を再登録しました（30日間有効）。`));
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        if (!window.confirm(`${label}（${p.email}）の登録を取り消しますか？\nこの人は、このメールアドレスでログインしても参加できなくなります。`)) return;
+        runRowAction(section, [cancelBtn].concat(renew ? [renew] : []), "取り消しています…",
+          () => inviteApi.cancelPendingMember({ facilityId: facility.id, pendingId: p.id }),
+          `${label} の登録を取り消しました。`);
+      });
+    }
+    return row;
   }
 
   function renderMembers(section) {
     const list = section.querySelector("[data-list]");
-    const rows = sortMembers(data.members).map((m) => {
-      const plan = planMemberRemoval(data.members, m, currentUser.uid);
-      // 1段目: 氏名 + 権限バッジ + 右端に操作(一般注文者のみ「所属を削除」) / 2段目: メール(登録がある場合のみ)
-      const btn = plan.ok
-        ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "remove-member", "aria-label": `${memberLabel(m)} の所属を削除`, title: "所属を削除" }, trashIcon())
-        : null;
-      const row = h("div", { class: "settings-row settings-row-member", "data-uid": m.uid },
-        h("span", { class: "settings-member-title" },
-          h("span", { "data-f": "name" }, memberLabel(m)),
-          h("span", { class: "member-role-badge", "data-f": "role" }, m.role === "admin" ? "管理者" : "注文者")),
-        h("span", { class: "settings-member-action" }, btn),
-        m.email ? h("span", { class: "settings-member-meta" }, h("span", { "data-f": "email" }, m.email)) : null);
-      if (btn) {
-        btn.addEventListener("click", async () => {
-          if (!window.confirm(confirmMessage(m))) return;
-          btn.disabled = true;
-          message(section, "削除しています…");
-          try {
-            await inviteApi.removeMember({ facilityId: facility.id, uid: m.uid });
-            data.members = await repository.listMembers(facility.id);
-            renderMembers(section);
-            message(section, `${memberLabel(m)} の所属を削除しました。`);
-          } catch (e) {
-            console.error("所属の削除に失敗しました:", e);
-            message(section, describeCallableError(e), true);
-            btn.disabled = false;
-          }
-        });
-      }
-      return row;
-    });
+    const rows = [
+      ...sortMembers(data.members).map(m => memberRow(section, m)),
+      ...sortPending(data.pending || []).map(p => pendingRow(section, p))
+    ];
     list.replaceChildren(...(rows.length ? rows : [h("p", { class: "form-hint" }, "所属ユーザーはいません。")]));
-  }
-
-  // ---------- メンバー招待 ----------
-  function inviteSection() {
-    const result = h("div", { "data-result": "" });
-    const emailInput = h("input", { class: "form-control", type: "email", "data-f": "inviteEmail", placeholder: "招待するメールアドレス", "aria-label": "招待するメールアドレス" });
-    const btn = h("button", { type: "button", class: "btn btn-primary", "data-act": "invite" }, "招待コードを発行");
-    const section = h("section", { class: "settings-section", "data-section": "invites" },
-      createSectionHeading("メンバーの招待", "招待したメールアドレスでログインした本人だけが参加できます。招待コードの有効期限は7日間で、1回のみ使用可能です。メールは自動送信されないため、本人に直接お伝えください。"),
-      h("div", { class: "settings-actions" }, emailInput, btn),
-      result,
-      h("p", { class: "form-hint", "data-msg": "" }));
-    btn.addEventListener("click", async () => {
-      const email = emailInput.value.trim();
-      result.replaceChildren();
-      if (!isValidEmail(email)) return message(section, "メールアドレスの形式が正しくありません。", true);
-      btn.disabled = true;
-      message(section, "発行しています…");
-      try {
-        const r = await inviteApi.createInvite({ facilityId: facility.id, email });
-        const expires = new Date(r.expiresAt).toLocaleDateString("ja-JP");
-        const code = h("output", { class: "settings-code", "data-invite-code": "" }, r.token);
-        result.replaceChildren(
-          h("p", {}, `${r.email} 宛ての招待コード（${expires} まで有効）:`), code,
-          h("button", { type: "button", class: "btn btn-outline-sm" }, "コピー"));
-        result.querySelector("button").addEventListener("click", () => {
-          try { navigator.clipboard.writeText(r.token); message(section, "コピーしました。"); } catch (e) { /* 手動でコピー */ }
-        });
-        emailInput.value = "";
-        message(section, "招待コードを発行しました。この画面を閉じると再表示できません。");
-      } catch (e) {
-        message(section, describeCallableError(e), true);
-      } finally {
-        btn.disabled = false;
-      }
-    });
-    return section;
   }
 
   // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出しのゴミ箱ボタン→ダイアログで確定) ----------
@@ -698,8 +783,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 画面全体 ----------
   const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
   if (canManageMembers) sections.members = memberSection();
-  if (inviteApi) sections.invites = inviteSection();
-  const del = inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
+  const isAdmin = actorRole === "admin";   // 施設名の編集・施設削除は管理者のみ表示(サーバーでも管理者のみ)
+  const del = isAdmin && inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });
 
   // ---------- 施設名の変更(施設管理者のみ。重複確認はサーバー。施設ID・所属・注文は変わらない) ----------
@@ -711,7 +796,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const nameBox = h("div", { class: "facility-rename", hidden: true },
     h("label", { class: "form-label" }, "施設名", nameInput),
     h("div", { class: "form-row" }, nameSave, nameConfirm, nameCancel), nameMsg);
-  const nameEditBtn = inviteApi && inviteApi.renameFacility
+  const nameEditBtn = isAdmin && inviteApi && inviteApi.renameFacility
     ? h("button", { type: "button", class: "btn btn-outline-sm", id: "btnRenameFacility", "aria-label": "施設名を編集", title: "施設名を編集" }, pencilIcon())
     : null;
   let renaming = false;

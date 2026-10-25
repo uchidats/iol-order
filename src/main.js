@@ -6,6 +6,7 @@ import { biometryState } from "./biometry/state.js";
 import { IOL_MODELS } from "./data/iol-models.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-config.js";
 import { decideAccess, validMemberships, ACCESS } from "./domain/access.js";
+import { isManagerRole } from "./domain/member-admin.js";
 import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
@@ -50,8 +51,10 @@ async function bootstrapWithFirebase(config) {
     configured: true, authReady: false, user: null,
     membershipsLoaded: false, memberships: [],
     selectedFacilityId: null,
-    facilities: [] // 読み取れた（=有効な）所属施設のドキュメント
+    facilities: [], // 読み取れた（=有効な）所属施設のドキュメント
+    pendingInvites: [] // 本人宛ての参加待ち(事前登録)。ある間は参加確認画面を表示する
   };
+  let pendingBusy = false;
   let notice = "";
   let error = "";
   let busy = false;
@@ -73,6 +76,7 @@ async function bootstrapWithFirebase(config) {
     onOnboardingClose: () => closeOnboarding(),
     onRegisterCancel: () => { registration.duplicate = null; error = ""; notice = ""; },
     onCheckName: (name) => (ctx && ctx.registrationApi ? ctx.registrationApi.checkFacilityName({ name }) : null),
+    onRespondPending: (args) => respondPending(args),
     onLocate: () => locateAndChoose({ userInitiated: true }),
     onSignOut: () => signOut()
   });
@@ -112,10 +116,10 @@ async function bootstrapWithFirebase(config) {
     await orderHistory.open({ id: access.facilityId, name: facilityName(access.facilityId) });
   }
 
-  /** 施設設定を開く。表示は施設管理者のみ（書き込みはFirestoreルールでも検証される） */
+  /** 施設設定を開く。表示は管理者・副管理者のみ（書き込みはFirestoreルール・Functionsでも検証される） */
   async function openSettings() {
     const access = decideAccess(state);
-    if (access.state !== ACCESS.GRANTED || access.role !== "admin") return;
+    if (access.state !== ACCESS.GRANTED || !isManagerRole(access.role)) return;
     if (!settings) {
       const { createFacilitySettings } = await import("./ui/facility-settings.js");
       settings = createFacilitySettings({
@@ -125,6 +129,7 @@ async function bootstrapWithFirebase(config) {
         masters: IOL_MODELS,
         inviteApi: ctx.registrationApi,
         currentUser: { uid: state.user.uid, displayName: state.user.displayName },
+        actorRole: access.role,   // 施設の切り替えはページの再読み込みで行うため、画面の生成時の役割で出し分ける
         onSaved: () => reloadFacilityOptions(),
         onDeleted: () => { selection.clearRemembered(window.localStorage); selection.setForceSelect(window.sessionStorage); location.reload(); },   // 削除後は所属を取得し直し、残りの施設の選択(なければ登録・参加)へ
         onRenamed: (id, name) => { const f = state.facilities.find(x => x.id === id); if (f) f.name = name; render(); },   // ヘッダー・メニューの施設名を更新
@@ -134,6 +139,46 @@ async function bootstrapWithFirebase(config) {
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
     setOrderViewHidden(true);
     await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
+  }
+
+  /** 本人宛ての参加待ち(メール確認済みのアカウントのみ。取得できない場合は表示しないだけで、ログイン・注文は妨げない) */
+  async function loadPendingInvites() {
+    if (!ctx || !ctx.registrationApi || !state.user || state.user.emailVerified === false) return [];
+    try {
+      const r = await ctx.registrationApi.listMyPendingMemberships();
+      return Array.isArray(r && r.memberships) ? r.memberships : [];
+    } catch (e) {
+      console.warn("参加待ちを確認できませんでした:", e);
+      return [];
+    }
+  }
+
+  /** 参加確認の「参加する」「参加しない」。承認すると所属を取得し直す。すべて答えたら、通常の施設選択・注文画面へ進む */
+  async function respondPending({ pendingId, accept }) {
+    if (pendingBusy) return;
+    const item = state.pendingInvites.find(p => p.pendingId === pendingId);
+    if (!item) return;
+    pendingBusy = true; error = ""; notice = "";
+    render();
+    try {
+      await ctx.registrationApi.respondMembership({ pendingId, accept });
+      state.pendingInvites = state.pendingInvites.filter(p => p.pendingId !== pendingId);
+      if (accept) {
+        state.memberships = await ctx.fetchMemberships(state.user.uid);
+        await loadFacilities();
+        notice = `「${item.facilityName}」に${item.roleLabel || ""}として参加しました。` + (formUid ? "メニューの「施設を切り替える」から移動できます。" : "");
+      } else {
+        notice = `「${item.facilityName}」への参加を見送りました。`;
+      }
+    } catch (e) {
+      error = describeCallableError(e);
+      // 期限切れ・取り消し済みなど、もう参加できないものは一覧から外す
+      if (String((e && e.code) || "").endsWith("failed-precondition")) state.pendingInvites = state.pendingInvites.filter(p => p.pendingId !== pendingId);
+    }
+    pendingBusy = false;
+    if (state.pendingInvites.length || formUid) { render(); return; }
+    if (await autoSelectFacility()) return;
+    await enterFacilityIfGranted();
   }
 
   /** 所属済みユーザーが、現在の施設・注文画面を保ったまま登録・参加の画面を開く */
@@ -174,11 +219,11 @@ async function bootstrapWithFirebase(config) {
     const access = decideAccess(state);
     const current = access.state === ACCESS.GRANTED ? state.facilities.find(f => f.id === access.facilityId) : null;
     setHeaderFacility(current && current.name);
-    ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy, registration });
+    ui.render({ access, user: state.user, notice, error, facilities: state.facilities, busy, registration, pendingInvites: state.pendingInvites, pendingBusy });
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canSettings: access.role === "admin"
+        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role)
       });
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
@@ -440,6 +485,7 @@ async function bootstrapWithFirebase(config) {
       state.memberships = [];
       state.facilities = [];
       state.selectedFacilityId = null;
+      state.pendingInvites = [];
       render();
 
       if (user) {
@@ -452,7 +498,9 @@ async function bootstrapWithFirebase(config) {
           state.memberships = []; // 取得できない場合は許可しない（fail closed）
           state.facilities = [];
         }
+        state.pendingInvites = await loadPendingInvites();
         state.membershipsLoaded = true;
+        if (state.pendingInvites.length) { render(); return; } // 参加確認を先に表示する(答え終わったら respondPending から先へ進む)
         if (await autoSelectFacility()) return; // 現在地判定の中で描画・遷移済み
       }
 

@@ -24,8 +24,19 @@ export function createRegistrationApi({ functions, httpsCallable }) {
     createInvite: ({ facilityId, email }) => call("createInvite", { facilityId, email }),
     /** @returns {Promise<{facilityId:string}>} */
     acceptInvite: ({ token }) => call("acceptInvite", { token }),
-    /** 施設管理者が、一般注文者の所属を削除する(所属の削除と操作履歴の記録は、サーバーで1トランザクション) */
-    removeMember: ({ facilityId, uid }) => call("removeMember", { facilityId, uid })
+    /** 管理者・副管理者が、利用者の所属を削除する(所属の削除と操作履歴の記録は、サーバーで1トランザクション) */
+    removeMember: ({ facilityId, uid }) => call("removeMember", { facilityId, uid }),
+    // ---- 利用者管理(事前登録・参加確認・役割変更)。権限の判定はすべてサーバー ----
+    /** 事前登録(名前・メール・役割)。@returns {Promise<{pendingId:string, email:string, name:string, role:string, status:string, expiresAt:string}>} */
+    addMember: ({ facilityId, name, email, role }) => call("addMember", { facilityId, name, email, role }),
+    cancelPendingMember: ({ facilityId, pendingId }) => call("cancelPendingMember", { facilityId, pendingId }),
+    /** 期限切れ・辞退の再登録(今日から30日) */
+    renewPendingMember: ({ facilityId, pendingId }) => call("renewPendingMember", { facilityId, pendingId }),
+    changeMemberRole: ({ facilityId, uid, role }) => call("changeMemberRole", { facilityId, uid, role }),
+    /** ログイン中の本人宛ての参加待ち。@returns {Promise<{memberships:Array<{pendingId:string, facilityId:string, facilityName:string, role:string, roleLabel:string, invitedByName:string|null, expiresAt:string}>}>} */
+    listMyPendingMemberships: () => call("listMyPendingMemberships", {}),
+    /** 参加の承認(accept=true)・辞退(false)。@returns {Promise<{status:"joined"|"already-member"|"declined", facilityId:string, role?:string}>} */
+    respondMembership: ({ pendingId, accept }) => call("respondMembership", { pendingId, accept: accept === true })
   };
 }
 

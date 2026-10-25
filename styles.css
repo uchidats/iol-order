@@ -2110,3 +2110,22 @@ input[type="date"], .lens-line select { color-scheme: light; }
   box-shadow: var(--popup-shadow); color-scheme: light;
 }
 .candidate-item { background: var(--popup-bg); color: var(--popup-text); border-color: var(--popup-border); color-scheme: light; }
+
+/* 利用者管理: 参加待ちの状態バッジ(役割バッジと同じ形。参加待ち=黄・期限切れ/辞退=グレー)、追加フォーム、役割の変更欄 */
+.member-state-badge { display: inline-flex; align-items: center; padding: 1px 9px; border: 1px solid #fcd34d; border-radius: 999px; background: #fffbeb; color: #92400e; font-size: 0.72rem; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.member-state-badge.is-expired, .member-state-badge.is-declined { border-color: #d1d5db; background: #f3f4f6; color: #4b5563; }
+.settings-row-member.is-pending [data-f="name"] { font-weight: 500; }
+.settings-member-action { display: inline-flex; align-items: center; gap: 6px; }
+.member-add-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; margin: 8px 0; }
+.member-add-form[hidden] { display: none; }
+.member-add-form .form-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.member-role-edit { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.member-role-edit select { width: auto; min-width: 9em; }
+@media (max-width: 640px) { .member-add-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* 参加確認(事前登録された施設への参加) */
+.pending-invite-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pending-invite { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: #fff; color: #1f2937; }
+.pending-invite-facility { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.pending-invite-meta { margin-top: 4px; font-size: 0.85rem; color: #4b5563; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pending-invite .onboarding-actions { margin-top: 12px; }

@@ -45,8 +45,13 @@ export function createFirestoreRepository(db, fs) {
       }
     },
     listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
-    /** 所属ユーザー（施設管理者のみ読める）。id = uid */
-    listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id }))
+    /** 所属ユーザー（管理者・副管理者のみ読める）。id = uid */
+    listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id })),
+    /** 参加待ち(事前登録。管理者・副管理者のみ読める。施設で絞った問い合わせだけが Rules で許可される) */
+    async listPendingMembers(facilityId) {
+      const snap = await fs.getDocs(fs.query(fs.collection(db, "pendingMembers"), fs.where("facilityId", "==", facilityId)));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
   };
 }
 

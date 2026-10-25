@@ -3,31 +3,30 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 利用者管理の再設計 手順2 — Cloud Functions(役割・事前登録・参加確認・役割変更)
-- **ブランチ**: `feature/roles-rules` → `main` へ push
+- **作業**: 利用者管理の再設計 手順3 — 画面(利用者管理の統合・参加確認・役割による出し分け・注文履歴の入力者表示)
+- **ブランチ**: `feature/roles-ui`(`main` から作成)→ `main` へ push
 
 ## 変更内容
-- 新規 Functions(`functions/src/members.js`): `addMember`(事前登録)、`cancelPendingMember`(取り消し)、`renewPendingMember`(期限切れ・辞退の再登録)、`listMyPendingMemberships`(本人宛ての参加待ち)、`respondMembership`(承認・辞退)、`changeMemberRole`(役割変更)。
-- 更新: `removeMember`(副管理者も注文者・代行入力者を削除可。その人宛ての参加待ちも取り消し)、`createOrder`(4つの役割で注文可、`createdBy.role` を記録)、`deleteFacility`(その施設の参加待ちも削除)。
-- 権限は `functions/src/roles.js`(Rules と一致)で判定。副管理者は注文者・代行入力者のみ扱える。管理者の事前登録は不可(参加後に役割変更)。最後の管理者は降格不可。管理者の所属は削除不可(先に役割変更)。施設名の変更・施設削除は管理者のみ(従来どおり)。
-- 参加の承認はサーバーで、メール確認済み・メール一致・30日の期限・施設が有効かを確認し、uid の所属を作る。別の経路で所属済みなら役割を変えない(昇格しない)。
-- 重要な操作(事前登録・取り消し・再登録・参加・辞退・役割変更・削除)は操作履歴(`auditLogs`)に同じトランザクションで記録。
-- 互換性: 既存の admin・orderer、招待コード方式(`createInvite`/`acceptInvite`)、注文履歴(旧注文は `createdBy.role` なし)は変更なし。画面の変更・招待コード機能の撤去は未実施(次の段階)。
-- 変更: `functions/src/members.js`、`functions/src/orders.js`、`functions/src/registration.js`、`functions/index.js`、`docs/self-registration.md`、テスト(`tests/functions/member-roles.test.js` 新規、`members.test.js`・`orders.test.js` 更新)。
-- 手順1(Rules)のデプロイは実施済み(前回)。元に戻す場合の Rules は commit `31b34f6`。
+- **利用者管理**: 「メンバーの招待」カード(招待コードの発行画面)を撤去し、「利用者管理」に統合。参加済み・参加待ち・期限切れ・辞退を1つの一覧に、役割・状態をバッジで表示。「追加」で名前・メールアドレス・役割を登録(管理者は副管理者・注文者・代行入力者、副管理者は注文者・代行入力者)。鉛筆で役割変更、ゴミ箱で所属削除・登録の取り消し、期限切れ・辞退は「再登録」。操作は権限に応じて出し分け(管理者の行・最後の管理者・副管理者が扱えない役割は操作なし)。サーバーの拒否理由は画面に表示。
+- **参加確認**: ログイン後、本人宛ての参加待ちがあれば、ほかの画面より先に「施設への参加の確認」(施設名・役割・登録者、「参加する」「参加しない」)を表示。複数施設に対応。「参加しない」は確認ダイアログあり。答え終わると通常の施設選択・注文画面へ。所属済みの人は現在の施設のまま(「施設を切り替える」から移動)。参加待ちの取得に失敗しても、ログイン・注文は妨げない。
+- **権限による表示**: 施設設定は管理者・副管理者に表示(ヘッダーメニュー)。施設名の編集・施設削除は管理者のみ表示。注文者・代行入力者には管理機能を表示しない。所属の判定(画面)は4つの役割に対応。
+- **注文履歴**: `createdBy.role` を使い、代行入力者の注文は「入力者 氏名（代行入力者）」(一覧は「氏名（代行入力）」)。担当医は明細ごとの表示のまま。過去の注文(役割なし)は従来どおり「発注者 氏名」。
+- 招待コードで参加する画面は移行期間中は維持。招待コード Functions は削除していない。
+- 画面の役割の定義(`src/domain/member-admin.js`)はサーバー(`functions/src/roles.js`)と一致することをテストで確認。
+- 変更: `src/domain/member-admin.js`、`src/domain/access.js`、`src/domain/order-history.js`、`src/data/registration-api.js`、`src/data/firestore-repository.js`、`src/ui/facility-settings.js`、`src/ui/auth-ui.js`、`src/ui/order-history.js`、`src/main.js`、`styles.css`、`index.html`(版の付与)、`docs/self-registration.md`、テスト。
 
 ## Firebaseデプロイ
-- 本報告の作成時点ではテスト成功まで。デプロイ対象(9関数のみ): `addMember,cancelPendingMember,renewPendingMember,listMyPendingMemberships,respondMembership,changeMemberRole,removeMember,createOrder,deleteFacility`(`medconf-iol-dev`)。結果は報告で確認。
-- `createOrder` の再デプロイでも `ORDER_INTAKE_ENABLED=false` / `ORDER_INTAKE_UNRESTRICTED=false` を維持(`functions/.env.medconf-iol-dev` を確認済み)。
-- 元に戻す方法: 直前の Functions のコードは commit `48d0a2f`。`git checkout 48d0a2f -- functions` で戻して同じ関数を再デプロイ(新規6関数は `firebase functions:delete` で削除)。
+- 不要(画面のみ。Functions・Rules の変更なし。手順1・2でデプロイ済みのものを使う)。
+- 実データの変更、実メール送信、招待コード Functions の削除は行っていない。
 
 ## 残課題(次の段階)
-- 手順3: 画面(利用者管理への統合・「追加」・参加確認画面・役割による出し分け・注文履歴の入力者表示)。
-- 手順5: 招待コード方式の撤去(手順3の公開から7日以上後)。
+- 実画面での確認(テスト用アカウントで、管理者・副管理者・注文者・代行入力者ごとの操作と、事前登録→ログイン→参加確認)。
+- 手順5: 招待コード方式の撤去(本公開から7日以上たち、未使用の招待がなくなってから。参加画面の招待コード欄と `createInvite`/`acceptInvite` の削除)。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 190 / Rules 51 / Functions 125(新規21: 事前登録の権限・入力検証・二重登録、参加確認のメール確認済み・メール不一致・取り消し・辞退・30日の期限・再登録、複数施設、メールアドレスの再利用、所属済みの人の昇格防止、役割変更の権限昇格防止・最後の管理者、削除の範囲・参加待ちの取り消し、施設削除時の参加待ち削除、副管理者は施設削除・施設名変更不可、注文の `createdBy.role`) / functions e2e 8 / ブラウザ回帰 65、すべて成功。
-- 注: 既存の注文の同時実行テスト(並列20回など)が、1回目の実行でエミュレータのロック待ちにより一時的に失敗し、再実行で全件成功した(以前から見られる不安定さ。今回の変更箇所とは無関係)。
+- unit 196 / ブラウザ回帰 74(Chromium・Firefox・WebKit。新規 `member-admin.pw.mjs` 9件: 管理者・副管理者それぞれの一覧・バッジ・操作の出し分け・追加・役割変更・削除・取り消し・再登録・サーバー拒否の表示・招待コード発行画面がない、参加確認画面(複数施設・施設名の文字表示・参加する/参加しない・注文画面を隠す)、スマホ幅とPC幅) / Rules 51 / Functions 125、すべて成功。
+- 途中、無関係の既存テスト(確認画面の発注元・発注先カード)が全体実行で1回だけ一時的に失敗し、単独・再実行では成功(以前から見られる負荷時の不安定さ)。
+- 実装中に見つけた不具合を修正: 追加フォームの CSS(`display: grid`)が `hidden` を上書きし、フォームが常に表示されていた → `[hidden]` を優先。
