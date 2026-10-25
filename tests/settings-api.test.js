@@ -17,10 +17,13 @@ function fakeFs() {
   return { fs, ops };
 }
 
-test("Rules をデプロイするまでは、変更者の記録を送らない(現在のRulesで保存・削除を止めない)", async () => {
-  assert.equal(SETTINGS_ACTOR_TRACKING, false);
+test("既定で変更者の記録を送る(Rules デプロイ済み)。無効にした場合は従来どおりの書き込み", async () => {
+  assert.equal(SETTINGS_ACTOR_TRACKING, true);
+  const def = fakeFs();
+  await createFirestoreSettingsApi({}, def.fs, { getUid: () => "adminA" }).saveOrderers("f1", [{ id: "o1", data: { name: "山田" } }]);
+  assert.equal(def.ops[0][0][2].updatedBy, "adminA");
   const { fs, ops } = fakeFs();
-  const api = createFirestoreSettingsApi({}, fs, { getUid: () => "adminA" });
+  const api = createFirestoreSettingsApi({}, fs, { getUid: () => "adminA", trackActor: false });
   await api.saveOrderers("f1", [{ id: "o1", data: { facilityId: "f1", name: "山田", sortOrder: 10 } }]);
   await api.deleteDealer("f1", "d1");
   assert.deepEqual(ops, [[["set", "facilities/f1/orderers/o1", { facilityId: "f1", name: "山田", sortOrder: 10, updatedAt: "SERVER_TS" }]], [["deleteDoc", "facilities/f1/facilityDealers/d1"]]]);

@@ -144,15 +144,17 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator("#ocrPatientName").count(), 0, "患者名の入力欄はない");
       const jst = (days) => new Date(Date.now() + (9 * 3600 + days * 86400) * 1000).toISOString().slice(0, 10);
       const date = page.locator(".lens-line").first().locator("[data-f=date]");
+      // WebKit では日付の入力の反映が遅れることがあるため、値が入ったのを確認してから押す
+      const setDate = async (d) => { await date.fill(d); await page.waitForFunction((v) => document.querySelector(".lens-line [data-f=date]").value === v, d); };
       assert.deepEqual([await date.getAttribute("min"), await date.getAttribute("max")], [jst(0), jst(366)]);
       await fillOrder(page, "");
       for (const [d, msg] of [[jst(-1), /手術日は本日以降/], [jst(367), /手術日が先すぎます/]]) {
-        await date.fill(d);
+        await setDate(d);
         await page.click("#btnConfirm");
-        assert.match(await page.locator(".lens-line").first().innerText(), msg, d);
+        await page.locator(".lens-line").first().getByText(msg).waitFor({ timeout: 5000 });   // 負荷が高いときの描画の遅れを待つ(WebKit)
         assert.equal(await visible(page, "#confirmModal"), false);
       }
-      await date.fill(jst(366));
+      await setDate(jst(366));
       await page.click("#btnConfirm");
       await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
       assert.equal((await srv(page)).calls.length, 0, "確認画面までは送信しない");

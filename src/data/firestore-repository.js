@@ -80,10 +80,10 @@ export async function fetchMemberships(db, fs, uid) {
 }
 
 /**
- * 施設設定の変更者の記録(updatedBy・削除の記録)を送るか。**Rules(firestore.rules の actorOk / deletionMarks)をデプロイしてから true にする**
- * (デプロイ前の Rules は updatedBy・deletionMarks を拒否するため)。手順は docs/settings-audit.md。
+ * 施設設定の変更者の記録(updatedBy・削除の記録)を送るか。Rules(firestore.rules の actorOk / deletionMarks。移行用の設定)は
+ * 2026-10-25 に medconf-iol-dev へデプロイ済みのため true。手順は docs/settings-audit.md。
  */
-export const SETTINGS_ACTOR_TRACKING = false;
+export const SETTINGS_ACTOR_TRACKING = true;
 
 /**
  * 施設設定の書き込みAPI（施設管理者のみ。実際の権限は Security Rules が検証する）

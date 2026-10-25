@@ -30,7 +30,7 @@ firebase-functions の型定義にも `app_user` がない。そのため、Rule
 - 移行期間(Rules の `actorRequired()` が `false` の間)に、旧版の画面(`SETTINGS_ACTOR_TRACKING` が `false` の版。開いたままのタブを含む)から変更した場合。4 に当たらなければ `unknown`。
 - Admin SDK・管理スクリプト・Firebase Console からの変更。`server`(サービスアカウント)または `unknown` で、人は特定しない(IAM の個人アカウントのメールは記録しない)。
 - 採用IOLの削除(画面にはない。運営者が Console などで削除した場合)、施設削除に伴う設定の削除(記録しない)。
-- トリガーが最大の再試行期間(イベントの保持期間)を過ぎても失敗し続けた場合(その変更の履歴が残らない。Cloud Logging にエラーが残る)。
+- トリガーが最大の再試行期間(最大7日)を過ぎても失敗し続けた場合(その変更の履歴が残らない。Cloud Logging にエラーが残る)。
 - 削除の記録と削除イベントの時刻の差が2分を超えた場合(通常は起きない。`unknown` になる)。
 - `actorName` は記録した時点の所属の表示名(変更時点ではない)。所属を外れた人は `actorUid` だけになる。
 
@@ -44,12 +44,17 @@ firebase-functions の型定義にも `app_user` がない。そのため、Rule
 - 画面での履歴の表示はまだない(Firebase Console・管理スクリプトで確認する)。
 
 ## 移行の手順(この順で行う)
-1. Rules をデプロイする(移行中: `updatedBy`・削除の記録は「あれば検証」、なくても受け付ける)。旧画面も新画面も動く。
-2. `src/data/firestore-repository.js` の `SETTINGS_ACTOR_TRACKING` を `true` にして push する(画面が変更者を送り始める)。
+1. 【2026-10-25 完了】Rules をデプロイする(移行中: `updatedBy`・削除の記録は「あれば検証」、なくても受け付ける)。旧画面も新画面も動く。
+2. 【2026-10-25 完了】`src/data/firestore-repository.js` の `SETTINGS_ACTOR_TRACKING` を `true` にして push する(画面が変更者を送り始める)。
 3. IAM を付与し、トリガー3つをデプロイする(下)。開発環境で変更し、`actorSource: "updatedBy"` / `"deletionMark"` と uid が記録されることを確認する。
 4. 利用者の画面が新しい版になった後(開いたままのタブの再読み込みを待つ)、`firestore.rules` の `actorRequired()` を `true` にして Rules をデプロイする(変更者の記録を必須にする)。
    2 より前に 4 を行うと、旧画面の保存・削除が拒否される。1 より前に 2 を行うと、新画面の保存・削除が拒否される。
 
 ## デプロイの注意
-- 第2世代の Firestore トリガーは Eventarc を使う。実行サービスアカウント(`iol-functions-dev`)に `roles/eventarc.eventReceiver` が必要になる場合がある(デプロイ時にエラーで分かる)。付与は最小限にする。
+- 第2世代の Firestore トリガーは Eventarc を使う。トリガーの ID は関数の実行サービスアカウント(`iol-functions-dev`)。2026-10-25 の調査(firebase-tools 15.32.1 のソースと `--dry-run`):
+  - **必要(手動で付与)**: `iol-functions-dev` に `roles/eventarc.eventReceiver`(プロジェクト)。CLI は専用のサービスアカウントには付与しない。
+  - **必要な場合あり**: `iol-functions-dev` に `roles/run.invoker`。プロジェクト全体ではなく、3つの Cloud Run サービス(`auditorderers`・`auditadoptediols`・`auditfacilitydealers`)だけに付与する(デプロイで作られた後。ログに「not authenticated」が出る場合)。
+  - **CLI が自動で付与するもの**(最初のイベント関数のデプロイ時。止めるオプションはない): Pub/Sub のサービスエージェントに `roles/iam.serviceAccountTokenCreator`、既定の Compute Engine サービスアカウント(使っていない。既に Editor)に `roles/run.invoker`・`roles/eventarc.eventReceiver`。このプロジェクト(2026年作成)では不要なため、トリガーの動作確認後に外してよい(以後のデプロイでは再付与されない)。
+  - Eventarc のサービスエージェント(`roles/eventarc.serviceAgent`)は、最初のトリガー作成時に Google が付与する。
+- 再試行(`retry: true`)は、成功するまで最大7日間続く(Firebase CLI の表示)。デプロイには `--force` が必要(再試行ありの関数の確認)。
 - エミュレータはトリガーに認証情報を渡さない(authType: unknown)。それでも Rules を通した `updatedBy`・削除の記録から変更者が決まることを E2E テストで確認している。本番の authType / authId の実際の値は、デプロイ後に `auth.type` で確認する。

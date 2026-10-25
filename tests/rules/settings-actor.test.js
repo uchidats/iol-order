@@ -75,6 +75,17 @@ for (const mode of ["transition", "strict"]) {
   });
 }
 
+for (const mode of ["transition", "strict"]) {
+  test(`[${mode}] 削除の記録は、削除と同じ一括書き込みでなければ使えない(先に書いた記録・後から書いた記録では削除できない)`, async () => {
+    const db = as(mode, "adminA");
+    // 記録だけを先に書いてから、別の書き込みで削除する → 記録の時刻が削除の時刻と違うので拒否
+    await assertSucceeds(setDoc(doc(db, "facilities/fA/deletionMarks/orderers_o1"), { collection: "orderers", docId: "o1", deletedBy: "adminA", deletedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(doc(db, "facilities/fA/orderers/o1")));
+    // 同じ一括書き込みなら削除できる
+    await assertSucceeds(delWithMark(db, "orderers", "o1", "adminA"));
+  });
+}
+
 test("[transition] 移行中は、updatedBy・削除の記録がない旧画面の書き込みも受け付ける(既存の保存・並び替え・削除を止めない)", async () => {
   const db = as("transition", "adminA");
   await assertSucceeds(setDoc(doc(db, "facilities/fA/orderers/o1"), { facilityId: "fA", name: "山田", sortOrder: 20, updatedAt: serverTimestamp() }));
