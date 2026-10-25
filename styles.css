@@ -1727,6 +1727,10 @@ input[type="date"].form-control {
 
 .orderer-edit { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: 8px; align-items: center; }
 .orderer-edit-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+/* 担当医の編集: 「利用者管理にも追加する（注文者）」 */
+.orderer-member-opt { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #1f2937; cursor: pointer; }
+.orderer-member-opt[hidden] { display: none; }
+.orderer-member-opt input { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); flex: none; }
 .btn-sm-inline { min-height: 36px; padding: 6px 14px; font-size: 0.9rem; }
 
 @media (max-width: 560px) {

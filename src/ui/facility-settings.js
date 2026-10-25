@@ -157,8 +157,22 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       btn("delete", "この担当医を削除", trashIcon()));
     const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.ordererNameMax, placeholder: "氏名（必須）", "aria-label": "氏名（必須）" });
     const emailInput = h("input", { class: "form-control", "data-f": "email", type: "email", placeholder: "メールアドレス（任意）", "aria-label": "メールアドレス（任意）" });
+    // 利用者管理への事前登録(注文者)。初期はオフ。既に所属済み・参加待ちのメールでは表示しない。チェック時はメール必須
+    const memberCheck = h("input", { type: "checkbox", "data-f": "addMember" });
+    const memberOpt = h("label", { class: "orderer-member-opt", hidden: true }, memberCheck, h("span", {}, "利用者管理にも追加する（注文者）"));
+    const syncMemberOpt = () => {
+      const show = canPreregister && !isKnownMemberEmail(emailInput.value);
+      memberOpt.hidden = !show;
+      if (!show) memberCheck.checked = false;
+      const required = show && memberCheck.checked;
+      emailInput.placeholder = required ? "メールアドレス（必須）" : "メールアドレス（任意）";
+      emailInput.setAttribute("aria-label", emailInput.placeholder);
+    };
+    emailInput.addEventListener("input", syncMemberOpt);
+    memberCheck.addEventListener("change", syncMemberOpt);
+    row._memberCheck = memberCheck;
     const editBox = h("div", { class: "orderer-edit", hidden: true },
-      nameInput, emailInput,
+      nameInput, emailInput, memberOpt,
       h("div", { class: "orderer-edit-actions" },
         h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存"),
         h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル")));
@@ -177,8 +191,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row._startEdit = () => {
       editing = true;
       nameInput.value = row._state.name; emailInput.value = row._state.email;
+      memberCheck.checked = false; syncMemberOpt();
       paint(); nameInput.focus();
     };
+    row._syncMemberOpt = syncMemberOpt;
     row._commit = () => { row._state.name = nameInput.value; row._state.email = emailInput.value; editing = false; paint(); };
     row._cancel = () => {
       if (!row._state.id && !row._state.name && !row._state.email) { row.remove(); return; } // 追加したばかりの行は取り消すと消える
@@ -200,6 +216,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const section = sections.orderers;
     const before = { name: row._state.name, email: row._state.email };
     const typed = { name: row.querySelector('[data-f="name"]').value, email: row.querySelector('[data-f="email"]').value };
+    const wantMember = canPreregister && !row._memberCheck.closest("label").hidden && row._memberCheck.checked;
     row._commit();
     const v = validateOrderers(readOrdererRows(section));
     showRowErrors(section, v.errors);
@@ -208,10 +225,68 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const own = row.querySelector("[data-err]");
       if (!own.textContent) own.textContent = v.errors.map(e => e.message).join(" / "); // 重複など、他の行側に出た指摘も、編集中の行に表示する
       row.querySelector('[data-f="name"]').value = typed.name; row.querySelector('[data-f="email"]').value = typed.email; // 入力した内容は残す
+      row._memberCheck.checked = wantMember; row._syncMemberOpt();
       return message(section, "入力内容を確認してください。", true);
     }
+    if (wantMember) return preregisterThenSave(row, before, typed);
     message(section, "");
     orderSaver.request();   // 行の「保存」(追加・設定変更の確定)で、自動保存する
+  }
+
+  /**
+   * 「利用者管理にも追加する（注文者）」: 先に事前登録(addMember)し、成功してから担当医を保存する。
+   * 事前登録に失敗したら担当医は保存せず、入力を残して理由を表示する。既に所属済み・参加待ちなら重複登録せず、担当医は保存する。
+   * 担当医の保存だけ失敗した場合は、自動保存の「再試行」で保存し直す(事前登録は同じメールで二度送らない: row._memberDone)。
+   */
+  async function preregisterThenSave(row, before, typed) {
+    const section = sections.orderers;
+    const own = row.querySelector("[data-err]");
+    const keepEditing = () => {   // 確定を取り消し、入力した内容のまま編集中に戻す
+      row._state.name = before.name; row._state.email = before.email; row._startEdit();
+      row.querySelector('[data-f="name"]').value = typed.name; row.querySelector('[data-f="email"]').value = typed.email;
+      row._memberCheck.checked = true; row._syncMemberOpt();
+    };
+    keepEditing();
+    const email = typed.email.trim();
+    const name = typed.name.replace(/\s+/g, " ").trim();
+    if (!isValidEmail(email)) {
+      own.textContent = "利用者管理にも追加する場合は、メールアドレスを入力してください。";
+      return message(section, "入力内容を確認してください。", true);
+    }
+    const saveBtn = row.querySelector('[data-act="save-row"]');
+    saveBtn.disabled = true; own.textContent = "";
+    message(section, "利用者管理に登録しています…");
+    let note = "";
+    try {
+      if (row._memberDone !== email.toLowerCase()) {
+        await inviteApi.addMember({ facilityId: facility.id, name, email, role: "orderer" });
+        note = `「${name}」を利用者管理に注文者として登録しました。本人がこのメールアドレスでログインすると、参加を確認できます。`;
+      }
+      row._memberDone = email.toLowerCase();
+    } catch (e) {
+      if (String((e && e.code) || "").endsWith("already-exists")) {
+        row._memberDone = email.toLowerCase();
+        note = "このメールアドレスは既に利用者管理に登録済み(所属済み・参加待ち)のため、重複して登録しませんでした。";
+      } else {
+        console.error("利用者管理への登録に失敗しました:", e);
+        saveBtn.disabled = false;
+        own.textContent = describeCallableError(e);
+        return message(section, "利用者管理に登録できなかったため、担当医は保存していません。", true);
+      }
+    }
+    saveBtn.disabled = false;
+    try { await reloadMembers(); if (sections.members) renderMembers(sections.members); } catch (e) { console.warn("利用者管理の一覧を更新できませんでした:", e); }
+    row._commit();   // 入力した内容で確定し、担当医を保存する
+    message(section, note);
+    orderSaver.request();
+  }
+
+  /** 利用者管理に既にいる(所属済み・期限内の参加待ち)メールアドレスか */
+  function isKnownMemberEmail(email) {
+    const e = String(email || "").trim().toLowerCase();
+    if (!e) return false;
+    return (data.members || []).some(m => String(m.email || "").toLowerCase() === e)
+      || (data.pending || []).some(p => String(p.email || "").toLowerCase() === e && pendingState(p) === "pending");
   }
 
   /**
