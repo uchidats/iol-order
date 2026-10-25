@@ -60,11 +60,31 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       pg.on("pageerror", e => errors.push(String(e)));
       await pg.goto(base);
       await pg.waitForFunction(() => window.__ready);
-      const sec = pg.locator('[data-section="delete"]'), start = sec.locator("#btnDeleteFacilityStart"), box = sec.locator(".delete-confirm"), input = box.locator("input");
+      const more = pg.locator("#btnSettingsMore"), menuItem = pg.locator("#btnDeleteFacility"), box = pg.locator("#deleteFacilityDialog"), input = box.locator("input");
+      const sec = box;
       const del = box.getByRole("button", { name: "この施設を削除する" });
+      // 画面の最下部に削除の欄はない。見出し右端の「︙」→「施設を削除」(赤いゴミ箱)→ダイアログ
+      assert.equal(await pg.locator('[data-section="delete"]').count(), 0);
       assert.equal(await box.isHidden(), true);
-      assert.match(await sec.innerText(), /注文履歴がある施設/);
-      await start.click();
+      assert.equal(await menuItem.isHidden(), true);
+      const headBox = await pg.locator(".settings-head").boundingBox(), moreBox = await more.boundingBox();
+      assert.ok(moreBox.x + moreBox.width > headBox.x + headBox.width - 40, "見出しの右端にある");
+      assert.ok(moreBox.y < headBox.y + headBox.height + 1);
+      await more.click();
+      assert.equal(await menuItem.isVisible(), true);
+      assert.equal(await menuItem.locator("svg").count(), 1);
+      assert.equal(await menuItem.evaluate(e => getComputedStyle(e).color), "rgb(220, 38, 38)", "赤");
+      assert.equal(await menuItem.innerText(), "施設を削除");
+      await pg.keyboard.press("Escape");   // Escで閉じる
+      assert.equal(await menuItem.isHidden(), true);
+      await more.click();
+      await pg.mouse.click(5, 600);       // 外側のクリックで閉じる
+      assert.equal(await menuItem.isHidden(), true);
+      await more.click();
+      await menuItem.click();
+      assert.equal(await box.isVisible(), true);
+      assert.match(await box.innerText(), /注文履歴がある施設/);
+      assert.equal(await menuItem.isHidden(), true, "メニューは閉じる");
       assert.equal(await del.isDisabled(), true);
       await input.fill("違う名前");
       assert.equal(await del.isDisabled(), true, "施設名が違えば押せない");
@@ -86,17 +106,27 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await del.click();
       await pg.waitForFunction(() => window.__deleted.length === 1);
       assert.deepEqual(await pg.evaluate(() => window.__deleted), ["f1"]);
+      assert.equal(await box.isHidden(), true, "成功でダイアログは閉じる");
 
       // キャンセルで確認欄が閉じる
-      await start.click();
+      await more.click(); await menuItem.click();
+      assert.equal(await input.inputValue(), "", "開き直すと入力は空");
       await box.getByRole("button", { name: "キャンセル" }).click();
       assert.equal(await box.isHidden(), true);
+      // PC幅でも同じ
+      await pg.setViewportSize({ width: 1100, height: 900 });
+      await more.click();
+      assert.equal(await menuItem.isVisible(), true);
+      const mb = await pg.locator(".more-menu").boundingBox();
+      assert.ok(mb.x >= 0 && mb.x + mb.width <= 1100);
+      await pg.keyboard.press("Escape");
+      await pg.setViewportSize({ width: 390, height: 900 });
       assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
 
-      // 削除用の関数がなければ、削除の欄は出ない
+      // 削除用の関数がなければ、「︙」は出ない
       await pg.goto(base + "norename");
       await pg.waitForFunction(() => window.__ready);
-      assert.equal(await pg.locator('[data-section="delete"]').count(), 0);
+      assert.equal(await pg.locator("#btnSettingsMore").count(), 0);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

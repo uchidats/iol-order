@@ -2068,7 +2068,20 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 #btnRenameFacility { margin-left: -4px; }
 
-/* 施設設定: 施設の削除(危険な操作は最下部に分けて表示) */
-.settings-danger { border-color: #fca5a5; }
-.delete-confirm { margin-top: 8px; }
-.delete-confirm .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* 施設設定: 見出し右端の「︙」メニューと、施設削除のダイアログ */
+.more-wrap { position: relative; margin-left: auto; }
+.settings-head .more-wrap { margin-left: 4px; }
+.more-trigger { padding: 4px 8px; }
+.more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 160px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 4px; }
+.more-menu[hidden] { display: none; }
+.more-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: #dc2626; font: inherit; text-align: left; cursor: pointer; }
+.more-menu-item:hover, .more-menu-item:focus-visible { background: #fef2f2; }
+.delete-dialog { width: min(92vw, 440px); border: 1px solid #fca5a5; border-radius: 10px; padding: 16px; background: #fff; color: #1f2937; }
+.delete-dialog::backdrop { background: rgba(0,0,0,.45); }
+.delete-dialog .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+@media (prefers-color-scheme: dark) {
+  .more-menu { background: #1f2937; border-color: #4b5563; }
+  .more-menu-item { color: #f87171; }
+  .more-menu-item:hover, .more-menu-item:focus-visible { background: #3b1d1d; }
+  .delete-dialog { background: #1f2937; color: #f3f4f6; border-color: #7f1d1d; }
+}

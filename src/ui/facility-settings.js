@@ -650,31 +650,49 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     return section;
   }
 
-  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。施設名を入力して確認) ----------
-  function deleteSection() {
+  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出し右端の「︙」メニューから、施設名を入力するダイアログで確認) ----------
+  const moreIcon = () => icon("M12 5.5v.01M12 12v.01M12 18.5v.01");
+  function deleteMenu() {
     const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", "aria-label": "削除する施設名の確認入力" });
     const doDelete = h("button", { type: "button", class: "btn btn-danger", disabled: true }, "この施設を削除する");
     const cancel = h("button", { type: "button", class: "btn btn-secondary" }, "キャンセル");
     const msg = h("p", { class: "error-message", role: "alert", hidden: true });
-    const confirmBox = h("div", { class: "delete-confirm", hidden: true },
-      h("label", { class: "form-label" }, "確認のため、削除する施設名を入力してください", input),
-      h("div", { class: "form-row" }, doDelete, cancel));
-    const start = h("button", { type: "button", class: "btn btn-outline-sm", id: "btnDeleteFacilityStart" }, "施設を削除する…");
-    const section = h("section", { class: "settings-section settings-danger", "data-section": "delete" },
-      h("h3", {}, "施設の削除"),
+    const dialog = h("dialog", { class: "delete-dialog", id: "deleteFacilityDialog", "aria-labelledby": "deleteFacilityTitle" },
+      h("h3", { id: "deleteFacilityTitle" }, "施設の削除"),
       h("p", { class: "form-hint" }, "注文履歴がある施設、自分以外の利用者が所属している施設は削除できません。削除すると、この施設の設定（担当医・採用IOL・ディーラーなど）と招待が消え、元に戻せません。"),
-      start, confirmBox, msg);
-    const same = () => input.value.replace(/s+/g, " ").trim() === (facility.name || "").replace(/s+/g, " ").trim() && input.value.trim() !== "";
+      h("label", { class: "form-label" }, "確認のため、削除する施設名を入力してください", input),
+      msg,
+      h("div", { class: "form-row" }, doDelete, cancel));
+    const trash = trashIcon(); trash.setAttribute("width", "16"); trash.setAttribute("height", "16");
+    const item = h("button", { type: "button", class: "more-menu-item", role: "menuitem", id: "btnDeleteFacility" }, trash, h("span", {}, "施設を削除"));
+    const menu = h("div", { class: "more-menu", role: "menu", hidden: true }, item);
+    const trigger = h("button", { type: "button", class: "btn btn-outline-sm more-trigger", id: "btnSettingsMore", "aria-label": "その他の操作", "aria-haspopup": "menu", "aria-expanded": "false", title: "その他" }, moreIcon());
+    const wrap = h("div", { class: "more-wrap" }, trigger, menu);
+
+    const setMenu = (on) => { menu.hidden = !on; trigger.setAttribute("aria-expanded", on ? "true" : "false"); };
+    trigger.addEventListener("click", (ev) => { ev.stopPropagation(); setMenu(menu.hidden); });
+    document.addEventListener("click", (ev) => { if (!menu.hidden && !wrap.contains(ev.target)) setMenu(false); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !menu.hidden) { setMenu(false); trigger.focus(); } });
+
+    const same = () => input.value.trim() !== "" && input.value.replace(/s+/g, " ").trim() === (facility.name || "").replace(/s+/g, " ").trim();
     input.addEventListener("input", () => { doDelete.disabled = !same(); });
-    start.addEventListener("click", () => { confirmBox.hidden = false; msg.hidden = true; input.value = ""; doDelete.disabled = true; input.focus(); });
-    cancel.addEventListener("click", () => { confirmBox.hidden = true; msg.hidden = true; });
+    const closeDialog = () => { if (dialog.open) dialog.close(); };
+    item.addEventListener("click", () => {
+      setMenu(false);
+      input.value = ""; doDelete.disabled = true; msg.hidden = true;
+      dialog.showModal();
+      input.focus();
+    });
+    cancel.addEventListener("click", closeDialog);
     let deleting = false;
+    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); doDelete.click(); } });
     doDelete.addEventListener("click", async () => {
       if (deleting || !same()) return;
       deleting = true; doDelete.disabled = true; msg.hidden = true;
       try {
         await inviteApi.deleteFacility({ facilityId: facility.id, confirmName: input.value });
         dirty = false;
+        closeDialog();
         onDeleted(facility.id);
       } catch (e) {
         const notFound = String((e && e.code) || "").endsWith("not-found") && !/[぀-ヿ一-鿿]/.test(String(e.message || ""));
@@ -683,14 +701,14 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         deleting = false; doDelete.disabled = !same();
       }
     });
-    return section;
+    return { wrap, dialog, reset: () => { setMenu(false); closeDialog(); } };
   }
 
   // ---------- 画面全体 ----------
   const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
   if (canManageMembers) sections.members = memberSection();
   if (inviteApi) sections.invites = inviteSection();
-  if (inviteApi && inviteApi.deleteFacility) sections.remove = deleteSection();
+  const del = inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });
 
   // ---------- 施設名の変更(施設管理者のみ。重複確認はサーバー。施設ID・所属・注文は変わらない) ----------
@@ -745,7 +763,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
     // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない
-    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, closeBtn),
+    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, closeBtn, del && del.wrap),
+    del && del.dialog,
     nameBox,
     status,
     ...Object.values(sections));
@@ -770,7 +789,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       facility = fac;
       title.textContent = fac.name;
       nameBox.hidden = true;
-      if (sections.remove) { sections.remove.querySelector(".delete-confirm").hidden = true; sections.remove.querySelector("p.error-message").hidden = true; }
+      if (del) del.reset();
       status.textContent = "読み込み中…";
       root.hidden = false;
       open = true;
