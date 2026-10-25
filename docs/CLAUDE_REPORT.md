@@ -14,8 +14,10 @@
 - 維持: 関連データの保護、削除条件、回数制限、Rules(変更なし)。実施設データは削除していない。
 - 変更: `functions/src/registration.js`、`src/ui/facility-settings.js`、`src/data/registration-api.js`、`styles.css`、`docs/self-registration.md`、テスト。
 
-## Firebaseデプロイ — 要対応(判断待ち)
-- **`deleteFacility` の再デプロイが必要**(未実施)。デプロイ済みの旧版は施設名(`confirmName`)を必須とするため、**デプロイするまでは、新しい画面からの削除は「確認のため、施設名を入力してください」で失敗**する(誤って削除されることはない)。指示があれば `firebase deploy --only functions:deleteFacility --project medconf-iol-dev`。Rules・他の関数の変更はなし。
+## Firebaseデプロイ(実施済み・2026-10-25)
+- `.firebaserc` と公開サイトの設定が `medconf-iol-dev` で一致することを確認し、**`deleteFacility` のみ**を再デプロイ(update成功)。他の関数・Firestore Rules は未変更。
+- 確認できたこと: 未ログインの呼び出しは「ログインが必要です(UNAUTHENTICATED)」で拒否される(稼働・認証必須)。安全条件(管理者権限・注文履歴ゼロ・自分以外の所属なし・施設IDだけで対象を特定・同名の別施設や管理者でない施設は削除不可)は、デプロイしたコードと同じ内容のエミュレータ上のFunctionsテスト105件で確認済み。
+- **未確認(認証付きの実画面・実環境での確認はしていない)**: ログイン後の実際の削除操作(ゴミ箱→ダイアログ→削除)と、実環境での拒否表示。実際の施設・注文データの変更・削除は行っていない。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
