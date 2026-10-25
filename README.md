@@ -41,7 +41,7 @@
    - `◀` / `▶` ステッパーボタンによる前後切り替え対応
 4. **枚数** (必須): `1 枚` / `2 枚`
 5. **手術日** (必須): HTML5標準日付ピッカー
-6. **注文者** (必須): `内田` / `角田` / `利根川` / `秋冨` / `木村`（Google Form準拠のプルダウン）
+6. **担当医** (必須): 施設設定の担当医マスターから選択
 7. **メールアドレス** (必須・新規):
    - 入力値を `localStorage` に保持し、次回起動時に自動入力
    - 注文完了控えや業者宛て送信の返信先として利用
@@ -60,7 +60,8 @@
 
 ## 📷 生体計測結果の画像読み取り機能（クライアントサイドOCR解析）
 
-OA-2000等の測定結果画面をスマートフォンから撮影・選択し、数値を自動抽出して手動確認・確定できる機能を実装しています。
+**現在は一時停止中**(画面に表示せず、Tesseract.js も読み込まない。`src/biometry/biometry-ui.js` の `BIOMETRY_OCR_ENABLED`)。患者名の入力欄は削除済み。
+OA-2000等の測定結果画面をスマートフォンから撮影・選択し、数値を自動抽出して手動確認・確定できる機能です。
 
 ### 1. 画像解析方式（ブラウザ内完全実行型 OCR）
 - **解析エンジン**: **Tesseract.js**（Web Workerによるブラウザ内完全実行）
@@ -106,7 +107,7 @@ src/main.js           起動処理
 src/config.js         設定（既定dryrun）/ config.local.js で上書き
 src/data/iol-models.js      IOLモデル・度数マスター
 src/data/schema.js          施設・注文者・採用IOL・ディーラーの型定義とRepository IF
-src/data/static-repository.js  現行の固定データを返すRepository実装
+src/data/static-repository.js  採用IOLから表示するモデルを解決する(静的モードは廃止)
 src/domain/                 度数フィルタ・入力検証（純粋関数）
 src/ui/                     注文フォーム・共通DOMヘルパー
 src/biometry/               生体計測OCR（state / parser / ocr / UI）

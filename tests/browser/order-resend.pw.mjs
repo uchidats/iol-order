@@ -91,7 +91,7 @@ async function fillOrder(page, notes) {
   const line = page.locator(".lens-line").first();
   await line.locator("[data-f=model]").selectOption("jj-dib00v");
   await line.locator("[data-f=power]").selectOption("+20.0D");
-  await line.locator("[data-f=date]").fill("2099-01-10");
+  await line.locator("[data-f=date]").fill(new Date(Date.now() + (9 * 3600 + 30 * 86400) * 1000).toISOString().slice(0, 10));   // 日本時間の30日後(1年以内)
   await line.locator("[data-f=doctor]").selectOption("o1");
   await page.fill("#notesInput", notes);
 }
@@ -131,6 +131,31 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(s.calls.length, 1, "同じ注文を再送していない");
       assert.equal(Object.keys(s.orders).length, 1, "二重に登録されていない");
       assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith("iol_order_pending:")).length), 0, "未確定の記録は消える");
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+
+  test(`手術日はサーバーと同じ範囲(日本時間の本日以降・1年以内)で確認する。OCR の画面は表示しない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const { page, errors } = await open(browser);
+      assert.equal(await page.locator("#ocrFeatureCard").isVisible(), false, "OCR は一時停止中");
+      assert.equal(await page.locator("#ocrPatientName").count(), 0, "患者名の入力欄はない");
+      const jst = (days) => new Date(Date.now() + (9 * 3600 + days * 86400) * 1000).toISOString().slice(0, 10);
+      const date = page.locator(".lens-line").first().locator("[data-f=date]");
+      assert.deepEqual([await date.getAttribute("min"), await date.getAttribute("max")], [jst(0), jst(366)]);
+      await fillOrder(page, "");
+      for (const [d, msg] of [[jst(-1), /手術日は本日以降/], [jst(367), /手術日が先すぎます/]]) {
+        await date.fill(d);
+        await page.click("#btnConfirm");
+        assert.match(await page.locator(".lens-line").first().innerText(), msg, d);
+        assert.equal(await visible(page, "#confirmModal"), false);
+      }
+      await date.fill(jst(366));
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      assert.equal((await srv(page)).calls.length, 0, "確認画面までは送信しない");
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

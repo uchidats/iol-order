@@ -29,7 +29,7 @@ function lineItem(l) {
 
 /**
  * 注文確認画面の「発注するレンズ」を、「手術日 + 担当医」ごとにまとめて表示する(表示のみ)。
- * 見出しは「手術日 2026年10月29日(木)　Dr. 内田」。同じ手術日でも担当医が違えば見出しを分ける。
+ * 見出しは「手術日 2026年10月29日(木)　Dr. 高橋」。同じ手術日でも担当医が違えば見出しを分ける。
  * 注文データの並び順・送信内容・保存内容には影響しない。グループは手術日の早い順、同じ日は担当医の初出順、レンズは入力順。
  * @param {HTMLElement} list 表示先(ol / ul)
  * @param {Array<object>} lines 確認済みの明細(lineNo・manufacturer・modelName・power・quantity・surgeryDate・doctor・isToric・isMultifocal)

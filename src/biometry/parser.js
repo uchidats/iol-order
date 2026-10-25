@@ -2,12 +2,10 @@
 
 /**
  * OA-2000等の測定結果テキストパース正規表現
- * - 患者名（ローマ字）抽出を含む
- * - 大文字小文字・スペース・姓名順を勝手に補正しない
+ * - 患者名は抽出しない(注文に不要な患者情報を扱わない)
  */
 export function parseBiometryText(text, baseConfidencePct) {
   const result = {
-    patientName: null,
     al: null,
     acd: null,
     k1: null,
@@ -21,20 +19,6 @@ export function parseBiometryText(text, baseConfidencePct) {
 
   const cleanText = text.replace(/,/g, ".").replace(/[\r\n]+/g, "\n");
   const baseConf = Math.min(0.95, Math.max(0.40, baseConfidencePct / 100));
-
-  // 0. 患者名 (ローマ字) パース
-  // 例: "Name: YAMADA TARO", "NAME TANAKA HANAKO", "Patient: SUZUKI ICHIRO"
-  // 大文字小文字・スペース・姓名順をそのまま保持
-  const nameMatch = cleanText.match(/(?:NAME|Name|PATIENT|Patient)[^\w\n]{0,8}([A-Za-z]+(?:\s+[A-Za-z]+)+)/);
-  if (nameMatch) {
-    const rawName = nameMatch[1].trim();
-    if (rawName.length >= 3 && !/\d/.test(rawName)) {
-      result.patientName = {
-        value: rawName,
-        confidence: baseConf
-      };
-    }
-  }
 
   // 1. 眼軸長 AL
   const alMatch = cleanText.match(/(?:AL|AXIAL|Axial(?:\s*Length)?)[^\d]{0,8}(\d{2}\.\d{1,3})/i);

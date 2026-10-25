@@ -10,12 +10,12 @@ const D = "projects/medconf-iol-dev/databases/(default)/documents";
 const raw = (p, fields) => ({ name: `${D}/${p}`, fields, updateTime: "t0" });
 const s = (v) => ({ stringValue: v });
 const backup = { project: PROJECT, collection: "orderers", docs: [
-  raw("facilities/f/orderers/a", { name: s("内田"), active: { booleanValue: true } }),
-  raw("facilities/f/orderers/b", { name: s("内田2"), active: { booleanValue: false } }),
+  raw("facilities/f/orderers/a", { name: s("高橋"), active: { booleanValue: true } }),
+  raw("facilities/f/orderers/b", { name: s("高橋2"), active: { booleanValue: false } }),
   raw("facilities/f/orderers/c", { name: s("削除済"), active: { booleanValue: false } })
 ] };
 const cur = new Map([
-  ["facilities/f/orderers/a", { fields: { name: s("内田") }, updateTime: "t1" }],                                        // active が無い(移行後)
+  ["facilities/f/orderers/a", { fields: { name: s("高橋") }, updateTime: "t1" }],                                        // active が無い(移行後)
   ["facilities/f/orderers/b", { fields: { name: s("改名後"), active: { booleanValue: false } }, updateTime: "t2" }],   // 既に同じ
   ["facilities/f/orderers/c", null]                                                                                      // 削除済み
 ]);

@@ -15,6 +15,7 @@ import { buildCreateOrderRequest } from "../domain/order-request.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { pendingOrderKey, createPendingOrderStore, deriveOrderId, reconcilePendingOrder, isDefinitiveRejection } from "../domain/pending-order.js";
 import { summarizeOrder } from "../domain/order-history.js";
+import { surgeryDateRange } from "../domain/surgery-date.js";
 import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.js";
 
 // 現在の状態
@@ -109,7 +110,8 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     getDealers: () => dealers,
     // 担当医の初期値: ログインユーザー本人が担当医マスター(メールアドレスで紐づけ)にいれば本人。いなければ未選択(従来どおり)
     getDefaultDoctorId: () => findSelfDoctor(doctors, loginUser),
-    minDate: todayString,
+    minDate: () => surgeryDateRange().min,   // 日本時間の本日(サーバーと同じ基準)
+    maxDate: () => surgeryDateRange().max,
     onChange: () => { updateAlconGuide(); if (draft) draft.save(); },   // モデル・絞り込み・レンズの追加/削除/元に戻すは、すぐ下書きに反映する
     // 削除は確認ダイアログなし。「元に戻す」付きの通知を出す(元に戻した結果も下書きに反映される)
     onLineRemoved: ({ lineNo, undo }) => showUndoToast(`レンズ${lineNo}を削除しました`, undo)
@@ -131,12 +133,6 @@ function setupDraft() {
     onRestored: () => { updateAlconGuide(); showToast("入力途中の内容を復元しました"); }
   });
   draft.restore();
-}
-
-/** 今日(端末のローカル日付)。手術日の最小値 */
-function todayString() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** いずれかの明細が ALCON のトーリックなら、計算ツールの案内を表示する */

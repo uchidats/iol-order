@@ -1,46 +1,6 @@
 import { IOL_MODELS } from "./iol-models.js";
 
-export const DEFAULT_FACILITY_ID = "tachikawa-hospital";
-
-const FACILITY = {
-  id: DEFAULT_FACILITY_ID,
-  name: "国家公務員共済組合連合会 立川病院 眼科",
-  status: "active"
-};
-
-// 既存フォームの注文者（Google Form準拠）
-const ORDERER_NAMES = ["内田", "角田", "利根川", "秋冨", "木村"];
-
-/**
- * 現行の固定データを返す FacilityRepository 実装
- * @returns {import("./schema.js").FacilityRepository}
- */
-export function createStaticRepository() {
-  return {
-    async getFacility() {
-      return FACILITY;
-    },
-    async listOrderers(facilityId = DEFAULT_FACILITY_ID) {
-      return ORDERER_NAMES.map((name, i) => ({
-        id: `orderer-${i + 1}`,
-        facilityId,
-        name
-      }));
-    },
-    async listAdoptedIols(facilityId = DEFAULT_FACILITY_ID) {
-      return IOL_MODELS.map(m => ({
-        id: m.id,
-        facilityId,
-        catalogIolId: m.id,
-        enabled: true
-      }));
-    },
-    async listDealers() {
-      // 開発用の静的モードはディーラーなし
-      return [];
-    }
-  };
-}
+// 固定データ(施設・注文者)で動く静的モードは廃止した(Firebase の設定がない場合はエラー表示。src/main.js)。
 
 /**
  * 採用IOLからフォームに表示するモデル定義を解決する

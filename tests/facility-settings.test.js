@@ -20,9 +20,9 @@ test("メール一覧: 区切り・重複・形式・上限", () => {
 });
 
 test("注文者: 必須・長さ・重複・メール形式を検証", () => {
-  const ok = validateOrderers([{ name: " 内田 ", email: "" }, { name: "角田", email: "t@example.jp" }]);
+  const ok = validateOrderers([{ name: " 高橋 ", email: "" }, { name: "伊藤", email: "t@example.jp" }]);
   assert.equal(ok.ok, true);
-  assert.equal(ok.cleaned[0].name, "内田");
+  assert.equal(ok.cleaned[0].name, "高橋");
   assert.equal(validateOrderers([{ name: "" }]).ok, false);
   assert.equal(validateOrderers([{ name: "あ".repeat(51) }]).ok, false);
   assert.equal(validateOrderers([{ name: "A" }, { name: " a " }]).ok, false); // 大文字小文字・空白差の重複
@@ -33,20 +33,20 @@ test("注文者: 必須・長さ・重複・メール形式を検証", () => {
 
 test("注文者の書き込み計画: 並び順は配列順、変更・新規のみ", () => {
   const original = [
-    { id: "o1", name: "内田", sortOrder: 10 },
-    { id: "o2", name: "角田", sortOrder: 20, email: "t@example.jp" }
+    { id: "o1", name: "高橋", sortOrder: 10 },
+    { id: "o2", name: "伊藤", sortOrder: 20, email: "t@example.jp" }
   ];
   // 変更なし
   assert.deepEqual(planOrdererWrites(original, validateOrderers(original.map(o => ({ ...o }))).cleaned, F), []);
   // 並べ替え + 新規
   const edited = validateOrderers([
-    { id: "o2", name: "角田", email: "t@example.jp" },
-    { id: "o1", name: "内田", email: "" },
-    { id: null, name: "利根川", email: "" }
+    { id: "o2", name: "伊藤", email: "t@example.jp" },
+    { id: "o1", name: "高橋", email: "" },
+    { id: null, name: "渡辺", email: "" }
   ]).cleaned;
   const w = planOrdererWrites(original, edited, F);
   assert.equal(w.length, 3);
-  assert.deepEqual(w.find(x => x.id === "o2").data, { facilityId: F, name: "角田", sortOrder: 10, email: "t@example.jp" });
+  assert.deepEqual(w.find(x => x.id === "o2").data, { facilityId: F, name: "伊藤", sortOrder: 10, email: "t@example.jp" });
   for (const x of w) assert.equal("active" in x.data, false, "new documents never carry active");
   assert.equal(w.find(x => x.id === "o1").data.sortOrder, 20);
   const created = w.find(x => x.id === null);

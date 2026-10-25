@@ -3,8 +3,7 @@
  *
  * - これは公開前提のクライアント設定であり、秘密情報ではない（アクセス制御はSecurity Rulesで行う）。
  * - サービスアカウント秘密鍵・Admin SDK認証情報は絶対にここ（Git）に置かない。
- * - apiKey は Firebase Console の値が提供されるまで未設定。未設定の間は Firebase 機能を無効化し、
- *   従来どおりの静的モード（dryrun）で動作する。値を推測して埋めないこと。
+ * - 必須項目が欠けている場合は、注文画面を表示せずにエラーを表示する(静的モードは廃止)。値を推測して埋めないこと。
  */
 export const FIREBASE_CONFIG = Object.freeze({
   apiKey: "AIzaSyCC3xOe6BtUNkFN8xR8hyuwvDa10r83lR0", // Webアプリ用の公開キー（Firebase CLI apps:sdkconfig の値と照合済み）

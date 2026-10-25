@@ -1,10 +1,10 @@
 import { loadConfig } from "./config.js";
-import { createStaticRepository, DEFAULT_FACILITY_ID } from "./data/static-repository.js";
 import { initOrderForm, isOrderFormDirty, reloadFacilityOptions } from "./ui/order-form.js";
-import { initBiometry } from "./biometry/biometry-ui.js";
+import { initBiometry, BIOMETRY_OCR_ENABLED } from "./biometry/biometry-ui.js";
 import { biometryState } from "./biometry/state.js";
 import { IOL_MODELS } from "./data/iol-models.js";
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "./firebase/firebase-config.js";
+import { setupAppCheck } from "./firebase/app-check.js";
 import { decideAccess, validMemberships, ACCESS } from "./domain/access.js";
 import { isManagerRole } from "./domain/member-admin.js";
 import * as registrationFlow from "./domain/registration-flow.js";
@@ -15,19 +15,35 @@ import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
 
 /**
- * Firebase未設定の間は従来の静的モードで動作する。
- * 設定済みの場合は、ログイン + 施設への有効な所属が確認でき、施設が確定するまで注文画面を表示しない。
+ * ログイン + 施設への有効な所属が確認でき、施設が確定するまで注文画面を表示しない。
+ * Firebase の設定がない・初期化に失敗した場合は、注文画面を出さずにエラーを表示する(固定データの静的モードは廃止)。
  */
 async function bootstrap() {
   const config = await loadConfig();
-  initBiometry();
+  if (BIOMETRY_OCR_ENABLED) initBiometry();
 
   if (!isFirebaseConfigured(FIREBASE_CONFIG)) {
-    await initOrderForm({ config, repository: createStaticRepository(), facilityId: DEFAULT_FACILITY_ID });
+    showFatal("システムの設定が不足しているため、注文画面を表示できません。管理者にお問い合わせください。");
     return;
   }
 
   await bootstrapWithFirebase(config);
+}
+
+/** 起動できないときの表示。注文画面は隠したままにする */
+function showFatal(message) {
+  for (const id of ["iolOrderForm", "ocrFeatureCard"]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  }
+  const main = document.querySelector("main.main-content");
+  if (!main) return;
+  const panel = document.getElementById("fatalPanel") || main.insertBefore(Object.assign(document.createElement("section"), { id: "fatalPanel", className: "feature-card" }), main.firstChild);
+  const p = document.createElement("p");
+  p.className = "error-message";
+  p.setAttribute("role", "alert");
+  p.textContent = message;
+  panel.replaceChildren(p);
 }
 
 const GEO_MESSAGES = Object.freeze({
@@ -418,6 +434,7 @@ async function bootstrapWithFirebase(config) {
       ]);
     const sdk = await loadFirebaseSdk();
     const app = sdk.app.initializeApp(FIREBASE_CONFIG);
+    await setupAppCheck({ app });   // 監視モード(サイトキー未設定の間は何もしない。src/firebase/app-check.js)
     const auth = sdk.auth.getAuth(app);
     const db = sdk.firestore.getFirestore(app);
     const service = createAuthService({
@@ -509,4 +526,5 @@ function describeAuthError(e) {
 
 bootstrap().catch(err => {
   console.error("初期化に失敗しました:", err);
+  showFatal("画面の読み込みに失敗しました。通信状況を確認して、ページを再読み込みしてください。");
 });

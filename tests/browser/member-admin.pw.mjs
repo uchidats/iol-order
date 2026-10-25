@@ -124,6 +124,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.waitForFunction(() => window.__ready);
         const sec = page.locator('[data-section="members"]');
         assert.equal(await page.locator('[data-section="invites"]').count(), 0, "「メンバーの招待」カードは廃止");
+        // 施設設定の並び: 担当医 → 利用者管理 → 採用IOL → ディーラー
+        assert.deepEqual((await page.locator("[data-section]").evaluateAll(es => es.map(e => e.getAttribute("data-section")))).filter(x => ["orderers", "members", "iols", "dealers"].includes(x)), ["orderers", "members", "iols", "dealers"]);
         // 一覧(表示順の保存がない間は 参加済み(役割順) → 参加待ち → 期限切れ → 辞退)
         assert.deepEqual(await names(page), ["自分", "副管理者X", "注文者A", "代行A", "新人P", "副候補S", "期限切れE", "辞退D"]);
         assert.deepEqual(await sec.locator('[data-f="state"]').allInnerTexts(), ["参加待ち", "参加待ち", "期限切れ", "辞退"]);

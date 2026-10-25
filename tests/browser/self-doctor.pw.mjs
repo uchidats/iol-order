@@ -24,7 +24,7 @@ import { buildLensOptions } from "/src/domain/lens-options.js";
 import { findSelfDoctor } from "/src/domain/self-doctor.js";
 import { IOL_MODELS } from "/src/data/iol-models.js";
 const q = new URLSearchParams(location.search);
-const doctors = [{ id: "o1", name: "内田", email: "uchida@example.jp" }, { id: "o2", name: "佐藤", email: "sato@example.jp" }, { id: "o3", name: "山田" }];
+const doctors = [{ id: "o1", name: "高橋", email: "takahashi@example.jp" }, { id: "o2", name: "佐藤", email: "sato@example.jp" }, { id: "o3", name: "山田" }];
 const user = q.get("email") === null ? null : { uid: "u1", email: q.get("email"), displayName: q.get("name") || "", emailVerified: q.get("verified") !== "0" };
 const options = buildLensOptions(IOL_MODELS);
 window.__lines = createLensLines({
@@ -71,9 +71,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const doctor = (i) => page.locator(".lens-line").nth(i).locator("[data-f=doctor]");
 
       // 本人が担当医マスターにいる(メールアドレスで紐づく): 初期値は本人。選択肢は従来どおり全員 + 「選択」
-      await open("email=UCHIDA@example.jp");
+      await open("email=TAKAHASHI@example.jp");
       assert.equal(await doctor(0).inputValue(), "o1");
-      assert.deepEqual(await doctor(0).locator("option").allInnerTexts(), ["選択", "内田", "佐藤", "山田"]);
+      assert.deepEqual(await doctor(0).locator("option").allInnerTexts(), ["選択", "高橋", "佐藤", "山田"]);
       // 別の医師に変更できる。変更後に「レンズを追加」すると、現在の担当医(変更後)を引き継ぐ(既存仕様を優先)
       await doctor(0).selectOption("o2");
       assert.equal(await doctor(0).inputValue(), "o2");
@@ -94,8 +94,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await doctor(0).selectOption("o2");
       assert.equal(await page.evaluate(() => window.__lines.values()[0].doctor.id), "o2");
 
-      // 氏名だけでは判定しない: 氏名が「内田」でも、メールが違う/ない/未確認のユーザーは従来どおり(未選択)
-      for (const qs of ["email=nurse@example.jp&name=内田", "name=内田", "email=&name=山田", "email=uchida@example.jp&verified=0", ""]) {
+      // 氏名だけでは判定しない: 氏名が「高橋」でも、メールが違う/ない/未確認のユーザーは従来どおり(未選択)
+      for (const qs of ["email=nurse@example.jp&name=高橋", "name=高橋", "email=&name=山田", "email=takahashi@example.jp&verified=0", ""]) {
         await open(qs);
         assert.equal(await doctor(0).inputValue(), "", `未選択のまま: ${qs}`);
         await page.click("#btnAddLine");

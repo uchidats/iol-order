@@ -15,6 +15,8 @@ import { createRegistrationService, RegistrationError } from "./src/registration
 import { createOrderService } from "./src/orders.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
+import { onDocumentWrittenWithAuthContext } from "firebase-functions/v2/firestore";
+import { createSettingsAuditService } from "./src/settings-audit.js";
 
 initializeApp();
 
@@ -87,3 +89,18 @@ export const respondMembership = onCall(options, wrap(memberService.respondMembe
 export const changeMemberRole = onCall(options, wrap(memberService.changeMemberRole));
 export const updateMemberName = onCall(options, wrap(memberService.updateMemberName));         // 参加済みの利用者の氏名(この施設の表示名のみ)
 export const updatePendingMember = onCall(options, wrap(memberService.updatePendingMember));   // 参加待ちの氏名・メール・役割
+
+// 施設設定(担当医・採用IOL・ディーラー)の変更履歴。画面からの直接の書き込みを Firestore トリガーで受けて auditLogs に記録する(src/settings-audit.js)。
+// 同じイベントの再配信・再試行でも二重に記録しない(履歴のIDをイベントIDから決める)ため、失敗時は再試行させる。
+const settingsAudit = createSettingsAuditService({ db: getFirestore(), FieldValue });
+const auditTrigger = (collection) => onDocumentWrittenWithAuthContext(
+  { document: `facilities/{facilityId}/${collection}/{docId}`, region: REGION, retry: true, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT },
+  (event) => settingsAudit.recordSettingChange({
+    eventId: event.id, collection, facilityId: event.params.facilityId, docId: event.params.docId,
+    before: event.data && event.data.before.exists ? event.data.before.data() : null,
+    after: event.data && event.data.after.exists ? event.data.after.data() : null,
+    authType: event.authType, authId: event.authId, time: event.time
+  }));
+export const auditOrderers = auditTrigger("orderers");
+export const auditAdoptedIols = auditTrigger("adoptedIols");
+export const auditFacilityDealers = auditTrigger("facilityDealers");

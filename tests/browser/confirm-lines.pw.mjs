@@ -20,11 +20,11 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 import { renderConfirmLines } from "/src/ui/confirm-lines.js";
 const base = { isToric: false, isMultifocal: false };
 window.__lines = [
-  { ...base, lineNo: 1, manufacturer: "ALCON", modelName: "CNA0T0", power: "+18.0D", quantity: 1, surgeryDate: "2099-02-12", doctor: "内田", doctorId: "o1" },
+  { ...base, lineNo: 1, manufacturer: "ALCON", modelName: "CNA0T0", power: "+18.0D", quantity: 1, surgeryDate: "2099-02-12", doctor: "高橋", doctorId: "o1" },
   { ...base, lineNo: 2, manufacturer: "J&J", modelName: "DIW300", isToric: true, power: "+18.5D", quantity: 2, surgeryDate: "2099-02-10", doctor: "佐藤太郎左衛門", doctorId: "o2" },
   { ...base, lineNo: 3, manufacturer: "HOYA", modelName: "XY1", power: "+19.5D", quantity: 1, surgeryDate: "2099-02-12", doctor: "山田", doctorId: "o3" },
-  { ...base, lineNo: 4, manufacturer: "NIDEK", modelName: "NSP-2", power: "+5.5D", quantity: 1, surgeryDate: "2099-02-10", doctor: "内田", doctorId: "o1" },
-  { ...base, lineNo: 5, manufacturer: "SANTEN", modelName: "NX-70S", power: "+20.0D", quantity: 1, surgeryDate: "2099-02-12", doctor: "内田", doctorId: "o1" }
+  { ...base, lineNo: 4, manufacturer: "NIDEK", modelName: "NSP-2", power: "+5.5D", quantity: 1, surgeryDate: "2099-02-10", doctor: "高橋", doctorId: "o1" },
+  { ...base, lineNo: 5, manufacturer: "SANTEN", modelName: "NX-70S", power: "+20.0D", quantity: 1, surgeryDate: "2099-02-12", doctor: "高橋", doctorId: "o1" }
 ];
 window.__before = JSON.stringify(window.__lines);
 window.__render = (lines) => renderConfirmLines(document.getElementById("summaryLines"), lines);
@@ -71,8 +71,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 「手術日 + 担当医」ごとの見出し。手術日の早い順、同じ日は担当医の初出順。同じ手術日・同じ担当医は1つにまとまり、担当医が違えば分かれる。レンズ番号は元のまま
       const heads = await page.locator(".summary-date-head").allInnerTexts();
       assert.deepEqual(heads.map(h => h.replace(/\s+/g, " ")), [
-        "手術日 2099年2月10日(火) Dr. 佐藤太郎左衛門", "手術日 2099年2月10日(火) Dr. 内田",
-        "手術日 2099年2月12日(木) Dr. 内田", "手術日 2099年2月12日(木) Dr. 山田"]);
+        "手術日 2099年2月10日(火) Dr. 佐藤太郎左衛門", "手術日 2099年2月10日(火) Dr. 高橋",
+        "手術日 2099年2月12日(木) Dr. 高橋", "手術日 2099年2月12日(木) Dr. 山田"]);
       assert.ok((await page.locator(".summary-date-head").first().textContent()).includes("　"), "手術日と担当医の間は全角スペース");
       const groups = await page.locator(".summary-date-group").evaluateAll(gs => gs.map(g => [...g.querySelectorAll(".lens-no-badge")].map(b => b.textContent)));
       assert.deepEqual(groups, [["レンズ2"], ["レンズ4"], ["レンズ1", "レンズ5"], ["レンズ3"]]);
@@ -115,7 +115,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 手術日が1日だけでも同じデザイン(見出し+その下にレンズ)。担当医が違えば見出しが分かれ、同じ担当医なら1つ。レンズ番号はそのまま
       await page.evaluate(() => window.__render(window.__lines.map(l => ({ ...l, surgeryDate: "2099-03-01" }))));
       assert.deepEqual((await page.locator(".summary-date-head").allInnerTexts()).map(h => h.replace(/\s+/g, " ")),
-        ["手術日 2099年3月1日(日) Dr. 内田", "手術日 2099年3月1日(日) Dr. 佐藤太郎左衛門", "手術日 2099年3月1日(日) Dr. 山田"]);
+        ["手術日 2099年3月1日(日) Dr. 高橋", "手術日 2099年3月1日(日) Dr. 佐藤太郎左衛門", "手術日 2099年3月1日(日) Dr. 山田"]);
       assert.deepEqual(await page.locator(".lens-no-badge").allInnerTexts(), ["レンズ1", "レンズ4", "レンズ5", "レンズ2", "レンズ3"], "担当医の初出順・同じ担当医内は入力順");
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }

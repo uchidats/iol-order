@@ -13,10 +13,10 @@
   <script type="importmap">
   {
     "imports": {
-      "./src/biometry/biometry-ui.js": "./src/biometry/biometry-ui.js?v=29892c8fb8",
+      "./src/biometry/biometry-ui.js": "./src/biometry/biometry-ui.js?v=0b8f28e142",
       "./src/biometry/ocr.js": "./src/biometry/ocr.js?v=0191908359",
-      "./src/biometry/parser.js": "./src/biometry/parser.js?v=a471323757",
-      "./src/biometry/state.js": "./src/biometry/state.js?v=6bd254fb21",
+      "./src/biometry/parser.js": "./src/biometry/parser.js?v=15007724d3",
+      "./src/biometry/state.js": "./src/biometry/state.js?v=3e1f62fd6e",
       "./src/config.js": "./src/config.js?v=8d417e5804",
       "./src/config.local.example.js": "./src/config.local.example.js?v=1d17e4b0c3",
       "./src/data/firestore-repository.js": "./src/data/firestore-repository.js?v=a6e2946087",
@@ -24,7 +24,7 @@
       "./src/data/order-api.js": "./src/data/order-api.js?v=593c21c67b",
       "./src/data/registration-api.js": "./src/data/registration-api.js?v=a00c0b52a3",
       "./src/data/schema.js": "./src/data/schema.js?v=2d8fd40edd",
-      "./src/data/static-repository.js": "./src/data/static-repository.js?v=9c12c06515",
+      "./src/data/static-repository.js": "./src/data/static-repository.js?v=386b7bface",
       "./src/domain/access.js": "./src/domain/access.js?v=ce87ba6b9f",
       "./src/domain/dealer-selection.js": "./src/domain/dealer-selection.js?v=0e5c48e88f",
       "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=7b9e10ba2d",
@@ -46,23 +46,25 @@
       "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=9165d28630",
       "./src/domain/registration-flow.js": "./src/domain/registration-flow.js?v=f354be2979",
       "./src/domain/self-doctor.js": "./src/domain/self-doctor.js?v=e2ba492122",
+      "./src/domain/surgery-date.js": "./src/domain/surgery-date.js?v=15f4106041",
+      "./src/firebase/app-check.js": "./src/firebase/app-check.js?v=2158dbf358",
       "./src/firebase/auth-service.js": "./src/firebase/auth-service.js?v=08a008feaf",
-      "./src/firebase/firebase-config.js": "./src/firebase/firebase-config.js?v=867ddadea3",
+      "./src/firebase/firebase-config.js": "./src/firebase/firebase-config.js?v=491da30194",
       "./src/firebase/sdk.js": "./src/firebase/sdk.js?v=82975b38ab",
-      "./src/main.js": "./src/main.js?v=ca44ab903a",
+      "./src/main.js": "./src/main.js?v=3aa3a98ab6",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=030de84378",
-      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=a26775e26b",
+      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=3cbccc6c15",
       "./src/ui/custom-select.js": "./src/ui/custom-select.js?v=f9a0120a62",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
       "./src/ui/draft-store.js": "./src/ui/draft-store.js?v=73d3fd5df9",
       "./src/ui/duplicate-warning.js": "./src/ui/duplicate-warning.js?v=77956e01fd",
-      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=70ace94822",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=bdb425c915",
       "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
       "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=050343b3df",
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
-      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=5c9f19f3f0",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=f1c99558f8",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=fa4840bb13",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=e7627e0231",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=f173f63a43",
       "./src/ui/undo-toast.js": "./src/ui/undo-toast.js?v=a5922dc06d"
     }
@@ -109,7 +111,7 @@
               placeholder="特記事項などを入力"
             ></textarea>
 
-            <!-- 関連リンク集 (Google Form準拠) -->
+            <!-- 関連リンク集 -->
             <details class="ref-links-accordion">
               <summary class="ref-links-summary">各社 Calculator 関連リンク</summary>
               <ul class="ref-links-list">
@@ -123,8 +125,8 @@
             <p class="error-message" id="err-notesInput"></p>
           </div>
 
-        <!-- 生体計測結果の画像読み取りアシスト -->
-        <section class="feature-card future-feature" id="ocrFeatureCard">
+        <!-- 生体計測結果の画像読み取りアシスト。OCRは一時停止中(BIOMETRY_OCR_ENABLED=false。Tesseract.js の外部読み込みもしない) -->
+        <section class="feature-card future-feature" id="ocrFeatureCard" hidden>
          <details class="ocr-collapse">
           <summary>計測結果を写真から読み取る（任意）</summary>
           <div class="feature-card-content">
@@ -400,22 +402,6 @@
           </div>
 
           <div class="biometry-grid">
-            <!-- 患者名 (ローマ字) -->
-            <div class="biometry-field-group col-span-full">
-              <label for="ocrPatientName" class="biometry-label">
-                患者名 (ローマ字)
-                <span class="text-muted-xs">（OA-2000画面表示）</span>
-                <span class="item-status-badge status-unrecognized" id="statusBadge-patientName">未検出</span>
-              </label>
-              <input 
-                type="text" 
-                id="ocrPatientName" 
-                class="form-control biometry-input text-left" 
-                placeholder="未検出 (例: YAMADA TARO)" 
-                autocomplete="off"
-              >
-            </div>
-
             <!-- AL: 眼軸長 -->
             <div class="biometry-field-group">
               <label for="ocrAL" class="biometry-label">
@@ -574,10 +560,9 @@
           <polyline points="22 4 12 14.01 9 11.01"></polyline>
         </svg>
       </div>
-      <h2 class="modal-title text-center" id="completeTitle">注文送信が完了しました</h2>
+      <h2 class="modal-title text-center" id="completeTitle">注文を受け付けました</h2>
       <p class="modal-subtitle text-center mt-2" id="completeSubtitle">
-        ご注文データがGoogleスプレッドシートへ正常に記録されました。<br>
-        ご登録のメールアドレス宛に控えが送信されます。
+        注文はサーバーに保存されました。
       </p>
 
       <div class="complete-details" id="completeDetails">
@@ -595,8 +580,6 @@
   <!-- 通知トースト -->
   <div class="toast hidden" id="toastNotice" role="status" aria-live="polite"></div>
 
-  <!-- Tesseract.js (クライアントサイド完全実行型OCR) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script type="module" src="src/main.js?v=ca44ab903a"></script>
+  <script type="module" src="src/main.js?v=3aa3a98ab6"></script>
 </body>
 </html>

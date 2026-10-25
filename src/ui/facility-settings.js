@@ -942,8 +942,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 画面全体 ----------
-  const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
-  if (canManageMembers) sections.members = memberSection();
+  const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
+  if (canManageMembers) built.members = memberSection();
+  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー(作成の順番・機能は変えない)
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers };
   const isAdmin = actorRole === "admin";   // 施設名の編集・施設削除は管理者のみ表示(サーバーでも管理者のみ)
   const del = isAdmin && inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });

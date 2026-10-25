@@ -56,10 +56,11 @@ let seq = 0; // ラベルの for / radio の name を明細ごとに一意にす
  * @param {() => string} [deps.getDefaultDoctorId] 担当医の初期値(ログインユーザー本人が担当医に紐づく場合のその担当医ID。なければ "")。最初の明細と、入力を初期状態に戻したときに使う。変更できる
  * @param {() => Array<{id:string, name:string, orderEmails?:string[]}>} [deps.getDealers] 施設の登録ディーラー。0社=発注先なし / 1社=自動選択 / 2社以上=明細ごとに選択必須
  * @param {() => string} deps.minDate 手術日の最小値(YYYY-MM-DD)
+ * @param {() => string} [deps.maxDate] 手術日の最大値(YYYY-MM-DD。"" は上限なし)
  * @param {() => void} [deps.onChange] 内容が変わったとき(例: 計算ツール案内の更新・下書きの保存)
  * @param {(info:{lineNo:number, undo:()=>void}) => void} [deps.onLineRemoved] レンズを削除した(最後の1枚は空に戻した)とき。undo() で元に戻せる
  */
-export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], getDefaultDoctorId = () => "", minDate, onChange = () => {}, onLineRemoved = () => {} }) {
+export function createLensLines({ container, addButton, getOptions, getDoctors, getDealers = () => [], getDefaultDoctorId = () => "", minDate, maxDate = () => "", onChange = () => {}, onLineRemoved = () => {} }) {
   const lines = [];
 
   function buildLine(prefill = {}) {
@@ -72,6 +73,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.power = h("select", { id: id("lensPower"), class: "form-control", "data-f": "power" }, h("option", { value: "" }, "選択"));
     line.date = h("input", { id: id("lensDate"), type: "date", class: "form-control", "data-f": "date" });
     line.date.min = minDate();
+    if (maxDate()) line.date.max = maxDate();
     if (prefill.surgeryDate) line.date.value = prefill.surgeryDate; // 直前の明細の手術日を引き継ぐ(変更可)
     line.doctor = h("select", { id: id("lensDoctor"), class: "form-control", "data-f": "doctor" }, h("option", { value: "" }, "選択"));
     // 「レンズを追加」では、直前の明細の担当医を引き継ぐ(変更可。引き継ぎを優先)。最初の明細・初期状態では、本人が担当医に紐づく場合は本人を初期値にする(変更可)
@@ -307,7 +309,11 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         v.lens ? clearErr(l, "model") : fail("model", "IOLモデルを選択してください", l.model);
         v.power ? clearErr(l, "power") : fail("power", "IOLパワー (ディオプター) を選択してください", l.power);
         v.quantity ? clearErr(l, "quantity") : fail("quantity", "枚数を選択してください", l.qty[0]);
-        v.surgeryDate ? clearErr(l, "date") : fail("date", "手術日を選択してください", l.date);
+        // 範囲はサーバーと同じ(日本時間の本日以降・1年以内。minDate / maxDate)
+        if (!v.surgeryDate) fail("date", "手術日を選択してください", l.date);
+        else if (v.surgeryDate < minDate()) fail("date", "手術日は本日以降を指定してください", l.date);
+        else if (maxDate() && v.surgeryDate > maxDate()) fail("date", "手術日が先すぎます（1年以内で指定してください）", l.date);
+        else clearErr(l, "date");
         v.doctor ? clearErr(l, "doctor") : fail("doctor", "担当医を選択してください", l.doctor);
         if (dealerMode(getDealers()) === "choose" && !v.dealer) fail("dealer", "発注先を選択してください", l.dealer); else clearErr(l, "dealer");
       });

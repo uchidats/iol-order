@@ -217,3 +217,30 @@ test("callable: removeMember は管理者だけが一般注文者の所属を削
   const order = await call("createOrder", { facilityId: fid, requestId: "rm-e2e-order-000001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10), ordererId: "x" }, nurse.idToken);
   assert.equal(order.body.error.status, "PERMISSION_DENIED");
 });
+
+test("施設設定の変更履歴: 管理者が画面と同じ方法(Rules を通した書き込み)でディーラーの発注用メールを変えると、トリガーが auditLogs に記録する", async () => {
+  const admin = await createUser("audit-admin@example.jp", { verified: true });   // 施設登録の回数制限に当たらないよう、別の利用者
+  const reg = await call("registerFacility", { name: "E2E履歴クリニック", requestId: "audit-request-0001" }, admin.idToken);
+  assert.equal(reg.http, 200);
+  const fid = reg.body.result.facilityId;
+  const write = (emails) => fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/facilities/${fid}/facilityDealers/dE2E`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${admin.idToken}` },
+    body: JSON.stringify({ fields: { facilityId: { stringValue: fid }, name: { stringValue: "E2E商会" },
+      orderEmails: { arrayValue: { values: emails.map(e => ({ stringValue: e })) } } } })
+  });
+  assert.equal((await write(["a@one.jp"])).status, 200);
+  assert.equal((await write(["z@other.jp"])).status, 200);
+  const list = async () => {
+    const r = await fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/facilities/${fid}/auditLogs`, { headers: { Authorization: "Bearer owner" } });
+    return ((await r.json()).documents || []).filter(d => d.fields.target.mapValue.fields.collection.stringValue === "facilityDealers");
+  };
+  let docs = [];
+  for (let i = 0; i < 40 && docs.length < 2; i++) { docs = await list(); if (docs.length < 2) await new Promise(r => setTimeout(r, 250)); }
+  assert.equal(docs.length, 2, "ディーラーの作成・変更の2件");
+  const json = JSON.stringify(docs);
+  assert.ok(json.includes("settings.facilityDealers.update") && json.includes("z***@other.jp"));
+  assert.ok(!json.includes("z@other.jp") && !json.includes("a@one.jp"), "アドレスそのものは記録しない");
+  const upd = docs.find(d => d.fields.action.stringValue === "settings.facilityDealers.update");
+  // エミュレータはトリガーに認証情報を渡さない(actorType: unknown)。本番では app_user と uid になる(デプロイ後に確認する)
+  assert.ok(["app_user", "unknown"].includes(upd.fields.actorType.stringValue));
+});

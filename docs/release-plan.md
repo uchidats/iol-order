@@ -74,11 +74,11 @@ node scripts/admin/restore-from-backup.mjs --backup backups/orderers-YYYYMMDD.js
 - 所属を戻す場合は、バックアップの種類(phase 1 / phase 2 のどちらの前か)を取り違えない。無効だった所属(`status=disabled`)を戻すと、再び無効になる(アクセス不可)。
 - 現データにはバックアップがまだない(未実行)。移行実行時に自動で作られる。
 
-## 「内田2」（無効な注文者）の扱い
+## 無効な注文者の扱い
 方針: 不要なテスト登録のため、移行時に削除対象とする（`--remove-inactive 施設ID/注文者ID`）。
 **ただし最新の dry-run（読み取りのみ）では、`active=false` の注文者は存在しない。**
-`tachikawa-hospital/tOg4OhoJV7CfYTmh3He9`（メール uchidats@senju-eye-clinic.jp）は名前が「敦郎」・`active=true` に変わっており、削除対象にならない（スクリプトは `active=false` のものだけ削除し、`active=true` は削除しない）。
-**決定: 「敦郎」は今回は削除せず残す**（active を外すだけ）。不要な担当医の整理は、移行後に施設設定から行う。
+`tachikawa-hospital/tOg4OhoJV7CfYTmh3He9`は名前が変更・`active=true` に変わっており、削除対象にならない（スクリプトは `active=false` のものだけ削除し、`active=true` は削除しない）。
+**決定: この担当医は今回は削除せず残す**（active を外すだけ）。不要な担当医の整理は、移行後に施設設定から行う。
 
 ## 直近の dry-run 結果（読み取りのみ）
 - orderers: 3件すべて `active=true` → active除去のみ（削除0）

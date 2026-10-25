@@ -10,7 +10,7 @@
 - 過去の注文に保存された注文者情報(`orders/*.orderer`)は変更しない。
 
 ## 現在のデータ(medconf-iol-dev、読み取りで確認)
-注文者 3 件: せんじゅ眼科 1 件(active=true)、立川病院 2 件(active=true 1 件、**active=false 1 件**: 「内田2」`uchidats@senju-eye-clinic.jp`)。すべて旧形式(active あり)。
+注文者 3 件: せんじゅ眼科 1 件(active=true)、立川病院 2 件(active=true 1 件、**active=false 1 件**: 1件)。すべて旧形式(active あり)。
 
 ## 移行スクリプト `scripts/admin/migrate-orderer-active.mjs`
 - 既定は **dry-run**(読み取りのみ)。対象は medconf-iol-dev 固定。

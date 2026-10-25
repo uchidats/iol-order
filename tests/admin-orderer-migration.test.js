@@ -6,9 +6,9 @@ import { buildPlan, parseMigrationArgs, PROJECT } from "../scripts/admin/orderer
 
 const o = (facilityId, id, fields) => ({ facilityId, id, fields, updateTime: "2026-10-24T00:00:00.000000Z" });
 const data = [
-  o("fT", "t1", { name: "内田", active: true, sortOrder: 10 }),
-  o("fT", "t2", { name: "内田2", active: false, sortOrder: 20 }),
-  o("fS", "s1", { name: "内田", active: true }),
+  o("fT", "t1", { name: "高橋", active: true, sortOrder: 10 }),
+  o("fT", "t2", { name: "高橋2", active: false, sortOrder: 20 }),
+  o("fS", "s1", { name: "高橋", active: true }),
   o("fS", "s2", { name: "新形式", sortOrder: 20 })
 ];
 
@@ -21,7 +21,7 @@ test("移行計画: 件数の集計(全体・active=true・active=false・既に
 test("移行計画: 無効(active=false)は、残すか削除するかを明示しない限り実行できない", () => {
   const p = buildPlan(data);
   assert.equal(p.ok, false);
-  assert.match(p.errors.join("\n"), /fT\/t2.*内田2.*--keep-inactive か --remove-inactive/);
+  assert.match(p.errors.join("\n"), /fT\/t2.*高橋2.*--keep-inactive か --remove-inactive/);
 });
 
 test("移行計画: 残す指定なら active だけを除去し、削除はしない。削除指定ならそのドキュメントだけ削除", () => {

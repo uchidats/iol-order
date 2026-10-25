@@ -9,12 +9,18 @@ let biometryModal, tabStaticMode, tabLiveMode, panelStaticMode, panelLiveMode;
 let biometryFileInput, biometryDropzone, dropzonePrompt, biometryPreviewContainer;
 let biometryPreviewImg, btnRetakeImage, btnRunOcr, ocrStatusMessage;
 let biometryVideo, liveStatusPill, liveStatusText, btnStopLiveOcr, liveCaptureCanvas;
-let ocrPatientName, ocrAL, ocrACD, ocrK1, ocrK2, ocrK1Axis, ocrK2Axis, ocrWTW;
+let ocrAL, ocrACD, ocrK1, ocrK2, ocrK1Axis, ocrK2Axis, ocrWTW;
 let btnCancelBiometry, btnConfirmBiometry;
 
 /**
  * 生体計測（OCR）機能の初期化
  */
+/**
+ * 写真からの計測値の読み取り(OCR)は一時停止中。true にするときは、Tesseract.js の読み込み方法(版の固定・自前配信など)を
+ * 見直してから index.html に追加する(現在は外部CDNから読み込まない)。注文機能とは独立している(注文には反映しない)。
+ */
+export const BIOMETRY_OCR_ENABLED = false;
+
 export function initBiometry() {
   btnOpenBiometryModal = $("btnOpenBiometryModal");
   btnOpenBiometryText = $("btnOpenBiometryText");
@@ -42,7 +48,6 @@ export function initBiometry() {
   btnStopLiveOcr = $("btnStopLiveOcr");
   liveCaptureCanvas = $("liveCaptureCanvas");
 
-  ocrPatientName = $("ocrPatientName");
   ocrAL = $("ocrAL");
   ocrACD = $("ocrACD");
   ocrK1 = $("ocrK1");
@@ -323,7 +328,7 @@ function updateLiveOcrConsensus(parsed) {
     }
   });
 
-  // 全主要項目（患者名、AL、K1、K2）が確定したかチェック
+  // 全主要項目（AL、K1、K2）が確定したかチェック
   const allMainConfirmed = liveOcrState.confirmed.al && liveOcrState.confirmed.k1 && liveOcrState.confirmed.k2;
   if (allMainConfirmed) {
     liveStatusText.textContent = "主要項目の安定読み取りが完了しました";
@@ -338,7 +343,7 @@ function checkValuesMatch(fieldDef, val1, val2) {
   if (val1 === null || val2 === null) return false;
 
   if (fieldDef.isText) {
-    // 文字列（患者名）: 完全一致（大文字小文字・スペース変更なし）
+    // 文字列項目: 完全一致（大文字小文字・スペース変更なし）
     return String(val1).trim() === String(val2).trim();
   }
 
@@ -502,7 +507,6 @@ function handleConfirmBiometry() {
   stopLiveCamera();
 
   const confirmedValues = {
-    patientName: ocrPatientName.value.trim() || null,
     al: ocrAL.value !== "" ? parseFloat(ocrAL.value) : null,
     acd: ocrACD.value !== "" ? parseFloat(ocrACD.value) : null,
     k1: ocrK1.value !== "" ? parseFloat(ocrK1.value) : null,
@@ -514,9 +518,9 @@ function handleConfirmBiometry() {
     confirmedAt: new Date().toISOString()
   };
 
-  // 最低限ALまたはK1または患者名が入力されているかチェック
-  if (confirmedValues.al === null && confirmedValues.k1 === null && confirmedValues.patientName === null) {
-    alert("眼軸長（AL）、角膜屈折力（K1/K2）、または患者名を入力してください。");
+  // 最低限ALまたはK1が入力されているかチェック
+  if (confirmedValues.al === null && confirmedValues.k1 === null) {
+    alert("眼軸長（AL）または角膜屈折力（K1/K2）を入力してください。");
     return;
   }
 
@@ -541,7 +545,6 @@ function renderBiometrySummary() {
   if (!v.isConfirmed) return;
 
   const items = [];
-  if (v.patientName) items.push(`患者名: ${v.patientName}`);
   if (v.al !== null) items.push(`AL: ${v.al.toFixed(2)}mm`);
   if (v.k1 !== null) items.push(`K1: ${v.k1.toFixed(2)}D@${v.k1Axis !== null ? v.k1Axis : 0}°`);
   if (v.k2 !== null) items.push(`K2: ${v.k2.toFixed(2)}D@${v.k2Axis !== null ? v.k2Axis : 0}°`);
