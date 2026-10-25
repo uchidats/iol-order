@@ -80,20 +80,44 @@ export async function fetchMemberships(db, fs, uid) {
 }
 
 /**
+ * 施設設定の変更者の記録(updatedBy・削除の記録)を送るか。**Rules(firestore.rules の actorOk / deletionMarks)をデプロイしてから true にする**
+ * (デプロイ前の Rules は updatedBy・deletionMarks を拒否するため)。手順は docs/settings-audit.md。
+ */
+export const SETTINGS_ACTOR_TRACKING = false;
+
+/**
  * 施設設定の書き込みAPI（施設管理者のみ。実際の権限は Security Rules が検証する）
  * writes: [{ id: string|null, data: object }]（id が null なら新規ドキュメント）
  * 1回の保存を writeBatch で原子的に反映する。
+ * 変更者の記録が有効なら、作成・更新に updatedBy(ログイン中の uid)を付け、担当医・ディーラーの削除は
+ * 同じ一括書き込みで削除の記録(deletionMarks)を書く。どちらも Rules が本人の uid・この書き込みの時刻であることを検証する。
+ * @param {{getUid?: () => (string|null), trackActor?: boolean}} [opts]
  */
-export function createFirestoreSettingsApi(db, fs) {
+export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackActor = SETTINGS_ACTOR_TRACKING } = {}) {
+  const actorUid = () => {
+    const uid = getUid();
+    if (!uid) throw new Error("ログイン情報を確認できません。ページを再読み込みしてください");
+    return uid;
+  };
   const commit = async (facilityId, sub, writes) => {
     if (!writes.length) return;
     const batch = fs.writeBatch(db);
+    const by = trackActor ? { updatedBy: actorUid() } : {};
     for (const w of writes) {
       const ref = w.id
         ? fs.doc(db, "facilities", facilityId, sub, w.id)
         : fs.doc(fs.collection(db, "facilities", facilityId, sub));
-      batch.set(ref, { ...w.data, updatedAt: fs.serverTimestamp() });
+      batch.set(ref, { ...w.data, updatedAt: fs.serverTimestamp(), ...by });
     }
+    await batch.commit();
+  };
+  const remove = async (facilityId, sub, id) => {
+    const ref = fs.doc(db, "facilities", facilityId, sub, id);
+    if (!trackActor) return fs.deleteDoc(ref);
+    const batch = fs.writeBatch(db);
+    batch.delete(ref);
+    batch.set(fs.doc(db, "facilities", facilityId, "deletionMarks", `${sub}_${id}`),
+      { collection: sub, docId: id, deletedBy: actorUid(), deletedAt: fs.serverTimestamp() });
     await batch.commit();
   };
   return {
@@ -109,8 +133,8 @@ export function createFirestoreSettingsApi(db, fs) {
     saveMemberOrder: (facilityId, order) => fs.setDoc(
       fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"),
       { order, updatedAt: fs.serverTimestamp() }),
-    deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
+    deleteOrderer: (facilityId, id) => remove(facilityId, "orderers", id),
     /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
-    deleteDealer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "facilityDealers", id)),
+    deleteDealer: (facilityId, id) => remove(facilityId, "facilityDealers", id),
   };
 }

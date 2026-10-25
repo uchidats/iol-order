@@ -445,7 +445,7 @@ async function bootstrapWithFirebase(config) {
     ctx = {
       service, db,
       repository: createFirestoreRepository(db, sdk.firestore),
-      settingsApi: createFirestoreSettingsApi(db, sdk.firestore),
+      settingsApi: createFirestoreSettingsApi(db, sdk.firestore, { getUid: () => (auth.currentUser ? auth.currentUser.uid : null) }),
       orderApi: createOrderApi({
         functions: sdk.functions.getFunctions(app, "asia-northeast1"),
         httpsCallable: sdk.functions.httpsCallable

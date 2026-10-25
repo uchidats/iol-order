@@ -55,6 +55,26 @@ service cloud.firestore {
       return isMember(fid) && get(memberPath(fid)).data.role in managerRoles();
     }
 
+    // ---------- 施設設定の変更者(docs/settings-audit.md) ----------
+    // 担当医・採用IOL・ディーラーの作成・更新は updatedBy(変更者の uid)を持てる。持つ場合は、ログイン中の本人の uid で、
+    // updatedAt がこの書き込みの時刻(serverTimestamp)であること(他人の名前・古い値で記録できない)。
+    // 担当医・ディーラーの削除は、同じ一括書き込みで deletionMarks に本人の uid と時刻を書く。
+    // 移行の間は false(updatedBy・削除の記録がない旧画面の書き込みも受け付ける)。すべての画面が新しい版になったら true にする。
+    function actorRequired() { return false; }
+
+    function actorOk(d) {
+      return ('updatedBy' in d)
+        ? (d.updatedBy == request.auth.uid && d.updatedAt == request.time)
+        : !actorRequired();
+    }
+
+    function deletionMarkOk(fid, col, id) {
+      let p = /databases/$(database)/documents/facilities/$(fid)/deletionMarks/$(col + '_' + id);
+      return existsAfter(p)
+        ? (getAfter(p).data.deletedBy == request.auth.uid && getAfter(p).data.deletedAt == request.time)
+        : !actorRequired();
+    }
+
     function stringIn(v, min, max) {
       return v is string && v.size() >= min && v.size() <= max;
     }
@@ -161,44 +181,61 @@ service cloud.firestore {
       match /orderers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'sortOrder', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 50)
           && (!('email' in request.resource.data) || emailOk(request.resource.data.email))
-          && validSortOrder(request.resource.data);
+          && validSortOrder(request.resource.data)
+          && actorOk(request.resource.data);
         // 担当医マスターは、自施設の管理者・副管理者も削除できる（所属・認証ユーザー・注文履歴には影響しない）
-        allow delete: if isPlatformAdmin() || isFacilityManager(fid);
+        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'orderers', id);
       }
 
       // 採用IOL（ドキュメントID = 共通IOLマスターのID。マスターに無いIDは登録不可）
       match /adoptedIols/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'catalogIolId', 'dealerId', 'enabled', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'catalogIolId', 'dealerId', 'enabled', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'catalogIolId', 'enabled'])
           && request.resource.data.facilityId == fid
           && request.resource.data.catalogIolId == id
           && validCatalogIolId(request.resource.data.catalogIolId)
           && request.resource.data.enabled is bool
-          && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100));
-        allow delete: if isPlatformAdmin();
+          && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
+          && actorOk(request.resource.data);
+        allow delete: if isPlatformAdmin();   // 画面からは削除しない(採用解除は enabled=false の更新)
       }
 
       // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 100)
           && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
           && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
-          && validSortOrder(request.resource.data);
+          && validSortOrder(request.resource.data)
+          && actorOk(request.resource.data);
         // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
-        allow delete: if isPlatformAdmin() || isFacilityManager(fid);
+        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'facilityDealers', id);
+      }
+
+      // 削除の記録(担当医・ディーラーを削除する一括書き込みで、本人が書く)。ID = {コレクション}_{ドキュメントID}。
+      // 変更履歴のトリガーが削除の変更者を確かめるためだけに使う。クライアントからは読めず、削除もできない
+      match /deletionMarks/{markId} {
+        allow read, delete: if false;
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
+          && request.resource.data.keys().hasOnly(['collection', 'docId', 'deletedBy', 'deletedAt'])
+          && request.resource.data.keys().hasAll(['collection', 'docId', 'deletedBy', 'deletedAt'])
+          && request.resource.data.collection in ['orderers', 'facilityDealers']
+          && request.resource.data.docId is string
+          && markId == request.resource.data.collection + '_' + request.resource.data.docId
+          && request.resource.data.deletedBy == request.auth.uid
+          && request.resource.data.deletedAt == request.time;
       }
 
       // 表示設定(施設ごとのIOLモデルの表示順)。順番だけの設定で、採用状態・注文内容には影響しない。
