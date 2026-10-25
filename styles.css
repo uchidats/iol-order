@@ -5,6 +5,11 @@
    ========================================================================== */
 
 :root {
+  /* ポップアップ・ダイアログ・ツールチップ・メニュー共通の配色(OSのダークモードでも変えない) */
+  --popup-bg: #ffffff;
+  --popup-text: #1f2937;
+  --popup-border: #d1d5db;
+  --popup-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
   /* プライマリカラー (信頼・清潔感のあるブルー) */
   --primary: #1d4ed8;
   --primary-hover: #1e40af;
@@ -2061,7 +2066,6 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .candidate-list { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .candidate-item { width: 100%; text-align: left; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #1f2937; font: inherit; cursor: pointer; }
 .candidate-item:hover, .candidate-item:focus-visible { border-color: #2563eb; background: #eff6ff; }
-@media (prefers-color-scheme: dark) { .candidate-item { background: #1f2937; color: #f3f4f6; border-color: #4b5563; } .candidate-item:hover, .candidate-item:focus-visible { background: #1e3a5f; } }
 
 /* 施設設定: 施設名の変更 */
 .facility-rename { margin: 0 0 12px; }
@@ -2095,3 +2099,13 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .mode-option:has(input:checked) { border-color: var(--primary); background: var(--primary-light); }
 .mode-option input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); flex: none; }
 .mode-option input[type="radio"]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ==========================================================================
+   ポップアップ類の共通配色: ヘッダーメニュー・ⓘの説明・選択肢のリスト・削除ダイアログ・候補の一覧
+   OSのダークモードでも、白背景・濃い文字・薄いグレーの枠・控えめな影に統一する(個別の指定ではなく、ここで一括)
+   ========================================================================== */
+.header-menu-panel, .info-tip-pop, .cs-panel, .delete-dialog {
+  background: var(--popup-bg); color: var(--popup-text); border: 1px solid var(--popup-border);
+  box-shadow: var(--popup-shadow); color-scheme: light;
+}
+.candidate-item { background: var(--popup-bg); color: var(--popup-text); border-color: var(--popup-border); color-scheme: light; }

@@ -103,6 +103,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual(await items.allInnerTexts(), ["さくら眼科クリニック", "<b>さくら</b>眼科", "a", "b", "c"]);
       assert.equal(await page.locator("#regNameCandidates b").count(), 0);
       assert.equal(await page.locator("#regCandidateGuide").isHidden(), true);
+      // ダークモードでも、候補の一覧は白背景・濃い文字(他のポップアップ・プルダウンと同じ配色)
+      await page.emulateMedia({ colorScheme: "dark" });
+      const cand = await items.nth(0).evaluate(e => { const s = getComputedStyle(e); return [s.backgroundColor, s.color, s.borderTopColor]; });
+      await page.emulateMedia({ colorScheme: "light" });
+      assert.deepEqual(cand, ["rgb(255, 255, 255)", "rgb(31, 41, 55)", "rgb(209, 213, 219)"]);
       // 候補を選ぶと、招待コードによる参加を案内(入力した施設名は書き換えない)。登録も引き続きできる
       await items.nth(0).click();
       const guide = await page.locator("#regCandidateGuide").innerText();

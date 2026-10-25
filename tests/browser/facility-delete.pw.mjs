@@ -128,6 +128,15 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await pg.setViewportSize({ width: 390, height: 900 });
       assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
 
+      // ⓘの説明(ツールチップ)も、ダークモードで白背景・濃い文字・薄いグレーの枠・控えめな影(ダイアログと同じ配色)
+      await pg.emulateMedia({ colorScheme: "dark" });
+      await pg.locator(".info-tip-btn").first().click();
+      const tip = await pg.locator(".info-tip-pop").first().evaluate(e => { const s = getComputedStyle(e); return { bg: s.backgroundColor, fg: s.color, border: s.borderTopColor, shadow: s.boxShadow }; });
+      await pg.emulateMedia({ colorScheme: "light" });
+      assert.equal(tip.bg, "rgb(255, 255, 255)"); assert.equal(tip.fg, "rgb(31, 41, 55)");
+      assert.equal(tip.border, "rgb(209, 213, 219)", "薄いグレーの枠");
+      assert.match(tip.shadow, /0\.12\)/, "控えめな影");
+
       // 削除用の関数がなければ、ゴミ箱は出ない
       await pg.goto(base + "norename");
       await pg.waitForFunction(() => window.__ready);
