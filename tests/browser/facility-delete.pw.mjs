@@ -85,6 +85,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await box.isVisible(), true);
       assert.match(await box.innerText(), /注文履歴がある施設/);
       assert.equal(await menuItem.isHidden(), true, "メニューは閉じる");
+      // 見た目: 見出しは削除対象の施設名入り・プレースホルダー・ボタンの色。ダークモードでも背景は白・文字は濃いグレー
+      assert.equal(await box.locator(".delete-prompt").innerText(), "確認のため『テスト施設』と入力してください");
+      assert.equal(await input.getAttribute("placeholder"), "施設名を入力");
+      const colors = () => pg.evaluate(() => { const q = s => getComputedStyle(document.querySelector(s)); const b = [...document.querySelectorAll("#deleteFacilityDialog button")]; return { bg: q("#deleteFacilityDialog").backgroundColor, fg: q("#deleteFacilityDialog").color, inBg: q("#deleteFacilityDialog input").backgroundColor, inFg: q("#deleteFacilityDialog input").color, del: getComputedStyle(b[0]).backgroundColor, cancel: getComputedStyle(b[1]).backgroundColor }; });
+      const light = await colors();
+      await pg.emulateMedia({ colorScheme: "dark" });
+      const dark = await colors();
+      await pg.emulateMedia({ colorScheme: "light" });
+      for (const c of [light, dark]) {
+        assert.equal(c.bg, "rgb(255, 255, 255)"); assert.equal(c.fg, "rgb(31, 41, 55)");
+        assert.equal(c.inBg, "rgb(255, 255, 255)"); assert.equal(c.inFg, "rgb(31, 41, 55)");
+        assert.equal(c.cancel, "rgb(241, 245, 249)", "キャンセルは従来のグレー");
+        const m = c.del.match(/\d+/g).map(Number); assert.ok(m[0] > 150 && m[1] < 90 && m[2] < 90, "削除ボタンは赤: " + c.del);
+      }
       assert.equal(await del.isDisabled(), true);
       await input.fill("違う名前");
       assert.equal(await del.isDisabled(), true, "施設名が違えば押せない");

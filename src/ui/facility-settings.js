@@ -653,14 +653,15 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出し右端の「︙」メニューから、施設名を入力するダイアログで確認) ----------
   const moreIcon = () => icon("M12 5.5v.01M12 12v.01M12 18.5v.01");
   function deleteMenu() {
-    const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", "aria-label": "削除する施設名の確認入力" });
+    const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", placeholder: "施設名を入力", "aria-label": "削除する施設名の確認入力" });
+    const prompt = h("label", { class: "form-label delete-prompt" });
     const doDelete = h("button", { type: "button", class: "btn btn-danger", disabled: true }, "この施設を削除する");
     const cancel = h("button", { type: "button", class: "btn btn-secondary" }, "キャンセル");
     const msg = h("p", { class: "error-message", role: "alert", hidden: true });
     const dialog = h("dialog", { class: "delete-dialog", id: "deleteFacilityDialog", "aria-labelledby": "deleteFacilityTitle" },
       h("h3", { id: "deleteFacilityTitle" }, "施設の削除"),
       h("p", { class: "form-hint" }, "注文履歴がある施設、自分以外の利用者が所属している施設は削除できません。削除すると、この施設の設定（担当医・採用IOL・ディーラーなど）と招待が消え、元に戻せません。"),
-      h("label", { class: "form-label" }, "確認のため、削除する施設名を入力してください", input),
+      prompt, input,
       msg,
       h("div", { class: "form-row" }, doDelete, cancel));
     const trash = trashIcon(); trash.setAttribute("width", "16"); trash.setAttribute("height", "16");
@@ -674,12 +675,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     document.addEventListener("click", (ev) => { if (!menu.hidden && !wrap.contains(ev.target)) setMenu(false); });
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !menu.hidden) { setMenu(false); trigger.focus(); } });
 
-    const same = () => input.value.trim() !== "" && input.value.replace(/s+/g, " ").trim() === (facility.name || "").replace(/s+/g, " ").trim();
+    const same = () => input.value.trim() !== "" && input.value.replace(/\s+/g, " ").trim() === (facility.name || "").replace(/\s+/g, " ").trim();
     input.addEventListener("input", () => { doDelete.disabled = !same(); });
     const closeDialog = () => { if (dialog.open) dialog.close(); };
     item.addEventListener("click", () => {
       setMenu(false);
       input.value = ""; doDelete.disabled = true; msg.hidden = true;
+      prompt.textContent = `確認のため『${facility.name}』と入力してください`;   // 削除対象の施設名を自動表示(textContent)
       dialog.showModal();
       input.focus();
     });
@@ -730,7 +732,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
   async function submitRename(confirmDuplicate) {
     if (renaming) return;
-    const name = nameInput.value.replace(/s+/g, " ").trim();
+    const name = nameInput.value.replace(/\s+/g, " ").trim();
     if (!name) { nameMsg.textContent = "施設名を入力してください。"; return; }
     renaming = true; nameSave.disabled = nameConfirm.disabled = true;
     try {

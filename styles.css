@@ -2076,12 +2076,20 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .more-menu[hidden] { display: none; }
 .more-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: #dc2626; font: inherit; text-align: left; cursor: pointer; }
 .more-menu-item:hover, .more-menu-item:focus-visible { background: #fef2f2; }
-.delete-dialog { width: min(92vw, 440px); border: 1px solid #fca5a5; border-radius: 10px; padding: 16px; background: #fff; color: #1f2937; }
+/* 削除ダイアログ: ダークモードでも、背景は白・文字は濃いグレーに固定(入力欄も明るい配色) */
+.delete-dialog { width: min(92vw, 440px); border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; background: #fff; color: #1f2937; color-scheme: light; }
 .delete-dialog::backdrop { background: rgba(0,0,0,.45); }
-.delete-dialog .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.delete-dialog h3 { margin: 0 0 8px; font-size: 1.05rem; color: #1f2937; }
+.delete-dialog .form-hint { color: #4b5563; font-size: 0.85rem; margin: 0 0 14px; }
+.delete-dialog .delete-prompt { display: block; margin-bottom: 6px; font-weight: 600; color: #1f2937; }
+.delete-dialog .form-control { background: #fff; color: #1f2937; border-color: #d1d5db; }
+.delete-dialog .form-control::placeholder { color: #9ca3af; }
+.delete-dialog .error-message { color: #b91c1c; }
+.delete-dialog .btn-secondary { background-color: #f1f5f9; color: #334155; border-color: #e2e8f0; }   /* 従来のグレー(ダークモードでも固定) */
+.delete-dialog .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+.delete-dialog .form-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (prefers-color-scheme: dark) {
   .more-menu { background: #1f2937; border-color: #4b5563; }
   .more-menu-item { color: #f87171; }
   .more-menu-item:hover, .more-menu-item:focus-visible { background: #3b1d1d; }
-  .delete-dialog { background: #1f2937; color: #f3f4f6; border-color: #7f1d1d; }
 }

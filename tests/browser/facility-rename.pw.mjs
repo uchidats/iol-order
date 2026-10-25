@@ -93,6 +93,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await box.getByText("変更する", { exact: true }).click();
       await box.getByText("権限がありません").waitFor();
       assert.equal(await pg.locator(".settings-facility").innerText(), "新しい 施設名");
+      // 連続する空白は1つにまとめるが、文字(sなど)は変えない
+      await input.fill("  Sunrise   Eye  Clinic ");
+      await box.getByText("変更する", { exact: true }).click();
+      await pg.waitForFunction(() => window.__calls.at(-1).name === "Sunrise Eye Clinic");
       // キャンセル
       await box.getByText("キャンセル").click();
       assert.equal(await box.isHidden(), true);
