@@ -115,7 +115,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
     // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
-    enhanceSelect(line.power, { ariaLabel: "IOLパワー", matchWidth: true });   // 度数は幅の狭い選択ボックス。展開メニューも同じ幅
+    enhanceSelect(line.power, { ariaLabel: "IOLパワー", matchWidth: true });
+    enhanceSelect(line.doctor, { ariaLabel: "担当医", matchWidth: true, wrapText: true });   // 担当医: 幅の狭い選択ボックス。展開メニューも同じ幅。長い名前は折り返す   // 度数は幅の狭い選択ボックス。展開メニューも同じ幅
     line.dealerGroup = line.root.querySelector('[data-group="dealer"]');
     syncDealerGroup(line);
 
@@ -125,7 +126,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
-    line.doctor.addEventListener("change", () => clearErr(line, "doctor"));
+    // 幅が狭いPCのネイティブ select では、長い名前が切れて見えることがあるため、ホバーで全文を確認できるようにする
+    const doctorTitle = () => { line.doctor.title = line.doctor.value && line.doctor.selectedOptions[0] ? line.doctor.selectedOptions[0].textContent : ""; };
+    line.doctor.addEventListener("change", () => { clearErr(line, "doctor"); doctorTitle(); });
+    doctorTitle();
     line.dealer.addEventListener("change", () => clearErr(line, "dealer"));
     line.qty.forEach(r => r.addEventListener("change", () => clearErr(line, "quantity")));
     const onFilter = () => { rebuildModels(line, line.model.value); onChange(); };
@@ -154,6 +158,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       line.doctor.appendChild(o);
     }
     line.doctor.value = [...line.doctor.options].some(o => o.value === selectedId) ? selectedId : "";
+    line.doctor.title = line.doctor.value && line.doctor.selectedOptions[0] ? line.doctor.selectedOptions[0].textContent : "";
   }
   const setErr = (line, k, msg, ctl) => { line.errs[k].textContent = msg; ctl?.classList.add("is-invalid"); };
 

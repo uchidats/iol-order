@@ -480,7 +480,8 @@ body {
 .lens-line .quantity-option { flex: none; width: 80px; }   /* flex-basis ではなく width で幅を決める(Firefox/Safari は flex-basis を内在幅に含めず、枚数の欄が78pxに潰れて手術日と重なっていた) */
 .lens-line .quantity-btn { min-height: 48px; }
 /* 担当医: 約200px(狭い画面では画面幅まで) */
-.lens-line [data-group="doctor"], .lens-line [data-group="dealer"] { max-width: 200px; }
+.lens-line [data-group="doctor"] { max-width: 150px; }   /* 担当医: 従来(200px)の約3/4。展開メニューも同じ幅 */
+.lens-line [data-group="dealer"] { max-width: 200px; }
 .lens-line [data-group="doctor"] .form-control, .lens-line [data-group="dealer"] .form-control { width: 100%; min-width: 0; }
 .lens-line [data-group="model"] { max-width: 220px; }   /* IOLモデル: 約220px(選択欄と展開した一覧の幅をそろえる)。狭い画面では画面幅まで */
 .lens-line [data-group="model"] .form-control { width: 100%; min-width: 0; }
@@ -1985,6 +1986,8 @@ input[type="date"].form-control {
   }
   .select-wrapper.cs-enhanced .cs-trigger.is-placeholder { color: var(--text-main); }
   .select-wrapper.cs-enhanced .cs-trigger-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 担当医: 名前が長いときは、切らずに折り返す */
+  .select-wrapper.cs-enhanced .cs-trigger.cs-wrap .cs-trigger-text { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; line-height: 1.35; }
   /* 元の select は値の保持用に残す(表示せず、タップも受けない) */
   .select-wrapper.cs-enhanced select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 }

@@ -33,15 +33,16 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 /**
  * select をカスタムドロップダウンに対応させる(トリガーボタンを追加するだけ。表示の切り替えは CSS)。
  * @param {HTMLSelectElement} select 親は .select-wrapper
- * @param {{ariaLabel:string, matchWidth?:boolean}} opts matchWidth: メニューの幅をボタンの幅に揃える(幅の狭い選択ボックス用。既定は 240〜280px)
+ * @param {{ariaLabel:string, matchWidth?:boolean, wrapText?:boolean}} opts matchWidth: メニューの幅をボタンの幅に揃える(幅の狭い選択ボックス用。既定は 240〜280px) / wrapText: 長い名前をボタンの中で折り返す(切らない)
  */
-export function enhanceSelect(select, { ariaLabel = "", matchWidth = false } = {}) {
+export function enhanceSelect(select, { ariaLabel = "", matchWidth = false, wrapText = false } = {}) {
   const wrapper = select.parentElement;
   if (!wrapper || select._customSelect) return;
   wrapper.classList.add("cs-enhanced");
 
   const trigger = el("button", "form-control cs-trigger");
   trigger.type = "button";
+  if (wrapText) trigger.classList.add("cs-wrap");
   trigger.setAttribute("aria-haspopup", "listbox");
   trigger.setAttribute("aria-expanded", "false");
   if (ariaLabel) trigger.setAttribute("aria-label", ariaLabel);

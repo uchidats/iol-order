@@ -27,7 +27,7 @@ const options = buildLensOptions(IOL_MODELS);
 window.__changes = [];
 window.__lines = createLensLines({
   container: document.getElementById("lensLines"), addButton: document.getElementById("btnAddLine"),
-  getOptions: () => options, getDoctors: () => [{ id: "o1", name: "山田" }], minDate: () => "2020-01-01"
+  getOptions: () => options, getDoctors: () => [{ id: "o1", name: "山田" }, { id: "o9", name: "国家公務員共済組合連合会立川病院 眼科部長 山田太郎左衛門" }], minDate: () => "2020-01-01"
 });
 document.querySelector("[data-f=model]").addEventListener("change", e => window.__changes.push(["model", e.target.value]));
 document.querySelector("[data-f=power]").addEventListener("change", e => window.__changes.push(["power", e.target.value]));
@@ -151,6 +151,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await modelTrigger.innerText()).trim(), "CNA0T0");
       assert.equal((await powerTrigger.innerText()).trim(), "+20.0D", "度数は維持");
 
+      // 担当医: 選択ボックスは約3/4(150px)・展開メニューも同じ幅。長い名前は切れずに折り返す
+      const doctorTrigger = line.locator('[data-group="doctor"] .cs-trigger'), doctorSelect = line.locator("[data-f=doctor]");
+      const dt = await rect(doctorTrigger);
+      assert.ok(Math.abs(dt.width - 150) <= 1, `担当医の幅 ${dt.width}`);
+      await doctorTrigger.click(); await panel.waitFor();
+      const dp = await rect(panel);
+      assert.ok(Math.abs(dp.width - dt.width) <= 1 && Math.abs(dp.left - dt.left) <= 1 && dp.right <= 390 - 7.5, `メニューの幅・位置: ${JSON.stringify({ dp, dt })}`);
+      assert.deepEqual(await panel.locator(".cs-option-text").allInnerTexts(), ["選択", "山田", "国家公務員共済組合連合会立川病院 眼科部長 山田太郎左衛門"], "メニューには全文(切れない)");
+      assert.ok(await panel.locator(".cs-option").nth(2).evaluate(o => o.scrollWidth <= o.clientWidth + 1 && o.getBoundingClientRect().height > 42), "長い名前の項目は折り返して高くなる");
+      await panel.locator('.cs-option[data-value="o9"]').click();
+      assert.equal(await doctorSelect.inputValue(), "o9");
+      const clip = await doctorTrigger.evaluate(b => { const s = b.querySelector(".cs-trigger-text"); const r = b.getBoundingClientRect(); return { clipped: s.scrollWidth > s.clientWidth + 1 || s.scrollHeight > s.clientHeight + 1, w: Math.round(r.width) }; });
+      assert.deepEqual(clip, { clipped: false, w: 150 }, "長い名前もボタンの中で切れずに折り返す(幅は同じ)");
+      assert.equal(await doctorSelect.evaluate(s => s.title), "国家公務員共済組合連合会立川病院 眼科部長 山田太郎左衛門", "全文はホバーでも確認できる");
+      await doctorSelect.selectOption("");
+
       // キーボード: Enter で開く・↓で移動・Enter で選ぶ・Esc で閉じる。外側をタップすると閉じる
       await powerTrigger.focus();
       await page.keyboard.press("Enter"); await panel.waitFor();
@@ -184,9 +200,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.setViewportSize({ width: 1100, height: 800 });
       assert.equal(await modelTrigger.isHidden(), true);
       assert.equal(await modelSelect.evaluate(s => getComputedStyle(s).opacity), "1");
-      // 幅: IOLパワーだけ約2/3(128px)。IOLモデル(220px)・担当医(200px)は変更なし
+      // 幅: IOLパワーは約2/3(128px)、担当医は約3/4(150px)。IOLモデル(220px)は変更なし
       const ws = await page.evaluate(() => Object.fromEntries(["model", "power", "doctor"].map(k => [k, Math.round(document.querySelector(`.lens-line [data-f=${k}]`).getBoundingClientRect().width)])));
-      assert.deepEqual(ws, { model: 220, power: 128, doctor: 200 }, "PC幅の選択ボックスの幅");
+      assert.deepEqual(ws, { model: 220, power: 128, doctor: 150 }, "PC幅の選択ボックスの幅");
       assert.deepEqual(errors, []);
       await context.close();
     } finally { await browser.close(); }
