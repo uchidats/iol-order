@@ -422,11 +422,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       for (const width of [390, 1100]) {
         await page.setViewportSize({ width, height: 1200 });
-        // 施設名の文字の大きさは「施設設定」と同じ。色(グレー)・太さは従来のまま
+        // 施設名の文字の大きさ・色(黒)は「施設設定」と同じ。太さは標準(「施設設定」は太字)。文字の縦位置もそろう
         const h2 = await style(".settings-head h2"), fac = await style(".settings-facility"), body = await style("body");
         assert.equal(fac.size, h2.size, `${width}: 施設名は「施設設定」と同じ大きさ`);
-        assert.equal(fac.color, "rgb(107, 114, 128)", "グレーのまま");
-        assert.equal(fac.weight, body.weight, "太さは従来のまま(標準)");
+        assert.equal(fac.color, h2.color, "施設名は「施設設定」と同じ黒");
+        assert.equal(fac.color, "rgb(15, 23, 42)");
+        assert.equal(fac.weight, body.weight, "太さは標準");
+        assert.equal(h2.weight, "700", "「施設設定」は太字");
+        const mids = await page.evaluate(() => [".settings-head h2", ".settings-facility"].map(sel => { const r = document.createRange(); r.selectNodeContents(document.querySelector(sel)); const b = r.getBoundingClientRect(); return (b.top + b.bottom) / 2; }));
+        assert.ok(Math.abs(mids[0] - mids[1]) < 0.5, `${width}: 「施設設定」と施設名の文字の縦位置がそろう ${mids}`);
+        // 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理)は、幅60px・高さ36pxで3か所とも同じ
+        const adds = await page.locator('#facilitySettings .settings-actions > [data-act="add"]').evaluateAll(bs => bs.map(b => { const r = b.getBoundingClientRect(), s = getComputedStyle(b); return [Math.round(r.width), Math.round(r.height), s.fontSize, s.borderRadius, s.paddingTop]; }));
+        assert.ok(adds.length >= 2, "追加ボタン");
+        for (const a of adds) assert.deepEqual(a, adds[0], `${width}: 追加ボタンのデザインがそろう`);
+        assert.deepEqual(adds[0].slice(0, 2), [60, 36], `${width}: 幅60px・高さ36px`);
         // 常時表示の説明文は削除。「施設設定」の右横にⓘ(各設定項目と同じ見た目)
         assert.ok(!(await page.locator("#facilitySettings").innerText()).includes("この画面は施設管理者のみ変更できます。") || (await page.locator(".settings-head .info-tip-pop").isHidden()), "説明文は常時表示しない");
         assert.equal(await page.locator("#facilitySettings > p.form-hint:not([role])").count(), 0);

@@ -1590,9 +1590,12 @@ input[type="date"].form-control {
 
 .settings-facility {
   flex: 1;
-  font-size: 1.15rem;   /* 「施設設定」と同じ大きさ(色・太さは従来のまま) */
-  color: #6b7280;
+  font-size: 1.15rem;   /* 「施設設定」と同じ大きさ。太さは通常のまま */
+  color: var(--text-main);   /* 「施設設定」と同じ黒(濃紺に近い黒) */
 }
+/* 見出しの「施設設定」の囲み(ⓘ付き)は、各項目の見出し用の下余白(6px)を使わない。
+   付けたままだと、縦中央揃えの行で「施設設定」だけが3px上にずれる */
+.settings-head .settings-heading { margin-bottom: 0; }
 
 .settings-section {
   padding: 16px;
@@ -2142,3 +2145,13 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .member-edit-note { grid-column: 1 / -1; margin: 0; }
 .member-item .member-role-edit { margin: 6px 0 2px; }
 @media (max-width: 640px) { .member-edit.is-pending-edit { grid-template-columns: minmax(0, 1fr); } }
+
+/* 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理で共通): 幅60px・高さ36pxのコンパクトな大きさ。PC・スマホ共通 */
+.settings-actions > .btn[data-act="add"] {
+  min-width: 60px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+}
