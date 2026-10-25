@@ -1585,7 +1585,7 @@ input[type="date"].form-control {
 
 .settings-facility {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: 1.15rem;   /* 「施設設定」と同じ大きさ(色・太さは従来のまま) */
   color: #6b7280;
 }
 
@@ -1645,7 +1645,7 @@ input[type="date"].form-control {
   margin-bottom: 6px;
 }
 
-.settings-heading h3 { margin: 0; }
+.settings-heading h3, .settings-heading h2 { margin: 0; }
 .info-tip { display: inline-flex; }
 
 .info-tip-btn {
@@ -2046,6 +2046,13 @@ input[type="date"].form-control {
    ページ全体のテーマは変えず、これらの入力要素だけに適用する */
 input[type="date"], .lens-line select { color-scheme: light; }
 
-/* ディーラーの並び替え: 先頭の行の「↑」は非表示。スマホ幅では「↑」のみ(「↓」は隠す)、PCは「↑↓」 */
-.dealer-item [data-act][hidden] { display: none !important; }
-@media (max-width: 640px) { .dealer-item .orderer-actions [data-act="down"] { display: none; } }
+
+/* 並び替えボタン(採用IOL・担当医・ディーラー共通・PCもスマホも「↑」のみ): 各リストの先頭の「↑」は見えなくするが場所は残す(ほかのボタンの位置を揃える) */
+.iol-move.is-first, .orderer-actions [data-act="up"].is-first { visibility: hidden; }
+/* 「↑」の表示・非表示は、すぐ切り替わる(.btn の transition: all で、0.15秒かけて切り替わらないように) */
+.iol-move, .orderer-actions [data-act="up"] { transition-property: background-color, border-color, color, box-shadow, transform; }
+.iol-model-row .settings-check { min-width: 0; }
+.iol-name { overflow-wrap: anywhere; }
+
+/* ディーラーのメールアドレス欄の補足説明(「（1行に1件・最大5件）」): 発注用・使用報告用で同じ大きさ・太さ・色(グレー) */
+.field-note { margin-left: 4px; font-size: 0.8rem; font-weight: 400; color: #6b7280; }

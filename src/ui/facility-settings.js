@@ -3,7 +3,7 @@ import {
   validateDealers, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
 import { planMemberRemoval, confirmMessage, memberLabel, sortMembers } from "../domain/member-admin.js";
-import { createSectionHeading } from "./info-tip.js";
+import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { baseModelName } from "../domain/lens-labels.js";
 import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -113,6 +113,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     };
     return api;
   }
+  /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
+  const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
   let orderSaver = null, iolSaver = null, dealerSaver = null;   // 担当医・採用IOL・ディーラーの自動保存(各セクションの作成時に用意する)
   const savers = () => [orderSaver, iolSaver, dealerSaver].filter(Boolean);
 
@@ -143,9 +145,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const nameView = h("span", { class: "orderer-name", "data-v": "name" });
     const emailView = h("span", { class: "orderer-email", "data-v": "email" });
     const actions = h("span", { class: "orderer-actions" },
-      btn("edit", "名前・メールを編集", pencilIcon()),
       btn("up", "上へ", "↑"),
-      btn("down", "下へ", "↓"),
+      btn("edit", "名前・メールを編集", pencilIcon()),
       btn("delete", "この担当医を削除", trashIcon()));
     const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.ordererNameMax, placeholder: "氏名（必須）", "aria-label": "氏名（必須）" });
     const emailInput = h("input", { class: "form-control", "data-f": "email", type: "email", placeholder: "メールアドレス（任意）", "aria-label": "メールアドレス（任意）" });
@@ -182,7 +183,6 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
     row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveOrdererRow(row));
     row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); orderSaver.request(); });
-    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); orderSaver.request(); });
     row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteOrdererRow(row));
     paint();
     return row;
@@ -309,6 +309,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       row._startEdit(); // 追加した行は編集状態で表示する。行の「保存」で確定した時点で自動保存される(入力途中は保存しない)
     });
     orderSaver = createAutoSaver(section, runOrdererSave);   // 「担当医を保存」ボタンは廃止(追加・設定変更の確定・並び替え・削除で自動保存)
+    // 並び替え: 先頭の担当医の「↑」は非表示。スマホ幅では「↑」のみ(「↓」を隠すのは CSS)、PCは「↑↓」
+    const doctorList = section.querySelector("[data-list]");
+    const updateDoctorMoves = () => [...doctorList.querySelectorAll(".orderer-item")].forEach((r, i) => { const up = r.querySelector('[data-act="up"]'); markFirst(up, i === 0); });
+    new MutationObserver(updateDoctorMoves).observe(doctorList, { childList: true });
     return section;
   }
 
@@ -343,13 +347,19 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     await onSaved();
   }
 
+  /** 採用IOLの並び替え: メーカーの先頭・各メーカー内の先頭のIOLでは、「↑」を非表示にする(スマホ幅では「↓」も CSS で隠す) */
+  function updateIolMoves(list) {
+    [...list.querySelectorAll("details.iol-maker")].forEach((d, i) => { markFirst(d.querySelector('summary [data-act="maker-up"]'), i === 0); });
+    list.querySelectorAll(".iol-maker-list").forEach(box => [...box.querySelectorAll(".iol-model-row")].forEach((r, i) => { markFirst(r.querySelector('[data-act="model-up"]'), i === 0); }));
+  }
+
   function renderIols(section) {
     const enabled = new Set(data.adopted.filter(a => a.enabled).map(a => a.catalogIolId));
     // メーカーごとに折りたたみ(初期はすべて閉じる)。見出しの右側に「採用数/登録数」と、並べ替えの↑↓。チェックと保存は従来どおり。
     // 並び順は施設ごとの設定(未設定は標準の順番)。新しいメーカー・モデルは既存の順番の末尾
     const mover = (act, label, text, move) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon iol-move", "data-act": act, "aria-label": label, title: label }, text);
-      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); move(); section._orderDirty = true; section._orderVersion = (section._orderVersion || 0) + 1; iolSaver.request(); }); // summary の開閉は起こさない。並べ替えで自動保存
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); move(); updateIolMoves(section.querySelector("[data-list]")); section._orderDirty = true; section._orderVersion = (section._orderVersion || 0) + 1; iolSaver.request(); }); // summary の開閉は起こさない。並べ替えで自動保存
       return b;
     };
     const swap = (el, delta) => {
@@ -362,16 +372,14 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const count = h("span", { class: "iol-maker-count" });
       let group;
       const makerMoves = h("span", { class: "iol-moves" },
-        mover("maker-up", `${mfg}を上へ`, "↑", () => swap(group, -1)),
-        mover("maker-down", `${mfg}を下へ`, "↓", () => swap(group, 1)));
+        mover("maker-up", `${mfg}を上へ`, "↑", () => swap(group, -1)));
       group = h("details", { class: "iol-maker", "data-maker": mfg },
         h("summary", { class: "iol-maker-summary" }, h("span", { class: "iol-maker-name" }, mfg), count, makerMoves),
         h("div", { class: "iol-maker-list" },
           items.map(m => {
             let row;
             const moves = h("span", { class: "iol-moves" },
-              mover("model-up", `${baseModelName(m)}を上へ`, "↑", () => swap(row, -1)),
-              mover("model-down", `${baseModelName(m)}を下へ`, "↓", () => swap(row, 1)));
+              mover("model-up", `${baseModelName(m)}を上へ`, "↑", () => swap(row, -1)));
             row = h("div", { class: "iol-model-row", "data-model": m.id },
               h("label", { class: "settings-check" },
                 h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
@@ -390,6 +398,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     });
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...nodes);
+    updateIolMoves(list);
     list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); iolSaver.request(); };   // チェックの変更で自動保存
   }
 
@@ -406,17 +415,16 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const nameView = h("span", { class: "orderer-name", "data-v": "name" });
     const infoView = h("span", { class: "orderer-email", "data-v": "info" });   // 登録状況(発注用・使用報告用のメールの件数)
     const actions = h("span", { class: "orderer-actions" },
-      btn("edit", "名前・メールアドレスを編集", pencilIcon()),
       btn("up", "上へ", "↑"),
-      btn("down", "下へ", "↓"),
+      btn("edit", "名前・メールアドレスを編集", pencilIcon()),
       btn("delete", "このディーラーを削除", trashIcon()));
     const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名（必須）", "aria-label": "ディーラー名（必須）" });
     const orderInput = h("textarea", { class: "form-control", "data-f": "orderEmails", rows: "2", placeholder: "order@example.jp", "aria-label": "発注用メールアドレス" });
     const usageInput = h("textarea", { class: "form-control", "data-f": "usageEmails", rows: "2", placeholder: "report@example.jp", "aria-label": "使用報告用メールアドレス" });
     const editBox = h("div", { class: "orderer-edit dealer-edit", hidden: true },
       nameInput,
-      h("label", { class: "form-label" }, `発注用メールアドレス（1行に1件・最大${LIMITS.emailsPerList}件）`, orderInput),
-      h("label", { class: "form-label" }, "使用報告用メールアドレス（発注用とは別に管理）", usageInput),
+      h("label", { class: "form-label" }, "発注用メールアドレス", h("span", { class: "field-note" }, `（1行に1件・最大${LIMITS.emailsPerList}件）`), orderInput),
+      h("label", { class: "form-label" }, "使用報告用メールアドレス", h("span", { class: "field-note" }, `（1行に1件・最大${LIMITS.emailsPerList}件）`), usageInput),
       h("div", { class: "orderer-edit-actions" },
         h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存"),
         h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル")));
@@ -452,7 +460,6 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
     row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveDealerRow(row));
     row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) { row.parentNode.insertBefore(row, row.previousElementSibling); dealerSaver.request(); } });
-    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) { row.parentNode.insertBefore(row.nextElementSibling, row); dealerSaver.request(); } });
     row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteDealerRow(row));
     paint();
     return row;
@@ -548,7 +555,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     dealerSaver = createAutoSaver(section, runDealerSave);   // 「ディーラーを保存」ボタンは廃止(追加・設定変更の確定・並び替え・削除で自動保存)
     // 並び替えの↑: 先頭の行では非表示(スマホでは↑のみ・PCは↑↓。スマホで↓を隠すのは CSS)。行の追加・削除・移動のたびに更新する
     const list = section.querySelector("[data-list]");
-    const updateMoves = () => [...list.querySelectorAll(".dealer-item")].forEach((r, i) => { const up = r.querySelector('[data-act="up"]'); if (up) up.hidden = i === 0; });
+    const updateMoves = () => [...list.querySelectorAll(".dealer-item")].forEach((r, i) => { const up = r.querySelector('[data-act="up"]'); markFirst(up, i === 0); });
     new MutationObserver(updateMoves).observe(list, { childList: true });
     return section;
   }
@@ -649,8 +656,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnSettingsClose" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
-    h("div", { class: "settings-head" }, h("h2", {}, "施設設定"), title, closeBtn),
-    h("p", { class: "form-hint" }, "この画面は施設管理者のみ変更できます。"),
+    // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない
+    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, closeBtn),
     status,
     ...Object.values(sections));
 

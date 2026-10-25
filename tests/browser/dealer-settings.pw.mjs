@@ -85,20 +85,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await sec.locator("input:visible, textarea:visible").count(), 0, "保存済みの行に入力欄は出ない");
       assert.match(await rows.nth(0).locator('[data-v="info"]').innerText(), /発注用メール 2件 ・ 使用報告用 1件/);
       assert.match(await rows.nth(1).locator('[data-v="info"]').innerText(), /発注用メール未登録.*自動送信不可/);
-      assert.deepEqual(await rows.nth(0).locator(".orderer-actions button").evaluateAll(bs => bs.map(b => b.getAttribute("data-act"))), ["edit", "up", "down", "delete"]);
+      assert.deepEqual(await rows.nth(0).locator(".orderer-actions button").evaluateAll(bs => bs.map(b => b.getAttribute("data-act"))), ["up", "edit", "delete"], "ボタンは「↑」「編集」「削除」の順(「↓」は廃止)");
 
       // 2) 担当医と同じサイズ・スタイル・配置のボタン
       const geom = (loc) => loc.locator(".orderer-actions button").evaluateAll(bs => bs.map(b => { const r = b.getBoundingClientRect(); const s = getComputedStyle(b); return { w: Math.round(r.width), h: Math.round(r.height), cls: b.className, radius: s.borderRadius, bg: s.backgroundColor, right: Math.round(window.innerWidth - r.right) }; }));
       const gDealer = await geom(rows.nth(1)), gDoctor = await geom(page.locator('[data-section="orderers"] .orderer-item').nth(1));   // 先頭の行は「↑」が非表示のため、2行目で比べる
       assert.deepEqual(gDealer.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), gDoctor.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), "ボタンのサイズ・スタイルが担当医と同じ");
-      assert.equal(gDealer[3].right, gDoctor[3].right, "右端の位置が担当医と同じ");
+      assert.equal(gDealer[2].right, gDoctor[2].right, "右端の位置が担当医と同じ");
       const addBtns = async (sel) => page.locator(`${sel} .settings-actions button`).evaluateAll(bs => bs.map(b => [b.className, b.textContent.trim()]));
-      assert.equal((await addBtns('[data-section="dealers"]'))[0][0], (await addBtns('[data-section="orderers"]'))[0][0], "追加ボタンのデザインが担当医と同じ(担当医は自動保存のため、保存ボタンはない。ディーラーは従来どおり保存ボタン)");
+      assert.equal((await addBtns('[data-section="dealers"]'))[0][0], (await addBtns('[data-section="orderers"]'))[0][0], "追加ボタンのデザインが担当医と同じ(担当医・ディーラーとも自動保存のため、保存ボタンはない)");
       assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["ディーラーを追加"], "「ディーラーを保存」ボタンは廃止(自動保存)");
-      // 先頭の行の「↑」は非表示。PC幅では「↑↓」
+      // 先頭の行の「↑」は見えない(場所は残る)。2行目以降は「↑」が見える。「↓」はない
       assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true);
       assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
-      assert.equal(await rows.nth(1).locator('[data-act="down"]').isVisible(), true);
+      assert.equal(await sec.locator('[data-act="down"]').count(), 0);
 
       // 3) 編集ボタンを押した行だけ入力欄になる。発注用・使用報告用メールは編集時に確認・変更できる
       await rows.nth(0).locator('[data-act="edit"]').click();

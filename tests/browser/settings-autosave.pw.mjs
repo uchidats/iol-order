@@ -232,12 +232,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const names = () => rows.locator('[data-v="name"]').allInnerTexts();
       await open();
 
-      // 保存ボタンは廃止。スマホ幅は「↑」のみ(「↓」は出ない)。先頭の行の「↑」は非表示
+      // 保存ボタンは廃止。「↑」のみ(「↓」はない)。先頭の行の「↑」は見えない
       assert.equal(await sec.locator('[data-act="save"]').count(), 0);
       assert.ok(!(await sec.innerText()).includes("ディーラーを保存"));
       assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true, "先頭の↑は非表示");
       assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
-      for (let i = 0; i < 2; i++) assert.equal(await rows.nth(i).locator('[data-act="down"]').isHidden(), true, "スマホでは↓なし");
+      assert.equal(await sec.locator('[data-act="down"]').count(), 0, "「↓」はない");
       const btnBoxes = await rows.nth(1).locator(".orderer-actions button").evaluateAll(bs => bs.filter(b => b.offsetParent).map(b => { const r = b.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }));
       for (let i = 0; i < btnBoxes.length; i++) for (let j = i + 1; j < btnBoxes.length; j++) assert.ok(btnBoxes[i][1] <= btnBoxes[j][0] + 0.5 || btnBoxes[j][1] <= btnBoxes[i][0] + 0.5, "ボタンが重ならない");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
@@ -312,14 +312,161 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await sec.locator('[data-act="retry-autosave"]').waitFor({ state: "detached" });
       assert.deepEqual((await db()).dealers.sort((a, b) => a.sortOrder - b.sortOrder).map(d => d.name), shown, "再試行で画面の並びが保存される");
 
-      // PC幅: 「↑↓」(先頭の↑は非表示)
+      // PC幅でも同じ(「↑」のみ。先頭の↑は見えない)
       await page.setViewportSize({ width: 1100, height: 900 });
       await open();
       assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true);
       assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
-      assert.equal(await rows.nth(0).locator('[data-act="down"]').isVisible(), true, "PCでは↓も表示");
-      assert.equal(await rows.nth(1).locator('[data-act="down"]').isVisible(), true);
+      assert.equal(await sec.locator('[data-act="down"]').count(), 0);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`並び替えボタン(担当医・ディーラー・採用IOL): PC・スマホとも「↑」のみ・各リストの先頭の↑は見えない(場所は残り、ほかのボタンの位置は揃う)・自動保存は維持: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 1200 } });
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      const open = async () => { await page.goto(base); await page.waitForFunction(() => window.__ready); await page.locator("details.iol-maker").evaluateAll(ds => ds.forEach(d => { d.open = true; })); };
+      const idle = () => page.waitForFunction(() => window.__inflight === 0);
+      const db = () => page.evaluate(() => JSON.parse(localStorage.getItem("__settingsDb")));
+      const iols = page.locator('[data-section="iols"]'), docs = page.locator('[data-section="orderers"]'), deals = page.locator('[data-section="dealers"]');
+      // ボタンが見えるか(visibility:hidden も「見えない」)。位置(左端)
+      const shown = (loc) => loc.evaluateAll(es => es.map(e => { const s = getComputedStyle(e); return s.visibility !== "hidden" && s.display !== "none" && e.getBoundingClientRect().width > 0; }));
+      const lefts = (loc) => loc.evaluateAll(es => es.map(e => Math.round(e.getBoundingClientRect().left)));
+      await open();
+
+      for (const width of [390, 1100]) {
+        await page.setViewportSize({ width, height: 1200 });
+        await open();
+        // 「↓」はどこにもない
+        assert.equal(await page.locator('#facilitySettings [data-act$="down"]').count(), 0, `${width}: 「↓」は廃止`);
+        // 担当医・ディーラー: 「↑」「編集」「削除」の順(左から)。先頭の↑だけ見えない
+        for (const [sec, kind] of [[docs, ".orderer-item"], [deals, ".dealer-item"]]) {
+          const rows = sec.locator(kind);
+          const cnt = await rows.count();
+          assert.ok(cnt >= 2);
+          assert.deepEqual(await rows.first().locator(".orderer-actions button").evaluateAll(bs => bs.map(b => b.getAttribute("data-act"))), ["up", "edit", "delete"]);
+          assert.deepEqual(await shown(rows.locator('[data-act="up"]')), Array.from({ length: cnt }, (_, i) => i > 0), `${width}: 先頭の↑だけ見えない`);
+          // 先頭の↑が見えなくても、ほかのボタンの位置は、ほかの行と同じ(ずれない)
+          for (const act of ["up", "edit", "delete"]) {
+            const xs = await lefts(rows.locator(`[data-act="${act}"]`));
+            assert.ok(xs.every(x => Math.abs(x - xs[0]) <= 1), `${width} ${act}: 位置がそろう ${xs}`);
+          }
+          // 名前は、ボタンの左に収まる(重ならない)
+          const ov = await rows.evaluateAll(rs => rs.some(r => { const n = r.querySelector(".orderer-namebox").getBoundingClientRect(), b = r.querySelector(".orderer-actions").getBoundingClientRect(); return n.right > b.left + 0.5 && n.top < b.bottom - 0.5 && b.top < n.bottom - 0.5; }));
+          assert.equal(ov, false, `${width}: 名前とボタンが重ならない`);
+        }
+        // 採用IOL: メーカー・メーカー内のIOLとも「↑」のみ。先頭の↑だけ見えない
+        const makers = iols.locator("details.iol-maker");
+        const n = await makers.count();
+        assert.deepEqual(await shown(makers.locator('summary [data-act="maker-up"]')), Array.from({ length: n }, (_, i) => i > 0));
+        const groups = await makers.evaluateAll(ds => ds.map(d => [...d.querySelectorAll(".iol-model-row")].map(r => { const b = r.querySelector('[data-act="model-up"]'), s = getComputedStyle(b); return { shown: s.visibility !== "hidden" && b.getBoundingClientRect().width > 0, left: Math.round(b.getBoundingClientRect().left), buttons: r.querySelectorAll(".iol-moves button").length }; })));
+        for (const g of groups) g.forEach((r, i) => { assert.equal(r.shown, i > 0, "メーカー内の先頭だけ↑が見えない"); assert.equal(r.buttons, 1, "↑のみ"); });
+        const flat = groups.flat();
+        assert.ok(flat.every(r => Math.abs(r.left - flat[0].left) <= 1), "各行の↑の位置がそろう");
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      }
+
+      // 並び替え(↑)後の自動保存は維持。移動後も、先頭だけ↑が見えない
+      await page.setViewportSize({ width: 390, height: 1200 });
+      await open();
+      const makers = iols.locator("details.iol-maker");
+      const secondMaker = await makers.nth(1).getAttribute("data-maker");
+      await makers.nth(1).locator('summary [data-act="maker-up"]').click();
+      await page.waitForFunction(() => window.__calls.some(c => c[0] === "iolOrder"));
+      await idle();
+      assert.equal((await db()).iolOrder.makerOrder[0], secondMaker, "メーカーの並び替えが自動保存された");
+      assert.deepEqual((await shown(makers.locator('summary [data-act="maker-up"]'))).slice(0, 2), [false, true]);
+      const multi = makers.filter({ has: page.locator(".iol-model-row >> nth=1") }).first();
+      const mrows = multi.locator(".iol-model-row");
+      const second = await mrows.nth(1).getAttribute("data-model");
+      await page.evaluate(() => { window.__calls = []; });
+      await mrows.nth(1).locator('[data-act="model-up"]').click();
+      await page.waitForFunction(() => window.__calls.some(c => c[0] === "iolOrder"));
+      await idle();
+      assert.equal(await mrows.nth(0).getAttribute("data-model"), second);
+      assert.deepEqual((await shown(mrows.locator('[data-act="model-up"]'))).slice(0, 2), [false, true], "移動後も先頭だけ↑が見えない");
+      const before = await docs.locator('[data-v="name"]').allInnerTexts();
+      await page.evaluate(() => { window.__calls = []; });
+      await docs.locator(".orderer-item").nth(1).locator('[data-act="up"]').click();
+      await page.waitForFunction(() => window.__calls.some(c => c[0] === "orderers"));
+      await idle();
+      assert.deepEqual((await db()).orderers.sort((a, b) => a.sortOrder - b.sortOrder).map(o => o.name), [before[1], before[0], ...before.slice(2)], "担当医の並び替えが自動保存された");
+      assert.deepEqual((await shown(docs.locator('.orderer-item [data-act="up"]'))).slice(0, 2), [false, true]);
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`施設設定の見出し(施設名の大きさ・ⓘ)とディーラーのメール欄の補足説明: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 1200 }, hasTouch: true });
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await page.goto(base);
+      await page.waitForFunction(() => window.__ready);
+      const style = (sel) => page.locator(sel).first().evaluate(e => { const s = getComputedStyle(e); return { size: s.fontSize, weight: s.fontWeight, color: s.color }; });
+
+      for (const width of [390, 1100]) {
+        await page.setViewportSize({ width, height: 1200 });
+        // 施設名の文字の大きさは「施設設定」と同じ。色(グレー)・太さは従来のまま
+        const h2 = await style(".settings-head h2"), fac = await style(".settings-facility"), body = await style("body");
+        assert.equal(fac.size, h2.size, `${width}: 施設名は「施設設定」と同じ大きさ`);
+        assert.equal(fac.color, "rgb(107, 114, 128)", "グレーのまま");
+        assert.equal(fac.weight, body.weight, "太さは従来のまま(標準)");
+        // 常時表示の説明文は削除。「施設設定」の右横にⓘ(各設定項目と同じ見た目)
+        assert.ok(!(await page.locator("#facilitySettings").innerText()).includes("この画面は施設管理者のみ変更できます。") || (await page.locator(".settings-head .info-tip-pop").isHidden()), "説明文は常時表示しない");
+        assert.equal(await page.locator("#facilitySettings > p.form-hint:not([role])").count(), 0);
+        const tip = page.locator(".settings-head .info-tip-btn");
+        assert.equal(await tip.count(), 1);
+        const pos = await page.evaluate(() => { const h = document.querySelector(".settings-head h2").getBoundingClientRect(), b = document.querySelector(".settings-head .info-tip-btn").getBoundingClientRect(); return { right: b.left >= h.right - 0.5, sameRow: Math.abs((b.top + b.bottom) / 2 - (h.top + h.bottom) / 2) < 14 }; });
+        assert.deepEqual(pos, { right: true, sameRow: true }, "「施設設定」の右横");
+        // 各設定項目(担当医など)のⓘと、同じ見た目
+        const a = await page.locator(".settings-head .info-tip-btn").evaluate(b => { const s = getComputedStyle(b); return [s.fontSize, s.color, s.backgroundColor, s.borderTopWidth, s.width, s.height]; });
+        const b2 = await page.locator('[data-section="orderers"] .info-tip-btn').evaluate(b => { const s = getComputedStyle(b); return [s.fontSize, s.color, s.backgroundColor, s.borderTopWidth, s.width, s.height]; });
+        assert.deepEqual(a, b2, "ⓘのサイズ・色が各設定項目と同じ");
+        // タップ(PC はホバー)で同じ説明文のツールチップ。外側で閉じる
+        const pop = page.locator(".settings-head .info-tip-pop");
+        assert.equal(await pop.isHidden(), true);
+        if (width === 1100) { await tip.hover(); } else { await tip.tap(); }
+        await pop.waitFor();
+        assert.equal(await pop.innerText(), "この画面は施設管理者のみ変更できます。");
+        const inView = await pop.evaluate(p => { const r = p.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
+        assert.equal(inView, true, "ツールチップが画面内");
+        await page.keyboard.press("Escape");
+        await page.mouse.click(5, 5);
+        await pop.waitFor({ state: "hidden" });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      }
+
+      // ディーラーの編集: 補足説明は両方「（1行に1件・最大5件）」で、同じ大きさ・太さ・色(グレー)
+      const sec = page.locator('[data-section="dealers"]');
+      await sec.locator(".dealer-item").first().locator('[data-act="edit"]').click();
+      const notes = sec.locator(".dealer-item.is-editing .field-note");
+      assert.deepEqual(await notes.allInnerTexts(), ["（1行に1件・最大5件）", "（1行に1件・最大5件）"]);
+      const labels = await sec.locator(".dealer-item.is-editing .form-label").evaluateAll(ls => ls.map(l => l.firstChild.textContent.trim()));
+      assert.deepEqual(labels, ["発注用メールアドレス", "使用報告用メールアドレス"]);
+      const ns = await notes.evaluateAll(es => es.map(e => { const s = getComputedStyle(e); return [s.fontSize, s.fontWeight, s.color]; }));
+      assert.deepEqual(ns[0], ns[1], "2つの補足説明は同じ書式");
+      assert.equal(ns[0][2], "rgb(107, 114, 128)", "グレー");
+      assert.ok(!(await sec.innerText()).includes("発注用とは別に管理"));
+      // 使用報告用も、実際に最大5件(6件目はエラーで保存されない)
+      await sec.locator('.dealer-item.is-editing [data-f="usageEmails"]').fill(Array.from({ length: 6 }, (_, i) => `u${i}@example.jp`).join("\n"));
+      await sec.locator(".dealer-item.is-editing [data-act=save-row]").click();
+      assert.match(await sec.locator(".dealer-item.is-editing [data-err]").innerText(), /使用報告用.*5件/);
       assert.deepEqual(errors, []);
       await context.close();
     } finally { await browser.close(); }
