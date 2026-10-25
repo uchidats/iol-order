@@ -2056,3 +2056,14 @@ input[type="date"], .lens-line select { color-scheme: light; }
 
 /* ディーラーのメールアドレス欄の補足説明(「（1行に1件・最大5件）」): 発注用・使用報告用で同じ大きさ・太さ・色(グレー) */
 .field-note { margin-left: 4px; font-size: 0.8rem; font-weight: 400; color: #6b7280; }
+
+/* 施設登録: 施設名の候補(施設名のみ)。選ぶと招待コードでの参加を案内する */
+.candidate-list { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.candidate-item { width: 100%; text-align: left; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #1f2937; font: inherit; cursor: pointer; }
+.candidate-item:hover, .candidate-item:focus-visible { border-color: #2563eb; background: #eff6ff; }
+@media (prefers-color-scheme: dark) { .candidate-item { background: #1f2937; color: #f3f4f6; border-color: #4b5563; } .candidate-item:hover, .candidate-item:focus-visible { background: #1e3a5f; } }
+
+/* 施設設定: 施設名の変更 */
+.facility-rename { margin: 0 0 12px; }
+.facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#btnRenameFacility { margin-left: -4px; }

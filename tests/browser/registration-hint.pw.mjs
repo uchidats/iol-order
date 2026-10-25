@@ -70,7 +70,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await input.pressSequentially("さ");
       await page.waitForTimeout(900);
       assert.deepEqual(await page.evaluate(() => window.__checks), []);
-      await page.evaluate(() => { window.__resp = { exact: false, similarCount: 2 }; });
+      await page.evaluate(() => { window.__resp = { exact: false, similarCount: 2, candidates: ["さくら眼科クリニック", "<b>さくら</b>眼科", "a", "b", "c"] }; });
       await input.fill("");
       await input.pressSequentially("医療法人社団 さくら眼科", { delay: 20 });
       await hint.waitFor();
@@ -81,7 +81,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(txt, /既に登録されている可能性があります/);
       assert.match(txt, /招待コード/);
       assert.match(txt, /既存施設に参加する/);
-      assert.ok(!/さくら|\d+件/.test(txt), "他施設の情報・件数は出さない: " + txt);
+      assert.ok(!/さくら|\d+件/.test(txt), "案内文に件数などは出さない: " + txt);
+      // 候補は施設名のみ(最大5件・HTMLとして解釈しない)
+      const items = page.locator("#regNameCandidates .candidate-item");
+      assert.deepEqual(await items.allInnerTexts(), ["さくら眼科クリニック", "<b>さくら</b>眼科", "a", "b", "c"]);
+      assert.equal(await page.locator("#regNameCandidates b").count(), 0);
+      assert.equal(await page.locator("#regCandidateGuide").isHidden(), true);
+      // 候補を選ぶと、招待コードによる参加を案内(入力した施設名は書き換えない)。登録も引き続きできる
+      await items.nth(0).click();
+      const guide = await page.locator("#regCandidateGuide").innerText();
+      assert.match(guide, /さくら眼科クリニック/);
+      assert.match(guide, /招待コード/);
+      assert.equal(await input.inputValue(), "医療法人社団 さくら眼科");
       // 登録は止めない(別の施設の場合は、そのまま登録できる)。ボタンは有効で、押すと通常の登録の操作が行われる
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
       await page.click("#btnRegSubmit");
@@ -93,6 +104,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.waitForFunction(() => window.__checks.length >= 2);
       await page.waitForTimeout(200);
       assert.equal(await hint.isHidden(), true);
+      assert.equal(await page.locator("#regNameCandidates").isHidden(), true);
 
       // 古い応答は使わない(遅れて届いた、前の入力への結果で表示しない)
       await page.evaluate(() => { window.__delays = { "遅い応答のテスト": 800 }; window.__resp = (n) => (n === "遅い応答のテスト" ? { exact: true, similarCount: 1 } : { exact: false, similarCount: 0 }); });

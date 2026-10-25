@@ -126,6 +126,7 @@ async function bootstrapWithFirebase(config) {
         inviteApi: ctx.registrationApi,
         currentUser: { uid: state.user.uid, displayName: state.user.displayName },
         onSaved: () => reloadFacilityOptions(),
+        onRenamed: (id, name) => { const f = state.facilities.find(x => x.id === id); if (f) f.name = name; render(); },   // ヘッダー・メニューの施設名を更新
         onClose: () => setOrderViewHidden(false)
       });
     }

@@ -16,7 +16,8 @@ export const LIMITS = Object.freeze({
   emailMax: 254,
   // 1ユーザー・1操作あたりの呼び出し回数の上限（固定ウィンドウ）。失敗した呼び出しも数える
   rateWindowMs: 60 * 60 * 1000,
-  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120 })
+  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120, renameFacility: 20 }),
+  maxCandidates: 5
 });
 
 /** クライアントに返すエラー。code は firebase-functions の HttpsError コードに対応 */
@@ -164,20 +165,30 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  /** 既存施設との名前の重複候補。他施設の名前・IDは返さず、件数と完全一致の有無のみ返す */
-  async function findNameCandidates(key) {
-    const snap = await db.collection("facilities").select("name").get();
+  /**
+   * 既存施設との名前の重複候補。返すのは、完全一致の有無・似た施設の件数・候補の施設名(最大 maxCandidates 件。施設名のみ)。
+   * 施設ID・メール・職員・注文などは返さない。excludeId の施設(名前変更中の自分の施設)は数えない
+   */
+  async function findNameCandidates(key, excludeId = null) {
+    const snap = await db.collection("facilities").select("name", "status").get();
     let exact = false, similarCount = 0;
+    const named = [];
     snap.forEach(d => {
+      if (d.id === excludeId) return;
       const r = compareNames(key, nameKey(d.get("name")));
-      if (r === "exact") { exact = true; similarCount++; } else if (r === "similar") similarCount++;
+      if (!r) return;
+      similarCount++;
+      if (r === "exact") exact = true;
+      if (d.get("status") === "active" && typeof d.get("name") === "string") named.push({ name: d.get("name"), rank: r === "exact" ? 0 : 1 });
     });
-    return { exact, similarCount };
+    named.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name, "ja"));
+    const candidates = [...new Set(named.map(n => n.name))].slice(0, LIMITS.maxCandidates);
+    return { exact, similarCount, candidates };
   }
 
   /**
    * 施設名を入力している間の、重複候補の確認(読み取りのみ。何も作成しない)。
-   * 返すのは「完全一致があるか」「似た施設の件数」だけ。他施設の名前・ID・メールアドレス・職員・注文・招待などは一切返さない。
+   * 返すのは「完全一致があるか」「似た施設の件数」「候補の施設名(最大5件)」だけ。施設ID・メールアドレス・職員・注文・招待などは一切返さない。
    * ログイン済み・メール確認済みのユーザーだけ。回数制限あり(施設名の総当たりを防ぐ)。
    */
   async function checkFacilityName({ auth, data }) {
@@ -188,8 +199,40 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       throw new RegistrationError("invalid-argument", `施設名は1〜${LIMITS.nameMax}文字で入力してください`);
     }
     await consumeRate(user.uid, "checkFacilityName");
-    const { exact, similarCount } = await findNameCandidates(nameKey(name));
-    return { exact, similarCount };
+    const { exact, similarCount, candidates } = await findNameCandidates(nameKey(name));
+    return { exact, similarCount, candidates };
+  }
+
+  /**
+   * 施設名の変更(施設管理者のみ)。既存施設との重複を確認し、候補があれば確認(confirmDuplicate)なしでは変更しない。
+   * 変更するのは name と updatedAt だけ。施設ID・所属・注文などは変わらない
+   */
+  async function renameFacility({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    assertKnownKeys(data, ["facilityId", "name", "confirmDuplicate"]);
+    if (typeof data.facilityId !== "string" || !FACILITY_ID_RE.test(data.facilityId)) {
+      throw new RegistrationError("invalid-argument", "施設の指定が正しくありません");
+    }
+    const name = typeof data.name === "string" ? normalizeName(data.name) : "";
+    if (!name || name.length > LIMITS.nameMax) {
+      throw new RegistrationError("invalid-argument", `施設名は1〜${LIMITS.nameMax}文字で入力してください`);
+    }
+    if (data.confirmDuplicate !== undefined && data.confirmDuplicate !== true) {
+      throw new RegistrationError("invalid-argument", "入力が正しくありません");
+    }
+    await consumeRate(user.uid, "renameFacility");
+    const facRef = db.doc(`facilities/${data.facilityId}`);
+    const [fac, mem] = await Promise.all([facRef.get(), db.doc(`facilities/${data.facilityId}/members/${user.uid}`).get()]);
+    if (!(fac.exists && fac.get("status") === "active" && mem.exists && mem.get("role") === "admin")) {
+      throw new RegistrationError("permission-denied", "この施設の管理者のみ施設名を変更できます");
+    }
+    if (fac.get("name") === name) return { status: "unchanged", name };
+    if (data.confirmDuplicate !== true) {
+      const dup = await findNameCandidates(nameKey(name), data.facilityId);
+      if (dup.exact || dup.similarCount > 0) return { status: "duplicate-candidate", exact: dup.exact, similarCount: dup.similarCount, candidates: dup.candidates };
+    }
+    await facRef.update({ name, updatedAt: FieldValue.serverTimestamp() });
+    return { status: "renamed", name };
   }
 
   /** 新しい施設を登録し、呼び出したユーザーを最初の管理者にする */
@@ -213,7 +256,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     // 重複候補（確認済みでなければ登録せず、候補の有無だけ返す）
     if (!input.confirmDuplicate) {
       const dup = await findNameCandidates(key);
-      if (dup.exact || dup.similarCount > 0) return { status: "duplicate-candidate", ...dup };
+      if (dup.exact || dup.similarCount > 0) return { status: "duplicate-candidate", exact: dup.exact, similarCount: dup.similarCount };
     }
 
     // 施設・最初の管理者の所属・利用枠の更新を1つのトランザクションで行う（全部成功か全部失敗）
@@ -313,5 +356,5 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  return { registerFacility, createInvite, acceptInvite, checkFacilityName };
+  return { registerFacility, createInvite, acceptInvite, checkFacilityName, renameFacility };
 }

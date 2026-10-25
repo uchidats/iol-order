@@ -257,15 +257,15 @@ test("checkFacilityName: 完全一致の有無と似た施設の件数だけを�
   const a = user("userA");
 
   const r1 = await service.checkFacilityName({ auth: a, data: { name: "さくら眼科" } });
-  assert.deepEqual(r1, { exact: true, similarCount: 2 });
+  assert.deepEqual(r1, { exact: true, similarCount: 2, candidates: ["医療法人社団 さくら眼科", "さくら眼科クリニック"] }, "候補は施設名のみ(完全一致が先)");
   const r2 = await service.checkFacilityName({ auth: a, data: { name: "（医）さくら　眼科" } });
-  assert.deepEqual(r2, { exact: true, similarCount: 2 });
+  assert.equal(r2.similarCount, 2);
   const r3 = await service.checkFacilityName({ auth: a, data: { name: "まったく別のクリニック" } });
-  assert.deepEqual(r3, { exact: false, similarCount: 0 });
+  assert.deepEqual(r3, { exact: false, similarCount: 0, candidates: [] });
 
   const all = JSON.stringify([r1, r2, r3]);
-  for (const s of ["sakura", "secret", "adminS", "invitee", "hash1", "秘密", "さくら"]) assert.ok(!all.includes(s), `応答に ${s} を含まない`);
-  assert.deepEqual(Object.keys(r1).sort(), ["exact", "similarCount"]);
+  for (const s of ["sakura\"", "secret", "adminS", "invitee", "hash1", "秘密", "createdBy"]) assert.ok(!all.includes(s), `応答に ${s} を含まない`);
+  assert.deepEqual(Object.keys(r1).sort(), ["candidates", "exact", "similarCount"]);
 });
 
 test("checkFacilityName: 何も作成・変更しない。ログイン・メール確認が必要。入力検証と回数制限がある", async () => {
@@ -554,4 +554,64 @@ test("同じメールアドレス(同一アカウント)が複数施設に所属
   // 別のUIDでも、メール確認済みで同じメールなら招待は使える仕様(メール=本人確認の根拠)。未確認は拒否される
   const inv = await service.createInvite({ auth: f1.admin, data: { facilityId: f1.facilityId, email: "other@example.jp" } });
   await rejects(service.acceptInvite({ auth: user("userX", { email: "other@example.jp", email_verified: false }), data: { token: inv.token } }), "permission-denied");
+});
+
+test("checkFacilityName: 候補は最大5件・有効な施設の名前のみ", async () => {
+  for (let i = 1; i <= 8; i++) await seedFacility("s" + i, "ひまわり眼科" + "ABCDEFGH"[i - 1] + "支店".repeat(0));
+  await seedFacility("sx", "ひまわり眼科", { status: "suspended" });
+  const r = await service.checkFacilityName({ auth: user("userA"), data: { name: "ひまわり眼科" } });
+  assert.ok(r.candidates.length <= LIMITS.maxCandidates);
+  assert.ok(!r.candidates.includes("ひまわり眼科"), "停止中の施設名は出さない");
+  assert.ok(r.similarCount >= 1);
+});
+
+// ================= 施設名の変更 =================
+test("renameFacility: 施設管理者だけが変更でき、name と updatedAt 以外(ID・所属・注文)は変わらない", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin("adminR", "旧い名前の施設");
+  await seedMember(facilityId, "ordererR", "orderer");
+  await db.doc(`facilities/${facilityId}/orders/o1`).set({ x: 1 });
+  const before = (await db.doc(`facilities/${facilityId}`).get()).data();
+  const r = await service.renameFacility({ auth: admin, data: { facilityId, name: "　新しい　名前の施設 " } });
+  assert.deepEqual(r, { status: "renamed", name: "新しい 名前の施設" });
+  const after = (await db.doc(`facilities/${facilityId}`).get()).data();
+  assert.equal(after.name, "新しい 名前の施設");
+  const { name: _n, updatedAt: _u, ...restAfter } = after; const { name: _n2, updatedAt: _u2, ...restBefore } = before;
+  assert.deepEqual(restAfter, restBefore);
+  assert.deepEqual((await db.collection(`facilities/${facilityId}/members`).get()).docs.map(d => d.id).sort(), ["adminR", "ordererR"]);
+  assert.equal((await db.doc(`facilities/${facilityId}/orders/o1`).get()).exists, true);
+  assert.deepEqual(await service.renameFacility({ auth: admin, data: { facilityId, name: "新しい 名前の施設" } }), { status: "unchanged", name: "新しい 名前の施設" });
+
+  await rejects(service.renameFacility({ auth: user("ordererR"), data: { facilityId, name: "乗っ取り" } }), "permission-denied");
+  const other = await reg(user("adminO"), "別の管理者の施設");
+  await rejects(service.renameFacility({ auth: user("adminO"), data: { facilityId, name: "他施設の名前変更" } }), "permission-denied");
+  await rejects(service.renameFacility({ auth: null, data: { facilityId, name: "x名前" } }), "unauthenticated");
+  await rejects(service.renameFacility({ auth: user("adminR", { email_verified: false }), data: { facilityId, name: "x名前" } }), "permission-denied");
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "  " } }), "invalid-argument");
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "あ".repeat(LIMITS.nameMax + 1) } }), "invalid-argument");
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "名前", role: "admin" } }), "invalid-argument");
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId: "../x", name: "名前" } }), "invalid-argument");
+  assert.equal((await db.doc(`facilities/${facilityId}`).get()).get("name"), "新しい 名前の施設");
+  assert.equal((await db.doc(`facilities/${other.facilityId}`).get()).get("name"), "別の管理者の施設");
+});
+
+test("renameFacility: 既存施設と重複しそうな場合は確認なしでは変更せず、候補は施設名のみ。自分の施設自身は重複扱いしない", async () => {
+  await seedFacility("tachikawa-hospital", "立川病院", { createdBy: "secret-uid" });
+  const { admin, facilityId } = await setupFacilityWithAdmin("adminR", "山田クリニック");
+  const r = await service.renameFacility({ auth: admin, data: { facilityId, name: "医療法人 立川病院" } });
+  assert.deepEqual(r, { status: "duplicate-candidate", exact: true, similarCount: 1, candidates: ["立川病院"] });
+  assert.ok(!JSON.stringify(r).includes("secret-uid") && !JSON.stringify(r).includes("tachikawa-hospital"));
+  assert.equal((await db.doc(`facilities/${facilityId}`).get()).get("name"), "山田クリニック");
+  // 自分の施設の名前を、表記だけ変える(法人名を付ける)のは重複ではない
+  assert.equal((await service.renameFacility({ auth: admin, data: { facilityId, name: "医療法人 山田クリニック" } })).status, "renamed");
+  // 確認して変更
+  const r2 = await service.renameFacility({ auth: admin, data: { facilityId, name: "立川病院", confirmDuplicate: true } });
+  assert.equal(r2.status, "renamed");
+  assert.equal((await db.doc("facilities/tachikawa-hospital").get()).get("name"), "立川病院");
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "名前", confirmDuplicate: "yes" } }), "invalid-argument");
+});
+
+test("renameFacility: 回数制限がある", async () => {
+  const { admin, facilityId } = await setupFacilityWithAdmin("adminR", "回数制限の施設");
+  for (let i = 0; i < LIMITS.rateMax.renameFacility; i++) await service.renameFacility({ auth: admin, data: { facilityId, name: "回数制限の施設" } });
+  await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "回数制限の施設" } }), "resource-exhausted");
 });

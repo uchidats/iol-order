@@ -54,9 +54,10 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
  * @param {() => void} deps.onClose
  * @param {{uid:string, displayName?:string}} [deps.currentUser] 操作者（利用者管理の操作記録に使う）
- * @param {{createInvite:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
+ * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
+ * @param {{createInvite:Function, renameFacility?:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, onRenamed = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -653,11 +654,61 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   if (canManageMembers) sections.members = memberSection();
   if (inviteApi) sections.invites = inviteSection();
   const title = h("span", { class: "settings-facility" });
+
+  // ---------- 施設名の変更(施設管理者のみ。重複確認はサーバー。施設ID・所属・注文は変わらない) ----------
+  const nameInput = h("input", { type: "text", class: "form-control", maxlength: "100", "aria-label": "施設名", autocomplete: "off" });
+  const nameSave = h("button", { type: "button", class: "btn btn-primary" }, "変更する");
+  const nameCancel = h("button", { type: "button", class: "btn btn-secondary" }, "キャンセル");
+  const nameConfirm = h("button", { type: "button", class: "btn btn-secondary", hidden: true }, "別の施設として変更する");
+  const nameMsg = h("p", { class: "form-hint", role: "status" });
+  const nameBox = h("div", { class: "facility-rename", hidden: true },
+    h("label", { class: "form-label" }, "施設名", nameInput),
+    h("div", { class: "form-row" }, nameSave, nameConfirm, nameCancel), nameMsg);
+  const nameEditBtn = inviteApi && inviteApi.renameFacility
+    ? h("button", { type: "button", class: "btn btn-outline-sm", id: "btnRenameFacility", "aria-label": "施設名を編集", title: "施設名を編集" }, pencilIcon())
+    : null;
+  let renaming = false;
+  function setRenameOpen(on) {
+    nameBox.hidden = !on;
+    if (on) { nameInput.value = facility.name; nameMsg.textContent = ""; nameConfirm.hidden = true; nameInput.focus(); }
+  }
+  async function submitRename(confirmDuplicate) {
+    if (renaming) return;
+    const name = nameInput.value.replace(/s+/g, " ").trim();
+    if (!name) { nameMsg.textContent = "施設名を入力してください。"; return; }
+    renaming = true; nameSave.disabled = nameConfirm.disabled = true;
+    try {
+      const r = await inviteApi.renameFacility({ facilityId: facility.id, name, confirmDuplicate });
+      if (r.status === "duplicate-candidate") {
+        const names = Array.isArray(r.candidates) ? r.candidates.slice(0, 5) : [];
+        nameMsg.textContent = "既に登録されている施設と名前が似ています" + (names.length ? "（" + names.join("、") + "）" : "") + "。別の施設の場合のみ、このまま変更できます。";
+        nameConfirm.hidden = false;
+        return;
+      }
+      if (r.status === "renamed" || r.status === "unchanged") {
+        facility.name = r.name; title.textContent = r.name;
+        setRenameOpen(false);
+        onRenamed(facility.id, r.name);
+      }
+    } catch (e) {
+      // 関数が未配備の場合(英語の not-found)は、一般的な案内にする
+      nameMsg.textContent = String((e && e.code) || "").endsWith("not-found") && !/[぀-ヿ一-鿿]/.test(String(e.message || "")) ? "施設名の変更は、現在ご利用いただけません。" : describeCallableError(e);
+    } finally {
+      renaming = false; nameSave.disabled = nameConfirm.disabled = false;
+    }
+  }
+  if (nameEditBtn) nameEditBtn.addEventListener("click", () => setRenameOpen(nameBox.hidden));
+  nameSave.addEventListener("click", () => submitRename(false));
+  nameConfirm.addEventListener("click", () => submitRename(true));
+  nameCancel.addEventListener("click", () => setRenameOpen(false));
+  nameInput.addEventListener("input", () => { nameConfirm.hidden = true; });
+  nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitRename(false); } });
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnSettingsClose" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
     // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない
-    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, closeBtn),
+    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, closeBtn),
+    nameBox,
     status,
     ...Object.values(sections));
 
@@ -680,6 +731,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     async open(fac) {
       facility = fac;
       title.textContent = fac.name;
+      nameBox.hidden = true;
       status.textContent = "読み込み中…";
       root.hidden = false;
       open = true;

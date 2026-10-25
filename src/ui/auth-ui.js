@@ -35,13 +35,15 @@ export function createAuthUi(handlers) {
   let lastArgs = null;
   let lastOpen = null; // メニューから開いた登録・参加画面の直前の種別（開き直しでモードを初期化する）
 
-  // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。他施設の名前などは取得しない(件数だけ)
+  // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。表示するのは候補の施設名のみ(最大5件)
   let nameTimer = null, nameSeq = 0;
   const DUP_HINT = "既に登録されている可能性があります。既存の施設に参加する場合は、その施設の管理者から招待コードを受け取り、「既存施設に参加する」から参加してください。別の施設の場合は、このまま登録できます。";
   function scheduleNameCheck(nameEl) {
     clearTimeout(nameTimer);
-    const hint = $("regNameHint");
+    const hint = $("regNameHint"), list = $("regNameCandidates"), guide = $("regCandidateGuide");
     if (hint) hint.hidden = true;
+    if (list) { list.hidden = true; list.textContent = ""; }
+    if (guide) guide.hidden = true;
     const name = normalizeFacilityName(nameEl.value);
     if (!handlers.onCheckName || name.length < 2) return;
     const mySeq = ++nameSeq;
@@ -52,7 +54,32 @@ export function createAuthUi(handlers) {
       if (mySeq !== nameSeq || !h || normalizeFacilityName(nameEl.value) !== name) return;   // 入力が変わっていたら、古い結果は使わない
       h.textContent = r && (r.exact || r.similarCount > 0) ? DUP_HINT : "";
       h.hidden = !h.textContent;
+      showCandidates(h.hidden ? [] : (Array.isArray(r.candidates) ? r.candidates.slice(0, 5) : []));
     }, 700);
+  }
+
+  /** 候補の施設名(施設名のみ)を一覧表示。選ぶと、招待コードによる参加を案内する。選んでも施設名の入力は書き換えない */
+  function showCandidates(names) {
+    const list = $("regNameCandidates"), guide = $("regCandidateGuide");
+    if (!list || !guide) return;
+    list.textContent = "";
+    for (const n of names) {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "candidate-item"; b.textContent = n;   // 施設名は textContent で(HTMLとして解釈しない)
+      b.addEventListener("click", () => {
+        guide.textContent = "";
+        const p = document.createElement("span");
+        p.textContent = "「" + n + "」に参加する場合は、その施設の管理者から招待コードを受け取り、";
+        const go = document.createElement("button");
+        go.type = "button"; go.id = "btnGoJoin"; go.className = "btn btn-secondary"; go.textContent = "招待コードで参加する";
+        go.addEventListener("click", () => { draft.mode = "join"; handlers.onRegisterCancel(); if (lastArgs) render(lastArgs); });
+        guide.append(p, document.createTextNode("「既存施設に参加する」から入力してください。"), document.createElement("br"), go);
+        guide.hidden = false;
+      });
+      li.appendChild(b); list.appendChild(li);
+    }
+    list.hidden = names.length === 0;
   }
 
   /** 所属なし: 「新しい施設を登録」または「招待コードで既存施設に参加」。招待なしでの参加はできない */
@@ -71,6 +98,8 @@ export function createAuthUi(handlers) {
           <input id="regFacilityName" class="form-control" type="text" maxlength="100" autocomplete="organization" value="${escapeHtml(draft.name)}">
           <p class="form-hint">施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。</p>
           <p class="error-message" id="regNameHint" role="status" aria-live="polite" hidden></p>
+          <ul class="candidate-list" id="regNameCandidates" aria-label="施設名の候補" hidden></ul>
+          <p class="form-hint" id="regCandidateGuide" role="status" aria-live="polite" hidden></p>
           ${showDup ? `
             <p class="error-message" role="alert">既に登録されている可能性があります(${reg.duplicate.exact ? "同じ名前の施設があります" : "名前の似た施設があります"})。
             既存の施設に参加する場合は、その施設の管理者から招待コードを受け取ってください。別の施設の場合のみ、このまま登録できます。</p>
