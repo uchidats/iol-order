@@ -16,7 +16,8 @@ export const LIMITS = Object.freeze({
   emailMax: 254,
   // 1ユーザー・1操作あたりの呼び出し回数の上限（固定ウィンドウ）。失敗した呼び出しも数える
   rateWindowMs: 60 * 60 * 1000,
-  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120, renameFacility: 20 }),
+  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120, renameFacility: 20, deleteFacility: 10 }),
+  maxDeleteDocs: 450,   // 1回の削除(トランザクション)で扱える書き込み数の上限(Firestoreは500)
   maxCandidates: 5
 });
 
@@ -169,17 +170,21 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
    * 既存施設との名前の重複候補。返すのは、完全一致の有無・似た施設の件数・候補の施設名(最大 maxCandidates 件。施設名のみ)。
    * 施設ID・メール・職員・注文などは返さない。excludeId の施設(名前変更中の自分の施設)は数えない
    */
-  async function findNameCandidates(key, excludeId = null) {
+  async function findNameCandidates(key, excludeId = null, { suggest = false } = {}) {
     const snap = await db.collection("facilities").select("name", "status").get();
     let exact = false, similarCount = 0;
     const named = [];
     snap.forEach(d => {
       if (d.id === excludeId) return;
-      const r = compareNames(key, nameKey(d.get("name")));
+      const fk = nameKey(d.get("name"));
+      let r = compareNames(key, fk);
+      // 入力中の候補表示(suggest)だけは、短い入力(2文字以上)でも「施設名の一部」として候補にする(例: 「立川」→「立川病院」)。登録・変更時の重複判定には使わない
+      let rank = r === "exact" ? 0 : 1;
+      if (!r && suggest && key.length >= 2 && fk.includes(key)) { r = "similar"; rank = fk.startsWith(key) ? 1 : 2; }
       if (!r) return;
       similarCount++;
       if (r === "exact") exact = true;
-      if (d.get("status") === "active" && typeof d.get("name") === "string") named.push({ name: d.get("name"), rank: r === "exact" ? 0 : 1 });
+      if (d.get("status") === "active" && typeof d.get("name") === "string") named.push({ name: d.get("name"), rank });
     });
     named.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name, "ja"));
     const candidates = [...new Set(named.map(n => n.name))].slice(0, LIMITS.maxCandidates);
@@ -199,7 +204,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       throw new RegistrationError("invalid-argument", `施設名は1〜${LIMITS.nameMax}文字で入力してください`);
     }
     await consumeRate(user.uid, "checkFacilityName");
-    const { exact, similarCount, candidates } = await findNameCandidates(nameKey(name));
+    const { exact, similarCount, candidates } = await findNameCandidates(nameKey(name), null, { suggest: true });
     return { exact, similarCount, candidates };
   }
 
@@ -233,6 +238,62 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     }
     await facRef.update({ name, updatedAt: FieldValue.serverTimestamp() });
     return { status: "renamed", name };
+  }
+
+  /**
+   * 施設の削除(施設管理者のみ)。次の場合は削除しない: 注文履歴がある / 自分以外の所属ユーザーがいる / 入力された施設名が一致しない。
+   * 削除するのは、その施設の配下のデータ(所属・担当医・採用IOL・ディーラー・表示設定・操作履歴など)と、その施設宛ての招待、
+   * 作成者のセルフ登録の利用枠(1件ぶん)。1つのトランザクションで、条件の再確認と削除を行う(途中で失敗しても何も消えない)。
+   * 他施設のデータには触れない。
+   */
+  async function deleteFacility({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    assertKnownKeys(data, ["facilityId", "confirmName"]);
+    if (typeof data.facilityId !== "string" || !FACILITY_ID_RE.test(data.facilityId)) {
+      throw new RegistrationError("invalid-argument", "施設の指定が正しくありません");
+    }
+    const confirmName = typeof data.confirmName === "string" ? normalizeName(data.confirmName) : "";
+    if (!confirmName) throw new RegistrationError("invalid-argument", "確認のため、施設名を入力してください");
+    await consumeRate(user.uid, "deleteFacility");
+
+    const facRef = db.doc(`facilities/${data.facilityId}`);
+    const subNames = (await facRef.listCollections()).map(c => c.id);
+    const NOT_ALLOWED = "この施設の管理者のみ削除できます";
+    return db.runTransaction(async (tx) => {
+      const [fac, actor] = await Promise.all([tx.get(facRef), tx.get(db.doc(`facilities/${data.facilityId}/members/${user.uid}`))]);
+      if (!(fac.exists && fac.get("status") === "active" && actor.exists && actor.get("role") === "admin")) {
+        throw new RegistrationError("permission-denied", NOT_ALLOWED);
+      }
+      if (normalizeName(fac.get("name") || "") !== confirmName) {
+        throw new RegistrationError("failed-precondition", "入力された施設名が一致しません。施設名を正確に入力してください");
+      }
+      // 注文履歴(どの形でも1件でもあれば削除しない)
+      const orders = await tx.get(facRef.collection("orders").limit(1));
+      if (!orders.empty) throw new RegistrationError("failed-precondition", "注文履歴がある施設は削除できません");
+      const members = await tx.get(facRef.collection("members"));
+      if (members.docs.some(m => m.id !== user.uid)) {
+        throw new RegistrationError("failed-precondition", "ほかの利用者が所属している施設は削除できません。先に利用者を削除してください");
+      }
+      const subs = await Promise.all(subNames.filter(n => n !== "orders").map(n => tx.get(facRef.collection(n))));
+      const invites = await tx.get(db.collection("invites").where("facilityId", "==", data.facilityId));
+      const creator = typeof fac.get("createdBy") === "string" && fac.get("selfRegistered") ? fac.get("createdBy") : null;
+      const quotaRef = creator ? db.doc(`registrationQuota/${creator}`) : null;
+      const quota = quotaRef ? await tx.get(quotaRef) : null;
+
+      const refs = [...subs.flatMap(s => s.docs.map(d => d.ref)), ...invites.docs.map(d => d.ref), facRef];
+      if (refs.length > LIMITS.maxDeleteDocs) {
+        throw new RegistrationError("failed-precondition", "データが多いため、この画面からは削除できません。運営者にご連絡ください");
+      }
+      // 書き込みは、すべての読み取りのあと
+      for (const r of refs) tx.delete(r);
+      if (quota && quota.exists) {
+        const keys = [...(quota.get("keys") || [])];
+        const i = keys.indexOf(nameKey(fac.get("name")));
+        if (i >= 0) keys.splice(i, 1);
+        tx.set(quotaRef, { count: Math.max(0, (quota.get("count") || 0) - 1), keys, updatedAt: FieldValue.serverTimestamp() });
+      }
+      return { status: "deleted", facilityId: data.facilityId };
+    });
   }
 
   /** 新しい施設を登録し、呼び出したユーザーを最初の管理者にする */
@@ -356,5 +417,5 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  return { registerFacility, createInvite, acceptInvite, checkFacilityName, renameFacility };
+  return { registerFacility, createInvite, acceptInvite, checkFacilityName, renameFacility, deleteFacility };
 }

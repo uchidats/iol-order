@@ -3,26 +3,25 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 施設名の候補表示(IOL内の既存施設のみ)・重複チェックの維持・施設管理者による施設名の編集
+- **作業**: ①「立川」で「立川病院」が候補に出ない問題の修正 ②施設管理者向けの施設削除機能
 - **ブランチ**: `feature/facility-duplicates` → `main` へ push
-- Google Places API は見送り(調査・実装とも不要の指示)。外部APIは増やしていない。
 
-## 調査
-- 施設名の編集: **UIは未実装**だった(Rulesでは施設管理者が name を直接更新できるが、重複確認ができない)。→ 実装。
-- 施設の削除: Rules で `allow delete: if false`、UI・サーバーとも削除機能なし。**調査のみ・新規実装なし**。
+## 1. 候補が出ない原因と修正
+- 原因: 類似判定が「共通部分が3文字以上」を要求していたため、2文字の「立川」は「立川病院」に当たらなかった(呼び出し・認証・応答・画面は正常)。
+- 修正(`checkFacilityName` のみ): 入力中の候補表示に限り、**2文字以上の入力が施設名の一部に含まれれば候補**にする(先頭一致を先に)。登録・変更時の重複判定の基準は変更なし。既存の重複チェック・招待コードでの参加は維持。
 
-## 変更内容
-- **候補表示**: `checkFacilityName` が候補の**施設名のみ(最大5件・有効な施設・完全一致が先)**を追加で返す。登録画面で施設名を入力すると、案内文の下に候補を一覧表示(バッジなし・HTMLとして解釈しない)。候補を選ぶと「その施設の管理者から招待コードを受け取り、「既存施設に参加する」から」と案内し、「招待コードで参加する」ボタンで参加画面へ。登録は止めない。`registerFacility` の重複応答は件数のみのまま。
-- **施設名の編集**: 新規 Callable `renameFacility`(施設管理者のみ・入力検証・回数制限20/時間・既存施設との重複確認、確認(`confirmDuplicate`)つきで変更可。自分自身は重複扱いしない)。更新は `name`・`updatedAt` のみ(施設ID・所属・注文は不変)。施設設定の施設名の横に鉛筆アイコン→入力欄→「変更する」。重複候補があれば施設名を示し「別の施設として変更する」で確定。変更後はヘッダー・メニューの施設名も更新。
-- 維持: 表記ゆれ対応、認証・回数制限、登録確定時のサーバー側重複確認、登録・招待・権限・注文。
-- 変更ファイル: `functions/src/registration.js`、`functions/index.js`、`src/data/registration-api.js`、`src/ui/auth-ui.js`、`src/ui/facility-settings.js`、`src/main.js`、`styles.css`、`docs/self-registration.md`、テスト。**Firestore Rules の変更なし**。
+## 2. 施設の削除
+- 調査したデータ: `facilities/{id}` 配下(members・orderers・adoptedIols・facilityDealers・displaySettings・auditLogs・orders・orderCounters)、`invites`(facilityId)、`registrationQuota/{作成者}`。Rules は `delete: false`(変更なし)。
+- 設計: 新規 Callable `deleteFacility`。サーバーが1トランザクションで、管理者・施設名一致・注文履歴なし・自分以外の所属なしを**再確認してから**、配下・招待・作成者の利用枠1件分を削除(途中失敗では何も消えない)。他施設には触れない。回数制限10回/時間・1回450件まで。
+- 画面: 施設設定の最下部「施設の削除」。説明→「施設を削除する…」→施設名を入力(一致するまで押せない)→「この施設を削除する」。サーバーの拒否理由(注文履歴あり・他の利用者あり等)を表示。成功後は所属を取得し直して施設選択へ。
+- 変更: `functions/src/registration.js`、`functions/index.js`、`src/data/registration-api.js`、`src/ui/facility-settings.js`、`src/main.js`、`styles.css`、`docs/self-registration.md`、テスト。**Rules変更なし**。実データの削除は行っていない。
 
 ## 要対応(判断待ち)
-- **Functions の再デプロイが必要**(未実施): ① `checkFacilityName`(候補の施設名を返すよう更新) ② `renameFacility`(新規)。デプロイ前は、候補の一覧は出ず(案内文のみ)、鉛筆から変更しようとすると「現在ご利用いただけません」と表示される(既存機能には影響なし)。指示があれば `firebase deploy --only functions:checkFacilityName,functions:renameFacility --project medconf-iol-dev` を実行する。
+- **Functions のデプロイが必要**(未実施): ① `checkFacilityName`(部分一致の修正) ② `deleteFacility`(新規)。デプロイ前は、「立川」の候補は引き続き出ず、削除を実行すると「施設の削除は、現在ご利用いただけません。」と表示される(既存機能に影響なし)。指示があれば `firebase deploy --only functions:checkFacilityName,functions:deleteFacility --project medconf-iol-dev`。
 - Firestore の実データ変更・実メール送信は行っていない。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 187 / Functions 99(新規: 候補は施設名のみ最大5件・非漏えい、renameFacility の権限・検証・重複・回数制限・関連情報不変) / Rules 43 / ブラウザ回帰 62(Chromium・Firefox・WebKit。新規 `facility-rename.pw.mjs`、`registration-hint.pw.mjs` に候補一覧・選択時の案内を追加)すべて成功。
+- unit 187 / Functions 104(新規: 「立川」→「立川病院」、削除の権限・施設名不一致・注文履歴あり・他の所属あり・他施設不変・招待と利用枠の整合・回数制限) / functions e2e 8 / Rules 43 / ブラウザ回帰 65(Chromium・Firefox・WebKit。新規 `facility-delete.pw.mjs`)すべて成功。

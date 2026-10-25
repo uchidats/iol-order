@@ -54,10 +54,11 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
  * @param {() => void} deps.onClose
  * @param {{uid:string, displayName?:string}} [deps.currentUser] 操作者（利用者管理の操作記録に使う）
+ * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
- * @param {{createInvite:Function, renameFacility?:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
+ * @param {{createInvite:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, onRenamed = () => {} }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, onRenamed = () => {}, onDeleted = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -649,10 +650,47 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     return section;
   }
 
+  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。施設名を入力して確認) ----------
+  function deleteSection() {
+    const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", "aria-label": "削除する施設名の確認入力" });
+    const doDelete = h("button", { type: "button", class: "btn btn-danger", disabled: true }, "この施設を削除する");
+    const cancel = h("button", { type: "button", class: "btn btn-secondary" }, "キャンセル");
+    const msg = h("p", { class: "error-message", role: "alert", hidden: true });
+    const confirmBox = h("div", { class: "delete-confirm", hidden: true },
+      h("label", { class: "form-label" }, "確認のため、削除する施設名を入力してください", input),
+      h("div", { class: "form-row" }, doDelete, cancel));
+    const start = h("button", { type: "button", class: "btn btn-outline-sm", id: "btnDeleteFacilityStart" }, "施設を削除する…");
+    const section = h("section", { class: "settings-section settings-danger", "data-section": "delete" },
+      h("h3", {}, "施設の削除"),
+      h("p", { class: "form-hint" }, "注文履歴がある施設、自分以外の利用者が所属している施設は削除できません。削除すると、この施設の設定（担当医・採用IOL・ディーラーなど）と招待が消え、元に戻せません。"),
+      start, confirmBox, msg);
+    const same = () => input.value.replace(/s+/g, " ").trim() === (facility.name || "").replace(/s+/g, " ").trim() && input.value.trim() !== "";
+    input.addEventListener("input", () => { doDelete.disabled = !same(); });
+    start.addEventListener("click", () => { confirmBox.hidden = false; msg.hidden = true; input.value = ""; doDelete.disabled = true; input.focus(); });
+    cancel.addEventListener("click", () => { confirmBox.hidden = true; msg.hidden = true; });
+    let deleting = false;
+    doDelete.addEventListener("click", async () => {
+      if (deleting || !same()) return;
+      deleting = true; doDelete.disabled = true; msg.hidden = true;
+      try {
+        await inviteApi.deleteFacility({ facilityId: facility.id, confirmName: input.value });
+        dirty = false;
+        onDeleted(facility.id);
+      } catch (e) {
+        const notFound = String((e && e.code) || "").endsWith("not-found") && !/[぀-ヿ一-鿿]/.test(String(e.message || ""));
+        msg.textContent = notFound ? "施設の削除は、現在ご利用いただけません。" : describeCallableError(e);
+        msg.hidden = false;
+        deleting = false; doDelete.disabled = !same();
+      }
+    });
+    return section;
+  }
+
   // ---------- 画面全体 ----------
   const sections = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
   if (canManageMembers) sections.members = memberSection();
   if (inviteApi) sections.invites = inviteSection();
+  if (inviteApi && inviteApi.deleteFacility) sections.remove = deleteSection();
   const title = h("span", { class: "settings-facility" });
 
   // ---------- 施設名の変更(施設管理者のみ。重複確認はサーバー。施設ID・所属・注文は変わらない) ----------
@@ -732,6 +770,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       facility = fac;
       title.textContent = fac.name;
       nameBox.hidden = true;
+      if (sections.remove) { sections.remove.querySelector(".delete-confirm").hidden = true; sections.remove.querySelector("p.error-message").hidden = true; }
       status.textContent = "読み込み中…";
       root.hidden = false;
       open = true;

@@ -615,3 +615,92 @@ test("renameFacility: 回数制限がある", async () => {
   for (let i = 0; i < LIMITS.rateMax.renameFacility; i++) await service.renameFacility({ auth: admin, data: { facilityId, name: "回数制限の施設" } });
   await rejects(service.renameFacility({ auth: admin, data: { facilityId, name: "回数制限の施設" } }), "resource-exhausted");
 });
+
+test("checkFacilityName: 短い入力(「立川」)でも、施設名の一部が一致する「立川病院」を候補にする。登録時の重複判定は変えない", async () => {
+  await seedFacility("tachikawa-hospital", "立川病院", { createdBy: "secret-uid" });
+  await seedFacility("other", "山田クリニック");
+  const a = user("userA");
+  const r = await service.checkFacilityName({ auth: a, data: { name: "立川" } });
+  assert.deepEqual(r, { exact: false, similarCount: 1, candidates: ["立川病院"] });
+  assert.deepEqual((await service.checkFacilityName({ auth: a, data: { name: "たちかわ" } })).candidates, [], "読みの違いは対象外");
+  assert.deepEqual((await service.checkFacilityName({ auth: a, data: { name: "川病" } })).candidates, ["立川病院"], "途中の一致も候補(先頭一致より後)");
+  assert.deepEqual((await service.checkFacilityName({ auth: a, data: { name: "立" } })).candidates, [], "1文字では候補にしない");
+  // 登録は、短い一部の入力では重複候補にしない(従来どおり)
+  assert.equal((await reg(a, "立川")).status, "created");
+});
+
+// ================= 施設の削除 =================
+const sub = (fid, p) => db.collection(`facilities/${fid}/${p}`).get();
+async function seedFull(uid = "adminD", name = "削除テスト施設") {
+  const admin = user(uid);
+  const { facilityId } = await setupFacilityWithAdmin(uid, name);
+  await db.doc(`facilities/${facilityId}/orderers/o1`).set({ name: "山田" });
+  await db.doc(`facilities/${facilityId}/adoptedIols/m1`).set({ x: 1 });
+  await db.doc(`facilities/${facilityId}/facilityDealers/d1`).set({ name: "A商会" });
+  await db.doc(`facilities/${facilityId}/displaySettings/s1`).set({ x: 1 });
+  await db.doc(`facilities/${facilityId}/auditLogs/l1`).set({ x: 1 });
+  const inv = await service.createInvite({ auth: admin, data: { facilityId, email: "x@example.jp" } });
+  return { admin, facilityId, inv };
+}
+
+test("deleteFacility: 管理者が施設名を入力して削除すると、その施設の配下・招待・利用枠の1件ぶんだけが消え、他施設は変わらない", async () => {
+  const other = await seedFull("adminO", "他の施設");
+  const { admin, facilityId, inv } = await seedFull();
+  const otherBefore = [(await sub(other.facilityId, "orderers")).size, (await sub(other.facilityId, "members")).size];
+  assert.equal((await db.doc("registrationQuota/adminD").get()).get("count"), 1);
+  const r = await service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "　削除テスト施設 " } });
+  assert.deepEqual(r, { status: "deleted", facilityId });
+  assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, false);
+  for (const p of ["members", "orderers", "adoptedIols", "facilityDealers", "displaySettings", "auditLogs"]) assert.equal((await sub(facilityId, p)).size, 0, p);
+  assert.equal((await db.doc(`invites/${hashToken(inv.token)}`).get()).exists, false, "招待も消える");
+  assert.equal((await db.doc("registrationQuota/adminD").get()).get("count"), 0, "利用枠を戻す");
+  // 他施設・他ユーザーの利用枠は変わらない
+  assert.equal((await db.doc(`facilities/${other.facilityId}`).get()).get("name"), "他の施設");
+  assert.deepEqual([(await sub(other.facilityId, "orderers")).size, (await sub(other.facilityId, "members")).size], otherBefore);
+  assert.equal((await db.collection("invites").where("facilityId", "==", other.facilityId).get()).size, 1);
+  assert.equal((await db.doc("registrationQuota/adminO").get()).get("count"), 1);
+  // 消えた施設は再削除できない
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "permission-denied");
+});
+
+test("deleteFacility: 注文履歴がある・自分以外の所属がいる・施設名が違う場合は削除せず、何も消えない", async () => {
+  const { admin, facilityId } = await seedFull();
+  const count = async () => [(await sub(facilityId, "orderers")).size, (await sub(facilityId, "members")).size, (await db.collection("invites").where("facilityId", "==", facilityId).get()).size];
+  const base = await count();
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "違う名前" } }), "failed-precondition");
+  await db.doc(`facilities/${facilityId}/orders/o1`).set({ x: 1 });
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "failed-precondition");
+  await db.doc(`facilities/${facilityId}/orders/o1`).delete();
+  await seedMember(facilityId, "ordererD", "orderer");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "failed-precondition");
+  await db.doc(`facilities/${facilityId}/members/ordererD`).delete();
+  assert.deepEqual(await count(), base);
+  assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, true);
+});
+
+test("deleteFacility: 一般ユーザー・他施設の管理者・未ログイン・メール未確認・不正な入力・余計な項目は拒否。回数制限あり", async () => {
+  const { admin, facilityId } = await seedFull();
+  await seedMember(facilityId, "ordererD", "orderer");
+  const body = { facilityId, confirmName: "削除テスト施設" };
+  await rejects(service.deleteFacility({ auth: user("ordererD"), data: body }), "permission-denied");
+  const o = await reg(user("adminX"), "別の管理者の施設");
+  await rejects(service.deleteFacility({ auth: user("adminX"), data: body }), "permission-denied");
+  await rejects(service.deleteFacility({ auth: null, data: body }), "unauthenticated");
+  await rejects(service.deleteFacility({ auth: user("adminD", { email_verified: false }), data: body }), "permission-denied");
+  await rejects(service.deleteFacility({ auth: admin, data: { ...body, confirmName: "" } }), "invalid-argument");
+  await rejects(service.deleteFacility({ auth: admin, data: { ...body, force: true } }), "invalid-argument");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId: "../x", confirmName: "a" } }), "invalid-argument");
+  assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, true);
+  assert.equal((await db.doc(`facilities/${o.facilityId}`).get()).exists, true);
+  for (let i = 0; i < LIMITS.rateMax.deleteFacility; i++) await service.deleteFacility({ auth: admin, data: { ...body, confirmName: "違う" } }).catch(() => {});
+  await rejects(service.deleteFacility({ auth: admin, data: { ...body, confirmName: "違う" } }), "resource-exhausted");
+});
+
+test("deleteFacility: 削除した施設の分だけ、セルフ登録の枠が空き、同名での再登録ができる", async () => {
+  const a = user("userA");
+  for (const n of ["アルファ眼科", "ベータ医院", "ガンマ病院"]) await reg(a, n);
+  await rejects(reg(a, "四つ目"), "resource-exhausted");
+  const fid = (await db.collection("facilities").where("name", "==", "ベータ医院").get()).docs[0].id;
+  await service.deleteFacility({ auth: a, data: { facilityId: fid, confirmName: "ベータ医院" } });
+  assert.equal((await reg(a, "ベータ医院")).status, "created", "同名でも、同一ユーザーの二重登録扱いにならない");
+});

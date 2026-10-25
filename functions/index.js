@@ -69,6 +69,7 @@ const options = {
 export const registerFacility = onCall(options, wrap(service.registerFacility));
 export const createInvite = onCall(options, wrap(service.createInvite));
 export const acceptInvite = onCall(options, wrap(service.acceptInvite));
+export const deleteFacility = onCall(options, wrap(service.deleteFacility));   // 施設の削除(施設管理者のみ・注文履歴なし・自分以外の所属なし)
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)
 export const createOrder = onCall(options, wrap(orderService.createOrder));

@@ -2067,3 +2067,8 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .facility-rename { margin: 0 0 12px; }
 .facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 #btnRenameFacility { margin-left: -4px; }
+
+/* 施設設定: 施設の削除(危険な操作は最下部に分けて表示) */
+.settings-danger { border-color: #fca5a5; }
+.delete-confirm { margin-top: 8px; }
+.delete-confirm .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
