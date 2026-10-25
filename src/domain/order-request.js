@@ -11,7 +11,9 @@ export function buildCreateOrderRequest(pending) {
       // 担当医は明細ごとにIDだけを送る。実際の発注者(ログインしたアカウント)は送らない(サーバーが認証情報から記録する)
       const line = { modelId: l.modelId, power: l.power, quantity: Number(l.quantity), surgeryDate: l.surgeryDate, doctorId: l.doctorId };
       if (l.toricModel) line.toricModel = l.toricModel;
-      if (l.dealerSelected && l.dealerId) line.dealerId = l.dealerId; // 複数社から利用者が選んだ発注先のID。1社の自動選択はサーバーが決める。名前・メールは送らない
+      // 確認画面に表示した発注先のIDを、1社の自動選択も含めて必ず送る(null = 発注先なしで確認した)。
+      // 確認後に施設のディーラー設定が変わった場合、サーバーは別のディーラーに切り替えず拒否する。名前・メールは送らない
+      line.dealerId = l.dealerId || null;
       return line;
     })
   };

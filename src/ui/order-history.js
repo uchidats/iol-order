@@ -90,9 +90,14 @@ export function createOrderHistory({ mount, repository, onClose }) {
         // 代行入力者の注文は「入力者 氏名（代行入力者）」。担当医は明細ごとに別表示(lineView)
         h("div", { class: "form-hint" }, o.isProxyEntry
           ? `注文日時 ${o.createdAtLabel} ・ 入力者 ${o.orderedBy}（${o.enteredByRole}）`
-          : `注文日時 ${o.createdAtLabel} ・ 発注者 ${o.orderedBy}`)),
+          : `注文日時 ${o.createdAtLabel} ・ 発注者 ${o.orderedBy}`),
+        h("div", { class: "form-hint history-status" }, `状態 ${o.statusLabel}`)),
       h("ul", { class: "summary-lines history-lines" }, o.lines.map(lineView)),
-      h("p", { class: "history-total" }, `${o.lineCount}件・合計${o.totalQuantity}枚`));
+      h("p", { class: "history-total" }, `${o.lineCount}件・合計${o.totalQuantity}枚`),
+      h("div", { class: "history-notes" }, h("strong", {}, "備考"), h("p", {}, o.notes || "（なし）")),
+      // 将来のメール送信結果(発注先ごと)。記録がある注文だけ表示する
+      o.notifications.length ? h("div", { class: "history-notifications" }, h("strong", {}, "メール送信"),
+        h("ul", {}, o.notifications.map(n => h("li", {}, [`${n.dealerName}: ${n.statusLabel}`, n.atLabel ? `（${n.atLabel}）` : "", n.error ? ` ${n.error}` : ""].join(""))))) : null);
   }
 
   return {

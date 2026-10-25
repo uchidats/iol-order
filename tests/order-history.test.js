@@ -70,3 +70,19 @@ test("新しい順。作成日時が読めない注文は末尾。Timestamp / se
   assert.equal(formatDateTimeJst(null), "—");
   assert.equal(formatDateTimeJst(ts("2026-12-31T15:00:00Z")), "2027/01/01 00:00");
 });
+
+test("詳細: 保存済みの備考と注文状態。メール送信結果(将来の notifications)は記録があるときだけ読む", async () => {
+  const { ORDER_STATUS } = await import("../functions/src/orders.js");
+  const { orderStatusLabel } = await import("../src/domain/order-history.js");
+  const o = summarizeOrder({ id: "x", status: "accepted", notes: "午前の手術分\n2行目", lines: [] });
+  assert.deepEqual([o.status, o.statusLabel, o.notes, o.notifications], ["accepted", "受付済み（ディーラー未通知）", "午前の手術分\n2行目", []]);
+  const old = summarizeOrder({ id: "y", item: { quantity: 1 } });
+  assert.deepEqual([old.statusLabel, old.notes], ["（記録なし）", ""]);
+  for (const s of Object.values(ORDER_STATUS).filter(s => s !== "draft")) assert.ok(!orderStatusLabel(s).includes(s), `サーバーの状態 ${s} に表示名がある`);
+  const n = summarizeOrder({ id: "z", status: "notification_failed", notifications: [
+    { dealerId: "d1", dealerName: "A商会", status: "sent", at: "2026-10-25T05:30:00Z" },
+    { dealerId: "d2", dealerName: "B医療", status: "failed", error: "宛先エラー" }] });
+  assert.deepEqual(n.notifications, [
+    { dealerName: "A商会", statusLabel: "送信済み", atLabel: "2026/10/25 14:30", error: "" },
+    { dealerName: "B医療", statusLabel: "送信失敗", atLabel: "", error: "宛先エラー" }]);
+});

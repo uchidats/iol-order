@@ -30,8 +30,8 @@ test("サーバーへ送るのは識別子と選択値のみ。明細ごとに�
   assert.deepEqual(req, {
     facilityId: "f1", requestId: "req-0123456789abcdef", notes: "まとめ発注",
     lines: [
-      { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctorId: "o1" },
-      { modelId: "jj-diwxxx-toric", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12", doctorId: "o2", toricModel: "DIW300" }
+      { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctorId: "o1", dealerId: null },
+      { modelId: "jj-diwxxx-toric", power: "+18.5D", quantity: 2, surgeryDate: "2026-11-12", doctorId: "o2", toricModel: "DIW300", dealerId: null }
     ]
   });
   assert.equal("ordererId" in req, false, "no order-level orderer");
@@ -81,10 +81,10 @@ test("createOrderApi は callable createOrder を呼び、結果の data を返�
   assert.deepEqual(calls, [[{ f: 1 }, "createOrder", { a: 1 }]]);
 });
 
-test("server-dev は設定で明示したときだけ有効。既定は dryrun のまま。GASのURLは使わない", () => {
-  assert.equal(resolveConfig().orderMode, "dryrun");
-  assert.equal(resolveConfig({ orderMode: "bogus" }).orderMode, "dryrun");
-  const c = resolveConfig({ orderMode: "server-dev", orderApiUrl: "https://script.google.com/macros/s/X/exec" });
-  assert.equal(c.orderMode, ORDER_MODES.SERVER_DEV);
-  assert.equal(c.orderApiUrl, "");
+test("server-dev は設定で明示したときだけ有効。既定は dryrun のまま。旧経路(gas)は廃止され dryrun になり、GASのURLは持たない", () => {
+  assert.deepEqual(resolveConfig(), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "bogus" }), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "gas", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "server-dev", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: ORDER_MODES.SERVER_DEV });
+  assert.equal("GAS" in ORDER_MODES, false);
 });

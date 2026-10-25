@@ -624,6 +624,17 @@ test("発注先: 1社なら自動選択(指定なしでよい)。指定する場
   assert.deepEqual(c.dispatch, { allowed: false, reason: "no-order-email" });
 });
 
+test("発注先: 確認後にディーラー設定が変わったら、別のディーラーに切り替えず拒否する(画面は確認した発注先を必ず送る)", async () => {
+  // 0社で確認(dealerId: null)→ その後1社が追加された: 自動選択しない
+  const none = multi([line({ dealerId: null })]);
+  assert.equal((await dealerOf(await order(user("ordA"), none)))[0].dealerId, null, "0社のままなら受け付ける");
+  await addDealer("dNew", "新商会", { orderEmails: ["n@example.jp"] });
+  await assert.rejects(order(user("ordA"), multi([line({ dealerId: null, surgeryDate: "2026-11-12" })])), /明細1: 発注先の設定が変更された可能性があります/);
+  // 1社(dOld)で確認 → dOld が削除され dNew だけになった: dNew に切り替えない
+  await assert.rejects(order(user("ordA"), multi([line({ dealerId: "dOld" })])), /発注先が見つかりません.*発注先の設定が変更された可能性があります/);
+  assert.equal((await dealerOf(await order(user("ordA"), multi([line({ dealerId: "dNew" })]))))[0].dealerId, "dNew", "確認した1社が残っていれば受け付ける");
+});
+
 test("発注先: 2社以上は明細ごとに選択が必須(勝手に決めない)。未選択・登録にないIDは拒否。選んだ発注先が明細ごとに保存される", async () => {
   await addDealer("dA", "A商会", { orderEmails: ["a@example.jp"] });
   await addDealer("dB", "B医療", { usageReportEmails: ["report@example.jp"] });   // 発注用メールなし

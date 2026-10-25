@@ -1,6 +1,5 @@
 // このファイルを src/config.local.js にコピーして使用する（config.local.js はGit管理外）。
-// 接続先と処理仕様を確認済みの「開発用」GASのURLのみを設定すること。
+// 開発用のサーバー受付(Cloud Functions の createOrder。ディーラー通知なし)で保存を試すときだけ設定する。
 export default {
-  orderMode: "gas", // "dryrun" | "gas"
-  orderApiUrl: "https://script.google.com/macros/s/<開発用デプロイID>/exec"
+  orderMode: "server-dev" // "dryrun" | "server-dev"
 };

@@ -11,9 +11,10 @@ import { showUndoToast, hideUndoToast } from "./undo-toast.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES } from "../config.js";
-import { submitOrder, OrderError } from "../api/order-client.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
 import { describeCallableError } from "../data/registration-api.js";
+import { pendingOrderKey, createPendingOrderStore, deriveOrderId, reconcilePendingOrder, isDefinitiveRejection } from "../domain/pending-order.js";
+import { summarizeOrder } from "../domain/order-history.js";
 import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.js";
 
 // 現在の状態
@@ -31,6 +32,7 @@ let currentPendingOrderData = null;
 let currentFacility = null; // { id, name }（Firebase有効時のみ）
 let facilityRepository = null;
 let facilityRepositoryId = null;
+let pendingStore = null;    // 送信したが受付結果が未確定の注文(server-dev かつログイン時のみ。pending-order.js)
 
 const el = {};
 
@@ -114,6 +116,8 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   });
   setupEventListeners();
   setupDraft();
+  pendingStore = appConfig.orderMode === ORDER_MODES.SERVER_DEV && loginUser && loginUser.uid && facilityRepositoryId
+    ? createPendingOrderStore(window.localStorage, pendingOrderKey(loginUser.uid, facilityRepositoryId)) : null;
   renderModeBadge();
 }
 
@@ -143,15 +147,11 @@ function updateAlconGuide() {
   alconCalculatorUrl = url;
 }
 
-/**
- * ヘッダー右側の状態表示。HTML の既定は「開発モード」で、実送信が有効な設定(gas)のときだけ「実運用版」にする。
- * 表示だけで、送信の可否は submitOrder(config.orderMode)で決まる。
- */
+/** ヘッダー右側の状態表示。HTML の既定は「開発モード」。表示だけで、送信の可否は config.orderMode で決まる */
 function renderModeBadge() {
   const badge = document.getElementById("systemBadge");
   if (!badge) return;
-  badge.textContent = appConfig.orderMode === ORDER_MODES.GAS ? "実運用版"
-    : appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
+  badge.textContent = appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
 }
 
 function setupEventListeners() {
@@ -212,22 +212,19 @@ async function handleFormSubmit(e) {
     notes: el.notesInput.value.trim(),
     submittedAt: new Date().toISOString(),
     // 再送時の重複受付をサーバー側で検出するための識別子（注文番号ではない）。
-    // 同じ確認内容の再送では同一値を使う。
+    // 受付結果が未確定の注文と同じ内容なら、その値を再利用する(下の checkPendingOrder)。
     clientRequestId: crypto.randomUUID()
   };
-  if (lines.length === 1) {
-    // 従来の単一IOL形式(旧経路・ログ)との互換: 1明細のときだけ、従来のトップレベルの項目も付ける
-    const l = lines[0];
-    Object.assign(currentPendingOrderData, {
-      orderer: l.doctor, email: l.doctorEmail, // 旧経路(GAS直接送信)の形式: 担当医を従来の項目に入れる
-      model: l.model, modelId: l.modelId, manufacturer: l.manufacturer, toricModel: l.toricModel,
-      power: l.power, quantity: `${l.quantity} 枚`, surgeryDate: l.surgeryDate
-    });
-  }
   if (currentFacility) {
     currentPendingOrderData.facilityId = currentFacility.id;
     currentPendingOrderData.facilityName = currentFacility.name;
   }
+
+  checkingDuplicates = true;
+  el.btnConfirm.disabled = true;
+  let proceed;
+  try { proceed = await checkPendingOrder(currentPendingOrderData); } finally { checkingDuplicates = false; el.btnConfirm.disabled = false; }
+  if (!proceed) return;
 
   // 過去の注文との重複確認: 一致するレンズがあれば警告(確認は1回。確認後は通常の確認画面へ)。なければ従来どおり確認画面へ
   checkingDuplicates = true;
@@ -262,6 +259,31 @@ function validateOrderForm() {
   }
 
   return isValid;
+}
+
+/**
+ * 前回送信して受付結果が未確定の注文があれば、確認画面へ進む前に受付状況を照会する(二重発注の防止。pending-order.js)。
+ * @returns {Promise<boolean>} 確認画面へ進んでよいか
+ */
+async function checkPendingOrder(data) {
+  if (!pendingStore || !facilityRepository.getOrder) return true;
+  const fid = facilityRepositoryId, uid = loginUser.uid;
+  const r = await reconcilePendingOrder(pendingStore.load(), buildCreateOrderRequest(data),
+    async (requestId) => facilityRepository.getOrder(fid, await deriveOrderId(uid, requestId)));
+  if (r.action === "reuse") { data.clientRequestId = r.requestId; return true; }   // 同じ内容: 同じ requestId で再送する(二重登録にならない)
+  if (r.action === "unknown") {
+    showToast("前回送信した注文の受付結果を確認できませんでした。通信状況を確認して、もう一度お試しください");
+    return false;
+  }
+  pendingStore.clear();
+  if (r.action === "accepted" && r.same) {
+    // 前回の送信が受け付けられていた。同じ内容を新しい注文として送らず、保存済みの注文を完了画面に出す
+    if (draft) { draft.clear(); draft.setReady(false); }
+    showCompleteModal(r.order, { orderNumber: r.order.orderNumber, replayed: true });
+    return false;
+  }
+  if (r.action === "accepted") showToast(`前回送信した注文（受付番号 ${r.order.orderNumber || "—"}）は受け付けられています`);
+  return true;
 }
 
 // ==========================================================================
@@ -299,29 +321,26 @@ function hideConfirmModal() {
 // ==========================================================================
 const RETAIN_NOTE = "入力内容は保持されています。";
 
-function describeOrderError(err) {
-  if (appConfig.orderMode === ORDER_MODES.SERVER_DEV) {
-    // 開発用のサーバー受付: 再送しても、同じ注文の識別子(clientRequestId)で二重登録にはならない
-    return `${describeCallableError(err)} 同じ内容で再送信しても二重には登録されません。${RETAIN_NOTE}`;
-  }
-  if (!(err instanceof OrderError)) {
-    return `送信中に予期しないエラーが発生しました。${RETAIN_NOTE}`;
-  }
-  switch (err.kind) {
-    case "dryrun":
-      return `【開発モード】実際の発注は行われていません。${RETAIN_NOTE}`;
-    case "failed":
-      return `注文は受け付けられていません（${err.message}）。内容を確認して再送信できます。${RETAIN_NOTE}`;
-    default: // unconfirmed
-      return "送信結果を確認できませんでした。注文が受け付けられている可能性があります。" +
-        `再送信する前に、受付状況（メール・ディーラー）を確認してください。${RETAIN_NOTE}`;
-  }
+/** @param {boolean} retryable 同じ内容の再送が同じ注文として扱われるか(未確定の注文をこの端末に保存できた) */
+function describeOrderError(err, retryable) {
+  if (isDefinitiveRejection(err)) return `${describeCallableError(err)} 注文は受け付けられていません。${RETAIN_NOTE}`;
+  const head = `${describeCallableError(err)} 受付結果を確認できませんでした。注文が受け付けられている可能性があります。`;
+  return retryable
+    ? `${head}この端末から同じ内容のまま再送信した場合は、同じ注文として扱われます（二重には登録されません）。別の端末から注文し直す前に、注文履歴を確認してください。${RETAIN_NOTE}`
+    : `${head}再送信する前に、注文履歴で受付状況を確認してください。${RETAIN_NOTE}`;
 }
 
 let submitting = false; // 連続クリックによる重複送信の防止
 
 async function handleExecuteOrder() {
   if (!currentPendingOrderData || submitting) return;
+  if (appConfig.orderMode !== ORDER_MODES.SERVER_DEV) {
+    // dryrun: 送信しない(完了扱いにしない)
+    console.log("【dryrun】送信予定のペイロード（送信はしていません）:", buildCreateOrderRequest(currentPendingOrderData));
+    el.modalSubmitErrorText.textContent = `【開発モード】実際の発注は行われていません。${RETAIN_NOTE}`;
+    el.modalSubmitError.classList.remove("hidden");
+    return;
+  }
   submitting = true;
 
   el.btnModalSubmit.disabled = true;
@@ -329,37 +348,28 @@ async function handleExecuteOrder() {
   el.btnModalSubmit.textContent = "送信しています…";
   el.modalSubmitError.classList.add("hidden");
 
+  const request = buildCreateOrderRequest(currentPendingOrderData);
+  // 送信の直前に、requestId と送信内容を端末に保存する(タイムアウト・画面を閉じる・再読み込みのあとも同じ requestId で再送できる)
+  const retryable = pendingStore ? pendingStore.save(request) : false;
   try {
-    let result;
-    if (appConfig.orderMode === ORDER_MODES.SERVER_DEV) {
-      // 開発用テスト経路: サーバーで検証して保存する(ディーラーへは通知されない)
-      if (!orderApi) throw new Error("サーバーに接続できません");
-      const r = await orderApi.createOrder(buildCreateOrderRequest(currentPendingOrderData));
-      result = { orderId: r.orderNumber, message: "開発用受付・ディーラー未通知", serverDev: true };
-    } else {
-      if (appConfig.orderMode === ORDER_MODES.GAS && currentPendingOrderData.lines.length > 1) {
-        // 廃止予定の旧経路(GAS直接送信)は、複数明細に対応しない(誤った内容で送らない)
-        throw new OrderError("failed", "この送信方法は複数のレンズをまとめて注文できません。レンズを1つずつ注文してください");
-      }
-      if (appConfig.orderMode !== ORDER_MODES.GAS) {
-        console.log("【dryrun】送信予定のペイロード（送信はしていません）:", currentPendingOrderData);
-      }
-      result = await submitOrder(currentPendingOrderData, appConfig);
-    }
+    // 開発用テスト経路: サーバーで検証して保存する(ディーラーへは通知されない)
+    if (!orderApi) throw Object.assign(new Error("サーバーに接続できません"), { code: "failed-precondition" });   // 送信していない
+    const r = await orderApi.createOrder(request);
+    if (pendingStore) pendingStore.clear();
 
-    // サーバーが受付番号を返した場合のみ完了扱い
+    // サーバーが受付番号を返した場合のみ完了扱い。表示はサーバーが保存した注文の内容から作る
+    let saved = null;
+    try { saved = facilityRepository.getOrder ? await facilityRepository.getOrder(facilityRepositoryId, r.orderId) : null; }
+    catch (e) { console.warn("保存した注文を読み込めませんでした:", e); }
     el.btnModalSubmit.disabled = false;
     el.btnModalBack.disabled = false;
     hideConfirmModal();
     if (draft) { draft.clear(); draft.setReady(false); }   // 注文が正常に完了したときだけ、下書きを削除する(失敗したときは下の catch に入り、下書きは残る)
-    showCompleteModal(currentPendingOrderData, result);
+    showCompleteModal(saved, { orderNumber: r.orderNumber, replayed: r.replayed === true });
   } catch (err) {
-    if (err instanceof OrderError && err.kind === "dryrun") {
-      console.info("注文は送信されていません（開発モード）");
-    } else {
-      console.error("注文送信エラー:", err);
-    }
-    el.modalSubmitErrorText.textContent = describeOrderError(err);
+    console.error("注文送信エラー:", err);
+    if (pendingStore && isDefinitiveRejection(err)) pendingStore.clear();   // サーバーが拒否した(注文は作られていない)
+    el.modalSubmitErrorText.textContent = describeOrderError(err, retryable);
     el.modalSubmitError.classList.remove("hidden");
   } finally {
     submitting = false;
@@ -375,16 +385,23 @@ async function handleExecuteOrder() {
   }
 }
 
-function showCompleteModal(orderData, result) {
-  if (result.serverDev) {
-    // 受付(accepted)まで。ディーラーへは通知していないので「発注済み」とは表示しない
-    $("completeTitle").textContent = "注文を受け付けました（開発用）";
-    $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
-  }
+/**
+ * 完了画面。内容はサーバーが保存した注文(saved)から表示する(画面の入力内容は使わない)。
+ * 読み込めなかった場合は受付番号だけを出し、注文履歴での確認を案内する。
+ */
+function showCompleteModal(saved, { orderNumber, replayed }) {
+  // 受付(accepted)まで。ディーラーへは通知していないので「発注済み」とは表示しない
+  $("completeTitle").textContent = replayed ? "この注文は受け付け済みです（開発用）" : "注文を受け付けました（開発用）";
+  $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+  const o = saved ? summarizeOrder(saved) : null;
   el.completeDetails.innerHTML = `
-    <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml(result.orderId)}</div>
-    ${orderData.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml(l.label)} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)} / 担当医 ${escapeHtml(l.doctor)}</div>`).join("")}
-    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(orderData.lines.length)}件・合計${escapeHtml(orderData.totalQuantity)}枚</div>
+    <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml((o && o.orderNumber) || orderNumber || "—")}</div>
+    ${o ? `
+    ${o.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml([l.maker, l.model].filter(Boolean).join(" / "))} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)} / 担当医 ${escapeHtml(l.doctorName)} / ${escapeHtml(l.dealerName ? `発注先 ${l.dealerName}` : "発注先未設定")}</div>`).join("")}
+    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(o.lineCount)}件・合計${escapeHtml(o.totalQuantity)}枚</div>
+    <div style="margin-bottom: 4px; white-space: pre-wrap;"><strong>備考:</strong> ${escapeHtml(o.notes || "（なし）")}</div>
+    <div style="margin-bottom: 4px;"><strong>状態:</strong> ${escapeHtml(o.statusLabel)}</div>` : `
+    <div style="margin-bottom: 4px;">保存された注文の内容を読み込めませんでした。注文履歴で内容を確認してください。</div>`}
   `;
 
   el.completeModal.classList.remove("hidden");

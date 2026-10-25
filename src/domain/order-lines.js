@@ -47,8 +47,7 @@ export function toOrderLines(values) {
     // 担当医(明細ごと)。IDだけをサーバーへ送り、氏名・メールはサーバーがマスターから記録する(画面表示用にここで持つ)
     doctorId: v.doctor.id, doctor: v.doctor.name, doctorEmail: v.doctor.email || "",
     // 発注先(明細ごと)。IDだけをサーバーへ送り、名前・メールはサーバーが登録ディーラーから記録する(確認画面の表示用にここで持つ)。
-    // 0社は発注先なし、1社は自動選択、2社以上は選択済み
-    dealerSelected: Boolean(v.dealerExplicit && v.dealer), // 利用者が複数社から選んだときだけ、IDをサーバーへ送る
+    // 0社は発注先なし、1社は自動選択、2社以上は選択済み。どの場合もIDを送る(order-request.js)
     dealerId: v.dealer ? v.dealer.id : "", dealerName: v.dealer ? v.dealer.name : "", dealerOrderEmails: v.dealer ? (v.dealer.orderEmails || []) : []
   }));
 }

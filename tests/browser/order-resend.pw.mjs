@@ -1,0 +1,191 @@
+// 回帰テスト(ブラウザ): 二重発注の防止(受付結果が未確定の注文の requestId を保存・照会・再利用)と、完了画面はサーバーが保存した内容で表示する。
+// 実際の index.html・styles.css・src/ui/order-form.js を、偽のリポジトリと偽の受付(createOrder)で動かす(ログイン・Firebase は使わない)。  npm run test:browser
+import test from "node:test";
+import assert from "node:assert/strict";
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium, firefox, webkit } from "playwright-core";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+
+// 偽のサーバー: 状態は localStorage("__srv")に置き、再読み込みしても残す。
+// mode: "ok" = 保存して応答 / "timeout" = 保存したが応答が届かない / "lost" = 保存されず応答も届かない
+const SCRIPT = `<script type="module">
+import { initOrderForm } from "./src/ui/order-form.js";
+import { deriveOrderId } from "./src/domain/pending-order.js";
+import { IOL_MODELS } from "./src/data/iol-models.js";
+const srv = () => JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[],"mode":"ok"}');
+const put = (s) => localStorage.setItem("__srv", JSON.stringify(s));
+const repository = {
+  listAdoptedIols: async () => IOL_MODELS.map(m => ({ id: m.id, catalogIolId: m.id, enabled: true })),
+  listOrderers: async () => [{ id: "o1", name: "山田" }],
+  listDealers: async () => [{ id: "d1", name: "A商会", orderEmails: ["a@example.jp"] }],
+  listOrders: async () => Object.values(srv().orders),
+  getOrder: async (fid, id) => srv().orders[id] || null
+};
+const orderApi = { async createOrder(req) {
+  const s = srv();
+  s.calls.push(req);
+  const id = await deriveOrderId("u1", req.requestId);
+  const replayed = Boolean(s.orders[id]);
+  if (!replayed && s.mode !== "lost") {
+    s.orders[id] = { id, orderNumber: "IOL-20991231-000" + (Object.keys(s.orders).length + 1), status: "accepted", notes: req.notes || "", createdAt: Date.now(),
+      lines: req.lines.map((l, i) => ({ lineNo: i + 1, surgeryDate: l.surgeryDate,
+        item: { manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", power: l.power, quantity: l.quantity },
+        doctor: { id: l.doctorId, name: "山田(保存値)" }, dealer: { id: l.dealerId, name: "A商会(保存値)" } })) };
+  }
+  put(s);
+  if (s.mode !== "ok") throw Object.assign(new Error("timeout"), { code: "functions/deadline-exceeded" });
+  return { orderId: id, orderNumber: s.orders[id].orderNumber, status: "accepted", replayed };
+} };
+await initOrderForm({ config: { orderMode: "server-dev" }, repository, facilityId: "f1", facility: { id: "f1", name: "テスト施設" }, orderApi,
+  user: { uid: "u1", email: "u1@example.jp", emailVerified: true } });
+window.__ready = true;
+</script>`;
+const PAGE = fs.readFileSync(path.join(ROOT, "index.html"), "utf8")
+  .replace(/<script src="https:\/\/cdn[^"]*"><\/script>/, "")
+  .replace(/<script type="module" src="src\/main\.js[^"]*"><\/script>/, SCRIPT);
+
+let server, base;
+test.before(async () => {
+  assert.ok(PAGE.includes("initOrderForm"), "index.html の main.js を差し替えられること");
+  server = http.createServer((req, res) => {
+    const url = decodeURIComponent(req.url.split("?")[0]);
+    if (url === "/") { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(PAGE); return; }
+    const p = path.join(ROOT, url);
+    if (!p.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+    fs.readFile(p, (e, b) => {
+      if (e) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { "content-type": (TYPES[path.extname(p)] || "application/octet-stream") + "; charset=utf-8" });
+      res.end(b);
+    });
+  }).listen(0);
+  await new Promise(r => server.once("listening", r));
+  base = `http://127.0.0.1:${server.address().port}/`;
+});
+test.after(() => { server.close(); });
+
+async function launch(type, name) {
+  for (const opts of name === "chromium" ? [{}, { channel: "msedge" }, { channel: "chrome" }] : [{}]) {
+    try { return await type.launch(opts); } catch { /* 次の候補へ */ }
+  }
+  return null;
+}
+
+const srv = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'));
+const setMode = (page, mode) => page.evaluate((m) => { const s = JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'); s.mode = m; localStorage.setItem("__srv", JSON.stringify(s)); }, mode);
+
+async function open(browser) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const errors = [];
+  page.on("pageerror", e => errors.push(String(e)));
+  await page.goto(base);
+  await page.waitForFunction(() => window.__ready);
+  return { page, errors };
+}
+
+async function fillOrder(page, notes) {
+  const line = page.locator(".lens-line").first();
+  await line.locator("[data-f=model]").selectOption("jj-dib00v");
+  await line.locator("[data-f=power]").selectOption("+20.0D");
+  await line.locator("[data-f=date]").fill("2099-01-10");
+  await line.locator("[data-f=doctor]").selectOption("o1");
+  await page.fill("#notesInput", notes);
+}
+
+const visible = (page, sel) => page.locator(sel).evaluate(e => !e.classList.contains("hidden"));
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`二重発注の防止: 受付後に応答が届かず、再読み込みして同じ内容で進む → 新しく送らず、保存済みの注文を完了画面に出す: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const { page, errors } = await open(browser);
+      await setMode(page, "timeout");
+      await fillOrder(page, "備考A");
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      await page.click("#btnModalSubmit");
+      await page.waitForFunction(() => !document.getElementById("modalSubmitError").classList.contains("hidden"));
+      assert.match(await page.locator("#modalSubmitErrorText").innerText(), /受付結果を確認できませんでした.*同じ内容のまま再送信した場合は、同じ注文として扱われます/);
+      let s = await srv(page);
+      assert.equal(s.calls.length, 1);
+      assert.equal(s.calls[0].lines[0].dealerId, "d1", "1社の自動選択でも、確認した発注先のIDを送る");
+      assert.equal(Object.keys(s.orders).length, 1, "サーバーには保存されている");
+
+      await page.waitForTimeout(600);   // 下書きの自動保存(400ms後)
+      await page.reload();
+      await page.waitForFunction(() => window.__ready);
+      await setMode(page, "ok");
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+      assert.equal(await page.locator("#completeTitle").innerText(), "この注文は受け付け済みです（開発用）");
+      const details = await page.locator("#completeDetails").innerText();
+      assert.match(details, /IOL-20991231-0001/);
+      assert.match(details, /担当医 山田\(保存値\).*発注先 A商会\(保存値\)/s, "完了画面はサーバーが保存した内容");
+      assert.match(details, /備考A/);
+      s = await srv(page);
+      assert.equal(s.calls.length, 1, "同じ注文を再送していない");
+      assert.equal(Object.keys(s.orders).length, 1, "二重に登録されていない");
+      assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith("iol_order_pending:")).length), 0, "未確定の記録は消える");
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+
+  test(`二重発注の防止: 保存されずに応答が届かず、戻って同じ内容で送り直す → 同じ requestId で送り、1件だけ登録される: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const { page, errors } = await open(browser);
+      await setMode(page, "lost");
+      await fillOrder(page, "備考B");
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      await page.click("#btnModalSubmit");
+      await page.waitForFunction(() => !document.getElementById("modalSubmitError").classList.contains("hidden"));
+      await page.click("#btnModalBack");
+      assert.equal(await visible(page, "#confirmModal"), false);
+      await setMode(page, "ok");
+      await page.click("#btnConfirm");   // 確認画面を開き直す(以前は新しい requestId になっていた)
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      await page.click("#btnModalSubmit");
+      await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+      assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました（開発用）");
+      const s = await srv(page);
+      assert.equal(s.calls.length, 2);
+      assert.equal(s.calls[1].requestId, s.calls[0].requestId, "同じ requestId で再送する");
+      assert.equal(Object.keys(s.orders).length, 1);
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+
+  test(`未確定の注文があり内容を変更した → 前回の受付結果を照会して知らせ、新しい requestId で進む: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const { page, errors } = await open(browser);
+      await setMode(page, "timeout");
+      await fillOrder(page, "備考C");
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      await page.click("#btnModalSubmit");
+      await page.waitForFunction(() => !document.getElementById("modalSubmitError").classList.contains("hidden"));
+      await page.click("#btnModalBack");
+      await setMode(page, "ok");
+      await page.locator(".lens-line").first().locator("[data-f=power]").selectOption("+21.0D");
+      await page.click("#btnConfirm");
+      await page.waitForFunction(() => /受け付けられています/.test(document.getElementById("toastNotice").textContent));
+      assert.match(await page.locator("#toastNotice").innerText(), /前回送信した注文（受付番号 IOL-20991231-0001）は受け付けられています/);
+      await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+      await page.click("#btnModalSubmit");
+      await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+      const s = await srv(page);
+      assert.notEqual(s.calls[1].requestId, s.calls[0].requestId, "内容が違う注文は新しい requestId");
+      assert.equal(Object.keys(s.orders).length, 2);
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}

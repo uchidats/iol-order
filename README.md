@@ -50,43 +50,11 @@
 
 ---
 
-## 🌐 Google Apps Script (GAS) POST送信仕様
+## 🌐 注文の送信
 
-### 1. 接続設定（既定は送信しない「開発モード」）
-GASのURLはコードに含めません。既定は `dryrun`（ネットワーク送信なし・実発注なし）です。
-接続先と処理仕様を確認済みの開発用GASに限り、`src/config.local.example.js` を `src/config.local.js` にコピーして設定します（`config.local.js` は Git 管理外）。
-`https://script.google.com/macros/s/` 以外のURLは拒否され、`dryrun` に戻ります。
-
-### 2. 送信方式と成功判定
-CORSプリフライトを回避するため `Content-Type: text/plain;charset=utf-8` でJSON文字列をPOSTします。
-**サーバーが `success: true`（または `status: "success"|"ok"`）と、サーバー発行の `orderId` を返した場合のみ「受付完了」と表示します。** 受付番号をブラウザ側で生成・補完することはありません。
-
-| 結果 | 画面表示 |
-|---|---|
-| dryrun | 「開発モード: 実際の発注は行われていません」（完了扱いにしない） |
-| サーバーが明示的にエラー | 「注文は受け付けられていません」 |
-| 通信エラー・HTTPエラー・非JSON・`orderId` なし | 「送信結果を確認できません。受け付けられている可能性があります」 |
-
-いずれも入力内容は保持され、確認画面から再確認・再送信できます。
-
-### 3. 送信payloadのJSON形式（例）
-
-```json
-{
-  "model": "ALCON / CNA0Tx / CNW0Tx (トーリック)",
-  "manufacturer": "ALCON",
-  "toricModel": "CNA0T3",
-  "power": "+20.0D",
-  "quantity": "1 枚",
-  "surgeryDate": "2026-10-15",
-  "orderer": "内田",
-  "email": "doctor@tachikawa-hosp.gr.jp",
-  "notes": "右眼 白内障手術用",
-  "submittedAt": "2026-10-02T01:35:00.000Z",
-  "clientRequestId": "（再送時の重複検出用UUID。注文番号ではない）"
-}
-```
-※トーリックIOLでない場合、`toricModel` は `""`（空文字）となります。
+注文の受付は Cloud Functions の `createOrder` だけです(検証・保存・注文番号の発行はサーバー)。仕様は `docs/order-intake.md`。
+既定は `dryrun`(ネットワーク送信なし・実発注なし)。開発用の受付で保存を試すときだけ、`src/config.local.example.js` を `src/config.local.js`(Git 管理外)にコピーして `orderMode: "server-dev"` にします。
+旧経路(ブラウザから GAS へ直接 POST する `orderMode: "gas"`)は廃止しました。指定されても `dryrun` で動作します。
 
 ---
 
@@ -136,7 +104,6 @@ biometryState = {
 index.html            画面（<script type="module" src="src/main.js">）
 src/main.js           起動処理
 src/config.js         設定（既定dryrun）/ config.local.js で上書き
-src/api/order-client.js     GAS送信と応答検証
 src/data/iol-models.js      IOLモデル・度数マスター
 src/data/schema.js          施設・注文者・採用IOL・ディーラーの型定義とRepository IF
 src/data/static-repository.js  現行の固定データを返すRepository実装

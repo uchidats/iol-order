@@ -44,18 +44,15 @@ test("確認画面の文言: 発注先未設定 / 発注先 名前 / 発注用�
   assert.equal(dealerLabel(C), "発注先 C商会", "有効な発注用メールが1件あれば送信可");
 });
 
-test("明細・リクエスト: 発注先IDだけをサーバーへ送る(名前・メールは送らない)。0社ならdealerIdなし。発注先が違えば別の明細", () => {
+test("明細・リクエスト: 発注先IDだけをサーバーへ送る(名前・メールは送らない)。0社なら dealerId: null。発注先が違えば別の明細", () => {
   const options = buildLensOptions(IOL_MODELS);
-  const v = (dealer, dealerExplicit = true) => ({ lens: findLensOption(options, "jj-dib00v"), power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctor: { id: "o1", name: "山田" }, dealer, dealerExplicit });
+  const v = (dealer) => ({ lens: findLensOption(options, "jj-dib00v"), power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctor: { id: "o1", name: "山田" }, dealer });
   const lines = toOrderLines([v(A), v(null)]);
   assert.deepEqual([lines[0].dealerId, lines[0].dealerName, lines[1].dealerId], ["dA", "A商会", ""]);
   const req = buildCreateOrderRequest({ facilityId: "f", clientRequestId: "req-0123456789abcdef", lines, notes: "" });
   assert.equal(req.lines[0].dealerId, "dA");
-  assert.equal("dealerId" in req.lines[1], false);
-  // 1社の自動選択(利用者が選んだものではない)は、IDを送らない(サーバーが決める。確認画面には名前を出す)
-  const auto = toOrderLines([v(A, false)])[0];
-  assert.deepEqual([auto.dealerId, auto.dealerName], ["dA", "A商会"]);
-  assert.equal("dealerId" in buildCreateOrderRequest({ facilityId: "f", clientRequestId: "req-0123456789abcdef", lines: [auto], notes: "" }).lines[0], false);
+  assert.equal(req.lines[1].dealerId, null, "発注先なしで確認したことを明示する");
+  // 1社の自動選択も、確認画面に表示した発注先のIDを送る(確認後にディーラー設定が変わったら、サーバーは切り替えずに拒否する)
   assert.ok(!JSON.stringify(req).includes("a@example.jp") && !JSON.stringify(req).includes("A商会"));
   assert.notEqual(lineKey(v(A)), lineKey(v(B)));
 });
@@ -90,4 +87,22 @@ test("確認画面の発注先カード: 1社は1回だけ(allSame)・複数社�
   assert.deepEqual(mixed.groups.map(g => [g.name, g.lineNos]), [["A商会", [1]], [null, [2]]]);
   // 発注用メールが有効なら警告なし(判定は dealerDispatch と同じ)
   assert.equal(summarizeDealers([ln(1, C)]).groups[0].warning, null);
+});
+
+test("メールアドレスの判定: サーバー(発注用メールの送信可否)・画面/メールプレビュー(isValidEmail)・Rules が同じ入力を受理・拒否する", async () => {
+  const fs = await import("node:fs");
+  const { isValidEmail } = await import("../src/domain/order-validation.js");
+  const { cleanEmails } = await import("../src/domain/order-mail.js");
+  const m = fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8").match(/v\.matches\('([^']+)'\)/);
+  const rulesRe = new RegExp(m[1].replace(/\\\\/g, "\\")); // ルール内の '\\s' は文字列エスケープ後に '\s' になる
+  const cases = {
+    "sales@example.jp": true, "s@s.jp": true, "a.b+c@sub.example.co.jp": true, "user@shop.jp": true,
+    "user@examplejp": false, "a@b": false, "@example.jp": false, "a b@example.jp": false, "a@@example.jp": false, "a	@example.jp": false, "": false
+  };
+  for (const [v, ok] of Object.entries(cases)) {
+    assert.equal(serverDispatch({ id: "d", orderEmails: [v] }).allowed, ok, `server ${JSON.stringify(v)}`);
+    assert.equal(isValidEmail(v), ok, `client ${JSON.stringify(v)}`);
+    assert.equal(rulesRe.test(v), ok, `rules ${JSON.stringify(v)}`);
+    assert.equal(cleanEmails([v]).length === 1, ok, `mail preview ${JSON.stringify(v)}`);
+  }
 });

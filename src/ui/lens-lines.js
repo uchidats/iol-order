@@ -294,8 +294,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         surgeryDate: l.date.value,
         doctor: getDoctors().find(d => d.id === l.doctor.value) || null,
         // 発注先: 1社なら自動、2社以上は選んだもの(未選択は null)、0社は null。判定はサーバーと同じ規則
-        dealer: (() => { const r = resolveLineDealer(getDealers(), l.dealer.value); return r.ok ? r.dealer : null; })(),
-        dealerExplicit: dealerMode(getDealers()) === "choose"   // 利用者が選んだ発注先か(1社の自動選択は、サーバーへ送らず、サーバーが決める)
+        dealer: (() => { const r = resolveLineDealer(getDealers(), l.dealer.value); return r.ok ? r.dealer : null; })()
       }));
     },
     /** 全明細の入力検証。最初の不備の要素を返す */

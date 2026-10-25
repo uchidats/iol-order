@@ -24,16 +24,25 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 - 明細ごとに: 採用済み・有効なモデル、度数の範囲と刻み、トーリックの正式型番、枚数(1か2)、手術日(日本時間で本日以降・366日以内)を検証する。
 - 同じレンズ・型番・度数・手術日の明細の重複は拒否(枚数で指定する)。
 - 画面側の検証と上限(`src/domain/order-lines.js`)は、サーバーの上限と一致していることをテストで確認している。
-- 旧経路(GAS直接送信)は複数明細に対応しない(複数明細のときは送信せずエラーにする)。
 
 ## 冪等性・二重送信
 - 同じ `requestId`・同じ内容の再送 → 既存の注文番号を返す（`replayed: true`）。
 - 同じ `requestId` で内容が違う → `already-exists` で拒否。元の注文は変わらない。
-- 画面は、確認画面を開いてから送信が成功するまで同じ `requestId` を使う。通信エラー後の再試行・連続クリックでも二重登録されない。
+- 画面は、送信の直前に `requestId` と送信内容を端末(localStorage。ログインユーザー・施設ごと)に保存し、受付の成功、またはサーバーが明確に拒否したとき(`invalid-argument` など。注文は作られていない)だけ消す(`src/domain/pending-order.js`)。
+- 次に確認画面へ進むとき、保存した注文を注文ドキュメント(ID はサーバーと同じ `deriveOrderId`)で照会する。受付済みで同じ内容 → 新しく送らず、保存済みの注文を完了画面に出す。受付済みで内容が違う → 受付番号を知らせて新しい注文として進む。未登録で同じ内容 → 同じ `requestId` を再利用。照会できず内容が違う → 進ませない。
+- これにより、タイムアウト・確認画面を閉じる(戻る)・再読み込みのあとの再送でも二重登録されない(`tests/browser/order-resend.pw.mjs`)。**別の端末・ブラウザからの再送は防げない**ため、エラー表示では注文履歴の確認を案内する。端末に保存できない環境では「二重には登録されません」と表示しない。
 - 並列送信（同じ注文20並列、別注文10並列）でも、1件だけ作成・注文番号の重複／欠番なし（テストで確認）。
 
 ## 注文状態
 `draft`（画面上のみ）→ `accepted`（今回ここまで）→ `notification_pending` → `notified` / `notification_failed`（将来。`ORDER_STATUS` に定義済み）。今回作る注文は `accepted` のみで、画面でも「発注済み」とは表示しない（「開発用受付・ディーラー未通知」）。
+完了画面と注文履歴の詳細は、サーバーが保存した注文(明細・担当医・発注先・備考・状態)から表示する。
+
+### メール送信結果(将来。案)
+発注先ごとに1件、`notifications: [{ dealerId, dealerName, status: "pending"|"sent"|"failed"|"skipped", at, error }]` を注文ドキュメントに追記する(Functions のみ書き込み)。注文全体の `status` は全件 `sent` で `notified`、1件でも `failed` なら `notification_failed`。履歴の詳細は、この配列があるときだけ「メール送信」欄に表示する(`describeNotifications`。今は保存されていない)。メールアドレス・本文は保存しない。
+
+## 発注先の一致
+- 画面は、確認画面に表示した発注先のIDを、1社の自動選択を含めて必ず送る(発注先なしで確認した場合は `dealerId: null`)。
+- サーバーは、確認した発注先が登録にない(削除された)場合や、発注先なしで確認したあとにディーラーが登録された場合、別のディーラーに切り替えず `invalid-argument`(「発注先の設定が変更された可能性があります」)で拒否する。`dealerId` の省略(旧形式)は従来どおり1社なら自動選択。
 
 ## Security Rules
 `facilities/{fid}/orders/**` は、自施設の有効な所属者と運営者だけが**読める**。**作成・変更・削除は全員不可**（Admin SDK＝Cloud Functions のみ）。注文番号のカウンター（`orderCounters`）とレート制限（`rateLimits`）はクライアントから見えない。
@@ -51,7 +60,7 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 ## 有効化（二重の安全装置）
 - **サーバー**: `ORDER_INTAKE_ENABLED`（既定 `false`）。`false` の間は認証済みの所属者でも `failed-precondition`。`functions/.env.medconf-iol-dev` で `true` にしてデプロイする。エミュレータのE2E（`demo-iol-e2e`）だけ `true`。
 - **画面**: 公開サイトは `dryrun` のまま。保存を試すには、**ローカルの** `src/config.local.js`（Git管理外）に `orderMode: "server-dev"` を設定する。バッジは「開発用受付」になり、完了画面は「開発用受付・ディーラー未通知」と表示する。
-- `orderMode: "gas"`（ブラウザからGASへ直接送信）は**廃止予定**。設定時に警告を出す。サーバー受付（と次段階の通知）が動作確認できた後に、コードごと削除する。
+- `orderMode: "gas"`（ブラウザからGASへ直接送信）は**廃止した**（コードを削除。指定されても `dryrun`）。旧GASの Web アプリ(doPost)の停止は、別途 GAS 側で行う。
 
 ## IOLマスターの二重管理
 サーバーは `functions/src/iol-catalog.js`・`power-filter.js`（`src/` の複製）を使う。`src/data/iol-models.js` / `src/domain/power-filter.js` を変更したら `npm run sync:catalog` を実行する。`tests/functions-catalog-sync.test.js` が、複製の不一致と、全モデルでクライアント／サーバーの許容度数が一致することを検査する。

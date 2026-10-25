@@ -62,6 +62,26 @@ export function describeLine(line, index = 0) {
   };
 }
 
+// 注文の状態(functions/src/orders.js の ORDER_STATUS)。今は accepted だけが作られる(ディーラー通知は将来)
+const STATUS_LABELS = Object.freeze({
+  accepted: "受付済み（ディーラー未通知）",
+  notification_pending: "ディーラー通知待ち",
+  notified: "ディーラー通知済み",
+  notification_failed: "ディーラー通知失敗"
+});
+export const orderStatusLabel = (status) => STATUS_LABELS[status] || (status ? String(status) : "（記録なし）");
+
+// 将来のメール送信結果(order.notifications: 発注先ごとに1件。docs/order-intake.md)。現在は保存されていない
+const NOTIFICATION_LABELS = Object.freeze({ pending: "送信待ち", sent: "送信済み", failed: "送信失敗", skipped: "送信対象外" });
+export function describeNotifications(order) {
+  return (Array.isArray(order.notifications) ? order.notifications : []).map(n => ({
+    dealerName: (n && n.dealerName) || "（発注先未設定）",
+    statusLabel: NOTIFICATION_LABELS[n && n.status] || (n && n.status ? String(n.status) : "（記録なし）"),
+    atLabel: n && n.at ? formatDateTimeJst(n.at) : "",
+    error: n && n.error ? String(n.error) : ""
+  }));
+}
+
 /** 一覧の1行分 */
 export function summarizeOrder(order) {
   const lines = orderLinesOf(order).map(describeLine);
@@ -77,6 +97,10 @@ export function summarizeOrder(order) {
     lineCount: lines.length,
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
     testOrder: order.testOrder === true,
+    status: order.status || "",
+    statusLabel: orderStatusLabel(order.status),
+    notes: typeof order.notes === "string" ? order.notes : "",
+    notifications: describeNotifications(order),
     lines
   };
 }

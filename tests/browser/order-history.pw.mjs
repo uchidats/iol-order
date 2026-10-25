@@ -20,7 +20,7 @@ const item = (o = {}) => ({ manufacturer: "J&J", model: "DIB00V", displayName: "
 const ts = (iso) => ({ toMillis: () => Date.parse(iso) });
 const orders = [
   { id: "old", orderNumber: "IOL-20260801-0001", createdAt: ts("2026-08-01T00:00:00Z"), item: item(), surgeryDate: "2026-09-01", orderer: { id: "o9", name: "最古注文者" } },
-  { id: "new", schemaVersion: 3, orderNumber: "IOL-20261025-0001", createdAt: ts("2026-10-25T05:30:00Z"), testOrder: true,
+  { id: "new", schemaVersion: 3, orderNumber: "IOL-20261025-0001", createdAt: ts("2026-10-25T05:30:00Z"), testOrder: true, status: "accepted", notes: "午前の手術分\\n2行目",
     createdBy: { email: "login@example.jp", displayName: "ログイン太郎" },
     lines: [
       { lineNo: 1, item: item(), surgeryDate: "2026-11-10", doctor: { id: "o1", name: "山田" }, dealer: { id: "d1", name: "A商会" } },
@@ -91,10 +91,14 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(lines[0], /レンズ1 J&J DIB00V \+20\.0D 1枚.*手術日 2026年11月10日.*担当医 山田 ・ 発注先 A商会/);
       assert.match(lines[1], /レンズ2 J&J DIW300 トーリック \+18\.5D 2枚.*手術日 2026年11月12日.*担当医 佐藤 ・ 発注先未設定/);
       assert.match(await page.locator(".history-total").innerText(), /2件・合計3枚/);
+      assert.equal(await page.locator(".history-status").innerText(), "状態 受付済み（ディーラー未通知）");
+      assert.equal(await page.locator(".history-notes p").innerText(), "午前の手術分\n2行目", "保存済みの備考(改行を保持)");
+      assert.equal(await page.locator(".history-notifications").count(), 0, "メール送信の記録がない注文には出さない");
       // 詳細(旧形式): orderer が担当医として出る
       await page.click('[data-act="back"]');
       await page.locator('[data-order="mid"]').click();
       assert.match(await page.locator(".history-line").first().innerText(), /担当医 旧注文者 ・ 発注先未設定/);
+      assert.equal(await page.locator(".history-notes p").innerText(), "（なし）");
       await page.click('[data-act="back"]');
       await page.locator('[data-order="old"]').click();
       assert.match(await page.locator(".history-line").first().innerText(), /担当医 最古注文者/);

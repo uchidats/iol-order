@@ -36,7 +36,7 @@ export function createStaticRepository() {
       }));
     },
     async listDealers() {
-      // 現行フローではディーラー管理なし（発注先はGAS側で決定）
+      // 開発用の静的モードはディーラーなし
       return [];
     }
   };

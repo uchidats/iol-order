@@ -69,7 +69,9 @@ function parseLine(raw, n, nowMs, defaultDoctorId) {
   const { modelId, power, quantity, surgeryDate } = raw;
   const toricModel = raw.toricModel === undefined || raw.toricModel === null ? "" : raw.toricModel;
   const doctorId = raw.doctorId === undefined || raw.doctorId === null ? defaultDoctorId : raw.doctorId;
-  // 発注先ディーラー(明細ごと・任意): 施設の登録ディーラーが複数のときは必須(マスターとの突き合わせは resolveLineDealer)
+  // 発注先ディーラー(明細ごと): 施設の登録ディーラーが複数のときは必須(マスターとの突き合わせは resolveLineDealer)。
+  // null は「発注先なしで確認した」の明示(画面は確認した発注先を必ず送る)。省略(undefined)は旧形式で、1社なら自動選択
+  const dealerNone = raw.dealerId === null;
   const dealerId = raw.dealerId === undefined || raw.dealerId === null || raw.dealerId === "" ? "" : raw.dealerId;
   if (dealerId !== "" && (typeof dealerId !== "string" || !ID.test(dealerId))) throw at("発注先が正しくありません");
 
@@ -83,7 +85,7 @@ function parseLine(raw, n, nowMs, defaultDoctorId) {
   const limit = jstDate(nowMs + ORDER_LIMITS.maxDaysAhead * 24 * 60 * 60 * 1000);
   if (surgeryDate < today) throw at("手術日は本日以降を指定してください");
   if (surgeryDate > limit) throw at("手術日が先すぎます");
-  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, doctorId, dealerId };
+  return { modelId, power, toricModel: toricModel.trim(), quantity, surgeryDate, doctorId, dealerId, dealerNone };
 }
 
 /** 入力の形式検証と正規化(マスターとの突き合わせは別)。従来の単一IOL形式は1明細に正規化する */
@@ -130,7 +132,7 @@ export function contentHash(i) {
     .digest("hex");
 }
 
-const EMAIL = /^[^s@]+@[^s@]+.[^s@]+$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // 画面(src/domain/order-validation.js)・Rules と同じ判定(tests/dealer-selection.test.js で一致を確認)
 
 /**
  * 明細の発注先ディーラーを決める(施設の登録ディーラーだけが対象。採用IOLの dealerId には依存しない)。
@@ -274,11 +276,15 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         const doc = doctorBy.get(l.doctorId);
         if (!doc.exists) throw bad(`明細${n}: 担当医が見つかりません`); // 担当医に有効/無効はない(旧形式の active フィールドは無視する)
         const docEmail = doc.get("email");
+        // 確認後にディーラー設定が変わった場合(確認した発注先の削除・発注先なしで確認後の追加)は、別のディーラーに切り替えず拒否する
+        const CHANGED = "発注先の設定が変更された可能性があります。画面を開き直して、発注先を確認してください";
+        if (l.dealerNone && dealerDocs.length > 0) throw bad(`明細${n}: ${CHANGED}`);
         const picked = resolveLineDealer(dealerDocs, l.dealerId);
-        if (!picked.ok) throw bad(picked.error === "select" ? `明細${n}: 発注先を選択してください` : `明細${n}: 発注先が見つかりません`);
+        if (!picked.ok) throw bad(picked.error === "select" ? `明細${n}: 発注先を選択してください` : `明細${n}: 発注先が見つかりません(${CHANGED})`);
         const dealer = picked.dealer ? { id: picked.dealer.id, name: picked.dealer.name } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
         // 将来の実メール送信の可否(現在は送信機能なし)。発注先なし・発注用メール未登録は送信不可。使用報告用メールは使わない。メールアドレス自体は保存しない
-        const dispatch = dealerDispatch(picked.dealer);        return {
+        const dispatch = dealerDispatch(picked.dealer);
+        return {
           lineNo: n,
           status: ORDER_STATUS.ACCEPTED,
           item: {

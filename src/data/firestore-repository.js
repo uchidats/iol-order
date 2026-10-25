@@ -31,6 +31,11 @@ export function createFirestoreRepository(db, fs) {
       const snap = await fs.getDocs(q);
       return snap.docs.map(d => ({ id: d.id, facilityId, ...d.data() }));
     },
+    /** 注文1件(サーバーが保存した内容)。なければ null。完了画面と、受付結果が未確定の注文の照会に使う */
+    async getOrder(facilityId, orderId) {
+      const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "orders", orderId));
+      return snap.exists() ? { id: snap.id, facilityId, ...snap.data() } : null;
+    },
     /**
      * 施設ごとのIOLモデルの表示順(未設定は null)。順番だけの設定なので、読めない・壊れている場合も null にして標準の順番で動かす
      * (注文フォームを止めない)
