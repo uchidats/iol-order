@@ -94,7 +94,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(gDealer[2].right, gDoctor[2].right, "右端の位置が担当医と同じ");
       const addBtns = async (sel) => page.locator(`${sel} .settings-actions button`).evaluateAll(bs => bs.map(b => [b.className, b.textContent.trim()]));
       assert.equal((await addBtns('[data-section="dealers"]'))[0][0], (await addBtns('[data-section="orderers"]'))[0][0], "追加ボタンのデザインが担当医と同じ(担当医・ディーラーとも自動保存のため、保存ボタンはない)");
-      assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["ディーラーを追加"], "「ディーラーを保存」ボタンは廃止(自動保存)");
+      assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["追加"], "「ディーラーを保存」ボタンは廃止(自動保存)。文言は「追加」");
+      for (const sel of ['[data-section="dealers"]', '[data-section="orderers"]']) { const w = await page.locator(`${sel} .settings-actions button`).evaluate(b => b.getBoundingClientRect().width); assert.ok(w < 80, `追加ボタンは文字数に合わせたコンパクトな幅: ${w}px`); }
       // 先頭の行の「↑」は見えない(場所は残る)。2行目以降は「↑」が見える。「↓」はない
       assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true);
       assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);

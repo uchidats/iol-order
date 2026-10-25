@@ -304,7 +304,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       createSectionHeading("担当医", "注文フォームの「担当医」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "担当医を追加")),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = ordererRow(); section.querySelector("[data-list]").appendChild(row);
@@ -548,7 +548,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。現在は登録のみで、メール送信は行われません。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "ディーラーを追加")),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = dealerRow(); section.querySelector("[data-list]").appendChild(row);
