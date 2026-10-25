@@ -35,6 +35,26 @@ export function createAuthUi(handlers) {
   let lastArgs = null;
   let lastOpen = null; // メニューから開いた登録・参加画面の直前の種別（開き直しでモードを初期化する）
 
+  // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。他施設の名前などは取得しない(件数だけ)
+  let nameTimer = null, nameSeq = 0;
+  const DUP_HINT = "既に登録されている可能性があります。既存の施設に参加する場合は、その施設の管理者から招待コードを受け取り、「既存施設に参加する」から参加してください。別の施設の場合は、このまま登録できます。";
+  function scheduleNameCheck(nameEl) {
+    clearTimeout(nameTimer);
+    const hint = $("regNameHint");
+    if (hint) hint.hidden = true;
+    const name = normalizeFacilityName(nameEl.value);
+    if (!handlers.onCheckName || name.length < 2) return;
+    const mySeq = ++nameSeq;
+    nameTimer = setTimeout(async () => {
+      let r = null;
+      try { r = await handlers.onCheckName(name); } catch { r = null; }   // 確認できなくても、登録の操作は妨げない(登録時にサーバーでも確認する)
+      const h = $("regNameHint");
+      if (mySeq !== nameSeq || !h || normalizeFacilityName(nameEl.value) !== name) return;   // 入力が変わっていたら、古い結果は使わない
+      h.textContent = r && (r.exact || r.similarCount > 0) ? DUP_HINT : "";
+      h.hidden = !h.textContent;
+    }, 700);
+  }
+
   /** 所属なし: 「新しい施設を登録」または「招待コードで既存施設に参加」。招待なしでの参加はできない */
   function renderOnboarding({ who, msg, user, registration, embedded = false }) {
     const reg = registration || {};
@@ -50,8 +70,9 @@ export function createAuthUi(handlers) {
           <label class="form-label" for="regFacilityName">施設名</label>
           <input id="regFacilityName" class="form-control" type="text" maxlength="100" autocomplete="organization" value="${escapeHtml(draft.name)}">
           <p class="form-hint">施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。</p>
+          <p class="error-message" id="regNameHint" role="status" aria-live="polite" hidden></p>
           ${showDup ? `
-            <p class="error-message" role="alert">${reg.duplicate.exact ? "同じ名前の施設が既に登録されています。" : "名前の似た施設が既に登録されています。"}
+            <p class="error-message" role="alert">既に登録されている可能性があります(${reg.duplicate.exact ? "同じ名前の施設があります" : "名前の似た施設があります"})。
             既存の施設に参加する場合は、その施設の管理者から招待コードを受け取ってください。別の施設の場合のみ、このまま登録できます。</p>
             <button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
             <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
@@ -94,7 +115,7 @@ export function createAuthUi(handlers) {
     if (closeBtn) closeBtn.addEventListener("click", () => handlers.onOnboardingClose());
 
     const nameEl = $("regFacilityName");
-    if (nameEl) nameEl.addEventListener("input", () => { draft.name = nameEl.value; });
+    if (nameEl) nameEl.addEventListener("input", () => { draft.name = nameEl.value; scheduleNameCheck(nameEl); });
     const submit = $("btnRegSubmit");
     if (submit) submit.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: false }));
     const confirmBtn = $("btnRegConfirm");

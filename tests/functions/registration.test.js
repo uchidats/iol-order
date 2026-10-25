@@ -229,6 +229,78 @@ test("名前の類似判定", () => {
   assert.equal(compareNames("", k("x")), null);
 });
 
+test("名前の表記ゆれ: 全角・半角、スペース、法人名の有無、ハイフン類は同じ施設名として扱う", () => {
+  const k = nameKey;
+  const same = [
+    ["医療法人社団 さくら眼科", "さくら眼科"],
+    ["医療法人社団さくら眼科", "さくら眼科クリニック".replace("クリニック", "")],
+    ["(医)さくら眼科", "さくら眼科"],
+    ["（医）さくら眼科", "さくら眼科"],
+    ["株式会社ＡＢＣクリニック", "abc クリニック"],
+    ["ＡＢＣ　Ｃｌｉｎｉｃ", "abc clinic"],
+    ["ｻｸﾗ眼科", "サクラ眼科"],
+    ["さくら‐眼科", "さくら－眼科"],
+    ["箕面ヶ丘眼科", "箕面ケ丘眼科"],
+    ["社会医療法人 立川病院", "立川病院"]
+  ];
+  for (const [a, b] of same) assert.equal(compareNames(k(a), k(b)), "exact", `${a} = ${b}`);
+  assert.equal(compareNames(k("医療法人社団 さくら眼科"), k("医療法人社団 すみれ眼科")), null, "法人名が同じだけでは類似としない");
+});
+
+// ================= 施設名の重複候補の確認(入力中) =================
+test("checkFacilityName: 完全一致の有無と似た施設の件数だけを返し、他施設の情報は一切返さない", async () => {
+  await seedFacility("sakura", "医療法人社団 さくら眼科", { createdBy: "secret-uid", contactEmail: "secret@example.jp" });
+  await seedMember("sakura", "adminS", "admin");
+  await db.doc("facilities/sakura/orders/o1").set({ patient: "秘密" });
+  await db.doc("invites/hash1").set({ facilityId: "sakura", email: "invitee@example.jp", status: "pending" });
+  await seedFacility("sakura2", "さくら眼科クリニック");
+  const a = user("userA");
+
+  const r1 = await service.checkFacilityName({ auth: a, data: { name: "さくら眼科" } });
+  assert.deepEqual(r1, { exact: true, similarCount: 2 });
+  const r2 = await service.checkFacilityName({ auth: a, data: { name: "（医）さくら　眼科" } });
+  assert.deepEqual(r2, { exact: true, similarCount: 2 });
+  const r3 = await service.checkFacilityName({ auth: a, data: { name: "まったく別のクリニック" } });
+  assert.deepEqual(r3, { exact: false, similarCount: 0 });
+
+  const all = JSON.stringify([r1, r2, r3]);
+  for (const s of ["sakura", "secret", "adminS", "invitee", "hash1", "秘密", "さくら"]) assert.ok(!all.includes(s), `応答に ${s} を含まない`);
+  assert.deepEqual(Object.keys(r1).sort(), ["exact", "similarCount"]);
+});
+
+test("checkFacilityName: 何も作成・変更しない。ログイン・メール確認が必要。入力検証と回数制限がある", async () => {
+  await seedFacility("sakura", "さくら眼科");
+  const a = user("userA");
+  await service.checkFacilityName({ auth: a, data: { name: "さくら眼科" } });
+  assert.equal(await count("facilities"), 1);
+  assert.equal((await db.doc("registrationQuota/userA").get()).get("count") || 0, 0, "登録枠を消費しない");
+
+  await rejects(service.checkFacilityName({ auth: null, data: { name: "さくら眼科" } }), "unauthenticated");
+  await rejects(service.checkFacilityName({ auth: user("u2", { email_verified: false }), data: { name: "さくら眼科" } }), "permission-denied");
+  await rejects(service.checkFacilityName({ auth: a, data: { name: "   " } }), "invalid-argument");
+  await rejects(service.checkFacilityName({ auth: a, data: { name: "あ".repeat(LIMITS.nameMax + 1) } }), "invalid-argument");
+  await rejects(service.checkFacilityName({ auth: a, data: { name: 123 } }), "invalid-argument");
+  await rejects(service.checkFacilityName({ auth: a, data: { name: "さくら眼科", extra: 1 } }), "invalid-argument");
+
+  const b = user("userB");
+  for (let i = 0; i < LIMITS.rateMax.checkFacilityName; i++) await service.checkFacilityName({ auth: b, data: { name: "さくら眼科" } });
+  await rejects(service.checkFacilityName({ auth: b, data: { name: "さくら眼科" } }), "resource-exhausted");
+  await service.checkFacilityName({ auth: user("userC"), data: { name: "さくら眼科" } }); // 他のユーザーは別枠
+});
+
+test("重複候補があっても施設名だけで登録は禁止しない。登録時にサーバーでも確認する(法人名の有無でも検出)", async () => {
+  await seedFacility("sakura", "医療法人社団 さくら眼科");
+  const a = user("userA");
+  const r1 = await reg(a, "さくら眼科");
+  assert.equal(r1.status, "duplicate-candidate");
+  assert.equal(r1.exact, true);
+  assert.deepEqual(Object.keys(r1).sort(), ["exact", "similarCount", "status"], "他施設の情報を含まない");
+  assert.equal(await count("facilities"), 1, "確認なしでは作成されない");
+  const r2 = await reg(a, "さくら眼科", { confirmDuplicate: true });
+  assert.equal(r2.status, "created", "別の施設なら、確認して登録できる");
+  assert.equal(await count("facilities"), 2);
+});
+
 // ================= 招待 =================
 async function setupFacilityWithAdmin(uid = "adminA", name = "招待テスト施設") {
   const admin = user(uid);

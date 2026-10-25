@@ -16,7 +16,7 @@ export const LIMITS = Object.freeze({
   emailMax: 254,
   // 1ユーザー・1操作あたりの呼び出し回数の上限（固定ウィンドウ）。失敗した呼び出しも数える
   rateWindowMs: 60 * 60 * 1000,
-  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20 })
+  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120 })
 });
 
 /** クライアントに返すエラー。code は firebase-functions の HttpsError コードに対応 */
@@ -38,9 +38,18 @@ export function normalizeName(s) {
   return String(s ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-/** 比較用キー: 小文字化し、空白・記号を除去 */
+// 法人名・会社名の表記(有無で別の施設とみなさない)。長いものから取り除く
+const CORPORATE_WORDS = [
+  "特定医療法人", "社会医療法人", "医療法人社団", "医療法人財団", "医療法人", "社会福祉法人", "学校法人", "宗教法人",
+  "一般社団法人", "一般財団法人", "公益社団法人", "公益財団法人", "地方独立行政法人", "独立行政法人", "国立大学法人", "公立大学法人",
+  "特定非営利活動法人", "npo法人", "株式会社", "有限会社", "合同会社", "(医)", "(株)", "(有)", "(社)", "(財)", "(学)", "(福)"
+];
+
+/** 比較用キー: 全角・半角を統一(NFKC)・小文字化し、法人名の表記・空白・記号・ハイフン類を除去。ヶ/ヵ/ケ のゆれも統一 */
 export function nameKey(s) {
-  return normalizeName(s).toLowerCase().replace(/[\s\-_・･.,、。()（）「」『』]/g, "");
+  let k = normalizeName(s).toLowerCase();
+  for (const w of CORPORATE_WORDS) k = k.split(w).join("");
+  return k.replace(/[ヶヵ]/g, "ケ").replace(/[\s\-_・･.,、。()（）「」『』\u2010-\u2015\u2212]/g, "");
 }
 
 function editDistanceAtMostOne(a, b) {
@@ -166,6 +175,23 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     return { exact, similarCount };
   }
 
+  /**
+   * 施設名を入力している間の、重複候補の確認(読み取りのみ。何も作成しない)。
+   * 返すのは「完全一致があるか」「似た施設の件数」だけ。他施設の名前・ID・メールアドレス・職員・注文・招待などは一切返さない。
+   * ログイン済み・メール確認済みのユーザーだけ。回数制限あり(施設名の総当たりを防ぐ)。
+   */
+  async function checkFacilityName({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    assertKnownKeys(data, ["name"]);
+    const name = typeof data.name === "string" ? normalizeName(data.name) : "";
+    if (!name || name.length > LIMITS.nameMax) {
+      throw new RegistrationError("invalid-argument", `施設名は1〜${LIMITS.nameMax}文字で入力してください`);
+    }
+    await consumeRate(user.uid, "checkFacilityName");
+    const { exact, similarCount } = await findNameCandidates(nameKey(name));
+    return { exact, similarCount };
+  }
+
   /** 新しい施設を登録し、呼び出したユーザーを最初の管理者にする */
   async function registerFacility({ auth, data }) {
     const user = assertVerifiedUser(auth);
@@ -287,5 +313,5 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  return { registerFacility, createInvite, acceptInvite };
+  return { registerFacility, createInvite, acceptInvite, checkFacilityName };
 }

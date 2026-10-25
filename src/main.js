@@ -72,6 +72,7 @@ async function bootstrapWithFirebase(config) {
     onJoin: (args) => handleJoin(args),
     onOnboardingClose: () => closeOnboarding(),
     onRegisterCancel: () => { registration.duplicate = null; error = ""; notice = ""; },
+    onCheckName: (name) => (ctx && ctx.registrationApi ? ctx.registrationApi.checkFacilityName({ name }) : null),
     onLocate: () => locateAndChoose({ userInitiated: true }),
     onSignOut: () => signOut()
   });

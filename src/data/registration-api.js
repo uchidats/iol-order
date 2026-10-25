@@ -10,6 +10,8 @@
 export function createRegistrationApi({ functions, httpsCallable }) {
   const call = async (name, payload) => (await httpsCallable(functions, name)(payload)).data;
   return {
+    /** 施設名の入力中の重複候補の確認(読み取りのみ。完全一致の有無と似た施設の件数だけ。他施設の情報は返らない) @returns {Promise<{exact:boolean, similarCount:number}>} */
+    checkFacilityName: ({ name }) => call("checkFacilityName", { name }),
     /** @returns {Promise<{status:"created"|"exists", facilityId:string}|{status:"duplicate-candidate", exact:boolean, similarCount:number}>} */
     registerFacility: ({ name, requestId, confirmDuplicate }) =>
       call("registerFacility", confirmDuplicate ? { name, requestId, confirmDuplicate: true } : { name, requestId }),
