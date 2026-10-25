@@ -48,7 +48,7 @@ const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () =>
     window.__order = [...order];
   } };
 const inviteApi = {
-  createInvite: rec("createInvite"), renameFacility: rec("renameFacility"), deleteFacility: rec("deleteFacility"),
+  renameFacility: rec("renameFacility"), deleteFacility: rec("deleteFacility"),
   removeMember: rec("removeMember"), changeMemberRole: rec("changeMemberRole"), cancelPendingMember: rec("cancelPendingMember"), renewPendingMember: rec("renewPendingMember"),
   updateMemberName: async (a) => { window.__calls.push(["updateMemberName", a]); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/permission-denied"; throw e; } const m = members.find(x => x.uid === a.uid); if (m) m.displayName = a.name; return { changed: true, name: a.name }; },
   updatePendingMember: async (a) => { window.__calls.push(["updatePendingMember", a]); const p = pending.find(x => x.id === a.pendingId); Object.assign(p, { name: a.name, email: a.email, role: a.role }); return { pendingId: p.id }; },

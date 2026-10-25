@@ -40,7 +40,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
 ## 施設のセルフ登録と招待（サーバー側のみ）
 施設の作成・招待による所属の作成は Cloud Functions だけが行う。詳細は [self-registration.md](self-registration.md)。
 - `facilities/{id}` にセルフ登録の場合 `createdBy` / `selfRegistered` / `createdAt` が付く。
-- `invites/{sha256(token)}`（招待。トークンのハッシュのみ保存）と `registrationQuota/{uid}`（利用枠）は **サーバー専用**（Rules で全クライアント拒否）。
+- （旧招待コード方式は廃止。残っていても使用不能）`invites/{sha256(token)}`（招待。トークンのハッシュのみ保存）と `registrationQuota/{uid}`（利用枠）は **サーバー専用**（Rules で全クライアント拒否）。
 
 ## 施設設定（施設管理者のみ）
 画面: ヘッダーメニューの「施設設定」（`role=admin` のみ表示）。注文者 / 採用IOL / ディーラーを編集し、保存すると注文フォームの選択肢へ即時反映される。

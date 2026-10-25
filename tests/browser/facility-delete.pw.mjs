@@ -19,7 +19,7 @@ import { IOL_MODELS } from "/src/data/iol-models.js";
 window.__calls = []; window.__deleted = []; window.__next = { status: "renamed" };
 const repository = { listOrderers: async () => [], listAdoptedIols: async () => [], listDealers: async () => [], listMembers: async () => [] };
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {} };
-const inviteApi = { createInvite: async () => ({}), ${withRename ? `renameFacility: async () => ({ status: "unchanged" }), deleteFacility: async (a) => { window.__calls.push(a); if (window.__delay) await new Promise(r => setTimeout(r, window.__delay)); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/failed-precondition"; throw e; } return { status: "deleted" }; }` : ""} };
+const inviteApi = { ${withRename ? `renameFacility: async () => ({ status: "unchanged" }), deleteFacility: async (a) => { window.__calls.push(a); if (window.__delay) await new Promise(r => setTimeout(r, window.__delay)); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/failed-precondition"; throw e; } return { status: "deleted" }; }` : ""} };
 const s = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, masters: IOL_MODELS, inviteApi, onSaved: async () => {}, onClose() {}, onDeleted: (id) => window.__deleted.push(id) });
 await s.open({ id: "f1", name: "テスト施設" });
 window.__ready = true;

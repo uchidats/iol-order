@@ -9,7 +9,7 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { getDocs, collection } from "firebase/firestore";
-import { createMemberService } from "../../functions/src/members.js";
+import { createMemberService, pendingIdOf } from "../../functions/src/members.js";
 import { createRegistrationService } from "../../functions/src/registration.js";
 
 const PROJECT = "demo-iol-functions";
@@ -126,31 +126,15 @@ test("削除後は、そのユーザーの既存セッション(Security Rules)�
   assert.equal((await getDocs(collection(env.authenticatedContext("ordA2").firestore(), `facilities/${F}/orderers`))).size, 1);
 });
 
-test("削除した人宛ての未使用の招待は取り消され、古い招待コードでは再参加できない。新しい招待なら再参加できる(使用済み・他の人の招待は影響なし)", async () => {
-  const inv = (email) => registration.createInvite({ auth: user("adminA"), data: { facilityId: F, email } });
-  const old = await inv("orda@example.jp");
-  const other = await inv("someone@example.jp");
-  const r = await remove(user("adminA"), { facilityId: F, uid: "ordA" });
-  assert.equal(r.revokedInvites, 1);
-  assert.equal((await logs())[0].revokedInvites, 1);
-  await rejects(registration.acceptInvite({ auth: user("ordA", { email: "orda@example.jp" }), data: { token: old.token } }), "failed-precondition");
-  assert.equal(await exists(`facilities/${F}/members/ordA`), false);
-  // 他の人宛ての招待は有効なまま
-  await registration.acceptInvite({ auth: user("someone"), data: { token: other.token } });
-  assert.equal(await exists(`facilities/${F}/members/someone`), true);
-  // 管理者が新しい招待を発行すれば、再び参加できる(所属は新しく作られる)
-  const fresh = await inv("orda@example.jp");
-  await registration.acceptInvite({ auth: user("ordA", { email: "orda@example.jp" }), data: { token: fresh.token } });
-  assert.equal(await exists(`facilities/${F}/members/ordA`), true);
-});
-
-test("所属にメールが記録されていない古い所属でも、認証情報のメールで未使用の招待を取り消す", async () => {
+test("所属にメールが記録されていない古い所属でも、認証情報のメールで、その人宛ての参加待ちを取り消す。旧招待コードのデータには触れない", async () => {
   await db.doc(`facilities/${F}/members/legacy`).set({ uid: "legacy", role: "orderer" });
-  const old = await registration.createInvite({ auth: user("adminA"), data: { facilityId: F, email: "legacy@example.jp" } });
+  await db.doc(`pendingMembers/${pendingIdOf(F, "legacy@example.jp")}`).set({ facilityId: F, email: "legacy@example.jp", role: "proxy", status: "pending" });
+  await db.doc("invites/legacy-hash").set({ facilityId: F, email: "legacy@example.jp", status: "pending" });   // 旧方式の残りのデータ(使用不能)
   const r = await remove(user("adminA"), { facilityId: F, uid: "legacy" });
+  assert.deepEqual(r, { removed: true });
   assert.deepEqual(lookups, ["legacy"]);
-  assert.equal(r.revokedInvites, 1);
-  await rejects(registration.acceptInvite({ auth: user("legacy"), data: { token: old.token } }), "failed-precondition");
+  assert.equal(await exists(`pendingMembers/${pendingIdOf(F, "legacy@example.jp")}`), false);
+  assert.equal((await db.doc("invites/legacy-hash").get()).get("status"), "pending", "旧データは変更しない");
   assert.equal((await logs())[0].targetEmail, "legacy@example.jp");
 });
 

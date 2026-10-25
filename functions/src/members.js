@@ -9,7 +9,7 @@
  *   有効期限は30日(サーバーで検証)。期限切れ・辞退は、管理者・副管理者が再登録できる。
  * - 重要な操作(追加・取り消し・再登録・参加・辞退・役割変更・削除)は、操作履歴(auditLogs)に同じトランザクションで記録する。
  *   操作履歴は Firestore Security Rules で、クライアントから作成・変更・削除できない(追記のみ・Cloud Functionsだけが書く)。
- * - 所属を削除した人宛ての、未使用の招待コード・参加待ちは取り消す。
+ * - 所属を削除した人宛ての参加待ちは取り消す。(旧招待コード方式は廃止)
  */
 import { createHash } from "node:crypto";
 import { RegistrationError, assertVerifiedUser, normalizeName } from "./registration.js";
@@ -358,7 +358,7 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
 
     const targetRef = db.doc(`facilities/${facilityId}/members/${targetUid}`);
 
-    // 所属に記録されたメールが無い古い所属は、認証情報から調べる(未使用の招待・参加待ちの取り消しに使う)
+    // 所属に記録されたメールが無い古い所属は、認証情報から調べる(参加待ちの取り消しに使う)
     const preTarget = await targetRef.get();
     let targetEmail = preTarget.exists ? preTarget.get("email") || null : null;
     if (preTarget.exists && !targetEmail) targetEmail = await lookupEmail(targetUid);
@@ -376,12 +376,9 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       if (!MEMBER_ROLES.includes(targetRole)) throw new RegistrationError("failed-precondition", "削除できない権限です");
       assertCanManage(actorRole, targetRole);
 
-      // 未使用の招待コード・参加待ち(削除する人のメール宛て)を取り消す
-      let pending = [];
+      // 削除する人のメール宛ての参加待ちを取り消す
       let pendingMember = null;
       if (targetEmail) {
-        pending = (await tx.get(db.collection("invites")
-          .where("facilityId", "==", facilityId).where("email", "==", targetEmail).where("status", "==", "pending"))).docs;
         const pm = await tx.get(db.doc(`pendingMembers/${pendingIdOf(facilityId, targetEmail)}`));
         if (pm.exists) pendingMember = pm;
       }
@@ -390,13 +387,11 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
         action: "member.remove",
         targetUid, targetRole,
         ...(target.get("displayName") ? { targetName: String(target.get("displayName")).slice(0, 100) } : {}),
-        ...(targetEmail ? { targetEmail } : {}),
-        revokedInvites: pending.length
+        ...(targetEmail ? { targetEmail } : {})
       });
       tx.delete(targetRef);
-      for (const inv of pending) tx.update(inv.ref, { status: "revoked", revokedAt: FieldValue.serverTimestamp(), revokedBy: user.uid });
       if (pendingMember) tx.delete(pendingMember.ref);
-      return { removed: true, revokedInvites: pending.length };
+      return { removed: true };
     });
   }
 

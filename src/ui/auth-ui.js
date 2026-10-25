@@ -12,7 +12,7 @@ const GATED_ELEMENT_IDS = ["ocrFeatureCard", "iolOrderForm"];
  *
  * @param {{onGoogle:()=>void, onEmailLink:(email:string)=>void,
  *          onSelectFacility:(facilityId:string)=>void, onLocate:()=>void, onSignOut:()=>void,
- *          onRegister:(a:{name:string, confirmDuplicate:boolean})=>void, onJoin:(a:{token:string})=>void,
+ *          onRegister:(a:{name:string, confirmDuplicate:boolean})=>void,
  *          onRegisterCancel:()=>void, onOnboardingClose:()=>void}} handlers
  */
 export function createAuthUi(handlers) {
@@ -31,13 +31,14 @@ export function createAuthUi(handlers) {
   }
 
   // 所属なしユーザーの入力途中の値（再描画で消えないよう保持）
-  const draft = { mode: null, name: "", token: "" };
+  const draft = { name: "" };
   let lastArgs = null;
-  let lastOpen = null; // メニューから開いた登録・参加画面の直前の種別（開き直しでモードを初期化する）
 
   // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。表示するのは候補の施設名のみ(最大5件)
   let nameTimer = null, nameSeq = 0;
-  const DUP_HINT = "既に登録されている可能性があります。既存の施設に参加する場合は、その施設の管理者から招待コードを受け取り、「既存施設に参加する」から参加してください。別の施設の場合は、このまま登録できます。";
+  // 既存の施設への参加は、その施設の管理者・副管理者が利用者管理で登録する(事前登録)。本人がログインすると参加の確認が表示される
+  const JOIN_GUIDE = "既存の施設に参加する場合は、その施設の管理者に、利用者管理への登録(このメールアドレス)を依頼してください。登録されると、ログインしたときに参加の確認が表示されます(表示されない場合は、ページを再読み込みしてください)。";
+  const DUP_HINT = "既に登録されている可能性があります。既存の施設に参加する場合は、その施設の管理者に利用者管理への登録を依頼してください。別の施設の場合は、このまま登録できます。";
   function scheduleNameCheck(nameEl) {
     clearTimeout(nameTimer);
     const hint = $("regNameHint"), list = $("regNameCandidates"), guide = $("regCandidateGuide");
@@ -58,7 +59,7 @@ export function createAuthUi(handlers) {
     }, 700);
   }
 
-  /** 候補の施設名(施設名のみ)を一覧表示。選ぶと、招待コードによる参加を案内する。選んでも施設名の入力は書き換えない */
+  /** 候補の施設名(施設名のみ)を一覧表示。選ぶと、その施設の管理者に登録を依頼するよう案内する。選んでも施設名の入力は書き換えない */
   function showCandidates(names) {
     const list = $("regNameCandidates"), guide = $("regCandidateGuide");
     if (!list || !guide) return;
@@ -68,13 +69,7 @@ export function createAuthUi(handlers) {
       const b = document.createElement("button");
       b.type = "button"; b.className = "candidate-item"; b.textContent = n;   // 施設名は textContent で(HTMLとして解釈しない)
       b.addEventListener("click", () => {
-        guide.textContent = "";
-        const p = document.createElement("span");
-        p.textContent = "「" + n + "」に参加する場合は、その施設の管理者から招待コードを受け取り、";
-        const go = document.createElement("button");
-        go.type = "button"; go.id = "btnGoJoin"; go.className = "btn btn-secondary"; go.textContent = "招待コードで参加する";
-        go.addEventListener("click", () => { draft.mode = "join"; handlers.onRegisterCancel(); if (lastArgs) render(lastArgs); });
-        guide.append(p, document.createTextNode("「既存施設に参加する」から入力してください。"), document.createElement("br"), go);
+        guide.textContent = "「" + n + "」に参加する場合は、その施設の管理者に、利用者管理への登録を依頼してください。登録されると、ログインしたときに参加の確認が表示されます。";
         guide.hidden = false;
       });
       li.appendChild(b); list.appendChild(li);
@@ -82,7 +77,7 @@ export function createAuthUi(handlers) {
     list.hidden = names.length === 0;
   }
 
-  /** 所属なし: 「新しい施設を登録」または「招待コードで既存施設に参加」。招待なしでの参加はできない */
+  /** 所属なし・メニューの「施設を登録」: 新しい施設の登録。既存の施設への参加は、その施設の管理者による事前登録で行う(案内のみ) */
   function renderOnboarding({ who, msg, user, registration, embedded = false }) {
     const reg = registration || {};
     const unverified = Boolean(user) && user.emailVerified === false;
@@ -90,10 +85,7 @@ export function createAuthUi(handlers) {
     const showDup = Boolean(reg.duplicate) && dupName === normalizeFacilityName(draft.name);
     const disabled = reg.busy || unverified ? "disabled" : "";
 
-    if (!draft.mode) draft.mode = "join";   // 初期選択は「既存施設に参加する」
-    let body = "", primary = "";   // primary: 左側に並べる主なボタン(右側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
-    if (draft.mode === "register") {
-      body = `
+    const body = `
         <div class="form-group">
           <label class="form-label" for="regFacilityName">施設名</label>
           <input id="regFacilityName" class="form-control" type="text" maxlength="100" autocomplete="organization" value="${escapeHtml(draft.name)}">
@@ -103,37 +95,26 @@ export function createAuthUi(handlers) {
           <p class="form-hint" id="regCandidateGuide" role="status" aria-live="polite" hidden></p>
           ${showDup ? `
             <p class="error-message" role="alert">既に登録されている可能性があります(${reg.duplicate.exact ? "同じ名前の施設があります" : "名前の似た施設があります"})。
-            既存の施設に参加する場合は、その施設の管理者から招待コードを受け取ってください。別の施設の場合のみ、このまま登録できます。</p>
+            既存の施設に参加する場合は、その施設の管理者に利用者管理への登録を依頼してください。別の施設の場合のみ、このまま登録できます。</p>
             ` : ""}
         </div>`;
-      primary = showDup
-        ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
+    // primary: 左側に並べる主なボタン(右側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
+    const primary = showDup
+      ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
             <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
-        : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`;
-    } else if (draft.mode === "join") {
-      body = `
-        <div class="form-group">
-          <label class="form-label" for="joinToken">招待コード</label>
-          <input id="joinToken" class="form-control" type="text" autocomplete="off" spellcheck="false" value="${escapeHtml(draft.token)}">
-          <p class="form-hint">施設の管理者から受け取った招待コードを入力します。招待されたメールアドレスでログインしている必要があります。招待がない場合は参加できません。</p>
-        </div>`;
-      primary = `<button type="button" class="btn btn-primary" id="btnJoinSubmit" ${disabled}>${reg.busy ? "確認しています…" : "参加する"}</button>`;
-    }
+      : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`;
 
     panel.innerHTML = `
       <div class="feature-info">
-        <div class="feature-title-row"><span class="feature-title">${embedded ? "施設の登録・参加" : "施設への所属が確認できません"}</span></div>
+        <div class="feature-title-row"><span class="feature-title">${embedded ? "新しい施設の登録" : "施設への所属が確認できません"}</span></div>
         <p class="feature-desc">${embedded
-          ? `${who} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録するか、招待を受けた別の施設に参加できます。`
-          : `${who} でログインしています。利用を始めるには、新しい施設を登録するか、招待を受けた施設に参加してください。`}</p>
+          ? `${who} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録できます。`
+          : `${who} でログインしています。利用を始めるには、新しい施設を登録してください。`}</p>
         ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
-        <div class="onboarding-mode" role="radiogroup" aria-label="施設の登録・参加">
-          <label class="mode-option"><input type="radio" name="onboardingMode" id="modeRegister" value="register" ${draft.mode === "register" ? "checked" : ""}><span>新しい施設を登録</span></label>
-          <label class="mode-option"><input type="radio" name="onboardingMode" id="modeJoin" value="join" ${draft.mode === "join" ? "checked" : ""}><span>既存施設に参加する</span></label>
-        </div>
+        <p class="form-hint onboarding-join-guide" id="joinGuide">${escapeHtml(JOIN_GUIDE)}</p>
         ${body}
         <div class="onboarding-actions">
-          ${primary ? `<div class="onboarding-primary">${primary}</div>` : ""}
+          <div class="onboarding-primary">${primary}</div>
           ${embedded
             ? '<button type="button" class="btn btn-outline-sm" id="btnOnboardingClose">注文画面に戻る</button>'
             : '<button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>'}
@@ -142,15 +123,6 @@ export function createAuthUi(handlers) {
       </div>`;
 
     const rerender = () => lastArgs && render(lastArgs);
-    // 切り替えても、入力済みの内容(施設名・招待コード)は draft に保持される
-    const switchMode = (mode) => {
-      if (draft.mode === mode) return;
-      draft.mode = mode; handlers.onRegisterCancel(); rerender();
-      const again = $("regFacilityName");
-      if (again && normalizeFacilityName(again.value).length >= 2) scheduleNameCheck(again);   // 施設名が入力済みなら、候補を出し直す
-    };
-    $("modeRegister").addEventListener("change", () => switchMode("register"));
-    $("modeJoin").addEventListener("change", () => switchMode("join"));
     const signOutBtn = $("btnAuthSignOut");
     if (signOutBtn) signOutBtn.addEventListener("click", () => handlers.onSignOut());
     const closeBtn = $("btnOnboardingClose");
@@ -164,11 +136,6 @@ export function createAuthUi(handlers) {
     if (confirmBtn) confirmBtn.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: true }));
     const cancel = $("btnRegCancel");
     if (cancel) cancel.addEventListener("click", () => { handlers.onRegisterCancel(); rerender(); });
-
-    const tokenEl = $("joinToken");
-    if (tokenEl) tokenEl.addEventListener("input", () => { draft.token = tokenEl.value; });
-    const join = $("btnJoinSubmit");
-    if (join) join.addEventListener("click", () => handlers.onJoin({ token: tokenEl.value.trim() }));
   }
 
   /** 参加確認: 施設名と役割を示し、施設ごとに「参加する」「参加しない」を選ぶ(承認・辞退の検証はサーバー) */
@@ -229,7 +196,7 @@ export function createAuthUi(handlers) {
       return;
     }
 
-    // 所属済みユーザーがメニューから開いた登録・参加画面（registration.open は "register" | "join"）
+    // 所属済みユーザーがメニューから開いた施設登録の画面（registration.open は "register"）
     const embeddedOpen = state === ACCESS.GRANTED && Boolean(registration && registration.open);
     setGated(state !== ACCESS.GRANTED || embeddedOpen);
 
@@ -240,13 +207,10 @@ export function createAuthUi(handlers) {
     ].join("");
 
     if (embeddedOpen) {
-      if (lastOpen !== registration.open) draft.mode = registration.open;
-      lastOpen = registration.open;
       panel.hidden = false;
       renderOnboarding({ who, msg, user, registration, embedded: true });
       return;
     }
-    lastOpen = null;
 
     if (state === ACCESS.GRANTED) {
       // 通常の注文画面。メッセージがある時だけパネルを出す

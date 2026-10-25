@@ -19,7 +19,7 @@ import { IOL_MODELS } from "/src/data/iol-models.js";
 window.__calls = []; window.__renamed = []; window.__next = { status: "renamed" };
 const repository = { listOrderers: async () => [], listAdoptedIols: async () => [], listDealers: async () => [], listMembers: async () => [] };
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {} };
-const inviteApi = { createInvite: async () => ({}), ${withRename ? `renameFacility: async (a) => { window.__calls.push(a); if (window.__fail) { const e = new Error("権限がありません"); e.code = "functions/permission-denied"; throw e; } const n = window.__next; return n.status === "renamed" ? { status: "renamed", name: a.name } : n; }` : ""} };
+const inviteApi = { ${withRename ? `renameFacility: async (a) => { window.__calls.push(a); if (window.__fail) { const e = new Error("権限がありません"); e.code = "functions/permission-denied"; throw e; } const n = window.__next; return n.status === "renamed" ? { status: "renamed", name: a.name } : n; }` : ""} };
 const s = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, masters: IOL_MODELS, inviteApi, onSaved: async () => {}, onClose() {}, onRenamed: (id, n) => window.__renamed.push([id, n]) });
 await s.open({ id: "f1", name: "テスト施設" });
 window.__ready = true;

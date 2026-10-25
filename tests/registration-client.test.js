@@ -16,17 +16,20 @@ test("API: 送るのは施設名・要求ID・確認フラグのみ（権限や�
   });
   await api.registerFacility({ name: "施設", requestId: "r".repeat(20) });
   await api.registerFacility({ name: "施設", requestId: "r".repeat(20), confirmDuplicate: true, role: "admin", facilityId: "x" });
-  await api.createInvite({ facilityId: "fac-1", email: "a@example.jp", role: "admin" });
-  await api.acceptInvite({ token: "t", facilityId: "other" });
+  await api.addMember({ facilityId: "fac-1", name: "x", email: "a@example.jp", role: "orderer", uid: "evil" });
+  await api.respondMembership({ pendingId: "p", accept: "yes", role: "admin" });
   assert.deepEqual(calls[0], ["registerFacility", { name: "施設", requestId: "r".repeat(20) }]);
   assert.deepEqual(calls[1], ["registerFacility", { name: "施設", requestId: "r".repeat(20), confirmDuplicate: true }]);
-  assert.deepEqual(calls[2], ["createInvite", { facilityId: "fac-1", email: "a@example.jp" }]);
-  assert.deepEqual(calls[3], ["acceptInvite", { token: "t" }]);
+  assert.deepEqual(calls[2], ["addMember", { facilityId: "fac-1", name: "x", email: "a@example.jp", role: "orderer" }]);
+  assert.deepEqual(calls[3], ["respondMembership", { pendingId: "p", accept: false }], "承認は true のときだけ");
+  // 旧招待コード方式の呼び出し口はない
+  assert.equal("createInvite" in api, false);
+  assert.equal("acceptInvite" in api, false);
 });
 
 test("エラー表示: サーバーの日本語メッセージは表示し、内部エラーは詳細を出さない", () => {
   assert.equal(describeCallableError({ code: "functions/permission-denied", message: "メールの確認が必要です" }), "メールの確認が必要です");
-  assert.equal(describeCallableError({ code: "functions/failed-precondition", message: "招待コードが無効です" }), "招待コードが無効です");
+  assert.equal(describeCallableError({ code: "functions/failed-precondition", message: "参加の確認ができませんでした" }), "参加の確認ができませんでした");
   assert.match(describeCallableError({ code: "functions/internal", message: "INTERNAL stack trace ..." }), /処理に失敗しました/);
   assert.ok(!describeCallableError({ code: "functions/internal", message: "secret detail" }).includes("secret"));
   assert.match(describeCallableError({ code: "functions/unavailable", message: "x" }), /接続できません/);

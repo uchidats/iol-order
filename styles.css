@@ -2098,12 +2098,8 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .onboarding-actions > :only-child { margin-right: auto; }
 .onboarding-primary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-/* 施設の登録・参加: 縦並びのラジオボタン(白背景・青のアクセント) */
-.onboarding-mode { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 16px; }
-.mode-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #fff; color: #1f2937; cursor: pointer; }
-.mode-option:has(input:checked) { border-color: var(--primary); background: var(--primary-light); }
-.mode-option input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); flex: none; }
-.mode-option input[type="radio"]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 施設の登録: 既存の施設への参加の案内(利用者管理への登録を依頼する) */
+.onboarding-join-guide { margin: 12px 0 16px; }
 
 /* ==========================================================================
    ポップアップ類の共通配色: ヘッダーメニュー・ⓘの説明・選択肢のリスト・削除ダイアログ・候補の一覧

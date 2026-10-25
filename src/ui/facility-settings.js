@@ -60,7 +60,7 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {"admin"|"subadmin"} [deps.actorRole] 操作者のこの施設での役割(画面の出し分け用。権限の最終判定はサーバー・Rules)
  * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
- * @param {{createInvite:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 招待の発行（サーバー側関数）。未指定なら招待セクションは出さない
+ * @param {{removeMember?:Function, addMember?:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 利用者管理・施設の操作（サーバー側関数）。未指定なら招待セクションは出さない
  */
 export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, onDeleted = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });

@@ -3,7 +3,7 @@ import { escapeHtml } from "./dom.js";
 /**
  * ヘッダーのメニュー（ログイン中のユーザー・施設名・施設の切り替え・ログアウト）
  * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。
- * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onJoinFacility:()=>void, onSignOut:()=>void}} handlers
+ * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onSignOut:()=>void}} handlers
  */
 export function createHeaderMenu(handlers) {
   const inner = document.querySelector(".header-inner");
@@ -45,7 +45,6 @@ export function createHeaderMenu(handlers) {
         ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
-        <button type="button" role="menuitem" class="header-menu-item" id="menuJoinFacility">別の施設に参加</button>
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
       panel.querySelector("#menuOrderHistory").addEventListener("click", () => { setOpen(false); handlers.onOpenHistory(); });
       const st = panel.querySelector("#menuFacilitySettings");
@@ -53,7 +52,6 @@ export function createHeaderMenu(handlers) {
       const sw = panel.querySelector("#menuSwitchFacility");
       if (sw) sw.addEventListener("click", () => { setOpen(false); handlers.onSwitchFacility(); });
       panel.querySelector("#menuRegisterFacility").addEventListener("click", () => { setOpen(false); handlers.onRegisterFacility(); });
-      panel.querySelector("#menuJoinFacility").addEventListener("click", () => { setOpen(false); handlers.onJoinFacility(); });
       panel.querySelector("#menuSignOut").addEventListener("click", () => { setOpen(false); handlers.onSignOut(); });
     }
   };

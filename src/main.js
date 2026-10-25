@@ -58,7 +58,7 @@ async function bootstrapWithFirebase(config) {
   let notice = "";
   let error = "";
   let busy = false;
-  const registration = { busy: false, duplicate: null, open: null }; // 施設登録・参加の状態（open: 所属済みユーザーがメニューから開いた画面 "register"|"join"）
+  const registration = { busy: false, duplicate: null, open: null }; // 施設登録の状態（open: 所属済みユーザーがメニューから開いた画面 "register"）
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
@@ -72,7 +72,6 @@ async function bootstrapWithFirebase(config) {
     }),
     onSelectFacility: (facilityId) => chooseFacility(facilityId),
     onRegister: (args) => handleRegister(args),
-    onJoin: (args) => handleJoin(args),
     onOnboardingClose: () => closeOnboarding(),
     onRegisterCancel: () => { registration.duplicate = null; error = ""; notice = ""; },
     onCheckName: (name) => (ctx && ctx.registrationApi ? ctx.registrationApi.checkFacilityName({ name }) : null),
@@ -92,7 +91,6 @@ async function bootstrapWithFirebase(config) {
     onOpenHistory: () => openHistory(),
     onOpenSettings: () => openSettings(),
     onRegisterFacility: () => openOnboarding("register"),
-    onJoinFacility: () => openOnboarding("join"),
     onSignOut: () => signOut()
   });
 
@@ -342,26 +340,6 @@ async function bootstrapWithFirebase(config) {
     render();
   }
 
-  /** 招待コードで既存施設に参加する（招待のない参加はサーバーが拒否する） */
-  async function handleJoin({ token }) {
-    if (registration.busy) return;
-    error = ""; notice = "";
-    if (!token) { error = "招待コードを入力してください"; render(); return; }
-    if (state.user.emailVerified === false) { error = "メールアドレスの確認が済んでいないため、参加できません。"; render(); return; }
-
-    registration.busy = true; render();
-    try {
-      const r = await ctx.registrationApi.acceptInvite({ token });
-      registration.busy = false;
-      if (registration.open) { await refreshWhileGranted(r.facilityId); return; }
-      await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: false });
-      return;
-    } catch (e) {
-      error = describeCallableError(e);
-    }
-    registration.busy = false;
-    render();
-  }
 
   /**
    * 現在地から施設を選ぶ（ログイン時の自動判定、または手動ボタン）。

@@ -3,34 +3,33 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-25
-- **作業**: 利用者管理の並び替え・編集(↑・編集・削除、役割はバッジから、氏名・参加待ちの編集、表示順の自動保存)
-- **ブランチ**: `feature/member-order-edit`(`main` 04a80c9 から作成)→ `main` へ push
+- **作業**: 旧招待コード方式の廃止(参加は利用者管理の事前登録に一本化)
+- **ブランチ**: `feature/remove-invite-code`(`main` 39142a1 から作成)→ `main` へ push
+- 前回分の記録: 利用者管理の並び替え・編集の Rules・3 Functions(`updateMemberName`・`updatePendingMember`・`respondMembership`)は `medconf-iol-dev` にデプロイ済み(成功。ログインしての実画面確認は未実施)。
 
-## 調査(既存)
-- 所属(`members`)・参加待ち(`pendingMembers`)はクライアントから書き込めない(Rules)。並び順の項目はなかった。→ 表示順は施設ごとの設定ドキュメントに、氏名・参加待ちの編集はサーバー関数で行う。
+## 調査
+- 画面: 施設の登録・参加画面の「既存施設に参加する」(招待コード入力・参加ボタン)、ヘッダーメニューの「別の施設に参加」、施設名候補の「招待コードで参加する」ボタンと案内文。招待コードの発行画面は撤去済み。
+- Functions: `createInvite`・`acceptInvite`(registration.js)、`removeMember` の旧招待の取り消し、`deleteFacility` の旧招待の削除。
+- Rules: `invites` は既に全クライアントから読み書き不可 → **Rules の変更は不要**。
 
 ## 変更内容
-- **画面**(`src/ui/facility-settings.js`): 各行を担当医・ディーラーと同じ行の部品(同じボタンのサイズ・色・間隔)にし、左から「↑」「編集」「削除」。先頭の↑と使えない操作は場所を残して非表示(位置がそろう)。
-  - 並び替えは担当医と同じ自動保存(1つずつ順に保存、失敗時は理由と「再試行」)。編集・削除・役割変更なども同じ列で順に実行し、保存順序の競合を防ぐ。
-  - 参加済み: 鉛筆で氏名のみ(メールは「変更できません」と表示)。管理者自身も編集可。役割の変更は役割バッジ(▾)から。自分自身のバッジは押せない(誤操作防止)。最後の管理者は降格不可。副管理者は注文者・代行入力者のみ。
-  - 参加待ち(期限切れ・辞退を含む): 鉛筆で氏名・メール・役割。期限切れ・辞退の「再登録」は名前の横に移動。
-- **Rules**(`firestore.rules`): `displaySettings/memberOrder`(`order` の配列・500件まで)を管理者・副管理者のみ読み書き可に。既存の `iolOrder` は従来どおり。
-- **Functions**(`functions/src/members.js`): 新規 `updateMemberName`(この施設の所属の表示名のみ。認証情報・他施設は不変)、`updatePendingMember`(メール変更時は1トランザクションで新しいIDに作り直し、表示順も引き継ぐ。所属済み・登録済みのメールへは不可)。`respondMembership` は参加時に表示順のキーを置き換える(同じ位置のまま参加済みに)。いずれも権限・入力検証・回数制限・操作履歴あり。
-- 既存の所属・参加承認・注文の動作は変更なし。既存データの変更なし。
+- **画面**: 招待コードの入力欄・「既存施設に参加する」の選択肢・メニューの「別の施設に参加」・「招待コードで参加する」ボタンを削除。所属のない人とメニューの「新しい施設を登録」は施設登録の画面のみ。既存の施設への参加は「その施設の管理者に利用者管理への登録を依頼してください。登録されると、ログインしたときに参加の確認が表示されます」と案内(施設名の候補・重複の案内も同様の文言に)。登録ボタンと「注文画面に戻る」/「ログアウト」の配置・余白は従来どおり。不要になったラジオボタンの CSS を削除。
+- **クライアントAPI**: `createInvite`・`acceptInvite` の呼び出し口と、`main.js` の招待参加処理を削除。
+- **Functions**: `createInvite`・`acceptInvite` と関連(入力検証・トークン・回数制限・上限の設定)を削除。`removeMember` から旧招待の取り消しを削除(参加待ちの取り消しは維持)。`deleteFacility` は施設削除時に旧招待の残りデータも一緒に消す(従来どおり)。
+- **データ**: Firestore の既存データは削除・変更していない。過去の `invites` は残るが、使う関数がなくなり、Rules でもクライアントから読み書きできないため使用不能。
+- 維持: 管理者アカウント・施設所属・権限・注文履歴、事前登録・参加確認・利用者管理・施設の切り替え・ログイン。`ORDER_INTAKE_ENABLED=false`(`functions/.env.medconf-iol-dev`)は変更なし。
+- テストの整理: 旧招待のテストを削除し、事前登録の流れに置き換え(Functions・e2e・ブラウザ・クライアントAPI)。「旧方式の関数・呼び出し口がない」ことを確認するテストを追加。
+- 変更: `src/ui/auth-ui.js`、`src/ui/header-menu.js`、`src/main.js`、`src/data/registration-api.js`、`src/ui/facility-settings.js`(コメント)、`styles.css`、`index.html`(版の付与)、`functions/src/registration.js`、`functions/src/members.js`、`functions/index.js`、docs、テスト。
 
 ## Firebaseデプロイ — 要対応(判断待ち)
-- **未実施**(指示により報告のみ)。必要なもの:
-  - Rules: `firebase deploy --only firestore:rules --project medconf-iol-dev`(memberOrder の追加)
-  - Functions: `firebase deploy --only functions:updateMemberName,functions:updatePendingMember,functions:respondMembership --project medconf-iol-dev`
-- デプロイ前の公開サイトの挙動: 並び替えは保存に失敗し「保存できませんでした…再試行」と表示(画面上の並びは再読み込みで元に戻る)。氏名・参加待ちの編集は「現在ご利用いただけません」系のエラーで保存されない。役割変更・削除・取り消し・再登録・追加・参加確認は従来どおり動作。データは壊れない。
-- 元に戻す方法: Rules・Functions とも commit `04a80c9` の版を再デプロイ。
-
-## 未確認
-- ログインしての実画面・実環境での確認(デプロイ後に、テスト用アカウントで並び替え・氏名変更・参加待ちの編集・メール変更後の参加を確認してください)。
+- **未実施**(指示により)。必要なもの:
+  - Functions の削除: `firebase functions:delete createInvite acceptInvite --region asia-northeast1 --project medconf-iol-dev`(削除するまでは、デプロイ済みの旧関数を直接呼べば古い招待コードが使える状態が残る。画面からは呼ばれない)
+  - Functions の更新: `firebase deploy --only functions:removeMember --project medconf-iol-dev`(旧招待の取り消し処理の削除。デプロイしなくても動作上の問題はない)
+- Rules の変更は不要。旧招待用の複合インデックス(`firestore.indexes.json`)は残している(使われないだけで害はない。整理する場合は別途)。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 196 / ブラウザ回帰 77(Chromium・Firefox・WebKit) / Rules 51 / Functions 130(新規5: 氏名変更の範囲・他施設不変・権限、参加待ちの編集(状態・期限は不変)、メール変更時の作り直し・旧メールで参加不可・新メールで参加・表示順の引き継ぎ、所属済み/登録済みメールへの変更不可・昇格防止、memberOrder の Rules) / functions e2e 8、すべて成功。
-- `member-admin.pw.mjs` を更新(スマホ幅390・PC幅1100): 全行 ↑・編集・削除の順、先頭の↑・使えない操作は非表示で位置がそろう、自分の役割バッジは押せない、役割バッジから変更、氏名のみの編集(メールは変更不可)、参加待ちの氏名・メール・役割の編集、連続の並び替えでも保存が重ならず最後の並びが保存される、保存失敗→再試行、サーバー拒否時は入力を保持、副管理者の出し分け。
+- unit 196 / ブラウザ回帰 77(Chromium・Firefox・WebKit) / Rules 51 / Functions 118(旧招待のテスト12件を削除し、旧方式がないことの確認・旧データの扱いを追加) / functions e2e 8(招待の流れを事前登録→参加確認→承認に置き換え、旧関数が存在しないこと=404 を確認)、すべて成功。
+- 注: Functions の初回実行で、既存の同時実行テスト3件がエミュレータのロック待ちで一時的に失敗し、再実行で全件成功(以前から見られる不安定さ。今回の変更とは無関係)。e2e の初回失敗は、存在しない関数の応答がJSONでないことによるテスト側の不備で、修正済み。

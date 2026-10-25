@@ -1,22 +1,19 @@
 /**
- * 施設のセルフ登録と招待参加（サーバー側ロジック）
+ * 施設のセルフ登録・施設名の確認と変更・施設の削除（サーバー側ロジック）
  *
  * Admin SDK 経由で実行される（Firestore Security Rules を介さない）ため、
- * ここが唯一の「施設作成」「招待による所属作成」の経路になる。クライアントには一切の権限を与えない。
+ * ここが唯一の「施設作成」の経路になる(既存施設への参加は利用者管理の事前登録: members.js。旧招待コード方式は廃止)。クライアントには一切の権限を与えない。
  * - 依存（db, FieldValue など）は注入する。テストはエミュレータ上の本物の Firestore で実行する。
  * - 入力は厳格に検証する（未知のキーは拒否）。クライアントは role / platformAdmin / facilityId を指定できない。
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 
 export const LIMITS = Object.freeze({
   nameMax: 100,
   maxFacilitiesPerUser: 3,           // 1ユーザーがセルフ登録できる施設数の上限（乱用防止）
-  inviteTtlMs: 7 * 24 * 60 * 60 * 1000,
-  maxPendingInvitesPerFacility: 20,
-  emailMax: 254,
   // 1ユーザー・1操作あたりの呼び出し回数の上限（固定ウィンドウ）。失敗した呼び出しも数える
   rateWindowMs: 60 * 60 * 1000,
-  rateMax: Object.freeze({ registerFacility: 10, createInvite: 30, acceptInvite: 20, checkFacilityName: 120, renameFacility: 20, deleteFacility: 10 }),
+  rateMax: Object.freeze({ registerFacility: 10, checkFacilityName: 120, renameFacility: 20, deleteFacility: 10 }),
   maxDeleteDocs: 450,   // 1回の削除(トランザクション)で扱える書き込み数の上限(Firestoreは500)
   maxCandidates: 5
 });
@@ -30,9 +27,7 @@ export class RegistrationError extends Error {
   }
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const REQUEST_ID_RE = /^[A-Za-z0-9-]{16,64}$/;
-const TOKEN_RE = /^[A-Za-z0-9_-]{32,128}$/;
 const FACILITY_ID_RE = /^[a-z0-9][a-z0-9-]{2,40}$/;
 
 // ---------- 名前の正規化と類似判定 ----------
@@ -101,28 +96,6 @@ export function parseRegisterInput(data) {
   return { name, requestId: data.requestId, confirmDuplicate: data.confirmDuplicate === true };
 }
 
-export function parseInviteInput(data) {
-  assertKnownKeys(data, ["facilityId", "email"]);
-  if (typeof data.facilityId !== "string" || !FACILITY_ID_RE.test(data.facilityId)) {
-    throw new RegistrationError("invalid-argument", "施設IDが正しくありません");
-  }
-  const email = String(data.email ?? "").trim().toLowerCase();
-  if (!email || email.length > LIMITS.emailMax || !EMAIL_RE.test(email)) {
-    throw new RegistrationError("invalid-argument", "メールアドレスの形式が正しくありません");
-  }
-  return { facilityId: data.facilityId, email };
-}
-
-export function parseAcceptInput(data) {
-  assertKnownKeys(data, ["token"]);
-  if (typeof data.token !== "string" || !TOKEN_RE.test(data.token)) {
-    throw new RegistrationError("failed-precondition", INVALID_INVITE);
-  }
-  return { token: data.token };
-}
-
-const INVALID_INVITE = "招待コードが無効、期限切れ、または使用済みです";
-
 // ---------- 認証 ----------
 /** 認証済みかつメール確認済み。platformAdmin はクライアントから設定できないトークンクレーム */
 export function assertVerifiedUser(auth) {
@@ -133,8 +106,6 @@ export function assertVerifiedUser(auth) {
   }
   return { uid: auth.uid, email: String(token.email).toLowerCase(), displayName: token.name || null, isPlatformAdmin: token.platformAdmin === true };
 }
-
-export const hashToken = (token) => createHash("sha256").update(token).digest("hex");
 
 /** 施設IDはサーバーが (uid, requestId) から導出する。クライアントは指定できず、同じ要求の再試行は同じIDになる */
 export function deriveFacilityId(uid, requestId) {
@@ -147,9 +118,8 @@ export function deriveFacilityId(uid, requestId) {
  * @param {{serverTimestamp:Function}} deps.FieldValue
  * @param {{fromMillis:Function}} deps.Timestamp
  * @param {() => number} [deps.now]
- * @param {(n:number) => Buffer} [deps.random]
  */
-export function createRegistrationService({ db, FieldValue, Timestamp, now = Date.now, random = randomBytes }) {
+export function createRegistrationService({ db, FieldValue, Timestamp, now = Date.now }) {
   /** ユーザー単位のレート制限（トランザクションで数える）。上限超過は resource-exhausted */
   async function consumeRate(uid, action) {
     const ref = db.doc(`rateLimits/${uid}_${action}`);
@@ -270,7 +240,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
         throw new RegistrationError("failed-precondition", "ほかの利用者が所属している施設は削除できません。先に利用者を削除してください");
       }
       const subs = await Promise.all(subNames.filter(n => n !== "orders").map(n => tx.get(facRef.collection(n))));
-      const invites = await tx.get(db.collection("invites").where("facilityId", "==", data.facilityId));
+      const invites = await tx.get(db.collection("invites").where("facilityId", "==", data.facilityId));   // 旧招待コード方式の残りのデータ(使用不能)も一緒に消す
       const pendingMembers = await tx.get(db.collection("pendingMembers").where("facilityId", "==", data.facilityId));   // この施設の参加待ち(事前登録)
       const creator = typeof fac.get("createdBy") === "string" && fac.get("selfRegistered") ? fac.get("createdBy") : null;
       const quotaRef = creator ? db.doc(`registrationQuota/${creator}`) : null;
@@ -346,72 +316,5 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  /** 施設管理者が、特定のメールアドレス宛ての参加招待（orderer 権限）を発行する。メールは送信しない */
-  async function createInvite({ auth, data }) {
-    const user = assertVerifiedUser(auth);
-    const input = parseInviteInput(data);
-    await consumeRate(user.uid, "createInvite");
-
-    const [fac, mem] = await Promise.all([
-      db.doc(`facilities/${input.facilityId}`).get(),
-      db.doc(`facilities/${input.facilityId}/members/${user.uid}`).get()
-    ]);
-    const isAdmin = fac.exists && fac.get("status") === "active"
-      && mem.exists && mem.get("role") === "admin";
-    if (!isAdmin && !user.isPlatformAdmin) {
-      throw new RegistrationError("permission-denied", "この施設の管理者のみ招待できます");
-    }
-    if (!fac.exists) throw new RegistrationError("not-found", "施設が見つかりません");
-
-    const pending = await db.collection("invites")
-      .where("facilityId", "==", input.facilityId).where("status", "==", "pending")
-      .where("expiresAt", ">", Timestamp.fromMillis(now())).count().get(); // 期限切れの未使用招待は上限に数えない
-    if (pending.data().count >= LIMITS.maxPendingInvitesPerFacility) {
-      throw new RegistrationError("resource-exhausted", "未使用の招待が上限に達しています");
-    }
-
-    const token = random(32).toString("base64url");
-    const expiresMs = now() + LIMITS.inviteTtlMs;
-    // 保存するのはトークンのハッシュのみ（ドキュメントID）。トークン本体は発行時に1度だけ返す
-    await db.doc(`invites/${hashToken(token)}`).create({
-      facilityId: input.facilityId, email: input.email, role: "orderer", status: "pending",
-      createdBy: user.uid, createdAt: FieldValue.serverTimestamp(), expiresAt: Timestamp.fromMillis(expiresMs)
-    });
-    return { token, email: input.email, expiresAt: new Date(expiresMs).toISOString() };
-  }
-
-  /** 招待コードで施設に参加する。コード・メールアドレス（確認済み）・有効期限がすべて一致する場合のみ */
-  async function acceptInvite({ auth, data }) {
-    const user = assertVerifiedUser(auth);
-    const input = parseAcceptInput(data);
-    await consumeRate(user.uid, "acceptInvite");
-    const inviteRef = db.doc(`invites/${hashToken(input.token)}`);
-
-    return db.runTransaction(async (tx) => {
-      const inv = await tx.get(inviteRef);
-      // 存在しない・期限切れ・使用済み・別のメールアドレス宛て、は区別せず同じ応答にする（探索対策）
-      const valid = inv.exists && inv.get("status") === "pending"
-        && inv.get("expiresAt").toMillis() > now() && inv.get("email") === user.email;
-      if (!valid) throw new RegistrationError("failed-precondition", INVALID_INVITE);
-
-      const facilityId = inv.get("facilityId");
-      const facRef = db.doc(`facilities/${facilityId}`);
-      const memRef = db.doc(`facilities/${facilityId}/members/${user.uid}`);
-      const [fac, mem] = await Promise.all([tx.get(facRef), tx.get(memRef)]);
-      if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_INVITE);
-
-      // 既に所属している人(管理者を含む)は変更しない(降格しない・二重に作らない)。所属がなければ orderer として作成する。
-      // 所属を削除された人が再び参加するには、削除の後に新しい招待が必要(削除時に未使用の招待は取り消される: members.js)
-      if (!mem.exists) {
-        tx.create(memRef, {
-          uid: user.uid, role: "orderer",
-          displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
-        });
-      }
-      tx.update(inviteRef, { status: "used", usedBy: user.uid, usedAt: FieldValue.serverTimestamp() });
-      return { facilityId };
-    });
-  }
-
-  return { registerFacility, createInvite, acceptInvite, checkFacilityName, renameFacility, deleteFacility };
+  return { registerFacility, checkFacilityName, renameFacility, deleteFacility };
 }

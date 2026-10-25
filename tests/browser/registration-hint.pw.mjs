@@ -18,7 +18,7 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 import { createAuthUi } from "/src/ui/auth-ui.js";
 window.__checks = []; window.__registers = []; window.__resp = { exact: false, similarCount: 0 }; window.__delays = {}; window.__throw = false;
 const ui = createAuthUi({
-  onGoogle() {}, onEmailLink() {}, onSelectFacility() {}, onLocate() {}, onSignOut() {}, onJoin() {}, onOnboardingClose() {},
+  onGoogle() {}, onEmailLink() {}, onSelectFacility() {}, onLocate() {}, onSignOut() {}, onOnboardingClose() {},
   onRegisterCancel() {},
   onRegister: (a) => window.__registers.push(a),
   onCheckName: async (name) => { window.__checks.push(name); await new Promise(r => setTimeout(r, window.__delays[name] || 0)); if (window.__throw) throw new Error("not deployed"); return typeof window.__resp === "function" ? window.__resp(name) : window.__resp; }
@@ -62,23 +62,14 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(base);
       await page.waitForFunction(() => window.__ready);
-      // 初期選択は「既存施設に参加する」。縦並びのラジオで、選んだ方の入力欄だけを表示。入力済みの内容は切り替えても保持
-      assert.equal(await page.locator("#modeJoin").isChecked(), true);
-      assert.equal(await page.locator("#modeRegister").isChecked(), false);
-      assert.equal(await page.locator("#joinToken").isVisible(), true);
-      assert.equal(await page.locator("#regFacilityName").count(), 0);
-      const r1 = await page.locator("#modeRegister").boundingBox(), r2 = await page.locator("#modeJoin").boundingBox();
-      assert.ok(r2.y > r1.y + 10 && Math.abs(r1.x - r2.x) < 2, "縦並び");
-      await page.fill("#joinToken", "TOKEN-123");
-      await page.check("#modeRegister");
-      assert.equal(await page.locator("#joinToken").count(), 0);
-      await page.fill("#regFacilityName", "保持テスト施設");
-      await page.check("#modeJoin");
-      assert.equal(await page.locator("#joinToken").inputValue(), "TOKEN-123", "招待コードを保持");
-      await page.check("#modeRegister");
-      assert.equal(await page.locator("#regFacilityName").inputValue(), "保持テスト施設", "施設名を保持");
-      await page.evaluate(() => { window.__checks.length = 0; });
-      await page.fill("#regFacilityName", "");
+      // 旧招待コード方式は廃止: 招待コードの入力欄・「既存施設に参加する」の選択肢はない。施設名の入力欄を表示し、
+      // 既存の施設への参加は、その施設の管理者に利用者管理への登録を依頼するよう案内する
+      for (const gone of ["#joinToken", "#btnJoinSubmit", "#modeJoin", "#modeRegister", "#btnGoJoin"]) assert.equal(await page.locator(gone).count(), 0, gone);
+      assert.equal(await page.locator("#regFacilityName").isVisible(), true);
+      const joinGuide = await page.locator("#joinGuide").innerText();
+      assert.match(joinGuide, /利用者管理への登録/);
+      assert.match(joinGuide, /参加の確認が表示されます/);
+      assert.ok(!/招待コード/.test(await page.locator("#authPanel").innerText()), "招待コードの表記はない");
       const input = page.locator("#regFacilityName"), hint = page.locator("#regNameHint");
       assert.equal(await hint.isHidden(), true);
 
@@ -92,11 +83,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await hint.waitFor();
       assert.deepEqual(await page.evaluate(() => window.__checks), ["医療法人社団 さくら眼科"], "入力が止まってから1回");
 
-      // 重複の可能性: 招待コードによる参加を案内。他施設の名前・件数などは出さない
+      // 重複の可能性: 管理者に利用者管理への登録を依頼するよう案内。他施設の名前・件数などは出さない
       const txt = await hint.innerText();
       assert.match(txt, /既に登録されている可能性があります/);
-      assert.match(txt, /招待コード/);
-      assert.match(txt, /既存施設に参加する/);
+      assert.match(txt, /利用者管理への登録を依頼/);
+      assert.ok(!/招待コード/.test(txt));
       assert.ok(!/さくら|\d+件/.test(txt), "案内文に件数などは出さない: " + txt);
       // 候補は施設名のみ(最大5件・HTMLとして解釈しない)
       const items = page.locator("#regNameCandidates .candidate-item");
@@ -108,11 +99,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const cand = await items.nth(0).evaluate(e => { const s = getComputedStyle(e); return [s.backgroundColor, s.color, s.borderTopColor]; });
       await page.emulateMedia({ colorScheme: "light" });
       assert.deepEqual(cand, ["rgb(255, 255, 255)", "rgb(31, 41, 55)", "rgb(209, 213, 219)"]);
-      // 候補を選ぶと、招待コードによる参加を案内(入力した施設名は書き換えない)。登録も引き続きできる
+      // 候補を選ぶと、その施設の管理者に登録を依頼するよう案内(入力した施設名は書き換えない)。登録も引き続きできる
       await items.nth(0).click();
       const guide = await page.locator("#regCandidateGuide").innerText();
       assert.match(guide, /さくら眼科クリニック/);
-      assert.match(guide, /招待コード/);
+      assert.match(guide, /利用者管理への登録を依頼/);
+      assert.equal(await page.locator("#btnGoJoin").count(), 0, "招待コードで参加するボタンはない");
       assert.equal(await input.inputValue(), "医療法人社団 さくら眼科");
       // 登録は止めない(別の施設の場合は、そのまま登録できる)。ボタンは有効で、押すと通常の登録の操作が行われる
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
@@ -143,20 +135,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await hint.isHidden(), true);
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
 
-      // ボタン配置: 主なボタン(登録する/参加する)は左、「ログアウト」(所属済みなら「注文画面に戻る」)は同じ行の右。説明文との間に16〜20px。登録画面・参加画面とも、PC・スマホで同じ
+      // ボタン配置: 「登録する」は左、「ログアウト」(所属済みなら「注文画面に戻る」)は同じ行の右。説明文との間に16〜20px。PC・スマホで同じ
       for (const width of [390, 1100]) {
         await page.setViewportSize({ width, height: 900 });
-        for (const [mode, primary, hintSel] of [["#modeJoin", "#btnJoinSubmit", "#joinToken ~ .form-hint"], ["#modeRegister", "#btnRegSubmit", "#regFacilityName ~ .form-hint"]]) {
-          await page.check(mode);
-          const p = await page.locator(primary).boundingBox(), s = await page.locator("#btnAuthSignOut").boundingBox();
-          const hint = await page.locator(hintSel).first().boundingBox();
-          assert.ok(Math.abs(p.y - s.y) < 6, `${width} ${primary}: 同じ行`);
-          assert.ok(p.x + p.width <= s.x, `${width} ${primary}: 左に主なボタン、右にログアウト`);
-          assert.ok(s.x + s.width > width - 60, `${width}: 右端に寄る`);
-          const lastHintBottom = await page.evaluate(([sel, pr]) => { const f = document.querySelector(sel).closest(".form-group"); return f.getBoundingClientRect().bottom; }, [primary === "#btnJoinSubmit" ? "#joinToken" : "#regFacilityName", primary]);
-          const gap = p.y - lastHintBottom;
-          assert.ok(gap >= 16 && gap <= 20, `${width} ${primary}: 説明文とボタンの間 ${gap}px`);
-        }
+        const p = await page.locator("#btnRegSubmit").boundingBox(), s = await page.locator("#btnAuthSignOut").boundingBox();
+        assert.ok(Math.abs(p.y - s.y) < 6, `${width}: 同じ行`);
+        assert.ok(p.x + p.width <= s.x, `${width}: 左に登録する、右にログアウト`);
+        assert.ok(s.x + s.width > width - 60, `${width}: 右端に寄る`);
+        const lastHintBottom = await page.evaluate(() => document.querySelector("#regFacilityName").closest(".form-group").getBoundingClientRect().bottom);
+        const gap = p.y - lastHintBottom;
+        assert.ok(gap >= 16 && gap <= 20, `${width}: 説明文とボタンの間 ${gap}px`);
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
       assert.deepEqual(errors, []);

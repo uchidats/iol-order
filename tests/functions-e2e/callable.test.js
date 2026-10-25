@@ -84,31 +84,41 @@ test("callable: 再送は同じ施設を返す(冪等)。権限の指定は INVA
   assert.equal(forged.body.error.status, "INVALID_ARGUMENT");
 });
 
-test("callable: 招待の発行→別アカウントでの参加。招待なし・別メールの参加は拒否", async () => {
-  const reg = await call("registerFacility", { name: "招待E2E医院", requestId: "verified-request-0003" }, verified.idToken);
+test("callable: 利用者管理の事前登録→本人のログインで参加確認→承認。別メールの人は参加できない。旧招待コードの関数はない", async () => {
+  const reg = await call("registerFacility", { name: "事前登録E2E医院", requestId: "verified-request-0003" }, verified.idToken);
   const facilityId = reg.body.result.facilityId;
 
-  // 管理者以外は発行できない
-  const denied = await call("createInvite", { facilityId, email: "nurse@example.jp" }, unverified.idToken);
-  assert.ok(["PERMISSION_DENIED"].includes(denied.body.error.status));
-
-  const inv = await call("createInvite", { facilityId, email: "nurse@example.jp" }, verified.idToken);
-  assert.equal(inv.http, 200);
-  const token = inv.body.result.token;
+  // 管理者以外(メール未確認)は登録できない
+  const denied = await call("addMember", { facilityId, name: "看護師", email: "nurse@example.jp", role: "orderer" }, unverified.idToken);
+  assert.equal(denied.body.error.status, "PERMISSION_DENIED");
+  const added = await call("addMember", { facilityId, name: "看護師", email: "nurse@example.jp", role: "orderer" }, verified.idToken);
+  assert.equal(added.http, 200);
+  const pendingId = added.body.result.pendingId;
 
   const stranger = await createUser("stranger@example.jp", { verified: true });
-  const wrong = await call("acceptInvite", { token }, stranger.idToken);
+  assert.deepEqual((await call("listMyPendingMemberships", {}, stranger.idToken)).body.result.memberships, []);
+  const wrong = await call("respondMembership", { pendingId, accept: true }, stranger.idToken);
   assert.equal(wrong.body.error.status, "FAILED_PRECONDITION");
   assert.equal(await getDoc(`facilities/${facilityId}/members/${stranger.uid}`), null);
 
   const nurse = await createUser("nurse@example.jp", { verified: true });
-  const ok = await call("acceptInvite", { token }, nurse.idToken);
-  assert.equal(ok.body.result.facilityId, facilityId);
+  const mine = (await call("listMyPendingMemberships", {}, nurse.idToken)).body.result.memberships;
+  assert.deepEqual(mine.map(m => [m.facilityId, m.role]), [[facilityId, "orderer"]]);
+  const ok = await call("respondMembership", { pendingId, accept: true }, nurse.idToken);
+  assert.equal(ok.body.result.status, "joined");
   const mem = await getDoc(`facilities/${facilityId}/members/${nurse.uid}`);
   assert.equal(mem.fields.role.stringValue, "orderer");
-
-  const reuse = await call("acceptInvite", { token }, nurse.idToken);
+  const reuse = await call("respondMembership", { pendingId, accept: true }, nurse.idToken);
   assert.equal(reuse.body.error.status, "FAILED_PRECONDITION");
+
+  // 旧招待コード方式の関数は存在しない(廃止)
+  for (const gone of ["createInvite", "acceptInvite"]) {
+    const r = await fetch(`http://${FN}/${PROJECT}/${REGION}/${gone}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${verified.idToken}` },
+      body: JSON.stringify({ data: { token: "A".repeat(43) } })
+    });
+    assert.equal(r.status, 404, `${gone} は存在しない`);
+  }
 });
 
 // ---------- 注文受付(createOrder) ----------
@@ -188,9 +198,9 @@ test("callable: removeMember は管理者だけが一般注文者の所属を削
   const owner3 = await createUser("rm-owner@example.jp", { verified: true });
   const reg = await call("registerFacility", { name: "サクラ眼科クリニック", requestId: "rm-e2e-register-0001" }, owner3.idToken);
   const fid = reg.body.result.facilityId;
-  const inv = await call("createInvite", { facilityId: fid, email: "rm-nurse@example.jp" }, owner3.idToken);
+  const added = await call("addMember", { facilityId: fid, name: "看護師", email: "rm-nurse@example.jp", role: "orderer" }, owner3.idToken);
   const nurse = await createUser("rm-nurse@example.jp", { verified: true });
-  assert.equal((await call("acceptInvite", { token: inv.body.result.token }, nurse.idToken)).http, 200);
+  assert.equal((await call("respondMembership", { pendingId: added.body.result.pendingId, accept: true }, nurse.idToken)).http, 200);
   const mem = await getDoc(`facilities/${fid}/members/${nurse.uid}`);
   assert.equal(mem.fields.status, undefined, "membership has no status");
 

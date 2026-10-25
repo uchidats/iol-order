@@ -1,5 +1,5 @@
 /**
- * 施設のセルフ登録・招待の呼び出し口（Cloud Functions の callable）
+ * 施設のセルフ登録・利用者管理の呼び出し口（Cloud Functions の callable）
  * 実際の処理はすべてサーバー側（functions/src/registration.js）で行われ、権限の判断もサーバーが行う。
  * ここでは入力を渡して結果を受け取るだけで、役割（role）や施設IDなどをクライアントが指定することはない。
  *
@@ -20,10 +20,6 @@ export function createRegistrationApi({ functions, httpsCallable }) {
       call("renameFacility", confirmDuplicate ? { facilityId, name, confirmDuplicate: true } : { facilityId, name }),
     /** 施設の削除(施設IDで特定。施設管理者のみ。注文履歴がある・自分以外の所属がある場合はサーバーが拒否する) */
     deleteFacility: ({ facilityId }) => call("deleteFacility", { facilityId }),
-    /** @returns {Promise<{token:string, email:string, expiresAt:string}>} */
-    createInvite: ({ facilityId, email }) => call("createInvite", { facilityId, email }),
-    /** @returns {Promise<{facilityId:string}>} */
-    acceptInvite: ({ token }) => call("acceptInvite", { token }),
     /** 管理者・副管理者が、利用者の所属を削除する(所属の削除と操作履歴の記録は、サーバーで1トランザクション) */
     removeMember: ({ facilityId, uid }) => call("removeMember", { facilityId, uid }),
     // ---- 利用者管理(事前登録・参加確認・役割変更)。権限の判定はすべてサーバー ----

@@ -10,7 +10,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
 import { doc, getDoc, setDoc, getDocs, collection } from "firebase/firestore";
 import {
-  createRegistrationService, deriveFacilityId, hashToken, nameKey, compareNames, LIMITS
+  createRegistrationService, deriveFacilityId, nameKey, compareNames, LIMITS
 } from "../../functions/src/registration.js";
 
 const PROJECT = "demo-iol-functions"; // demo- プロジェクトはエミュレータ専用
@@ -301,146 +301,16 @@ test("重複候補があっても施設名だけで登録は禁止しない。�
   assert.equal(await count("facilities"), 2);
 });
 
-// ================= 招待 =================
-async function setupFacilityWithAdmin(uid = "adminA", name = "招待テスト施設") {
+// ================= 旧招待コード方式(廃止) =================
+test("旧招待コード方式は廃止: 発行・参加の処理はサービスにない(参加は利用者管理の事前登録のみ)", () => {
+  for (const gone of ["createInvite", "acceptInvite"]) assert.equal(gone in service, false, gone);
+});
+
+async function setupFacilityWithAdmin(uid = "adminA", name = "テスト施設") {
   const admin = user(uid);
   const r = await reg(admin, name);
   return { admin, facilityId: r.facilityId };
 }
-
-test("招待: 施設管理者だけが発行でき、保存されるのはトークンのハッシュのみ", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const r = await service.createInvite({ auth: admin, data: { facilityId, email: "Nurse@Example.JP " } });
-  assert.match(r.token, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(r.email, "nurse@example.jp");
-  assert.equal(r.expiresAt, new Date(clock.t + LIMITS.inviteTtlMs).toISOString());
-
-  const snap = await db.collection("invites").get();
-  assert.equal(snap.size, 1);
-  assert.equal(snap.docs[0].id, hashToken(r.token));
-  const d = snap.docs[0].data();
-  assert.deepEqual([d.facilityId, d.email, d.role, d.status, d.createdBy], [facilityId, "nurse@example.jp", "orderer", "pending", "adminA"]);
-  assert.ok(!JSON.stringify([snap.docs[0].id, d]).includes(r.token), "トークン本体は保存しない");
-});
-
-test("招待: 管理者以外・他施設の管理者・未確認ユーザー・停止中の施設では発行できない", async () => {
-  const { facilityId } = await setupFacilityWithAdmin();
-  await seedMember(facilityId, "ordererA", "orderer");
-  const other = await reg(user("adminB"), "別の施設B");
-  const body = { facilityId, email: "x@example.jp" };
-  await rejects(service.createInvite({ auth: user("ordererA"), data: body }), "permission-denied");
-  await rejects(service.createInvite({ auth: user("stranger"), data: body }), "permission-denied");
-  await rejects(service.createInvite({ auth: user("adminB"), data: body }), "permission-denied");
-  await rejects(service.createInvite({ auth: user("adminA", { email_verified: false }), data: body }), "permission-denied");
-  await rejects(service.createInvite({ auth: null, data: body }), "unauthenticated");
-  await db.doc(`facilities/${facilityId}`).update({ status: "suspended" });
-  await rejects(service.createInvite({ auth: user("adminA"), data: body }), "permission-denied");
-  assert.equal(await count("invites"), 0);
-  assert.ok(other.facilityId);
-});
-
-test("招待: 権限(role)の指定や不正なメール・未知のキーは拒否。発行されるのは常に orderer", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  for (const bad of [
-    { facilityId, email: "x@example.jp", role: "admin" }, { facilityId, email: "x@example.jp", platformAdmin: true },
-    { facilityId, email: "broken" }, { facilityId, email: "" }, { facilityId, email: "a@" + "x".repeat(250) + ".jp" },
-    { facilityId: "../x", email: "x@example.jp" }, { email: "x@example.jp" }
-  ]) {
-    await rejects(service.createInvite({ auth: admin, data: bad }), "invalid-argument");
-  }
-  assert.equal(await count("invites"), 0);
-});
-
-test("招待: 未使用の招待が上限を超えると発行できない", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  for (let i = 0; i < LIMITS.maxPendingInvitesPerFacility; i++) {
-    await service.createInvite({ auth: admin, data: { facilityId, email: `u${i}@example.jp` } });
-  }
-  await rejects(service.createInvite({ auth: admin, data: { facilityId, email: "over@example.jp" } }), "resource-exhausted");
-});
-
-test("参加: 招待されたメールアドレスの確認済みアカウントだけが参加でき、orderer 権限になる", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const { token } = await service.createInvite({ auth: admin, data: { facilityId, email: "nurse@example.jp" } });
-  const nurse = user("nurse1", { email: "Nurse@Example.jp" }); // 大文字小文字の違いは同一視
-  const r = await service.acceptInvite({ auth: nurse, data: { token } });
-  assert.deepEqual(r, { facilityId });
-  const mem = (await db.doc(`facilities/${facilityId}/members/nurse1`).get()).data();
-  assert.deepEqual([mem.uid, mem.role, "status" in mem], ["nurse1", "orderer", false]);
-  const inv = (await db.doc(`invites/${hashToken(token)}`).get()).data();
-  assert.equal(inv.status, "used");
-  assert.equal(inv.usedBy, "nurse1");
-});
-
-test("参加の拒否: 無効・使用済み・期限切れ・別メール宛て・未確認・未ログインは、すべて同じ応答(探索対策)", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const { token } = await service.createInvite({ auth: admin, data: { facilityId, email: "nurse@example.jp" } });
-  const messages = new Set();
-  const fail = async (auth, data, code = "failed-precondition") => {
-    await assert.rejects(service.acceptInvite({ auth, data }), (e) => { messages.add(e.message); return e.code === code; });
-  };
-  await fail(user("x1", { email: "other@example.jp" }), { token });                       // 別のメールアドレス
-  await fail(user("x2", { email: "nurse@example.jp" }), { token: "A".repeat(43) });       // 存在しないコード
-  await fail(user("x2", { email: "nurse@example.jp" }), { token: "short" });              // 形式不正
-  await fail(user("x2", { email: "nurse@example.jp" }), { token: "../../x".padEnd(40, "a") });
-  assert.equal(await count(`facilities/${facilityId}/members`), 1, "拒否された試行で所属が増えない");
-
-  await assert.rejects(service.acceptInvite({ auth: user("x3", { email: "nurse@example.jp", email_verified: false }), data: { token } }), (e) => e.code === "permission-denied");
-  await assert.rejects(service.acceptInvite({ auth: null, data: { token } }), (e) => e.code === "unauthenticated");
-
-  clock.t += LIMITS.inviteTtlMs + 1;                                                        // 期限切れ
-  await fail(user("x4", { email: "nurse@example.jp" }), { token });
-  clock.t -= LIMITS.inviteTtlMs + 1;
-
-  await service.acceptInvite({ auth: user("nurse1", { email: "nurse@example.jp" }), data: { token } });
-  await fail(user("x5", { email: "nurse@example.jp" }), { token });                       // 使用済み
-  assert.equal(messages.size, 1, "失敗理由を区別できない同一メッセージであること");
-  assert.equal(await count(`facilities/${facilityId}/members`), 2);
-});
-
-test("参加: 同じ招待の同時使用は1回だけ成功する", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const { token } = await service.createInvite({ auth: admin, data: { facilityId, email: "nurse@example.jp" } });
-  const nurse = user("nurse1", { email: "nurse@example.jp" });
-  const results = await Promise.allSettled(Array.from({ length: 5 }, () => service.acceptInvite({ auth: nurse, data: { token } })));
-  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
-  assert.equal(await count(`facilities/${facilityId}/members`), 2);
-});
-
-test("参加: 招待で管理者を降格しない / 既に所属している人の所属は変わらない / 停止中の施設には参加できない", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const mk = (email) => service.createInvite({ auth: admin, data: { facilityId, email } });
-
-  const t1 = await mk("adminA@example.jp"); // 管理者自身宛て
-  await service.acceptInvite({ auth: admin, data: { token: t1.token } });
-  assert.equal((await db.doc(`facilities/${facilityId}/members/adminA`).get()).get("role"), "admin");
-
-  // 既に所属している人が招待を使っても、所属(role・作成日時)は変わらず、所属に status は付かない
-  await seedMember(facilityId, "already", "orderer");
-  const before = (await db.doc(`facilities/${facilityId}/members/already`).get()).data();
-  const t2 = await mk("already@example.jp");
-  await service.acceptInvite({ auth: user("already"), data: { token: t2.token } });
-  assert.deepEqual((await db.doc(`facilities/${facilityId}/members/already`).get()).data(), before);
-  // 新しく参加した人の所属は {uid, role, displayName, email, updatedAt} だけ(有効/無効の状態はない)
-  const t4 = await mk("fresh@example.jp");
-  await service.acceptInvite({ auth: user("fresh"), data: { token: t4.token } });
-  const fresh = (await db.doc(`facilities/${facilityId}/members/fresh`).get()).data();
-  assert.deepEqual(Object.keys(fresh).sort(), ["displayName", "email", "role", "uid", "updatedAt"]);
-  assert.equal(fresh.role, "orderer");
-
-  const t3 = await mk("late@example.jp");
-  await db.doc(`facilities/${facilityId}`).update({ status: "suspended" });
-  await assert.rejects(service.acceptInvite({ auth: user("late"), data: { token: t3.token } }), (e) => e.code === "failed-precondition");
-  assert.equal((await db.doc(`facilities/${facilityId}/members/late`).get()).exists, false);
-});
-
-test("招待なしでは参加できない: サービスに招待以外の参加経路は無く、他人の施設IDを指定しても所属は作られない", async () => {
-  const { facilityId } = await setupFacilityWithAdmin();
-  const s = user("stranger");
-  await assert.rejects(service.acceptInvite({ auth: s, data: { facilityId, token: "A".repeat(43) } }), (e) => e.code === "failed-precondition" || e.code === "invalid-argument");
-  await assert.rejects(service.registerFacility({ auth: s, data: { name: "x施設", requestId: uuid(), facilityId } }), (e) => e.code === "invalid-argument");
-  assert.equal((await db.doc(`facilities/${facilityId}/members/stranger`).get()).exists, false);
-});
 
 // ================= Security Rules との整合（クライアントから見た結果） =================
 const as = (uid, claims = {}) => env.authenticatedContext(uid, { email_verified: true, ...claims }).firestore();
@@ -476,13 +346,13 @@ test("クライアント(運営者権限なし)は施設を作成できない", 
   }
 });
 
-test("招待と利用枠は、運営者権限を含むどのクライアントからも読み書きできない（サーバー専用）", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  const { token } = await service.createInvite({ auth: admin, data: { facilityId, email: "nurse@example.jp" } });
+test("旧招待(invites・残っていても使用不能)と利用枠は、運営者権限を含むどのクライアントからも読み書きできない（サーバー専用）", async () => {
+  const { facilityId } = await setupFacilityWithAdmin();
+  await db.doc("invites/legacy-hash").set({ facilityId, email: "nurse@example.jp", role: "orderer", status: "pending" });   // 旧方式で発行された残りのデータ
   for (const c of [as("adminA"), as("stranger"), as("opsAdmin", { platformAdmin: true })]) {
-    await assertFails(getDoc(doc(c, `invites/${hashToken(token)}`)));
+    await assertFails(getDoc(doc(c, "invites/legacy-hash")));
     await assertFails(getDocs(collection(c, "invites")));
-    await assertFails(setDoc(doc(c, `invites/${hashToken("B".repeat(43))}`), { facilityId, email: "x@example.jp", role: "admin", status: "pending" }));
+    await assertFails(setDoc(doc(c, "invites/forged"), { facilityId, email: "x@example.jp", role: "admin", status: "pending" }));
     await assertFails(getDoc(doc(c, "registrationQuota/adminA")));
     await assertFails(setDoc(doc(c, "registrationQuota/adminA"), { count: 0, keys: [] }));
   }
@@ -490,14 +360,11 @@ test("招待と利用枠は、運営者権限を含むどのクライアント�
 
 // ================= 所属の記録 =================
 test("所属ドキュメントに確認済みメールが記録される(利用者管理の表示用)", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
+  const { facilityId } = await setupFacilityWithAdmin();
   assert.equal((await db.doc(`facilities/${facilityId}/members/adminA`).get()).get("email"), "admina@example.jp");
-  const inv = await service.createInvite({ auth: admin, data: { facilityId, email: "New@Example.jp" } });
-  await service.acceptInvite({ auth: user("newbie", { email: "New@Example.jp" }), data: { token: inv.token } });
-  assert.equal((await db.doc(`facilities/${facilityId}/members/newbie`).get()).get("email"), "new@example.jp");
 });
 
-// ================= レート制限・期限切れ招待・複数施設 =================
+// ================= レート制限・複数施設 =================
 test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否され、時間経過で回復し、他ユーザーには影響しない", async () => {
   const a = user("userA");
   const fire = () => service.registerFacility({ auth: a, data: { name: "重複確認クリニック", requestId: uuid() } });
@@ -509,25 +376,6 @@ test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否
   assert.equal((await fire()).status, "duplicate-candidate");
 });
 
-test("レート制限: 招待の受諾の失敗連打は上限で拒否され、発行も呼び出し回数が数えられる", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  await service.createInvite({ auth: admin, data: { facilityId, email: "x@example.jp" } });
-  assert.equal((await db.doc("rateLimits/adminA_createInvite").get()).get("count"), 1);
-  const bad = { auth: user("guess"), data: { token: "A".repeat(43) } };
-  for (let i = 0; i < LIMITS.rateMax.acceptInvite; i++) await rejects(service.acceptInvite(bad), "failed-precondition");
-  await rejects(service.acceptInvite(bad), "resource-exhausted");
-});
-
-test("招待: 期限切れの未使用招待は上限に数えず、管理者が発行できなくなることはない", async () => {
-  const { admin, facilityId } = await setupFacilityWithAdmin();
-  for (let i = 0; i < LIMITS.maxPendingInvitesPerFacility; i++) {
-    await service.createInvite({ auth: admin, data: { facilityId, email: `u${i}@example.jp` } });
-  }
-  clock.t += LIMITS.inviteTtlMs + 1;
-  const r = await service.createInvite({ auth: admin, data: { facilityId, email: "new@example.jp" } });
-  assert.ok(r.token);
-});
-
 test("既存施設に所属するユーザーも、上限(3施設)の範囲で新しい施設を登録でき、元の所属は変わらない", async () => {
   const a = user("userA");
   await seedFacility("existing", "既存クリニック");
@@ -536,24 +384,6 @@ test("既存施設に所属するユーザーも、上限(3施設)の範囲で�
   assert.equal(r.status, "created");
   assert.equal((await db.doc("facilities/existing/members/userA").get()).get("role"), "orderer");
   assert.equal((await db.doc(`facilities/${r.facilityId}/members/userA`).get()).get("role"), "admin");
-});
-
-test("同じメールアドレス(同一アカウント)が複数施設に所属でき、施設ごとに権限が独立する。別アカウントの同メールは参加できない", async () => {
-  const a = user("userA", { email: "dr@example.jp" });
-  const f1 = await setupFacilityWithAdmin("adm1", "施設one");
-  const f2 = await setupFacilityWithAdmin("adm2", "施設two");
-  for (const f of [f1, f2]) {
-    const inv = await service.createInvite({ auth: f.admin, data: { facilityId: f.facilityId, email: "DR@example.jp" } });
-    assert.deepEqual(await service.acceptInvite({ auth: a, data: { token: inv.token } }), { facilityId: f.facilityId });
-  }
-  for (const f of [f1, f2]) {
-    assert.equal((await db.doc(`facilities/${f.facilityId}/members/userA`).get()).get("role"), "orderer");
-  }
-  const mine = await db.collectionGroup("members").where("uid", "==", "userA").get();
-  assert.equal(mine.size, 2);
-  // 別のUIDでも、メール確認済みで同じメールなら招待は使える仕様(メール=本人確認の根拠)。未確認は拒否される
-  const inv = await service.createInvite({ auth: f1.admin, data: { facilityId: f1.facilityId, email: "other@example.jp" } });
-  await rejects(service.acceptInvite({ auth: user("userX", { email: "other@example.jp", email_verified: false }), data: { token: inv.token } }), "permission-denied");
 });
 
 test("checkFacilityName: 候補は最大5件・有効な施設の名前のみ", async () => {
@@ -639,20 +469,20 @@ async function seedFull(uid = "adminD", name = "削除テスト施設") {
   await db.doc(`facilities/${facilityId}/facilityDealers/d1`).set({ name: "A商会" });
   await db.doc(`facilities/${facilityId}/displaySettings/s1`).set({ x: 1 });
   await db.doc(`facilities/${facilityId}/auditLogs/l1`).set({ x: 1 });
-  const inv = await service.createInvite({ auth: admin, data: { facilityId, email: "x@example.jp" } });
-  return { admin, facilityId, inv };
+  await db.doc(`invites/legacy-${facilityId}`).set({ facilityId, email: "x@example.jp", status: "pending" });   // 旧方式の残りのデータ
+  return { admin, facilityId };
 }
 
 test("deleteFacility: 管理者が施設名を入力して削除すると、その施設の配下・招待・利用枠の1件ぶんだけが消え、他施設は変わらない", async () => {
   const other = await seedFull("adminO", "他の施設");
-  const { admin, facilityId, inv } = await seedFull();
+  const { admin, facilityId } = await seedFull();
   const otherBefore = [(await sub(other.facilityId, "orderers")).size, (await sub(other.facilityId, "members")).size];
   assert.equal((await db.doc("registrationQuota/adminD").get()).get("count"), 1);
   const r = await service.deleteFacility({ auth: admin, data: { facilityId } });
   assert.deepEqual(r, { status: "deleted", facilityId });
   assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, false);
   for (const p of ["members", "orderers", "adoptedIols", "facilityDealers", "displaySettings", "auditLogs"]) assert.equal((await sub(facilityId, p)).size, 0, p);
-  assert.equal((await db.doc(`invites/${hashToken(inv.token)}`).get()).exists, false, "招待も消える");
+  assert.equal((await db.doc(`invites/legacy-${facilityId}`).get()).exists, false, "旧方式の招待の残りも消える");
   assert.equal((await db.doc("registrationQuota/adminD").get()).get("count"), 0, "利用枠を戻す");
   // 他施設・他ユーザーの利用枠は変わらない
   assert.equal((await db.doc(`facilities/${other.facilityId}`).get()).get("name"), "他の施設");
