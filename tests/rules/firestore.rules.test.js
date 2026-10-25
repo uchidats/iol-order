@@ -509,3 +509,139 @@ test("注文履歴: 自施設の所属メンバーは「新しい順・50件」�
   await assertFails(updateDoc(doc(as("adminA"), "facilities/fA/orders/ord1"), { status: "x" }));
   await assertFails(deleteDoc(doc(as("adminA"), "facilities/fA/orders/ord1")));
 });
+
+// ---------- 役割の拡張(副管理者・代行入力者)と参加待ち ----------
+async function seedRoles() {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "facilities/fA/members/subA"), member("subA", "subadmin"));
+    await setDoc(doc(db, "facilities/fA/members/proxyA"), member("proxyA", "proxy"));
+    await setDoc(doc(db, "facilities/fA/members/viewerA"), member("viewerA", "viewer"));   // 未定義の役割
+    await setDoc(doc(db, "facilities/fB/members/subB"), member("subB", "subadmin"));
+    await setDoc(doc(db, "facilities/fS/members/subS"), member("subS", "subadmin"));
+    await setDoc(doc(db, "facilities/fA/auditLogs/l1"), { action: "member.remove" });
+    await setDoc(doc(db, "pendingMembers/fA_h1"), { facilityId: "fA", email: "new@example.jp", name: "新人", role: "orderer", status: "pending" });
+    await setDoc(doc(db, "pendingMembers/fB_h2"), { facilityId: "fB", email: "new@example.jp", name: "新人", role: "proxy", status: "pending" });
+  });
+}
+const settingsBody = {
+  orderers: { facilityId: "fA", name: "副管理者が追加" },
+  adopted: { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true },
+  dealer: { facilityId: "fA", dealerId: "d", name: "n", orderEmails: ["a@example.jp"] },
+  display: { makerOrder: ["ALCON"], modelOrder: ["alcon-cna0t0"] }
+};
+
+test("副管理者: 自施設の施設設定(担当医・採用IOL・ディーラー・表示順)を変更でき、利用者一覧・操作履歴・注文を読める", async () => {
+  await seedRoles();
+  const db = as("subA");
+  await assertSucceeds(getDoc(doc(db, "facilities/fA")));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/orderers/s1"), settingsBody.orderers));
+  await assertSucceeds(deleteDoc(doc(db, "facilities/fA/orderers/o1")));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/adoptedIols/hoya-xy1"), settingsBody.adopted));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/facilityDealers/s1"), settingsBody.dealer));
+  await assertSucceeds(deleteDoc(doc(db, "facilities/fA/facilityDealers/d1")));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), settingsBody.display));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/members")));
+  await assertSucceeds(getDoc(doc(db, "facilities/fA/members/adminA")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/auditLogs")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/orders")));
+});
+
+test("副管理者: 施設名・所在地は変更できず、所属の作成・変更・削除(権限の昇格を含む)・注文の書き込み・採用IOLの削除もできない", async () => {
+  await seedRoles();
+  const db = as("subA");
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { name: "変更" }));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { location: { lat: 35, lng: 139 }, geoRadiusM: 100 }));
+  await assertFails(deleteDoc(doc(db, "facilities/fA")));
+  await assertFails(updateDoc(doc(db, "facilities/fA/members/subA"), { role: "admin" }));
+  await assertFails(updateDoc(doc(db, "facilities/fA/members/ordA"), { role: "subadmin" }));
+  await assertFails(setDoc(doc(db, "facilities/fA/members/newbie"), member("newbie", "orderer")));
+  await assertFails(deleteDoc(doc(db, "facilities/fA/members/ordA")));
+  await assertFails(deleteDoc(doc(db, "facilities/fA/members/adminA")));
+  await assertFails(setDoc(doc(db, "facilities/fA/orders/x"), { status: "received" }));
+  await assertFails(deleteDoc(doc(db, "facilities/fA/adoptedIols/a1")));
+  await assertFails(setDoc(doc(db, "facilities/fA/auditLogs/x"), { action: "x" }));
+});
+
+test("副管理者: 他施設・停止中の施設は読み書きできない", async () => {
+  await seedRoles();
+  const db = as("subA");
+  await assertFails(getDoc(doc(db, "facilities/fB")));
+  await assertFails(getDocs(collection(db, "facilities/fB/members")));
+  await assertFails(setDoc(doc(db, "facilities/fB/orderers/s1"), { facilityId: "fB", name: "x" }));
+  await assertFails(setDoc(doc(db, "facilities/fA/orderers/s2"), { facilityId: "fB", name: "x" }));
+  const dbS = as("subS");
+  await assertFails(getDoc(doc(dbS, "facilities/fS")));
+  await assertFails(setDoc(doc(dbS, "facilities/fS/orderers/s1"), { facilityId: "fS", name: "x" }));
+});
+
+test("代行入力者: 注文者と同じ(自施設の設定・注文を読めるが、設定の変更・利用者一覧・操作履歴は不可)", async () => {
+  await seedRoles();
+  const db = as("proxyA");
+  await assertSucceeds(getDoc(doc(db, "facilities/fA")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/orderers")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/adoptedIols")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/facilityDealers")));
+  await assertSucceeds(getDocs(collection(db, "facilities/fA/orders")));
+  await assertSucceeds(getDoc(doc(db, "facilities/fA/members/proxyA")));
+  await assertFails(getDoc(doc(db, "facilities/fA/members/adminA")));
+  await assertFails(getDocs(collection(db, "facilities/fA/members")));
+  await assertFails(getDocs(collection(db, "facilities/fA/auditLogs")));
+  await assertFails(setDoc(doc(db, "facilities/fA/orderers/p1"), { facilityId: "fA", name: "x" }));
+  await assertFails(setDoc(doc(db, "facilities/fA/facilityDealers/p1"), settingsBody.dealer));
+  await assertFails(setDoc(doc(db, "facilities/fA/displaySettings/iolOrder"), settingsBody.display));
+  await assertFails(updateDoc(doc(db, "facilities/fA"), { name: "変更" }));
+  await assertFails(getDoc(doc(db, "facilities/fB")));
+});
+
+test("未定義の役割の所属は、所属として扱わない(施設のデータを読めない)", async () => {
+  await seedRoles();
+  const db = as("viewerA");
+  await assertFails(getDoc(doc(db, "facilities/fA")));
+  await assertFails(getDocs(collection(db, "facilities/fA/orderers")));
+  await assertFails(getDocs(collection(db, "facilities/fA/orders")));
+});
+
+test("所属確認クエリ: 副管理者・代行入力者も自分の所属を取得できる", async () => {
+  await seedRoles();
+  for (const uid of ["subA", "proxyA"]) {
+    const r = await assertSucceeds(getDocs(query(collectionGroup(as(uid), "members"), where("uid", "==", uid))));
+    assert.equal(r.size, 1);
+  }
+});
+
+test("運営者は新しい役割の所属を作成でき、未定義の役割は作成できない", async () => {
+  const db = platform();
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/members/n1"), member("n1", "subadmin")));
+  await assertSucceeds(setDoc(doc(db, "facilities/fA/members/n2"), member("n2", "proxy")));
+  await assertFails(setDoc(doc(db, "facilities/fA/members/n3"), member("n3", "viewer")));
+});
+
+test("参加待ち: その施設の管理者・副管理者だけが読める(施設で絞った一覧のみ)。書き込みはどのクライアントからもできない", async () => {
+  await seedRoles();
+  const q = (db, fid) => getDocs(query(collection(db, "pendingMembers"), where("facilityId", "==", fid)));
+  const invitee = () => as("newbie", { email: "new@example.jp", email_verified: true });
+  for (const uid of ["adminA", "subA"]) {
+    await assertSucceeds(getDoc(doc(as(uid), "pendingMembers/fA_h1")));
+    const r = await assertSucceeds(q(as(uid), "fA"));
+    assert.equal(r.size, 1);
+    await assertFails(getDoc(doc(as(uid), "pendingMembers/fB_h2")));
+    await assertFails(q(as(uid), "fB"));
+    await assertFails(getDocs(collection(as(uid), "pendingMembers")));   // 施設で絞らない一覧は不可
+  }
+  for (const uid of ["ordA", "proxyA", "viewerA", "stranger", "subS"]) {
+    await assertFails(getDoc(doc(as(uid), "pendingMembers/fA_h1")));
+    await assertFails(q(as(uid), "fA"));
+  }
+  // 本人(登録されたメールでログインした人)でも、クライアントから直接は読めない(本人宛てはサーバー経由)
+  await assertFails(getDoc(doc(invitee(), "pendingMembers/fA_h1")));
+  await assertFails(getDocs(query(collection(invitee(), "pendingMembers"), where("email", "==", "new@example.jp"))));
+  await assertFails(getDoc(doc(anon(), "pendingMembers/fA_h1")));
+  await assertSucceeds(getDoc(doc(platform(), "pendingMembers/fA_h1")));
+  const body = { facilityId: "fA", email: "x@example.jp", name: "x", role: "orderer", status: "pending" };
+  for (const db of [as("adminA"), as("subA"), as("ordA"), invitee(), platform()]) {
+    await assertFails(setDoc(doc(db, "pendingMembers/fA_new"), body));
+    await assertFails(updateDoc(doc(db, "pendingMembers/fA_h1"), { status: "accepted" }));
+    await assertFails(deleteDoc(doc(db, "pendingMembers/fA_h1")));
+  }
+});

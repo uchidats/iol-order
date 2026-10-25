@@ -28,17 +28,31 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/facilities/$(fid)).data.status == 'active';
     }
 
-    // 所属（role が admin/orderer の所属ドキュメントがある）で、施設も有効。
+    // 役割(functions/src/roles.js と一致させる。tests/rules-roles-sync.test.js が検証)
+    //  admin    = 管理者     : すべて(施設名・所在地の変更、施設削除、管理者・副管理者の権限管理を含む)
+    //  subadmin = 副管理者   : 施設設定(担当医・採用IOL・ディーラー・表示順)、利用者管理(注文者・代行入力者のみ)、注文
+    //  orderer  = 注文者     : 注文
+    //  proxy    = 代行入力者 : 注文(注文者と同じ権限。注文の記録で役割を区別する)
+    function memberRoles() { return ['admin', 'subadmin', 'orderer', 'proxy']; }
+    function managerRoles() { return ['admin', 'subadmin']; }
+
+    // 所属（上記いずれかの role の所属ドキュメントがある）で、施設も有効。
     // 所属に有効/無効の状態はない。所属が削除されると、ログイン中のセッションでも次のリクエストから拒否される。
     function isMember(fid) {
       return signedIn()
         && exists(memberPath(fid))
-        && get(memberPath(fid)).data.role in ['admin', 'orderer']
+        && get(memberPath(fid)).data.role in memberRoles()
         && facilityIsActive(fid);
     }
 
+    // 管理者のみ(施設名・所在地の変更など)
     function isFacilityAdmin(fid) {
       return isMember(fid) && get(memberPath(fid)).data.role == 'admin';
+    }
+
+    // 管理者または副管理者(施設設定・利用者一覧の閲覧)
+    function isFacilityManager(fid) {
+      return isMember(fid) && get(memberPath(fid)).data.role in managerRoles();
     }
 
     function stringIn(v, min, max) {
@@ -126,41 +140,41 @@ service cloud.firestore {
         return request.resource.data.keys().hasOnly(['uid', 'role', 'displayName', 'email', 'updatedAt'])
           && request.resource.data.keys().hasAll(['uid', 'role'])
           && request.resource.data.uid == uid
-          && request.resource.data.role in ['admin', 'orderer'];
+          && request.resource.data.role in memberRoles();
       }
 
       match /members/{uid} {
-        // 自分の所属は読める(ログイン後の所属確認用)。他人の所属は施設管理者のみ。
-        allow get: if signedIn() && (request.auth.uid == uid || isFacilityAdmin(fid) || isPlatformAdmin());
-        allow list: if isFacilityAdmin(fid) || isPlatformAdmin();
+        // 自分の所属は読める(ログイン後の所属確認用)。他人の所属は管理者・副管理者のみ。
+        allow get: if signedIn() && (request.auth.uid == uid || isFacilityManager(fid) || isPlatformAdmin());
+        allow list: if isFacilityManager(fid) || isPlatformAdmin();
         allow create, update: if isPlatformAdmin() && validMemberShape(uid);
         allow delete: if isPlatformAdmin();
       }
 
-      // 管理操作の記録（追記のみ。施設管理者と運営者だけが読める。書き込みはCloud Functionsのみ＝クライアントは作成・変更・削除できない）
+      // 管理操作の記録（追記のみ。管理者・副管理者と運営者だけが読める。書き込みはCloud Functionsのみ＝クライアントは作成・変更・削除できない）
       match /auditLogs/{logId} {
-        allow read: if isFacilityAdmin(fid) || isPlatformAdmin();
+        allow read: if isFacilityManager(fid) || isPlatformAdmin();
         allow write: if false;
       }
 
-      // 注文者（施設管理者のみ変更・削除可）
+      // 担当医マスター（コレクション名は互換のため orderers。管理者・副管理者が変更・削除可）
       match /orderers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'name', 'email', 'sortOrder', 'updatedAt'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 50)
           && (!('email' in request.resource.data) || emailOk(request.resource.data.email))
           && validSortOrder(request.resource.data);
-        // 注文者マスターのみ、自施設の施設管理者も削除できる（所属・認証ユーザー・注文履歴には影響しない）
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+        // 担当医マスターは、自施設の管理者・副管理者も削除できる（所属・認証ユーザー・注文履歴には影響しない）
+        allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 
       // 採用IOL（ドキュメントID = 共通IOLマスターのID。マスターに無いIDは登録不可）
       match /adoptedIols/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'catalogIolId', 'dealerId', 'enabled', 'updatedAt'])
           && request.resource.data.keys().hasAll(['facilityId', 'catalogIolId', 'enabled'])
           && request.resource.data.facilityId == fid
@@ -174,7 +188,7 @@ service cloud.firestore {
       // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
@@ -183,21 +197,21 @@ service cloud.firestore {
           && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
           && validSortOrder(request.resource.data);
-        // ディーラーに有効/無効はない。自施設の施設管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+        // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
+        allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 
       // 表示設定(施設ごとのIOLモデルの表示順)。順番だけの設定で、採用状態・注文内容には影響しない。
-      // 読めるのは所属メンバー(注文画面が使う)、書けるのは自施設の施設管理者のみ(設定担当者の権限は未実装)。
+      // 読めるのは所属メンバー(注文画面が使う)、書けるのは自施設の管理者・副管理者のみ。
       match /displaySettings/{docId} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityAdmin(fid))
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
           && docId == 'iolOrder'
           && request.resource.data.keys().hasOnly(['makerOrder', 'modelOrder', 'updatedAt'])
           && request.resource.data.keys().hasAll(['makerOrder', 'modelOrder'])
           && request.resource.data.makerOrder is list && request.resource.data.makerOrder.size() <= 50
           && request.resource.data.modelOrder is list && request.resource.data.modelOrder.size() <= 200;
-        allow delete: if isPlatformAdmin() || isFacilityAdmin(fid);
+        allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 
       // 注文（サーバーのみが作成。クライアントは読取のみ）
@@ -210,6 +224,13 @@ service cloud.firestore {
     // 施設のセルフ登録・招待参加はサーバー側(Cloud Functions / Admin SDK)専用。クライアントからは一切読み書きできない
     match /invites/{inviteId} {
       allow read, write: if false;
+    }
+    // 参加待ち(利用者管理の「追加」で事前登録された利用者。ドキュメントID = {施設ID}_{メールのハッシュ})。
+    // 作成・変更・削除・参加の承認はサーバー(Cloud Functions)のみ。メール確認済み・30日の期限の検証もサーバーで行う。
+    // 読めるのは、その施設の管理者・副管理者と運営者のみ(一覧は facilityId で絞った問い合わせだけが通る)。本人宛ての参加待ちはサーバー経由で返す。
+    match /pendingMembers/{id} {
+      allow read: if isPlatformAdmin() || (signedIn() && resource.data.facilityId is string && isFacilityManager(resource.data.facilityId));
+      allow write: if false;
     }
     match /registrationQuota/{uid} {
       allow read, write: if false;
