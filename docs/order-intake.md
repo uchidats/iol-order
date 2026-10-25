@@ -37,8 +37,8 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 `draft`（画面上のみ）→ `accepted`（今回ここまで）→ `notification_pending` → `notified` / `notification_failed`（将来。`ORDER_STATUS` に定義済み）。今回作る注文は `accepted` のみで、画面でも「発注済み」とは表示しない（「開発用受付・ディーラー未通知」）。
 完了画面と注文履歴の詳細は、サーバーが保存した注文(明細・担当医・発注先・備考・状態)から表示する。
 
-### メール送信結果(将来。案)
-発注先ごとに1件、`notifications: [{ dealerId, dealerName, status: "pending"|"sent"|"failed"|"skipped", at, error }]` を注文ドキュメントに追記する(Functions のみ書き込み)。注文全体の `status` は全件 `sent` で `notified`、1件でも `failed` なら `notification_failed`。履歴の詳細は、この配列があるときだけ「メール送信」欄に表示する(`describeNotifications`。今は保存されていない)。メールアドレス・本文は保存しない。
+### メール送信(実装済み・送信停止中)
+ディーラーへの注文メール・注文控え・送信状態の記録は `docs/order-mail.md`。注文と同じトランザクションで送信待ちのメールを保存し、送信は別の処理が行う。
 
 ## 発注先の一致
 - 画面は、確認画面に表示した発注先のIDを、1社の自動選択を含めて必ず送る(発注先なしで確認した場合は `dealerId: null`)。

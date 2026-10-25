@@ -50,6 +50,11 @@ export function createFirestoreRepository(db, fs) {
       }
     },
     listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
+    /** 施設のメール設定(注文控え・署名)。管理者・副管理者だけが読める。未設定は null */
+    async getMailSettings(facilityId) {
+      const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "settings", "mail"));
+      return snap.exists() ? snap.data() : null;
+    },
     /** 所属ユーザー（管理者・副管理者のみ読める）。id = uid */
     listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id })),
     /** 利用者管理の表示順(管理者・副管理者のみ読める)。未設定は null */
@@ -133,6 +138,11 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
     saveMemberOrder: (facilityId, order) => fs.setDoc(
       fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"),
       { order, updatedAt: fs.serverTimestamp() }),
+    /** 施設のメール設定の保存(管理者・副管理者のみ。Rules が検証する)。変更者の記録(updatedBy)も付ける */
+    saveMailSettings: async (facilityId, data) => {
+      const by = trackActor ? { updatedBy: actorUid() } : {};
+      await fs.setDoc(fs.doc(db, "facilities", facilityId, "settings", "mail"), { ...data, updatedAt: fs.serverTimestamp(), ...by });
+    },
     deleteOrderer: (facilityId, id) => remove(facilityId, "orderers", id),
     /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
     deleteDealer: (facilityId, id) => remove(facilityId, "facilityDealers", id),

@@ -5,7 +5,7 @@
  *   ディーラー宛(発注用メール)・固定の確認先・発注者(ログインしたユーザー)宛は、別の概念として扱う(order-mail.js)。
  * - `confirmed: true` は、現行の Google Forms + GAS の形式を再現したものであることを表す(2026-10-25 に利用者から仕様を受領)。
  *   `confirmed: false` の暫定形式は、実送信に使ってはいけない。
- * - 将来は、この形式を施設ごとの設定(Firestore)から読み込めるようにする。今回は設定UIを作らず、コード上の定義だけ。
+ * - 施設ごとの署名・ディーラーの正式表記は、施設設定(Firestore)から読む(profileFromSettings)。コードには書かない。
  * - 担当医への確認メールは対象外。
  */
 
@@ -26,7 +26,7 @@ export const GAS_CLOSING = Object.freeze([
  * GAS形式の形式を作る。**施設の住所・署名(signature)は施設ごとの設定**(未指定なら署名なし)。
  * 件名の「施設名」は、生成時に施設名から入れる(固定しない)。
  */
-export function createGasProfile({ id, signature = [], dealerDisplayNames = {} }) {
+export function createGasProfile({ id, signature = [], dealerDisplayNames = {}, sendToOrderer = true }) {
   return Object.freeze({
     id, confirmed: true, format: "gas-questions",
     subjectTemplate: "【{facility}】IOL注文：ご確認のほどよろしくお願いします",
@@ -36,24 +36,38 @@ export function createGasProfile({ id, signature = [], dealerDisplayNames = {} }
     signatureConfigured: signature.length > 0,
     // 宛名に使うディーラーの正式表記(キーは facilityDealers のID)。登録データの名称と異なる場合に、登録データを変えずに宛名だけ正式表記にする
     dealerDisplayNames: Object.freeze({ ...dealerDisplayNames }),
-    sendToOrderer: true   // Google Forms の回答者(=発注者)のメールアドレスも宛先(To)に含める
+    sendToOrderer   // true: Google Forms の回答者(=発注者)のメールアドレスも宛先(To)に含める(旧GASの動作)
   });
 }
-
-/** 立川病院の署名(施設の情報。他の施設には使わない) */
-export const TACHIKAWA_GAS_PROFILE = createGasProfile({
-  id: "tachikawa-gas",
-  signature: ["〒190-8531 東京都立川市錦町4-2-22", "国家公務員共済組合連合会　立川病院　眼科"],
-  // 現行GASの正式表記は「栗原医療器械店」。Firestore の登録名は「栗原医療機械店」(登録データは変更しない)
-  dealerDisplayNames: { "1Fc1MIFpWjR6bwjuG1sS": "栗原医療器械店" }
-});
 
 /** 署名が未設定の施設の既定(GAS形式。住所・署名は出さず、警告を付ける) */
 export const DEFAULT_GAS_PROFILE = createGasProfile({ id: "gas-default" });
 
-const BY_FACILITY = Object.freeze({ "tachikawa-hospital": TACHIKAWA_GAS_PROFILE });
+/** 施設設定(メール)の上限。画面・Rules・サーバーで同じ値を使う */
+export const MAIL_SETTINGS_LIMITS = Object.freeze({ signatureMax: 500, signatureLines: 10, mailNameMax: 100 });
 
-/** 施設の形式。署名の定義がない施設は、署名なしのGAS形式(立川病院の住所・署名は使わない) */
-export function resolveMailProfile(facilityId) {
-  return BY_FACILITY[facilityId] || DEFAULT_GAS_PROFILE;
+/** 署名(施設設定の自由記述)を行の配列にする。前後の空行は除き、最大行数まで */
+export function signatureLines(text) {
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n").map(l => l.replace(/\s+$/, ""));
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  return lines.slice(0, MAIL_SETTINGS_LIMITS.signatureLines);
+}
+
+/**
+ * 施設設定から形式を作る(コードに施設ごとの署名・正式表記を書かない)。
+ * - 署名: 施設設定 `settings/mail` の signature
+ * - 宛名の正式表記: 各ディーラーの mailName(未設定なら登録名)
+ * - 宛先はディーラーの発注用メールだけ(発注者を To に入れない。控えは施設設定の「注文控えメール」で別に送る)
+ * @param {{signature?:string}|null} mailSettings
+ * @param {Array<{id:string, mailName?:string}>|Record<string,{mailName?:string}>} dealers
+ */
+export function profileFromSettings(mailSettings, dealers = []) {
+  const list = Array.isArray(dealers) ? dealers : Object.entries(dealers || {}).map(([id, d]) => ({ id, ...d }));
+  const names = {};
+  for (const d of list) {
+    const n = typeof d.mailName === "string" ? d.mailName.replace(/[\r\n]+/g, " ").trim() : "";
+    if (n) names[d.id] = n.slice(0, MAIL_SETTINGS_LIMITS.mailNameMax);
+  }
+  return createGasProfile({ id: "facility-settings", signature: signatureLines(mailSettings && mailSettings.signature), dealerDisplayNames: names, sendToOrderer: false });
 }

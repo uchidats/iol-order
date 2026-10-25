@@ -256,3 +256,26 @@ test("施設設定の変更履歴: 画面と同じ書き込み(Rules を通し�
   assert.ok(json.includes("z***@other.jp"));
   assert.ok(!json.includes("z@other.jp") && !json.includes("a@one.jp"), "アドレスそのものは記録しない");
 });
+
+test("注文メール: createOrder が送信待ちを保存し、トリガーが処理する。送信機能が停止中(MAIL_SENDING_ENABLED=false)なので送らずに held(実際のメールは送らない)", async () => {
+  const owner = await createUser("mail-owner@example.jp", { verified: true });
+  const reg = await call("registerFacility", { name: "E2Eメール医院", requestId: "mail-e2e-register-01" }, owner.idToken);
+  const fid = reg.body.result.facilityId;
+  await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
+  const put = (p, fields) => fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${p}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" }, body: JSON.stringify({ fields })
+  });
+  assert.equal((await put(`facilities/${fid}/facilityDealers/dA`, { facilityId: { stringValue: fid }, name: { stringValue: "A商会" }, orderEmails: { arrayValue: { values: [{ stringValue: "order-a@example.jp" }] } } })).status, 200);
+  assert.equal((await put(`facilities/${fid}/settings/mail`, { copyEnabled: { booleanValue: true }, copyEmail: { stringValue: "info@example.jp" } })).status, 200);
+  const ok = await call("createOrder", { facilityId: fid, requestId: "mail-e2e-request-0001", lines: [{ modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), doctorId: "o1", dealerId: "dA" }] }, owner.idToken);
+  assert.equal(ok.http, 200);
+  const oid = ok.body.result.orderId;
+  const status = async (m) => ((await getDoc(`facilities/${fid}/orders/${oid}/mails/${m}`)) || { fields: {} }).fields.status?.stringValue;
+  let st = [];
+  for (let i = 0; i < 40; i++) { st = [await status("d_dA"), await status("copy")]; if (st.every(s => s === "held")) break; await new Promise(r => setTimeout(r, 250)); }
+  assert.deepEqual(st, ["held", "held"], "ディーラー宛て・注文控えとも未送信(停止中)");
+  const order = await getDoc(`facilities/${fid}/orders/${oid}`);
+  assert.equal(order.fields.status.stringValue, "accepted", "停止中は「受付済み(ディーラー未通知)」のまま");
+  assert.deepEqual(order.fields.notifications.arrayValue.values.map(v => v.mapValue.fields.status.stringValue), ["held", "held"]);
+});

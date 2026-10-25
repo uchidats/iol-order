@@ -95,3 +95,11 @@ test("診断用の認証情報: authId はサービスアカウントのとき�
 test("updatedBy の変更だけでは記録しない(変更内容の項目に含めない)", () => {
   assert.equal(describeSettingChange({ name: "A", updatedBy: "x" }, { name: "A", updatedBy: "y" }), null);
 });
+
+test("施設のメール設定(settings/mail)の変更も記録する: 注文控えの送信先は伏せ字、ON/OFF・署名の変更", () => {
+  const d = describeSettingChange({ copyEnabled: false, copyEmail: "" }, { copyEnabled: true, copyEmail: "info@senju-eye-clinic.jp", signature: "署名" });
+  assert.deepEqual(d.changes.copyEnabled, { before: false, after: true });
+  assert.equal(d.changes.copyEmail.after.masked, "i***@senju-eye-clinic.jp");
+  assert.ok(!JSON.stringify(d).includes("info@"));
+  assert.deepEqual(d.changes.signature, { before: null, after: "署名" });
+});

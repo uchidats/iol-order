@@ -1,4 +1,4 @@
-// IOLマスター・度数フィルタを、Cloud Functions 用に functions/src/ へ複製する。
+// IOLマスター・度数フィルタ・発注メールの生成を、Cloud Functions 用に functions/src/ へ複製する。
 //   npm run sync:catalog
 // Cloud Functions のデプロイには functions/ 配下しか含まれないため、クライアント(src/)と同じ定義を複製して使う。
 // 複製が元と食い違っていないことは tests/functions-catalog-sync.test.js が検査する。
@@ -11,7 +11,10 @@ const HEADER = (from) =>
 
 const copies = [
   ["src/data/iol-models.js", "functions/src/iol-catalog.js", (s) => s],
-  ["src/domain/power-filter.js", "functions/src/power-filter.js", (s) => s.replace('"../data/iol-models.js"', '"./iol-catalog.js"')]
+  ["src/domain/power-filter.js", "functions/src/power-filter.js", (s) => s.replace('"../data/iol-models.js"', '"./iol-catalog.js"')],
+  // 発注メールの件名・本文の生成(画面のプレビュー・管理スクリプトと、Cloud Functions の実送信で同じものを使う)。相対パスはそのまま
+  ...["order-mail.js", "order-mail-profiles.js", "order-history.js", "order-validation.js", "lens-labels.js"]
+    .map(f => [`src/domain/${f}`, `functions/src/shared/${f}`, (s) => s])
 ];
 
 export function renderCopies() {

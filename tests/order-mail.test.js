@@ -98,7 +98,14 @@ test("暫定テンプレートは正式版として扱わない: 各メールに
 });
 
 // ================= 現行GAS(立川病院)形式の再現 =================
-import { TACHIKAWA_GAS_PROFILE, GENERIC_DRAFT_PROFILE, DEFAULT_GAS_PROFILE, createGasProfile, resolveMailProfile } from "../src/domain/order-mail-profiles.js";
+import { GENERIC_DRAFT_PROFILE, DEFAULT_GAS_PROFILE, createGasProfile, profileFromSettings, signatureLines, MAIL_SETTINGS_LIMITS } from "../src/domain/order-mail-profiles.js";
+
+// 旧GAS(立川病院)の形式を再現したテスト用の形式。実際の施設の署名・宛名は、コードではなく施設設定(settings/mail・ディーラーの mailName)で入力する
+const TACHIKAWA_GAS_PROFILE = createGasProfile({
+  id: "tachikawa-gas",
+  signature: ["〒190-8531 東京都立川市錦町4-2-22", "国家公務員共済組合連合会　立川病院　眼科"],
+  dealerDisplayNames: { "1Fc1MIFpWjR6bwjuG1sS": "栗原医療器械店" }
+});
 
 const KURIHARA = { id: "dK", name: "栗原医療器械店" };
 const gasSettings = { dK: { name: "栗原医療器械店", orderEmails: ["kurihara-order@example.jp"], usageReportEmails: ["kurihara-report@example.jp"] } };
@@ -173,9 +180,20 @@ test("GAS形式: 発注者のメールが記録されていない場合は警告
   assert.deepEqual(p.mails[1].recipients.orderer, []);
 });
 
-test("形式は施設ごと: 立川病院の署名は立川病院だけ。他の施設は署名なしのGAS形式。形式の定義にメールアドレスは含まれない", () => {
-  assert.equal(resolveMailProfile("tachikawa-hospital"), TACHIKAWA_GAS_PROFILE);
-  assert.equal(resolveMailProfile("other-facility"), DEFAULT_GAS_PROFILE);
+test("形式は施設設定から作る: 署名は settings/mail、宛名の正式表記はディーラーの mailName。宛先は発注用メールだけ(発注者を入れない)。コードに施設の署名はない", async () => {
+  const p = profileFromSettings({ signature: "\n〒190-8531 東京都立川市錦町4-2-22\r\n国家公務員共済組合連合会　立川病院　眼科\n\n" }, [{ id: "1Fc1MIFpWjR6bwjuG1sS", name: "栗原医療機械店", mailName: " 栗原医療器械店 " }, { id: "x", name: "別" }]);
+  assert.deepEqual([...p.signature], [...TACHIKAWA_GAS_PROFILE.signature]);
+  assert.deepEqual({ ...p.dealerDisplayNames }, { "1Fc1MIFpWjR6bwjuG1sS": "栗原医療器械店" });
+  assert.equal(p.sendToOrderer, false);
+  assert.equal(p.confirmed, true);
+  assert.deepEqual([...profileFromSettings(null, {}).signature], [], "未設定は署名なし");
+  assert.deepEqual({ ...profileFromSettings({}, { d1: { mailName: "正式" } }).dealerDisplayNames }, { d1: "正式" }, "ディーラーは配列でも、IDをキーにした形でもよい");
+  assert.equal(signatureLines("a\n".repeat(30)).length, MAIL_SETTINGS_LIMITS.signatureLines);
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("../src/domain/order-mail-profiles.js", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /立川|190-8531|1Fc1MIFp/, "施設の署名・ディーラーIDをコードに書かない");
+  const m = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, profile: profileFromSettings({ signature: "署名" }, settings) }).mails[0];
+  assert.deepEqual(m.to, ["order-a@example.jp"], "発注者は宛先に入らない(控えは別のメール)");
   assert.deepEqual(DEFAULT_GAS_PROFILE.signature, []);
   assert.equal(isTemplateConfirmed(TACHIKAWA_GAS_PROFILE), true);
   assert.equal(isTemplateConfirmed(GENERIC_DRAFT_PROFILE), false);
@@ -188,7 +206,7 @@ test("形式は施設ごと: 立川病院の署名は立川病院だけ。他の
 });
 
 test("他の施設: 件名は自施設名、立川病院の住所・署名は出ない(署名未設定の警告)。施設ごとの署名を設定できる", () => {
-  const other = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, facilityName: "みどり眼科", profile: resolveMailProfile("fac-other") }).mails[0];
+  const other = buildOrderMailPreview(order([line(1, A)]), { dealers: settings, facilityName: "みどり眼科", profile: DEFAULT_GAS_PROFILE }).mails[0];
   assert.equal(other.subject, "【みどり眼科】IOL注文：ご確認のほどよろしくお願いします");
   assert.ok(other.body.startsWith("A商会御中"));
   assert.ok(other.body.includes("上記の眼内レンズを注文させていただきたく存じます。"));
@@ -217,9 +235,8 @@ test("トーリック型番は該当する明細だけ表示(空欄の項目は�
 });
 
 // ================= 立川病院の実際のID・正式表記・本文の欠落/混入 =================
-test("立川病院: 実際の施設ID(tachikawa-hospital)とディーラーID(登録データ)に紐付く。宛名は正式表記「栗原医療器械店」(登録名「機械」は変更しない)", () => {
-  const profile = resolveMailProfile("tachikawa-hospital");
-  assert.equal(profile, TACHIKAWA_GAS_PROFILE);
+test("宛名の正式表記: 登録名(栗原医療機械店)と異なる正式表記(栗原医療器械店)を、登録データを変えずに宛名に使う", () => {
+  const profile = TACHIKAWA_GAS_PROFILE;
   const REAL_DEALER = { id: "1Fc1MIFpWjR6bwjuG1sS", name: "栗原医療機械店" };   // Firestore の登録(読み取りで確認した値)
   const p = buildOrderMailPreview(order([line(1, REAL_DEALER)]), {
     facilityName: "立川病院", profile, confirmationEmails: ["confirm@example.jp"],
@@ -233,7 +250,7 @@ test("立川病院: 実際の施設ID(tachikawa-hospital)とディーラーID(�
   assert.equal(m.dealerName, "栗原医療器械店");
   assert.equal(m.status, "ready");
   // 他の施設・他のディーラーには、立川病院の署名も正式表記も使われない
-  const other = buildOrderMailPreview(order([line(1, { id: "x1", name: "別商会" })]), { facilityName: "別眼科", profile: resolveMailProfile("fac-other"), dealers: { x1: { name: "別商会", orderEmails: ["o@example.jp"] } } }).mails[0];
+  const other = buildOrderMailPreview(order([line(1, { id: "x1", name: "別商会" })]), { facilityName: "別眼科", profile: DEFAULT_GAS_PROFILE, dealers: { x1: { name: "別商会", orderEmails: ["o@example.jp"] } } }).mails[0];
   assert.ok(other.body.startsWith("別商会御中") && !other.body.includes("立川") && !other.body.includes("器械"));
 });
 
@@ -262,7 +279,7 @@ test("複数ディーラー: 明細・宛先が他のディーラーのメール
   const p = buildOrderMailPreview(order([
     mk(1, D[0], "+10.0D", "医師一", "2026-11-01"), mk(2, D[1], "+11.0D", "医師二", "2026-11-02"), mk(3, D[2], "+12.0D", "医師三", "2026-11-03"),
     mk(4, D[0], "+13.0D", "医師四", "2026-11-04"), mk(5, D[1], "+14.0D", "医師五", "2026-11-05"), mk(6, D[2], "+15.0D", "医師六", "2026-11-06")
-  ]), { profile: resolveMailProfile("fac-other"), facilityName: "テスト眼科", dealers: set, confirmationEmails: ["confirm@example.jp"] });
+  ]), { profile: DEFAULT_GAS_PROFILE, facilityName: "テスト眼科", dealers: set, confirmationEmails: ["confirm@example.jp"] });
   assert.equal(p.mails.length, 3);
   const mine = { dX: [1, 4], dY: [2, 5], dZ: [3, 6] };
   const marks = { 1: ["+10.0D", "医師一", "2026-11-01"], 2: ["+11.0D", "医師二", "2026-11-02"], 3: ["+12.0D", "医師三", "2026-11-03"], 4: ["+13.0D", "医師四", "2026-11-04"], 5: ["+14.0D", "医師五", "2026-11-05"], 6: ["+15.0D", "医師六", "2026-11-06"] };

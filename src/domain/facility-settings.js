@@ -5,6 +5,7 @@
  * 両者の制限値は同じにしてある（変更時は rules とテストも更新すること）。
  */
 import { isValidEmail } from "./order-validation.js";
+import { MAIL_SETTINGS_LIMITS } from "./order-mail-profiles.js";
 
 export const LIMITS = Object.freeze({
   ordererNameMax: 50,
@@ -125,13 +126,16 @@ export function validateDealers(rows) {
     else if (names.has(keyOf(name))) errors.push({ index, field: "name", message: `ディーラー名が重複しています: ${name}` });
     else names.set(keyOf(name), index);
 
+    const mailName = norm(r.mailName);   // 注文メールの宛名(正式表記。任意。未入力ならディーラー名)
+    if (mailName.length > MAIL_SETTINGS_LIMITS.mailNameMax) errors.push({ index, field: "mailName", message: `メールの宛名は${MAIL_SETTINGS_LIMITS.mailNameMax}文字までです` });
+
     const order = parseEmailList(r.orderEmailsText);
     const usage = parseEmailList(r.usageEmailsText);
     order.errors.forEach(message => errors.push({ index, field: "orderEmails", message: `発注用: ${message}` }));
     usage.errors.forEach(message => errors.push({ index, field: "usageEmails", message: `使用報告用: ${message}` }));
 
     cleaned.push({
-      id: r.id || null, name,
+      id: r.id || null, name, mailName,
       orderEmails: order.emails, usageReportEmails: usage.emails
     });
   });
@@ -151,7 +155,8 @@ export function planDealerWrites(original, cleaned, facilityId) {
       orderEmails: c.orderEmails, usageReportEmails: c.usageReportEmails
     };
     if (o && o.dealerId) data.dealerId = o.dealerId; // 将来のグローバルディーラー連携用IDは保持
-    const changed = !o || o.name !== c.name || o.sortOrder !== sortOrder
+    if (c.mailName) data.mailName = c.mailName;      // 宛名の正式表記(空なら保存しない = ディーラー名を使う)
+    const changed = !o || o.name !== c.name || o.sortOrder !== sortOrder || (o.mailName || "") !== (c.mailName || "")
       || !sameList(o.orderEmails, c.orderEmails) || !sameList(o.usageReportEmails, c.usageReportEmails);
     if (changed) writes.push({ id: c.id, data });
   });
@@ -165,4 +170,26 @@ export function moveItem(list, index, direction) {
   const copy = [...list];
   [copy[index], copy[to]] = [copy[to], copy[index]];
   return copy;
+}
+
+/**
+ * 施設のメール設定(settings/mail)の検証: 注文控えメール(ON/OFF・送信先1件)と署名。
+ * ON のときは送信先が必須。OFF のときに入力済みの送信先は残す(次に ON にしたときに使う)。
+ */
+export function validateMailSettings({ copyEnabled, copyEmail, signature }) {
+  const errors = [];
+  const email = norm(copyEmail).toLowerCase();
+  const sig = String(signature ?? "").replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+  if (copyEnabled && !email) errors.push("注文控えの送信先メールアドレスを入力してください");
+  else if (email && (email.length > LIMITS.emailMax || !isValidEmail(email))) errors.push(`メールアドレスの形式が正しくありません: ${email}`);
+  if (sig.length > MAIL_SETTINGS_LIMITS.signatureMax) errors.push(`署名は${MAIL_SETTINGS_LIMITS.signatureMax}文字までです`);
+  if (sig.split("\n").length > MAIL_SETTINGS_LIMITS.signatureLines) errors.push(`署名は${MAIL_SETTINGS_LIMITS.signatureLines}行までです`);
+  return { ok: errors.length === 0, errors, cleaned: { copyEnabled: Boolean(copyEnabled), copyEmail: email, signature: sig } };
+}
+
+/** 保存する内容(変更がなければ null) */
+export function planMailSettingsWrite(original, cleaned) {
+  const o = original || {};
+  const same = (o.copyEnabled === true) === cleaned.copyEnabled && (o.copyEmail || "") === cleaned.copyEmail && (o.signature || "") === cleaned.signature;
+  return same && original ? null : { copyEnabled: cleaned.copyEnabled, copyEmail: cleaned.copyEmail, signature: cleaned.signature };
 }

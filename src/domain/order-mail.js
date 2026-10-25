@@ -7,8 +7,9 @@
  *  - 発注先が未設定の明細は、メールにしない(blocked: dealer-unset)。
  *
  * 形式(件名・宛名・本文・署名)は「メール形式の設定(profile。order-mail-profiles.js)」で決まる。
- *  - 立川病院: 現行 Google Forms + GAS の形式を再現(件名固定・「質問名: 回答」の列挙・定型文・署名)。
- *  - 設定のない施設: 暫定の下書き(draft-unconfirmed)。実送信には使えない。
+ *  - 施設設定から作る形式(profileFromSettings): 現行 Google Forms + GAS の形式(件名固定・「質問名: 回答」の列挙・定型文・署名)。
+ *    署名・宛名の正式表記は施設ごとの設定。実送信(Cloud Functions の functions/src/order-mail-outbox.js)はこの形式を使う。
+ *  - 形式を渡さない場合: 暫定の下書き(draft-unconfirmed)。実送信には使えない。
  * 宛先は3種類の別の概念: ①ディーラー(発注用メール) ②固定の確認先(設定から渡す。コードに書かない) ③発注者(ログインしたユーザー)。
  * すべて To に指定し、CC・BCC は使わない(常に空)。①が1件もなければ、②③があっても送信不可。担当医への確認メールは対象外。
  */

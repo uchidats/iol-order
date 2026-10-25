@@ -1,6 +1,6 @@
 import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
-  validateDealers, planDealerWrites, LIMITS
+  validateDealers, validateMailSettings, planMailSettingsWrite, planDealerWrites, LIMITS
 } from "../domain/facility-settings.js";
 import {
   planMemberRemoval, confirmMessage, memberLabel, sortMembers, roleLabel, roleChoices, assignableRoles, canManageRole, isManagerRole,
@@ -121,8 +121,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
-  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理の自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver].filter(Boolean);
+  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -137,7 +137,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       repository.listDealers(facility.id)
     ]);
     const iolOrder = repository.getIolOrder ? await repository.getIolOrder(facility.id) : null;
-    data = { orderers, adopted, dealers, iolOrder, members: [], pending: [] };
+    // メール設定(注文控え・署名)。読めない場合(権限・未デプロイ)は未設定として表示し、他の設定の読み込みは止めない
+    const mailSettings = repository.getMailSettings ? await repository.getMailSettings(facility.id).catch((e) => { console.warn("メール設定を読み込めませんでした:", e); return null; }) : null;
+    data = { orderers, adopted, dealers, iolOrder, mailSettings, members: [], pending: [] };
     if (canManageMembers) await reloadMembers();
   }
 
@@ -489,7 +491,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 並び順は sortOrder に保存する(選択肢の表示順だけ。発注先の判定には使わない)。
   function dealerRow(d = { id: null, name: "", orderEmails: [], usageReportEmails: [] }) {
     const row = h("div", { class: "orderer-item dealer-item", "data-id": d.id || "" });
-    row._state = { id: d.id || null, name: d.name || "", orderEmailsText: (d.orderEmails || []).join("\n"), usageEmailsText: (d.usageReportEmails || []).join("\n") };
+    row._state = { id: d.id || null, name: d.name || "", mailName: d.mailName || "", orderEmailsText: (d.orderEmails || []).join("\n"), usageEmailsText: (d.usageReportEmails || []).join("\n") };
     let editing = false;
     const countOf = (text) => String(text || "").split(/\r?\n|,/).map(s => s.trim()).filter(Boolean).length;
 
@@ -501,10 +503,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       btn("edit", "名前・メールアドレスを編集", pencilIcon()),
       btn("delete", "このディーラーを削除", trashIcon()));
     const nameInput = h("input", { class: "form-control", "data-f": "name", type: "text", maxlength: LIMITS.dealerNameMax, placeholder: "ディーラー名（必須）", "aria-label": "ディーラー名（必須）" });
+    const mailNameInput = h("input", { class: "form-control", "data-f": "mailName", type: "text", maxlength: "100", placeholder: "未入力ならディーラー名", "aria-label": "注文メールの宛名（正式表記・任意）" });
     const orderInput = h("textarea", { class: "form-control", "data-f": "orderEmails", rows: "2", placeholder: "order@example.jp", "aria-label": "発注用メールアドレス" });
     const usageInput = h("textarea", { class: "form-control", "data-f": "usageEmails", rows: "2", placeholder: "report@example.jp", "aria-label": "使用報告用メールアドレス" });
     const editBox = h("div", { class: "orderer-edit dealer-edit", hidden: true },
       nameInput,
+      h("label", { class: "form-label" }, "注文メールの宛名", h("span", { class: "field-note" }, "（正式表記・任意。「〇〇御中」の〇〇）"), mailNameInput),
       h("label", { class: "form-label" }, "発注用メールアドレス", h("span", { class: "field-note" }, `（1行に1件・最大${LIMITS.emailsPerList}件）`), orderInput),
       h("label", { class: "form-label" }, "使用報告用メールアドレス", h("span", { class: "field-note" }, `（1行に1件・最大${LIMITS.emailsPerList}件）`), usageInput),
       h("div", { class: "orderer-edit-actions" },
@@ -525,11 +529,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row._isEditing = () => editing;
     row._startEdit = () => {
       editing = true;
-      nameInput.value = row._state.name; orderInput.value = row._state.orderEmailsText; usageInput.value = row._state.usageEmailsText;
+      nameInput.value = row._state.name; mailNameInput.value = row._state.mailName; orderInput.value = row._state.orderEmailsText; usageInput.value = row._state.usageEmailsText;
       paint(); nameInput.focus();
     };
     row._commit = () => {
-      row._state.name = nameInput.value; row._state.orderEmailsText = orderInput.value; row._state.usageEmailsText = usageInput.value;
+      row._state.name = nameInput.value; row._state.mailName = mailNameInput.value; row._state.orderEmailsText = orderInput.value; row._state.usageEmailsText = usageInput.value;
       editing = false; paint();
     };
     row._cancel = () => {
@@ -548,14 +552,14 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   const readDealerRows = (section) => [...section.querySelectorAll(".dealer-item")].map(r => ({
-    id: r._state.id, name: r._state.name, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText
+    id: r._state.id, name: r._state.name, mailName: r._state.mailName, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText
   }));
 
   /** 行の「保存」: この行の編集内容を、一覧全体の既存の検証にかけ、問題なければ(並び替えなどの未保存の変更も含めて)保存する */
   async function saveDealerRow(row) {
     const section = sections.dealers;
     const before = { ...row._state };
-    const typed = { name: row.querySelector('[data-f="name"]').value, order: row.querySelector('[data-f="orderEmails"]').value, usage: row.querySelector('[data-f="usageEmails"]').value };
+    const typed = { name: row.querySelector('[data-f="name"]').value, mailName: row.querySelector('[data-f="mailName"]').value, order: row.querySelector('[data-f="orderEmails"]').value, usage: row.querySelector('[data-f="usageEmails"]').value };
     row._commit();
     const v = validateDealers(readDealerRows(section));
     showRowErrors(section, v.errors);
@@ -564,6 +568,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const own = row.querySelector("[data-err]");
       if (!own.textContent) own.textContent = v.errors.map(e => e.message).join(" / ");
       row.querySelector('[data-f="name"]').value = typed.name;
+      row.querySelector('[data-f="mailName"]').value = typed.mailName;
       row.querySelector('[data-f="orderEmails"]').value = typed.order;
       row.querySelector('[data-f="usageEmails"]').value = typed.usage;
       return message(section, "入力内容を確認してください。", true);
@@ -579,7 +584,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   async function runDealerSave() {
     const section = sections.dealers;
     const entries = [...section.querySelectorAll(".dealer-item")].filter(r => !(r._isEditing() && !r._state.id));   // 未確定の追加行は除く
-    const v = validateDealers(entries.map(r => ({ id: r._state.id, name: r._state.name, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText })));
+    const v = validateDealers(entries.map(r => ({ id: r._state.id, name: r._state.name, mailName: r._state.mailName, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText })));
     section.querySelectorAll("[data-err]").forEach(p => { p.textContent = ""; });
     v.errors.forEach(e => { const p = entries[e.index] && entries[e.index].querySelector("[data-err]"); if (p) p.textContent = (p.textContent ? p.textContent + " / " : "") + e.message; });
     if (!v.ok) throw new Error("ディーラーの入力内容を確認してください");
@@ -625,7 +630,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function dealerSection() {
     const section = h("section", { class: "settings-section", "data-section": "dealers" },
-      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。現在は登録のみで、メール送信は行われません。"),
+      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。注文メールは発注用メールアドレスに送られます(宛名は「注文メールの宛名」、未入力ならディーラー名)。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
@@ -644,6 +649,49 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function renderDealers(section) {
     section.querySelector("[data-list]").replaceChildren(...data.dealers.map(dealerRow));
+  }
+
+  // ---------- 注文メール(注文控え・署名) ----------
+  // 注文控えメール: 初期は OFF。ON のときだけ送信先(1件)を入力する。署名はディーラーへの注文メールの最後に入る(施設ごと)。
+  function mailSection() {
+    const chk = h("input", { type: "checkbox", "data-f": "copyEnabled" });
+    const email = h("input", { class: "form-control", type: "email", maxlength: "254", "data-f": "copyEmail", placeholder: "info@example.jp", "aria-label": "注文控えの送信先メールアドレス", autocomplete: "off" });
+    const emailBox = h("label", { class: "form-label mail-copy-email", hidden: true }, "注文控えの送信先", h("span", { class: "field-note" }, "（1件）"), email);
+    const sig = h("textarea", { class: "form-control", rows: "3", maxlength: "500", "data-f": "signature", placeholder: "〒000-0000 住所\n施設名", "aria-label": "署名" });
+    const section = h("section", { class: "settings-section", "data-section": "mail" },
+      createSectionHeading("注文メール", "注文時にディーラーへ送るメールの設定です。宛先は各ディーラーの発注用メールアドレスです。「注文控えメールを送信する」をONにすると、ディーラーへの送信結果(受付・失敗・未送信)を書いた控えを、指定したアドレスに送ります。署名はディーラーへのメールの最後に入ります。変更は自動で保存されます。"),
+      h("label", { class: "settings-check" }, chk, h("span", {}, "注文控えメールを送信する")),
+      emailBox,
+      h("label", { class: "form-label" }, "署名", h("span", { class: "field-note" }, "（住所・施設名など。任意・10行まで）"), sig),
+      h("p", { class: "form-hint", "data-msg": "" }));
+    chk.addEventListener("change", () => {
+      emailBox.hidden = !chk.checked;
+      if (chk.checked && !email.value.trim()) { email.focus(); message(section, "送信先のメールアドレスを入力すると保存されます。"); return; }   // 送信先が入るまで保存しない
+      mailSaver.request();
+    });
+    email.addEventListener("change", () => mailSaver.request());
+    sig.addEventListener("change", () => mailSaver.request());
+    mailSaver = createAutoSaver(section, async () => {
+      const v = validateMailSettings({ copyEnabled: chk.checked, copyEmail: email.value, signature: sig.value });
+      if (!v.ok) { message(section, v.errors.join(" / "), true); return; }   // 入力の誤りは保存しない(入力は画面に残す)
+      const w = planMailSettingsWrite(data.mailSettings, v.cleaned);
+      message(section, "");
+      if (!w) return;
+      await settingsApi.saveMailSettings(facility.id, w);
+      data.mailSettings = { ...w };
+      email.value = w.copyEmail;
+      await onSaved();
+    });
+    return section;
+  }
+
+  function renderMail(section) {
+    const m = data.mailSettings || {};
+    section.querySelector('[data-f="copyEnabled"]').checked = m.copyEnabled === true;
+    section.querySelector('[data-f="copyEmail"]').value = m.copyEmail || "";
+    section.querySelector('[data-f="signature"]').value = m.signature || "";
+    section.querySelector(".mail-copy-email").hidden = m.copyEnabled !== true;
+    message(section, "");
   }
 
   // ---------- 利用者管理 ----------
@@ -942,10 +990,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 画面全体 ----------
-  const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection() };
+  const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null };
   if (canManageMembers) built.members = memberSection();
-  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー(作成の順番・機能は変えない)
-  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers };
+  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール(作成の順番・機能は変えない)
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.mail ? { mail: built.mail } : {}) };
   const isAdmin = actorRole === "admin";   // 施設名の編集・施設削除は管理者のみ表示(サーバーでも管理者のみ)
   const del = isAdmin && inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });
@@ -1037,6 +1085,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         renderOrderers(sections.orderers);
         renderIols(sections.iols);
         renderDealers(sections.dealers);
+        if (sections.mail) renderMail(sections.mail);
         if (sections.members) renderMembers(sections.members);
         status.textContent = "";
         dirty = false;

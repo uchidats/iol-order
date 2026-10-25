@@ -65,21 +65,35 @@ export function describeLine(line, index = 0) {
 // 注文の状態(functions/src/orders.js の ORDER_STATUS)。今は accepted だけが作られる(ディーラー通知は将来)
 const STATUS_LABELS = Object.freeze({
   accepted: "受付済み（ディーラー未通知）",
-  notification_pending: "ディーラー通知待ち",
-  notified: "ディーラー通知済み",
-  notification_failed: "ディーラー通知失敗"
+  notification_pending: "ディーラーへ送信中",
+  notified: "ディーラーへの送信受付済み",
+  notification_failed: "ディーラーへの送信に失敗あり"
 });
 export const orderStatusLabel = (status) => STATUS_LABELS[status] || (status ? String(status) : "（記録なし）");
 
-// 将来のメール送信結果(order.notifications: 発注先ごとに1件。docs/order-intake.md)。現在は保存されていない
-const NOTIFICATION_LABELS = Object.freeze({ pending: "送信待ち", sent: "送信済み", failed: "送信失敗", skipped: "送信対象外" });
+// メールの送信結果(order.notifications: 発注先ごと + 注文控え。functions/src/order-mail-outbox.js が更新する。docs/order-mail.md)。
+// 「受付済み」は配信サービスが受け付けただけ(配信の完了ではない)。配信の結果(delivery)は別に表示する
+const NOTIFICATION_LABELS = Object.freeze({
+  waiting: "送信待ち（ディーラーへの送信の後）", pending: "送信待ち", sending: "送信中", retry: "再送信待ち（一時的なエラー）",
+  accepted: "送信受付済み（配信の確認待ち）", failed: "送信失敗（届いていません）", held: "未送信（メール送信は停止中）",
+  skipped_test: "未送信（テスト注文）", not_sent: "送信対象外",
+  sent: "送信済み", skipped: "送信対象外"   // 旧い記録の値
+});
+const DELIVERY_LABELS = Object.freeze({ delivered: "配信済み", delayed: "配信遅延中", bounced: "配信失敗（宛先エラー）", complained: "受信者が迷惑メールとして報告", failed: "配信失敗" });
+const REASON_LABELS = Object.freeze({ "dealer-unset": "発注先未設定", "no-order-email": "発注用メール未登録", "dealer-deleted": "発注先が削除済み" });
 export function describeNotifications(order) {
-  return (Array.isArray(order.notifications) ? order.notifications : []).map(n => ({
-    dealerName: (n && n.dealerName) || "（発注先未設定）",
-    statusLabel: NOTIFICATION_LABELS[n && n.status] || (n && n.status ? String(n.status) : "（記録なし）"),
-    atLabel: n && n.at ? formatDateTimeJst(n.at) : "",
-    error: n && n.error ? String(n.error) : ""
-  }));
+  return (Array.isArray(order.notifications) ? order.notifications : []).map(n => {
+    const delivery = n && n.delivery ? DELIVERY_LABELS[n.delivery] || String(n.delivery) : "";
+    const reason = n && n.reason ? REASON_LABELS[n.reason] || String(n.reason) : "";
+    const base = NOTIFICATION_LABELS[n && n.status] || (n && n.status ? String(n.status) : "（記録なし）");
+    return {
+      kind: (n && n.kind) || "dealer",
+      dealerName: (n && n.dealerName) || "（発注先未設定）",
+      statusLabel: delivery ? delivery : reason ? `${base}（${reason}）` : base,
+      atLabel: n && (n.deliveryAt || n.statusAt || n.at) ? formatDateTimeJst(n.deliveryAt || n.statusAt || n.at) : "",
+      error: n && n.error ? String(n.error) : ""
+    };
+  });
 }
 
 /** 一覧の1行分 */

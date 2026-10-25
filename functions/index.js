@@ -9,13 +9,15 @@
  */
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineString, defineBoolean } from "firebase-functions/params";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { defineString, defineBoolean, defineSecret } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
 import { createOrderService } from "./src/orders.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
-import { onDocumentWrittenWithAuthContext } from "firebase-functions/v2/firestore";
+import { onDocumentWrittenWithAuthContext, onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { createMailDispatchService, createResendSender, verifyWebhookSignature } from "./src/order-mail-outbox.js";
 import { createSettingsAuditService } from "./src/settings-audit.js";
 
 initializeApp();
@@ -104,3 +106,40 @@ const auditTrigger = (collection) => onDocumentWrittenWithAuthContext(
 export const auditOrderers = auditTrigger("orderers");
 export const auditAdoptedIols = auditTrigger("adoptedIols");
 export const auditFacilityDealers = auditTrigger("facilityDealers");
+export const auditFacilitySettings = auditTrigger("settings");   // 施設のメール設定(注文控えの宛先・署名)
+
+// ---------------- 注文メールの送信(docs/order-mail.md) ----------------
+// 送信のキルスイッチ。true にするまで送信せず、送信待ちのメールは held(未送信)になる。true にしても ORDER_INTAKE_ENABLED は別。
+const MAIL_SENDING_ENABLED = defineBoolean("MAIL_SENDING_ENABLED", { default: false });
+const MAIL_FROM = defineString("MAIL_FROM", { default: "" });                     // 例: "IOL Order <order@mail.example.jp>"(配信サービスで認証済みのドメイン)
+const MAIL_TEST_RECIPIENT = defineString("MAIL_TEST_RECIPIENT", { default: "" }); // テスト注文(開発用受付)の送信先。空ならテスト注文は送らない
+const RESEND_API_KEY = defineSecret("RESEND_API_KEY");                              // Secret Manager(コード・.env に書かない)
+const RESEND_WEBHOOK_SECRET = defineSecret("RESEND_WEBHOOK_SECRET");
+const mailDispatch = createMailDispatchService({
+  db: getFirestore(), FieldValue, Timestamp,
+  isEnabled: () => MAIL_SENDING_ENABLED.value() && Boolean(MAIL_FROM.value()),
+  testRecipient: () => MAIL_TEST_RECIPIENT.value(),
+  getSender: () => createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
+});
+const mailOptions = { region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [RESEND_API_KEY] };
+// 送信待ちのメールが作られたら送る(再試行はこの関数ではなく、定期実行が状態を見て行う)
+export const sendOrderMail = onDocumentCreated({ ...mailOptions, document: "facilities/{facilityId}/orders/{orderId}/mails/{mailId}" },
+  (event) => (event.data ? mailDispatch.processMail(event.data.ref) : null));
+// 再送待ち・送信中のまま止まったメール・送信できる注文控えの処理(10分ごと)
+export const retryOrderMails = onSchedule({ ...mailOptions, schedule: "every 10 minutes", timeZone: "Asia/Tokyo" }, () => mailDispatch.processDue());
+// 配信結果(Resend の Webhook。署名を検証する)。受付と配信の結果を区別して記録する
+export const resendWebhook = onRequest({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [RESEND_WEBHOOK_SECRET] }, async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send(""); return; }
+  const ok = verifyWebhookSignature({
+    secret: RESEND_WEBHOOK_SECRET.value(), id: req.get("svix-id"), timestamp: req.get("svix-timestamp"),
+    signature: req.get("svix-signature"), rawBody: req.rawBody
+  });
+  if (!ok) { res.status(401).send(""); return; }
+  try {
+    await mailDispatch.handleDeliveryEvent(req.body);
+    res.status(200).send("");
+  } catch (e) {
+    console.error("webhook failed:", e);
+    res.status(500).send("");   // 配信サービスが再送する
+  }
+});

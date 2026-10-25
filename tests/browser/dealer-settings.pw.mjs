@@ -103,7 +103,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       // 3) 編集ボタンを押した行だけ入力欄になる。発注用・使用報告用メールは編集時に確認・変更できる
       await rows.nth(0).locator('[data-act="edit"]').click();
-      assert.equal(await sec.locator("input:visible").count(), 1);
+      assert.deepEqual(await sec.locator("input:visible").evaluateAll(es => es.map(e => e.getAttribute("data-f"))), ["name", "mailName"], "名前と注文メールの宛名(正式表記・任意)");
       assert.equal(await rows.nth(0).locator('[data-f="orderEmails"]').inputValue(), "a1@example.jp\na2@example.jp");
       assert.equal(await rows.nth(0).locator('[data-f="usageEmails"]').inputValue(), "ar@example.jp");
       await rows.nth(0).locator('[data-f="name"]').fill("A商会(新)");

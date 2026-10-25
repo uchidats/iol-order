@@ -83,6 +83,29 @@ test("詳細: 保存済みの備考と注文状態。メール送信結果(将�
     { dealerId: "d1", dealerName: "A商会", status: "sent", at: "2026-10-25T05:30:00Z" },
     { dealerId: "d2", dealerName: "B医療", status: "failed", error: "宛先エラー" }] });
   assert.deepEqual(n.notifications, [
-    { dealerName: "A商会", statusLabel: "送信済み", atLabel: "2026/10/25 14:30", error: "" },
-    { dealerName: "B医療", statusLabel: "送信失敗", atLabel: "", error: "宛先エラー" }]);
+    { kind: "dealer", dealerName: "A商会", statusLabel: "送信済み", atLabel: "2026/10/25 14:30", error: "" },
+    { kind: "dealer", dealerName: "B医療", statusLabel: "送信失敗（届いていません）", atLabel: "", error: "宛先エラー" }]);
+});
+
+test("メール送信の状態: 配信サービスの受付と、実際の配信結果を区別して表示する。送信対象外は理由を出す。注文控えも表示する", async () => {
+  const { MAIL_STATUS } = await import("../functions/src/order-mail-outbox.js");
+  const { describeNotifications } = await import("../src/domain/order-history.js");
+  const ts = (iso) => ({ toMillis: () => Date.parse(iso) });
+  const ns = describeNotifications({ notifications: [
+    { kind: "dealer", dealerName: "A商会", status: "accepted", statusAt: ts("2026-10-25T05:30:00Z") },
+    { kind: "dealer", dealerName: "B医療", status: "accepted", delivery: "delivered", deliveryAt: "2026-10-25T05:31:00Z" },
+    { kind: "dealer", dealerName: "C商会", status: "accepted", delivery: "bounced" },
+    { kind: "dealer", dealerName: "D商会", status: "not_sent", reason: "no-order-email" },
+    { kind: "dealer", dealerName: "（発注先未設定）", status: "not_sent", reason: "dealer-unset" },
+    { kind: "dealer", dealerName: "E商会", status: "held" },
+    { kind: "copy", dealerName: "注文控え", status: "waiting" }] });
+  assert.deepEqual(ns.map(n => n.statusLabel), [
+    "送信受付済み（配信の確認待ち）", "配信済み", "配信失敗（宛先エラー）", "送信対象外（発注用メール未登録）", "送信対象外（発注先未設定）",
+    "未送信（メール送信は停止中）", "送信待ち（ディーラーへの送信の後）"]);
+  assert.deepEqual(ns.slice(0, 2).map(n => n.atLabel), ["2026/10/25 14:30", "2026/10/25 14:31"]);
+  assert.equal(ns[6].kind, "copy");
+  for (const st of Object.values(MAIL_STATUS)) {
+    const label = describeNotifications({ notifications: [{ status: st }] })[0].statusLabel;
+    assert.notEqual(label, st, `サーバーの状態 ${st} に表示名がある`);
+  }
 });

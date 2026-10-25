@@ -15,12 +15,15 @@
  *   同じ内容の再送は既存の注文番号を返し、同じ requestId で内容が違う場合は拒否する。
  * - 注文番号はサーバーが日付ごとの連番で発行する(クライアントは指定できない)。
  * - 依存(db, FieldValue など)は注入する。テストはエミュレータ上の本物の Firestore で実行する。
+ * - ディーラーへの注文メール・注文控えは、注文と同じトランザクションで「送信待ち」として保存するだけ(送信は order-mail-outbox.js)。
+ *   宛先・件名・本文は注文時点の施設設定のスナップショット。送信に失敗しても注文は残る。
  */
 import { createHash } from "node:crypto";
 import { RegistrationError, assertVerifiedUser } from "./registration.js";
 import { MEMBER_ROLES } from "./roles.js";
 import { IOL_MODELS } from "./iol-catalog.js";
 import { filterPowersByModel } from "./power-filter.js";
+import { buildOrderOutbox } from "./order-mail-outbox.js";
 
 /** 注文の状態。今回の段階で作成されるのは ACCEPTED まで(ディーラー通知は次段階) */
 export const ORDER_STATUS = Object.freeze({
@@ -239,8 +242,9 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     const counterRef = db.doc(`facilities/${input.facilityId}/orderCounters/${day}`);
 
     return db.runTransaction(async (tx) => {
-      const [fac, mem, existing, counter] = await Promise.all(
-        [fRef, mRef, orderRef, counterRef].map(r => tx.get(r)));
+      const mailSettingsRef = db.doc(`facilities/${input.facilityId}/settings/mail`);   // 注文控え・署名(施設設定)
+      const [fac, mem, existing, counter, mailSettingsSnap] = await Promise.all(
+        [fRef, mRef, orderRef, counterRef, mailSettingsRef].map(r => tx.get(r)));
       // 担当医: この施設のマスター(orderers)にいる人だけ。明細ごとに異なってよい
       const doctorIds = [...new Set(input.lines.map(l => l.doctorId))];
       const doctorSnaps = await Promise.all(doctorIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/orderers/${id}`))));
@@ -250,7 +254,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
       const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
       // 発注先ディーラー: この施設の登録ディーラー(facilityDealers)から決める。採用IOLの dealerId には依存しない
       const dealerDocs = (await tx.get(db.collection(`facilities/${input.facilityId}/facilityDealers`))).docs
-        .map(d => ({ id: d.id, name: d.get("name") || "", orderEmails: d.get("orderEmails") }));
+        .map(d => ({ id: d.id, name: d.get("name") || "", orderEmails: d.get("orderEmails"), mailName: d.get("mailName") || "" }));
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
@@ -303,7 +307,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
       const orderNumber = `IOL-${day}-${String(seq).padStart(4, "0")}`;
 
       tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp() });
-      tx.create(orderRef, {
+      const orderDoc = {
         schemaVersion: 3,
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
@@ -322,7 +326,11 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         // role: 注文時点の入力者の役割(admin/subadmin/orderer/proxy)。代行入力者の注文を区別する(担当医は lines[].doctor)
         createdBy: { uid: user.uid, email: user.email, displayName: user.displayName, role: mem.get("role") },
         createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp()
-      });
+      };
+      // 送るメール(送信待ち)と、発注先ごとの状態の要約(notifications。アドレス・本文は含めない)
+      const outbox = buildOrderOutbox({ facilityId: input.facilityId, orderId, order: orderDoc, dealers: dealerDocs, mailSettings: mailSettingsSnap.exists ? mailSettingsSnap.data() : null });
+      tx.create(orderRef, { ...orderDoc, notifications: outbox.notifications });
+      for (const m of outbox.mails) tx.create(orderRef.collection("mails").doc(m.id), { ...m.data, createdAt: FieldValue.serverTimestamp(), statusAt: FieldValue.serverTimestamp() });
       return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false, lineCount: lines.length, totalQuantity: input.totalQuantity };
     });
   }

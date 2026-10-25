@@ -211,10 +211,11 @@ service cloud.firestore {
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'mailName', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 100)
+          && (!('mailName' in request.resource.data) || stringIn(request.resource.data.mailName, 0, 100))   // 注文メールの宛名(正式表記。任意)
           && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
           && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
@@ -262,6 +263,27 @@ service cloud.firestore {
       match /orders/{orderId} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow write: if false;
+
+        // 注文メールの送信待ち・送信結果(宛先・本文を含む)。読めるのは管理者・副管理者と運営者。書き込みは Cloud Functions のみ
+        match /mails/{mailId} {
+          allow read: if isPlatformAdmin() || isFacilityManager(fid);
+          allow write: if false;
+        }
+      }
+
+      // 施設のメール設定(docId = 'mail'): 注文控えメール(ON/OFF・送信先1件)と署名。管理者・副管理者が読み書きできる
+      match /settings/{docId} {
+        allow read: if isPlatformAdmin() || isFacilityManager(fid);
+        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
+          && docId == 'mail'
+          && request.resource.data.keys().hasOnly(['copyEnabled', 'copyEmail', 'signature', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasAll(['copyEnabled'])
+          && request.resource.data.copyEnabled is bool
+          && (!('copyEmail' in request.resource.data) || request.resource.data.copyEmail == '' || emailOk(request.resource.data.copyEmail))
+          && (request.resource.data.copyEnabled == false || ('copyEmail' in request.resource.data && emailOk(request.resource.data.copyEmail)))
+          && (!('signature' in request.resource.data) || stringIn(request.resource.data.signature, 0, 500))
+          && actorOk(request.resource.data);
+        allow delete: if false;
       }
     }
 

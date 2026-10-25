@@ -19,10 +19,10 @@
  */
 import { createHash } from "node:crypto";
 
-export const AUDITED_COLLECTIONS = Object.freeze(["orderers", "adoptedIols", "facilityDealers"]);
+export const AUDITED_COLLECTIONS = Object.freeze(["orderers", "adoptedIols", "facilityDealers", "settings"]);
 const IGNORED_FIELDS = new Set(["updatedAt", "updatedBy", "sortOrder", "facilityId"]);
 const EMAIL_LIST_FIELDS = new Set(["orderEmails", "usageReportEmails"]);
-const EMAIL_FIELDS = new Set(["email"]);
+const EMAIL_FIELDS = new Set(["email", "copyEmail"]);
 const TEXT_MAX = 100;
 
 const text = (v) => (typeof v === "string" ? v.slice(0, TEXT_MAX) : v === undefined ? null : v);
@@ -104,7 +104,7 @@ export function authDiagnostics(authType, authId, actorUid) {
 }
 
 /** 履歴に表示する対象の名前(担当医名・ディーラー名・採用IOLのID) */
-const labelOf = (collection, docId, data) => (collection === "adoptedIols" ? docId : text((data && data.name) || "") || docId);
+const labelOf = (collection, docId, data) => (collection === "adoptedIols" || collection === "settings" ? docId : text((data && data.name) || "") || docId);
 
 /**
  * @param {object} deps
