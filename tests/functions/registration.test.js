@@ -648,7 +648,7 @@ test("deleteFacility: 管理者が施設名を入力して削除すると、そ�
   const { admin, facilityId, inv } = await seedFull();
   const otherBefore = [(await sub(other.facilityId, "orderers")).size, (await sub(other.facilityId, "members")).size];
   assert.equal((await db.doc("registrationQuota/adminD").get()).get("count"), 1);
-  const r = await service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "　削除テスト施設 " } });
+  const r = await service.deleteFacility({ auth: admin, data: { facilityId } });
   assert.deepEqual(r, { status: "deleted", facilityId });
   assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, false);
   for (const p of ["members", "orderers", "adoptedIols", "facilityDealers", "displaySettings", "auditLogs"]) assert.equal((await sub(facilityId, p)).size, 0, p);
@@ -660,19 +660,18 @@ test("deleteFacility: 管理者が施設名を入力して削除すると、そ�
   assert.equal((await db.collection("invites").where("facilityId", "==", other.facilityId).get()).size, 1);
   assert.equal((await db.doc("registrationQuota/adminO").get()).get("count"), 1);
   // 消えた施設は再削除できない
-  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "permission-denied");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId } }), "permission-denied");
 });
 
 test("deleteFacility: 注文履歴がある・自分以外の所属がいる・施設名が違う場合は削除せず、何も消えない", async () => {
   const { admin, facilityId } = await seedFull();
   const count = async () => [(await sub(facilityId, "orderers")).size, (await sub(facilityId, "members")).size, (await db.collection("invites").where("facilityId", "==", facilityId).get()).size];
   const base = await count();
-  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "違う名前" } }), "failed-precondition");
   await db.doc(`facilities/${facilityId}/orders/o1`).set({ x: 1 });
-  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "failed-precondition");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId } }), "failed-precondition");
   await db.doc(`facilities/${facilityId}/orders/o1`).delete();
   await seedMember(facilityId, "ordererD", "orderer");
-  await rejects(service.deleteFacility({ auth: admin, data: { facilityId, confirmName: "削除テスト施設" } }), "failed-precondition");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId } }), "failed-precondition");
   await db.doc(`facilities/${facilityId}/members/ordererD`).delete();
   assert.deepEqual(await count(), base);
   assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, true);
@@ -681,19 +680,32 @@ test("deleteFacility: 注文履歴がある・自分以外の所属がいる・�
 test("deleteFacility: 一般ユーザー・他施設の管理者・未ログイン・メール未確認・不正な入力・余計な項目は拒否。回数制限あり", async () => {
   const { admin, facilityId } = await seedFull();
   await seedMember(facilityId, "ordererD", "orderer");
-  const body = { facilityId, confirmName: "削除テスト施設" };
+  const body = { facilityId };
   await rejects(service.deleteFacility({ auth: user("ordererD"), data: body }), "permission-denied");
   const o = await reg(user("adminX"), "別の管理者の施設");
   await rejects(service.deleteFacility({ auth: user("adminX"), data: body }), "permission-denied");
   await rejects(service.deleteFacility({ auth: null, data: body }), "unauthenticated");
   await rejects(service.deleteFacility({ auth: user("adminD", { email_verified: false }), data: body }), "permission-denied");
-  await rejects(service.deleteFacility({ auth: admin, data: { ...body, confirmName: "" } }), "invalid-argument");
+  await rejects(service.deleteFacility({ auth: admin, data: {} }), "invalid-argument");
   await rejects(service.deleteFacility({ auth: admin, data: { ...body, force: true } }), "invalid-argument");
-  await rejects(service.deleteFacility({ auth: admin, data: { facilityId: "../x", confirmName: "a" } }), "invalid-argument");
+  await rejects(service.deleteFacility({ auth: admin, data: { facilityId: "../x" } }), "invalid-argument");
   assert.equal((await db.doc(`facilities/${facilityId}`).get()).exists, true);
   assert.equal((await db.doc(`facilities/${o.facilityId}`).get()).exists, true);
-  for (let i = 0; i < LIMITS.rateMax.deleteFacility; i++) await service.deleteFacility({ auth: admin, data: { ...body, confirmName: "違う" } }).catch(() => {});
-  await rejects(service.deleteFacility({ auth: admin, data: { ...body, confirmName: "違う" } }), "resource-exhausted");
+  for (let i = 0; i < LIMITS.rateMax.deleteFacility; i++) await service.deleteFacility({ auth: admin, data: { ...body } }).catch(() => {});
+  await rejects(service.deleteFacility({ auth: admin, data: { ...body } }), "resource-exhausted");
+});
+
+test("deleteFacility: 削除対象は施設IDだけで決まる(施設名の入力は不要。旧画面が送る confirmName は無視され、名前では特定しない)", async () => {
+  const a = await seedFull("adminA", "同じ名前の施設");
+  await seedFacility("fac-b", "同じ名前の施設"); await seedMember("fac-b", "adminB", "admin");
+  const b = { facilityId: "fac-b" };
+  // 旧画面の互換: 違う名前を送っても、施設IDの施設が対象(名前は見ない)
+  await service.deleteFacility({ auth: a.admin, data: { facilityId: a.facilityId, confirmName: "全然違う名前" } });
+  assert.equal((await db.doc(`facilities/${a.facilityId}`).get()).exists, false);
+  assert.equal((await db.doc(`facilities/${b.facilityId}`).get()).exists, true, "同名の別施設は残る");
+  // 自分が管理者でない施設は、IDを指定しても削除できない
+  await rejects(service.deleteFacility({ auth: a.admin, data: { facilityId: b.facilityId } }), "permission-denied");
+  assert.equal((await db.doc(`facilities/${b.facilityId}`).get()).exists, true);
 });
 
 test("deleteFacility: 削除した施設の分だけ、セルフ登録の枠が空き、同名での再登録ができる", async () => {
@@ -701,6 +713,6 @@ test("deleteFacility: 削除した施設の分だけ、セルフ登録の枠が�
   for (const n of ["アルファ眼科", "ベータ医院", "ガンマ病院"]) await reg(a, n);
   await rejects(reg(a, "四つ目"), "resource-exhausted");
   const fid = (await db.collection("facilities").where("name", "==", "ベータ医院").get()).docs[0].id;
-  await service.deleteFacility({ auth: a, data: { facilityId: fid, confirmName: "ベータ医院" } });
+  await service.deleteFacility({ auth: a, data: { facilityId: fid } });
   assert.equal((await reg(a, "ベータ医院")).status, "created", "同名でも、同一ユーザーの二重登録扱いにならない");
 });

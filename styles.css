@@ -2073,18 +2073,19 @@ input[type="date"], .lens-line select { color-scheme: light; }
 #btnRenameFacility { margin-left: -4px; }
 
 /* 施設設定: 施設削除のボタンとダイアログ */
-.delete-trigger { color: #dc2626; }   /* 大きさ・背景は編集(鉛筆)と同じ(btn-outline-sm)。アイコンだけ赤 */
+.delete-trigger { color: #1f2937; }   /* 大きさ・背景は編集(鉛筆)と同じ(btn-outline-sm)。アイコンは濃いグレー */
 /* 削除ダイアログ: ダークモードでも、背景は白・文字は濃いグレーに固定(入力欄も明るい配色) */
 .delete-dialog { width: min(92vw, 440px); border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; background: #fff; color: #1f2937; color-scheme: light; }
 .delete-dialog::backdrop { background: rgba(0,0,0,.45); }
 .delete-dialog h3 { margin: 0 0 8px; font-size: 1.05rem; color: #1f2937; }
 .delete-dialog .form-hint { color: #4b5563; font-size: 0.85rem; margin: 0 0 14px; }
-.delete-dialog .delete-prompt { display: block; margin-bottom: 6px; font-weight: 600; color: #1f2937; }
-.delete-dialog .form-control { background: #fff; color: #1f2937; border-color: #d1d5db; }
-.delete-dialog .form-control::placeholder { color: #9ca3af; }
+.delete-dialog .delete-target { margin: 0 0 10px; font-weight: 700; color: #1f2937; overflow-wrap: anywhere; }
 .delete-dialog .error-message { color: #b91c1c; }
 .delete-dialog .btn-secondary { background-color: #f1f5f9; color: #334155; border-color: #e2e8f0; }   /* 従来のグレー(ダークモードでも固定) */
-.delete-dialog .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+/* 削除ボタンはグレー(赤にしない)。キャンセルより濃いグレーで区別 */
+.delete-dialog .delete-confirm-btn { background-color: #6b7280; border-color: #6b7280; color: #ffffff; }
+.delete-dialog .delete-confirm-btn:hover:not(:disabled) { background-color: #4b5563; border-color: #4b5563; }
+.delete-dialog .delete-confirm-btn:disabled, .delete-dialog .btn-secondary:disabled { opacity: .55; cursor: not-allowed; }
 .delete-dialog .form-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* 施設の登録・参加: 主なボタン(登録する/参加する)は左、「注文画面に戻る」/「ログアウト」は同じ行の右。説明文との間に余白 */

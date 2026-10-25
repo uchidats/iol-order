@@ -650,50 +650,49 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     return section;
   }
 
-  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出しのゴミ箱ボタンから、施設名を入力するダイアログで確認) ----------
+  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出しのゴミ箱ボタン→ダイアログで確定) ----------
+  // 削除対象は、選択中の施設ID(facility.id)で特定する。ダイアログの施設名は表示のみ(名前では特定しない)
   function deleteMenu() {
-    const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", placeholder: "施設名を入力", "aria-label": "削除する施設名の確認入力" });
-    const prompt = h("label", { class: "form-label delete-prompt" });
-    const doDelete = h("button", { type: "button", class: "btn btn-danger", disabled: true }, "この施設を削除する");
+    const target = h("p", { class: "delete-target" });
+    const doDelete = h("button", { type: "button", class: "btn delete-confirm-btn" }, "この施設を削除する");
     const cancel = h("button", { type: "button", class: "btn btn-secondary" }, "キャンセル");
     const msg = h("p", { class: "error-message", role: "alert", hidden: true });
     const dialog = h("dialog", { class: "delete-dialog", id: "deleteFacilityDialog", "aria-labelledby": "deleteFacilityTitle" },
       h("h3", { id: "deleteFacilityTitle" }, "施設の削除"),
+      target,
       h("p", { class: "form-hint" }, "注文履歴がある施設、自分以外の利用者が所属している施設は削除できません。削除すると、この施設の設定（担当医・採用IOL・ディーラーなど）と招待が消え、元に戻せません。"),
-      prompt, input,
       msg,
       h("div", { class: "form-row" }, doDelete, cancel));
-    // 編集(鉛筆)と同じ大きさ・背景のゴミ箱ボタン(アイコンだけ赤)
+    // 編集(鉛筆)と同じ大きさ・背景のゴミ箱ボタン(アイコンは濃いグレー)。押しただけでは削除しない
     const trigger = h("button", { type: "button", class: "btn btn-outline-sm delete-trigger", id: "btnDeleteFacility", "aria-label": "施設を削除", title: "施設を削除" }, trashIcon());
 
-    const same = () => input.value.trim() !== "" && input.value.replace(/\s+/g, " ").trim() === (facility.name || "").replace(/\s+/g, " ").trim();
-    input.addEventListener("input", () => { doDelete.disabled = !same(); });
-    const closeDialog = () => { if (dialog.open) dialog.close(); };
+    let deleting = false;
+    const closeDialog = () => { if (dialog.open && !deleting) dialog.close(); };
     trigger.addEventListener("click", () => {
-      input.value = ""; doDelete.disabled = true; msg.hidden = true;
-      prompt.textContent = `確認のため『${facility.name}』と入力してください`;   // 削除対象の施設名を自動表示(textContent)
+      msg.hidden = true; doDelete.disabled = false; cancel.disabled = false; doDelete.textContent = "この施設を削除する";
+      target.textContent = `削除する施設: ${facility.name || "（名称未設定）"}`;   // textContent(HTMLとして解釈しない)
       dialog.showModal();
-      input.focus();
     });
     cancel.addEventListener("click", closeDialog);
-    let deleting = false;
-    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); doDelete.click(); } });
+    dialog.addEventListener("cancel", (ev) => { if (deleting) ev.preventDefault(); });   // 削除中は Esc でも閉じない
     doDelete.addEventListener("click", async () => {
-      if (deleting || !same()) return;
-      deleting = true; doDelete.disabled = true; msg.hidden = true;
+      if (deleting) return;   // 二重送信の防止
+      deleting = true; doDelete.disabled = true; cancel.disabled = true; msg.hidden = true; doDelete.textContent = "削除しています…";
+      const facilityId = facility.id;
       try {
-        await inviteApi.deleteFacility({ facilityId: facility.id, confirmName: input.value });
+        await inviteApi.deleteFacility({ facilityId });
+        deleting = false;
         dirty = false;
         closeDialog();
-        onDeleted(facility.id);
+        onDeleted(facilityId);
       } catch (e) {
         const notFound = String((e && e.code) || "").endsWith("not-found") && !/[぀-ヿ一-鿿]/.test(String(e.message || ""));
         msg.textContent = notFound ? "施設の削除は、現在ご利用いただけません。" : describeCallableError(e);
         msg.hidden = false;
-        deleting = false; doDelete.disabled = !same();
+        deleting = false; doDelete.disabled = false; cancel.disabled = false; doDelete.textContent = "この施設を削除する";
       }
     });
-    return { wrap: trigger, dialog, reset: () => closeDialog() };
+    return { wrap: trigger, dialog, reset: () => { deleting = false; closeDialog(); } };
   }
 
   // ---------- 画面全体 ----------

@@ -241,19 +241,17 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
   }
 
   /**
-   * 施設の削除(施設管理者のみ)。次の場合は削除しない: 注文履歴がある / 自分以外の所属ユーザーがいる / 入力された施設名が一致しない。
+   * 施設の削除(施設管理者のみ)。施設は施設IDだけで特定する(施設名では特定しない)。次の場合は削除しない: 注文履歴がある / 自分以外の所属ユーザーがいる。
    * 削除するのは、その施設の配下のデータ(所属・担当医・採用IOL・ディーラー・表示設定・操作履歴など)と、その施設宛ての招待、
    * 作成者のセルフ登録の利用枠(1件ぶん)。1つのトランザクションで、条件の再確認と削除を行う(途中で失敗しても何も消えない)。
    * 他施設のデータには触れない。
    */
   async function deleteFacility({ auth, data }) {
     const user = assertVerifiedUser(auth);
-    assertKnownKeys(data, ["facilityId", "confirmName"]);
+    assertKnownKeys(data, ["facilityId", "confirmName"]);   // confirmName は旧画面との互換のため受け付けるだけで、使わない(施設IDで特定する)
     if (typeof data.facilityId !== "string" || !FACILITY_ID_RE.test(data.facilityId)) {
       throw new RegistrationError("invalid-argument", "施設の指定が正しくありません");
     }
-    const confirmName = typeof data.confirmName === "string" ? normalizeName(data.confirmName) : "";
-    if (!confirmName) throw new RegistrationError("invalid-argument", "確認のため、施設名を入力してください");
     await consumeRate(user.uid, "deleteFacility");
 
     const facRef = db.doc(`facilities/${data.facilityId}`);
@@ -263,9 +261,6 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       const [fac, actor] = await Promise.all([tx.get(facRef), tx.get(db.doc(`facilities/${data.facilityId}/members/${user.uid}`))]);
       if (!(fac.exists && fac.get("status") === "active" && actor.exists && actor.get("role") === "admin")) {
         throw new RegistrationError("permission-denied", NOT_ALLOWED);
-      }
-      if (normalizeName(fac.get("name") || "") !== confirmName) {
-        throw new RegistrationError("failed-precondition", "入力された施設名が一致しません。施設名を正確に入力してください");
       }
       // 注文履歴(どの形でも1件でもあれば削除しない)
       const orders = await tx.get(facRef.collection("orders").limit(1));

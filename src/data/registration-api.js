@@ -18,8 +18,8 @@ export function createRegistrationApi({ functions, httpsCallable }) {
     /** 施設名の変更(施設管理者のみ。重複候補があれば status:"duplicate-candidate" を返し、confirmDuplicate なしでは変更しない) */
     renameFacility: ({ facilityId, name, confirmDuplicate }) =>
       call("renameFacility", confirmDuplicate ? { facilityId, name, confirmDuplicate: true } : { facilityId, name }),
-    /** 施設の削除(施設管理者のみ。注文履歴がある・自分以外の所属がある・施設名が一致しない場合はサーバーが拒否する) */
-    deleteFacility: ({ facilityId, confirmName }) => call("deleteFacility", { facilityId, confirmName }),
+    /** 施設の削除(施設IDで特定。施設管理者のみ。注文履歴がある・自分以外の所属がある場合はサーバーが拒否する) */
+    deleteFacility: ({ facilityId }) => call("deleteFacility", { facilityId }),
     /** @returns {Promise<{token:string, email:string, expiresAt:string}>} */
     createInvite: ({ facilityId, email }) => call("createInvite", { facilityId, email }),
     /** @returns {Promise<{facilityId:string}>} */
