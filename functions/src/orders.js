@@ -18,6 +18,7 @@
  */
 import { createHash } from "node:crypto";
 import { RegistrationError, assertVerifiedUser } from "./registration.js";
+import { MEMBER_ROLES } from "./roles.js";
 import { IOL_MODELS } from "./iol-catalog.js";
 import { filterPowersByModel } from "./power-filter.js";
 
@@ -251,7 +252,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
-        && mem.exists && ["admin", "orderer"].includes(mem.get("role")); // 所属があれば有効(削除された所属は存在しない)
+        && mem.exists && MEMBER_ROLES.includes(mem.get("role")); // 所属があれば有効(削除された所属は存在しない)。4つの役割はすべて注文できる
       if (!allowed) throw new RegistrationError("permission-denied", "この施設から注文することはできません");
 
       if (existing.exists) {
@@ -312,7 +313,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         doctorIds,   // この注文に含まれる担当医(明細ごとの詳細は lines[].doctor)
         notes: input.notes,
         // 実際に発注したログインユーザー(担当医とは別の情報。サーバーが認証情報から記録し、クライアントの申告は受け取らない)
-        createdBy: { uid: user.uid, email: user.email, displayName: user.displayName },
+        // role: 注文時点の入力者の役割(admin/subadmin/orderer/proxy)。代行入力者の注文を区別する(担当医は lines[].doctor)
+        createdBy: { uid: user.uid, email: user.email, displayName: user.displayName, role: mem.get("role") },
         createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp()
       });
       return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false, lineCount: lines.length, totalQuantity: input.totalQuantity };

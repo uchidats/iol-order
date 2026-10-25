@@ -23,7 +23,7 @@ before(async () => {
   db = getFirestore();
   clock = { t: Date.parse("2026-10-24T00:00:00Z") };
   lookups = [];
-  service = createMemberService({ db, FieldValue, now: () => clock.t, lookupEmail: async (uid) => { lookups.push(uid); return uid === "legacy" ? "legacy@example.jp" : null; } });
+  service = createMemberService({ db, FieldValue, Timestamp, now: () => clock.t, lookupEmail: async (uid) => { lookups.push(uid); return uid === "legacy" ? "legacy@example.jp" : null; } });
   registration = createRegistrationService({ db, FieldValue, Timestamp, now: () => clock.t });
   env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: fs.readFileSync(rulesPath, "utf8"), host, port: Number(port) } });
 });

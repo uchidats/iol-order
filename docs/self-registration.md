@@ -78,3 +78,13 @@ Cloud Functions のデプロイには次が必要。**この変更では Firebas
 
 ## 利用者管理・所属の反映手順
 [member-status-removal.md](member-status-removal.md)（所属の status 廃止・所属削除）を参照。
+
+## 役割と利用者管理（事前登録・参加確認）
+- **役割**: `admin`(管理者)・`subadmin`(副管理者)・`orderer`(注文者)・`proxy`(代行入力者)。定義は `functions/src/roles.js`、Rules の `memberRoles()`/`managerRoles()` と一致（`tests/rules-roles-sync.test.js`）。
+  - 4つとも注文・閲覧ができる。施設設定（担当医・採用IOL・ディーラー・表示順）と利用者管理は管理者・副管理者。施設名・所在地の変更と施設削除は管理者のみ。
+  - 副管理者が追加・変更・削除できるのは注文者・代行入力者だけ。管理者・副管理者の権限管理は管理者のみ。最後の管理者は降格できない。管理者の所属は削除できない（先に役割を変更する）。
+- **事前登録**（`addMember`）: 管理者・副管理者が名前・メール・役割を登録 → `pendingMembers/{施設ID}_{メールのsha256}`（30日有効）。管理者の事前登録は不可（参加後に役割を変更）。取り消し `cancelPendingMember`、期限切れ・辞退の再登録 `renewPendingMember`。
+- **参加確認**: 本人がログイン → `listMyPendingMemberships`（施設名・役割・登録者名のみ）→ `respondMembership` で承認/辞退。サーバーで、メール確認済み(`email_verified`)・メールアドレスの一致・30日の期限・施設が有効かを確認し、承認すると uid の所属を作る。既に所属している場合は役割を変えない。
+- **役割変更** `changeMemberRole`、**削除** `removeMember`（その人宛ての招待コード・参加待ちも取り消す）。いずれも操作履歴（`auditLogs`）に同じトランザクションで記録。
+- **注文**: 入力者の役割を `createdBy.role` に記録（担当医は `lines[].doctor`）。旧注文には無い。
+- 施設削除時は、その施設の参加待ちも削除。招待コード方式（`createInvite`/`acceptInvite`）は段階的廃止まで従来どおり。

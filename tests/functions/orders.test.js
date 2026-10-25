@@ -83,7 +83,7 @@ test("正常系: 検証して保存され、受付済み(accepted)・サーバ�
   assert.deepEqual(o.lines[0].doctor, { id: "o1", name: "山田", email: "y@orderer.jp" }); // 担当医: マスターのスナップショット
   assert.equal("orderer" in o, false, "no order-level orderer in the new format");
   assert.deepEqual(o.doctorIds, ["o1"]);
-  assert.deepEqual(o.createdBy, { uid: "ordA", email: "orda@login.jp", displayName: "ログイン-ordA" }); // 担当医とは別に、実際の発注者を認証情報から記録
+  assert.deepEqual(o.createdBy, { uid: "ordA", email: "orda@login.jp", displayName: "ログイン-ordA", role: "orderer" }); // 担当医とは別に、実際の発注者(と注文時点の役割)を認証情報・所属から記録
   assert.equal(o.notes, "右眼");
   assert.ok(o.createdAt && o.acceptedAt && o.requestId === d.requestId && o.schemaVersion === 3);
 });
@@ -145,6 +145,17 @@ test("所属を削除された後の再送でも、既存の注文を返さず�
 test("権限の無い role(不明な値)の所属は注文できない", async () => {
   await seedMember(F, "weird", "viewer");
   await rejects(order(user("weird"), body()), "permission-denied");
+});
+
+test("副管理者・代行入力者も注文でき、注文には入力者の役割(createdBy.role)が記録される。担当医(lines[].doctor)は入力者とは別", async () => {
+  for (const [uid, role] of [["subX", "subadmin"], ["proxyX", "proxy"]]) {
+    await seedMember(F, uid, role);
+    const r = await order(user(uid), body());
+    const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+    assert.equal(o.createdBy.uid, uid);
+    assert.equal(o.createdBy.role, role);
+    assert.ok(o.lines.every(l => l.doctor && l.doctor.id), "担当医は明細ごとに別に記録");
+  }
 });
 
 test("キルスイッチ: 無効な間は認証済みの所属者でも受け付けない", async () => {
@@ -542,7 +553,7 @@ test("担当医が異なる複数レンズを、1回の注文で扱える。明�
 test("実際の発注者(createdBy)は、サーバーが認証情報から記録する。クライアントが申告する発注者・代理発注の項目は受け付けない", async () => {
   const r = await order(user("adminA", { name: "管理者 太郎" }), multi([line({ doctorId: "o2" })]));
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
-  assert.deepEqual(o.createdBy, { uid: "adminA", email: "admina@login.jp", displayName: "管理者 太郎" });
+  assert.deepEqual(o.createdBy, { uid: "adminA", email: "admina@login.jp", displayName: "管理者 太郎", role: "admin" });
   assert.equal(o.lines[0].doctor.name, "佐藤", "doctor and orderer are separate");
   for (const forged of [{ createdBy: { uid: "ordA" } }, { orderedBy: "x" }, { actorUid: "ordA" }, { proxy: true }, { proxyOrder: true }, { ordererName: "x" }, { doctorName: "x" }, { orderer: { name: "x" } }]) {
     await rejects(order(user("adminA"), multi([line()], forged)), "invalid-argument");

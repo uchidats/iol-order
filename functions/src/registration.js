@@ -242,7 +242,7 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
 
   /**
    * 施設の削除(施設管理者のみ)。施設は施設IDだけで特定する(施設名では特定しない)。次の場合は削除しない: 注文履歴がある / 自分以外の所属ユーザーがいる。
-   * 削除するのは、その施設の配下のデータ(所属・担当医・採用IOL・ディーラー・表示設定・操作履歴など)と、その施設宛ての招待、
+   * 削除するのは、その施設の配下のデータ(所属・担当医・採用IOL・ディーラー・表示設定・操作履歴など)と、その施設宛ての招待・参加待ち、
    * 作成者のセルフ登録の利用枠(1件ぶん)。1つのトランザクションで、条件の再確認と削除を行う(途中で失敗しても何も消えない)。
    * 他施設のデータには触れない。
    */
@@ -271,11 +271,12 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
       }
       const subs = await Promise.all(subNames.filter(n => n !== "orders").map(n => tx.get(facRef.collection(n))));
       const invites = await tx.get(db.collection("invites").where("facilityId", "==", data.facilityId));
+      const pendingMembers = await tx.get(db.collection("pendingMembers").where("facilityId", "==", data.facilityId));   // この施設の参加待ち(事前登録)
       const creator = typeof fac.get("createdBy") === "string" && fac.get("selfRegistered") ? fac.get("createdBy") : null;
       const quotaRef = creator ? db.doc(`registrationQuota/${creator}`) : null;
       const quota = quotaRef ? await tx.get(quotaRef) : null;
 
-      const refs = [...subs.flatMap(s => s.docs.map(d => d.ref)), ...invites.docs.map(d => d.ref), facRef];
+      const refs = [...subs.flatMap(s => s.docs.map(d => d.ref)), ...invites.docs.map(d => d.ref), ...pendingMembers.docs.map(d => d.ref), facRef];
       if (refs.length > LIMITS.maxDeleteDocs) {
         throw new RegistrationError("failed-precondition", "データが多いため、この画面からは削除できません。運営者にご連絡ください");
       }

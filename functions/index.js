@@ -80,3 +80,10 @@ const memberService = createMemberService({
   lookupEmail: async (uid) => { try { return (await getAuth().getUser(uid)).email || null; } catch (e) { return null; } }
 });
 export const removeMember = onCall(options, wrap(memberService.removeMember));
+// 利用者管理(事前登録・参加確認・役割変更)。権限は functions/src/roles.js(firestore.rules と一致)
+export const addMember = onCall(options, wrap(memberService.addMember));
+export const cancelPendingMember = onCall(options, wrap(memberService.cancelPendingMember));
+export const renewPendingMember = onCall(options, wrap(memberService.renewPendingMember));
+export const listMyPendingMemberships = onCall(options, wrap(memberService.listMyPendingMemberships));
+export const respondMembership = onCall(options, wrap(memberService.respondMembership));
+export const changeMemberRole = onCall(options, wrap(memberService.changeMemberRole));
