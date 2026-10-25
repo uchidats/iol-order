@@ -93,7 +93,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual(gDealer.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), gDoctor.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), "ボタンのサイズ・スタイルが担当医と同じ");
       assert.equal(gDealer[3].right, gDoctor[3].right, "右端の位置が担当医と同じ");
       const addBtns = async (sel) => page.locator(`${sel} .settings-actions button`).evaluateAll(bs => bs.map(b => [b.className, b.textContent.trim()]));
-      assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[0]), (await addBtns('[data-section="orderers"]')).map(x => x[0]), "追加・保存ボタンのデザインが担当医と同じ");
+      assert.equal((await addBtns('[data-section="dealers"]'))[0][0], (await addBtns('[data-section="orderers"]'))[0][0], "追加ボタンのデザインが担当医と同じ(担当医は自動保存のため、保存ボタンはない。ディーラーは従来どおり保存ボタン)");
       assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["ディーラーを追加", "ディーラーを保存"]);
 
       // 3) 編集ボタンを押した行だけ入力欄になる。発注用・使用報告用メールは編集時に確認・変更できる

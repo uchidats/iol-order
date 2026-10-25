@@ -66,6 +66,56 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   let open = false;
   const markDirty = () => { dirty = true; };
 
+  /**
+   * 自動保存(採用IOL・担当医)。変更のたびに request() を呼ぶと、画面の最新の状態を、1件ずつ順番に保存する。
+   *  - 保存中に続けて操作しても、保存は直列(同時に2つ走らない)。保存の時点の画面の状態を保存するので、古い内容で上書きしない。続けて操作した分は1回にまとめる。
+   *  - 成功の通知は出さない。失敗したときだけエラーと「再試行」を表示し、画面の変更は消さない(次の操作か再試行で、最新の状態をもう一度保存する)。
+   *  - exclusive(): 保存と同時に走らせてはいけない処理(削除)を、保存の合間に実行する。
+   * @param {HTMLElement} section 表示先(メッセージ・再試行ボタン)
+   * @param {() => Promise<void>} run 保存の実体(既存のサーバー・データベースへの保存処理)
+   */
+  function createAutoSaver(section, run) {
+    let again = false, running = false;
+    const waiters = [];
+    const api = { failed: false };
+    const settle = () => waiters.splice(0).forEach(r => r());
+    const showError = () => {
+      message(section, "保存できませんでした。変更はまだ保存されていません。通信状態や権限を確認して、再試行してください。", true);
+      if (!section.querySelector('[data-act="retry-autosave"]')) {
+        const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "retry-autosave" }, "再試行");
+        b.addEventListener("click", () => api.request());
+        section.querySelector("[data-msg]").after(b);
+      }
+    };
+    const clearError = () => {
+      const b = section.querySelector('[data-act="retry-autosave"]');
+      if (b) b.remove();
+      const p = section.querySelector("[data-msg]");
+      if (p && p.classList.contains("error-message")) message(section, "");
+    };
+    async function pump() {
+      if (running) return;
+      running = true;
+      try {
+        while (again) {
+          again = false;
+          try { await run(); if (api.failed) { api.failed = false; clearError(); } }
+          catch (e) { console.error("自動保存に失敗しました:", e); api.failed = true; showError(); break; }
+        }
+      } finally { running = false; settle(); if (again && !api.failed) pump(); }
+    }
+    api.request = () => { again = true; pump(); };
+    api.idle = () => (running || again ? new Promise(r => waiters.push(r)) : Promise.resolve());
+    api.exclusive = async (task) => {
+      while (running) await new Promise(r => waiters.push(r));
+      running = true;
+      try { return await task(); } finally { running = false; settle(); if (again) pump(); }
+    };
+    return api;
+  }
+  let orderSaver = null, iolSaver = null;   // 担当医・採用IOLの自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver].filter(Boolean);
+
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
     p.textContent = text || "";
@@ -131,8 +181,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row.querySelector('[data-act="edit"]').addEventListener("click", () => row._startEdit());
     row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
     row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveOrdererRow(row));
-    row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); markDirty(); });
-    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); markDirty(); });
+    row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); orderSaver.request(); });
+    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); orderSaver.request(); });
     row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteOrdererRow(row));
     paint();
     return row;
@@ -153,17 +203,31 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       row.querySelector('[data-f="name"]').value = typed.name; row.querySelector('[data-f="email"]').value = typed.email; // 入力した内容は残す
       return message(section, "入力内容を確認してください。", true);
     }
-    await saveOrderersNow(section);
+    message(section, "");
+    orderSaver.request();   // 行の「保存」(追加・設定変更の確定)で、自動保存する
   }
 
-  async function saveOrderersNow(section) {
-    const v = validateOrderers(readOrdererRows(section));
-    showRowErrors(section, v.errors);
-    if (!v.ok) return message(section, "入力内容を確認してください。", true);
+  /**
+   * 担当医の自動保存の実体: 確定済みの行だけを、画面に並んでいる順に保存する。
+   * 入力途中の行(追加して未確定の行・編集中の入力)は含めない(確定した時点で保存される)。
+   */
+  async function runOrdererSave() {
+    const section = sections.orderers;
+    const entries = [...section.querySelectorAll(".orderer-item")].filter(r => !(r._isEditing() && !r._state.id));   // 未確定の追加行は除く
+    const v = validateOrderers(entries.map(r => ({ id: r._state.id, name: r._state.name, email: r._state.email })));
+    section.querySelectorAll("[data-err]").forEach(p => { p.textContent = ""; });
+    v.errors.forEach(e => { const p = entries[e.index] && entries[e.index].querySelector("[data-err]"); if (p) p.textContent = (p.textContent ? p.textContent + " / " : "") + e.message; });
+    if (!v.ok) throw new Error("担当医の入力内容を確認してください");
     const writes = planOrdererWrites(data.orderers, v.cleaned, facility.id);
-    if (!writes.length) return message(section, "変更はありません。");
-    const ok = await saveWith(section, section.querySelector('[data-act="save"]'), () => settingsApi.saveOrderers(facility.id, writes));
-    if (ok) { renderOrderers(section); message(section, "担当医を保存しました。"); }
+    if (!writes.length) return;
+    await settingsApi.saveOrderers(facility.id, writes);
+    await load();   // 最新の保存内容を読み直す(新しい担当医の ID もここで分かる。画面の入力途中の行は壊さない)
+    entries.forEach((r, i) => {
+      if (r._state.id) return;
+      const saved = data.orderers.find(o => o.name === v.cleaned[i].name);
+      if (saved) { r._state.id = saved.id; r.setAttribute("data-id", saved.id); }
+    });
+    await onSaved();
   }
 
   /**
@@ -181,9 +245,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     btn.disabled = true;
     message(section, "削除しています…");
     try {
-      await settingsApi.deleteOrderer(facility.id, id);
-      data.orderers = data.orderers.filter(o => o.id !== id);
-      row.remove();
+      await orderSaver.exclusive(async () => {   // 自動保存と同時に走らせない(削除した担当医を、保存が書き戻さないように)
+        await settingsApi.deleteOrderer(facility.id, id);
+        data.orderers = data.orderers.filter(o => o.id !== id);
+        row.remove();
+      });
       await onSaved();
       message(section, `「${name}」を削除しました。`);
     } catch (e) {
@@ -233,52 +299,48 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
-      createSectionHeading("担当医", "注文フォームの「担当医」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。"),
+      createSectionHeading("担当医", "注文フォームの「担当医」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "担当医を追加"),
-        h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "担当医を保存")),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "担当医を追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
-      const row = ordererRow(); section.querySelector("[data-list]").appendChild(row); markDirty();
-      row._startEdit(); // 追加した行は編集状態で表示する
+      const row = ordererRow(); section.querySelector("[data-list]").appendChild(row);
+      row._startEdit(); // 追加した行は編集状態で表示する。行の「保存」で確定した時点で自動保存される(入力途中は保存しない)
     });
-    const saveBtn = section.querySelector('[data-act="save"]');
-    saveBtn.addEventListener("click", async () => {
-      if ([...section.querySelectorAll(".orderer-item")].some(r => r._isEditing())) {
-        return message(section, "編集中の行を、保存またはキャンセルしてください。", true);
-      }
-      await saveOrderersNow(section);
-    });
+    orderSaver = createAutoSaver(section, runOrdererSave);   // 「担当医を保存」ボタンは廃止(追加・設定変更の確定・並び替え・削除で自動保存)
     return section;
   }
 
   // ---------- 採用IOL ----------
   function iolSection() {
     const section = h("section", { class: "settings-section", "data-section": "iols" },
-      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。↑↓でメーカーとモデルの表示順を変更できます。"),
+      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。↑↓でメーカーとモデルの表示順を変更できます。変更は自動で保存されます。"),
       h("div", { "data-list": "" }),
-      h("div", { class: "settings-actions" }, h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "採用IOLを保存")),
       h("p", { class: "form-hint", "data-msg": "" }));
-    const saveBtn = section.querySelector('[data-act="save"]');
-    saveBtn.addEventListener("click", async () => {
-      const selected = [...section.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value);
-      const v = validateAdoption(selected, masters);
-      if (!v.ok) return message(section, "マスターに存在しないIOLは登録できません。", true);
-      const writes = planAdoptedWrites(masters, data.adopted, selected, facility.id);
-      // 表示順(メーカーの順番・モデルの順番)は、画面に並んでいる順番をそのまま保存する。並べ替えていなければ書かない
-      const order = buildIolOrderSetting(masters,
-        [...section.querySelectorAll("details.iol-maker")].map(d => d.getAttribute("data-maker")),
-        [...section.querySelectorAll('.iol-model-row input[type="checkbox"]')].map(c => c.value));
-      const orderChanged = Boolean(section._orderDirty) && Boolean(settingsApi.saveIolOrder);
-      if (!writes.length && !orderChanged) return message(section, "変更はありません。");
-      const ok = await saveWith(section, saveBtn, async () => {
-        if (writes.length) await settingsApi.saveAdoptedIols(facility.id, writes);
-        if (orderChanged) await settingsApi.saveIolOrder(facility.id, order);
-      });
-      if (ok) { section._orderDirty = false; renderIols(section); message(section, "採用IOLを保存しました。"); }
-    });
+    iolSaver = createAutoSaver(section, runIolSave);   // 「採用IOLを保存」ボタンは廃止(チェック・並び替えで自動保存)
     return section;
+  }
+
+  /** 採用IOLの自動保存の実体: 画面の最新の状態(チェックと並び順)を保存する。採用が変わっていれば採用を、並べ替えていれば表示順を保存する */
+  async function runIolSave() {
+    const section = sections.iols;
+    const selected = [...section.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value);
+    const v = validateAdoption(selected, masters);
+    if (!v.ok) throw new Error("マスターに存在しないIOLは登録できません");
+    const writes = planAdoptedWrites(masters, data.adopted, selected, facility.id);
+    // 表示順(メーカーの順番・モデルの順番)は、画面に並んでいる順番をそのまま保存する。並べ替えていなければ書かない
+    const order = buildIolOrderSetting(masters,
+      [...section.querySelectorAll("details.iol-maker")].map(d => d.getAttribute("data-maker")),
+      [...section.querySelectorAll('.iol-model-row input[type="checkbox"]')].map(c => c.value));
+    const orderVersion = section._orderVersion || 0;
+    const orderChanged = Boolean(section._orderDirty) && Boolean(settingsApi.saveIolOrder);
+    if (!writes.length && !orderChanged) return;
+    if (writes.length) await settingsApi.saveAdoptedIols(facility.id, writes);
+    if (orderChanged) await settingsApi.saveIolOrder(facility.id, order);
+    if ((section._orderVersion || 0) === orderVersion) section._orderDirty = false;   // 保存中にさらに並べ替えていれば、次の保存で保存する
+    await load();   // 最新の保存内容を読み直す(画面は作り直さない。操作中の表示を壊さない)
+    await onSaved();
   }
 
   function renderIols(section) {
@@ -287,7 +349,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     // 並び順は施設ごとの設定(未設定は標準の順番)。新しいメーカー・モデルは既存の順番の末尾
     const mover = (act, label, text, move) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon iol-move", "data-act": act, "aria-label": label, title: label }, text);
-      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); move(); section._orderDirty = true; markDirty(); }); // summary の開閉は起こさない
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); move(); section._orderDirty = true; section._orderVersion = (section._orderVersion || 0) + 1; iolSaver.request(); }); // summary の開閉は起こさない。並べ替えで自動保存
       return b;
     };
     const swap = (el, delta) => {
@@ -328,7 +390,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     });
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...nodes);
-    list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); markDirty(); };
+    list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); iolSaver.request(); };   // チェックの変更で自動保存
   }
 
   // ---------- ディーラー(担当医と同じ操作: 通常は一覧表示、鉛筆を押した行だけ編集、↑↓で並び替え、ゴミ箱で削除) ----------
@@ -578,14 +640,17 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     status,
     ...Object.values(sections));
 
-  closeBtn.addEventListener("click", () => {
-    if (dirty && !window.confirm("保存していない変更があります。破棄して注文画面に戻りますか？")) return;
+  closeBtn.addEventListener("click", async () => {
+    await Promise.all(savers().map(s => s.idle()));   // 保存中なら、終わるのを待つ
+    const unsaved = dirty || savers().some(s => s.failed);   // 自動保存に失敗した変更も「保存されていない」
+    if (unsaved && !window.confirm("保存されていない変更があります。破棄して注文画面に戻りますか？")) return;
     close();
     onClose();
   });
 
   function close() {
     open = false; dirty = false;
+    savers().forEach(s => { s.failed = false; });
     root.hidden = true;
   }
 
