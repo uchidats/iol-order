@@ -2001,6 +2001,8 @@ input[type="date"].form-control {
 .cs-option.is-placeholder { color: #6b7280; }
 .cs-option.is-active { background: #f1f5f9; }
 .cs-option.is-selected { font-weight: 600; }
+.cs-option.is-selected:not(.is-placeholder) { background: #eaf2ff; }   /* 選択中: 薄い青の背景 + 青いチェックマーク(モデル・度数・担当医で共通) */
+.cs-option.is-selected.is-active:not(.is-placeholder) { background: #dbeafe; }
 .cs-check { flex: none; color: #2563eb; }   /* 選択中: 青いチェックマーク */
 
 /* 各レンズカードの右上の、控えめなゴミ箱アイコン(押すとそのレンズだけ削除。確認ダイアログなし、「元に戻す」付きの通知) */
@@ -2039,3 +2041,7 @@ input[type="date"].form-control {
 .dup-power { font-weight: 700; white-space: nowrap; }
 .dup-line-date { margin-top: 2px; font-size: 0.9rem; color: #475569; }
 .dup-question { margin: 0; font-weight: 700; }
+
+/* ダークモードの端末でも、手術日のカレンダー(日付入力)と選択メニューは、ライトモード(白背景・濃い文字)で表示する。
+   ページ全体のテーマは変えず、これらの入力要素だけに適用する */
+input[type="date"], .lens-line select { color-scheme: light; }

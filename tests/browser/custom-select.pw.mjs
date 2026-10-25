@@ -132,6 +132,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await panel.locator(".cs-option.is-selected .cs-check").count(), 1);
       assert.equal(await panel.locator(".cs-check").evaluate(c => getComputedStyle(c).color), "rgb(37, 99, 235)", "青いチェック");
       assert.equal(await panel.locator(".cs-option.is-selected").evaluate(o => { const r = o.getBoundingClientRect(), p = o.closest(".cs-panel").getBoundingClientRect(); return r.top >= p.top - 1 && r.bottom <= p.bottom + 1; }), true);
+      // 選択中の項目は、薄い青の背景(ホバー中でない)。未選択の「選択」の行は青くしない
+      await panel.locator(".cs-option").first().evaluate(o => o.classList.remove("is-active"));
+      assert.equal(await panel.locator(".cs-option.is-selected .cs-option-text").innerText(), "DIB00V");
+      await page.mouse.move(0, 0);
+      const selBg = await panel.evaluate(p => [getComputedStyle(p.querySelector(".cs-option.is-selected")).backgroundColor, getComputedStyle(p.querySelector(".cs-option.is-placeholder")).backgroundColor]);
+      assert.ok(selBg[0] === "rgb(234, 242, 255)" || selBg[0] === "rgb(219, 234, 254)", "薄い青の背景: " + selBg[0]);
+      assert.notEqual(selBg[1], "rgb(234, 242, 255)");
       await page.keyboard.press("Escape");
       assert.equal(await panel.count(), 0);
 
@@ -165,6 +172,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const clip = await doctorTrigger.evaluate(b => { const s = b.querySelector(".cs-trigger-text"); const r = b.getBoundingClientRect(); return { clipped: s.scrollWidth > s.clientWidth + 1 || s.scrollHeight > s.clientHeight + 1, w: Math.round(r.width) }; });
       assert.deepEqual(clip, { clipped: false, w: 150 }, "長い名前もボタンの中で切れずに折り返す(幅は同じ)");
       assert.equal(await doctorSelect.evaluate(s => s.title), "国家公務員共済組合連合会立川病院 眼科部長 山田太郎左衛門", "全文はホバーでも確認できる");
+      // 担当医のメニュー: 白背景・選択中は薄い青の背景と青いチェック(ダークモードでも)
+      await doctorTrigger.click(); await panel.waitFor();
+      const dm = await panel.evaluate(p => { const s = p.querySelector(".cs-option.is-selected"); return { bg: getComputedStyle(p).backgroundColor, selBg: getComputedStyle(s).backgroundColor, check: getComputedStyle(s.querySelector(".cs-check")).color, other: getComputedStyle(p.querySelector(".cs-option:not(.is-selected):not(.is-active)") || p.querySelector(".cs-option")).color }; });
+      assert.equal(dm.bg, "rgb(255, 255, 255)");
+      assert.ok(["rgb(234, 242, 255)", "rgb(219, 234, 254)"].includes(dm.selBg), dm.selBg);
+      assert.equal(dm.check, "rgb(37, 99, 235)");
+      await page.keyboard.press("Escape");
       await doctorSelect.selectOption("");
 
       // キーボード: Enter で開く・↓で移動・Enter で選ぶ・Esc で閉じる。外側をタップすると閉じる
@@ -195,6 +209,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.ok(narrow.left >= 7.5 && narrow.right <= 320 - 7.5, `320px: ${JSON.stringify(narrow)}`);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
       await page.keyboard.press("Escape");
+
+      // ダークモードの端末でも、手術日のカレンダー(日付入力)と選択メニューはライトモード。ページ全体のテーマは変えない
+      const cs = await page.evaluate(() => ({ date: getComputedStyle(document.querySelector("[data-f=date]")).colorScheme, model: getComputedStyle(document.querySelector("[data-f=model]")).colorScheme, doctor: getComputedStyle(document.querySelector("[data-f=doctor]")).colorScheme, root: getComputedStyle(document.documentElement).colorScheme, body: getComputedStyle(document.body).backgroundColor }));
+      assert.deepEqual([cs.date, cs.model, cs.doctor], ["light", "light", "light"]);
+      assert.equal(cs.root, "normal", "ページ全体のテーマは変更しない");
 
       // PC幅: ボタンは出ず、従来のネイティブ select
       await page.setViewportSize({ width: 1100, height: 800 });
