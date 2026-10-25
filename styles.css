@@ -2093,3 +2093,9 @@ input[type="date"], .lens-line select { color-scheme: light; }
   .more-menu-item { color: #f87171; }
   .more-menu-item:hover, .more-menu-item:focus-visible { background: #3b1d1d; }
 }
+
+/* 施設の登録・参加: 主なボタン(登録する/参加する)は左、「注文画面に戻る」/「ログアウト」は同じ行の右。説明文との間に余白 */
+.onboarding-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 18px; }
+.form-group + .onboarding-actions { margin-top: 0; }   /* 直前の入力欄グループの下余白(18px)をそのまま使う */
+.onboarding-actions > :only-child { margin-right: auto; }
+.onboarding-primary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

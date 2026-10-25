@@ -122,6 +122,21 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await hint.isHidden(), true);
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
 
+      // ボタン配置: 主なボタン(登録する/参加する)は左、「ログアウト」(所属済みなら「注文画面に戻る」)は同じ行の右。説明文との間に16〜20px。登録画面・参加画面とも、PC・スマホで同じ
+      for (const width of [390, 1100]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const [mode, primary, hintSel] of [["#btnModeJoin", "#btnJoinSubmit", "#joinToken ~ .form-hint"], ["#btnModeRegister", "#btnRegSubmit", "#regFacilityName ~ .form-hint"]]) {
+          await page.click(mode);
+          const p = await page.locator(primary).boundingBox(), s = await page.locator("#btnAuthSignOut").boundingBox();
+          const hint = await page.locator(hintSel).first().boundingBox();
+          assert.ok(Math.abs(p.y - s.y) < 6, `${width} ${primary}: 同じ行`);
+          assert.ok(p.x + p.width <= s.x, `${width} ${primary}: 左に主なボタン、右にログアウト`);
+          assert.ok(s.x + s.width > width - 60, `${width}: 右端に寄る`);
+          const lastHintBottom = await page.evaluate(([sel, pr]) => { const f = document.querySelector(sel).closest(".form-group"); return f.getBoundingClientRect().bottom; }, [primary === "#btnJoinSubmit" ? "#joinToken" : "#regFacilityName", primary]);
+          const gap = p.y - lastHintBottom;
+          assert.ok(gap >= 16 && gap <= 20, `${width} ${primary}: 説明文とボタンの間 ${gap}px`);
+        }
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }

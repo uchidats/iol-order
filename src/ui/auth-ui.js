@@ -90,7 +90,7 @@ export function createAuthUi(handlers) {
     const showDup = Boolean(reg.duplicate) && dupName === normalizeFacilityName(draft.name);
     const disabled = reg.busy || unverified ? "disabled" : "";
 
-    let body = "";
+    let body = "", primary = "";   // primary: 左側に並べる主なボタン(右側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
     if (draft.mode === "register") {
       body = `
         <div class="form-group">
@@ -103,18 +103,20 @@ export function createAuthUi(handlers) {
           ${showDup ? `
             <p class="error-message" role="alert">既に登録されている可能性があります(${reg.duplicate.exact ? "同じ名前の施設があります" : "名前の似た施設があります"})。
             既存の施設に参加する場合は、その施設の管理者から招待コードを受け取ってください。別の施設の場合のみ、このまま登録できます。</p>
-            <button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
-            <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
-          : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`}
+            ` : ""}
         </div>`;
+      primary = showDup
+        ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
+            <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
+        : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`;
     } else if (draft.mode === "join") {
       body = `
         <div class="form-group">
           <label class="form-label" for="joinToken">招待コード</label>
           <input id="joinToken" class="form-control" type="text" autocomplete="off" spellcheck="false" value="${escapeHtml(draft.token)}">
           <p class="form-hint">施設の管理者から受け取った招待コードを入力します。招待されたメールアドレスでログインしている必要があります。招待がない場合は参加できません。</p>
-          <button type="button" class="btn btn-primary" id="btnJoinSubmit" ${disabled}>${reg.busy ? "確認しています…" : "参加する"}</button>
         </div>`;
+      primary = `<button type="button" class="btn btn-primary" id="btnJoinSubmit" ${disabled}>${reg.busy ? "確認しています…" : "参加する"}</button>`;
     }
 
     panel.innerHTML = `
@@ -129,9 +131,12 @@ export function createAuthUi(handlers) {
           <button type="button" class="btn btn-secondary" id="btnModeJoin" ${draft.mode === "join" ? 'aria-pressed="true"' : ""}>既存施設に参加する</button>
         </div>
         ${body}
-        ${embedded
-          ? '<button type="button" class="btn btn-outline-sm" id="btnOnboardingClose">注文画面に戻る</button>'
-          : '<button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>'}
+        <div class="onboarding-actions">
+          ${primary ? `<div class="onboarding-primary">${primary}</div>` : ""}
+          ${embedded
+            ? '<button type="button" class="btn btn-outline-sm" id="btnOnboardingClose">注文画面に戻る</button>'
+            : '<button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>'}
+        </div>
         ${msg}
       </div>`;
 
