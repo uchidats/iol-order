@@ -2068,14 +2068,8 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 #btnRenameFacility { margin-left: -4px; }
 
-/* 施設設定: 見出し右端の「︙」メニューと、施設削除のダイアログ */
-.more-wrap { position: relative; margin-left: auto; }
-.settings-head .more-wrap { margin-left: 4px; }
-.more-trigger { padding: 4px 8px; }
-.more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 160px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 4px; }
-.more-menu[hidden] { display: none; }
-.more-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: #dc2626; font: inherit; text-align: left; cursor: pointer; }
-.more-menu-item:hover, .more-menu-item:focus-visible { background: #fef2f2; }
+/* 施設設定: 施設削除のボタンとダイアログ */
+.delete-trigger { color: #dc2626; }   /* 大きさ・背景は編集(鉛筆)と同じ(btn-outline-sm)。アイコンだけ赤 */
 /* 削除ダイアログ: ダークモードでも、背景は白・文字は濃いグレーに固定(入力欄も明るい配色) */
 .delete-dialog { width: min(92vw, 440px); border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; background: #fff; color: #1f2937; color-scheme: light; }
 .delete-dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -2088,11 +2082,6 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .delete-dialog .btn-secondary { background-color: #f1f5f9; color: #334155; border-color: #e2e8f0; }   /* 従来のグレー(ダークモードでも固定) */
 .delete-dialog .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
 .delete-dialog .form-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-@media (prefers-color-scheme: dark) {
-  .more-menu { background: #1f2937; border-color: #4b5563; }
-  .more-menu-item { color: #f87171; }
-  .more-menu-item:hover, .more-menu-item:focus-visible { background: #3b1d1d; }
-}
 
 /* 施設の登録・参加: 主なボタン(登録する/参加する)は左、「注文画面に戻る」/「ログアウト」は同じ行の右。説明文との間に余白 */
 .onboarding-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 18px; }

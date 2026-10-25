@@ -19,7 +19,7 @@ import { IOL_MODELS } from "/src/data/iol-models.js";
 window.__calls = []; window.__deleted = []; window.__next = { status: "renamed" };
 const repository = { listOrderers: async () => [], listAdoptedIols: async () => [], listDealers: async () => [], listMembers: async () => [] };
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {} };
-const inviteApi = { createInvite: async () => ({}), ${withRename ? `deleteFacility: async (a) => { window.__calls.push(a); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/failed-precondition"; throw e; } return { status: "deleted" }; }` : ""} };
+const inviteApi = { createInvite: async () => ({}), ${withRename ? `renameFacility: async () => ({ status: "unchanged" }), deleteFacility: async (a) => { window.__calls.push(a); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/failed-precondition"; throw e; } return { status: "deleted" }; }` : ""} };
 const s = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, masters: IOL_MODELS, inviteApi, onSaved: async () => {}, onClose() {}, onDeleted: (id) => window.__deleted.push(id) });
 await s.open({ id: "f1", name: "テスト施設" });
 window.__ready = true;
@@ -60,31 +60,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       pg.on("pageerror", e => errors.push(String(e)));
       await pg.goto(base);
       await pg.waitForFunction(() => window.__ready);
-      const more = pg.locator("#btnSettingsMore"), menuItem = pg.locator("#btnDeleteFacility"), box = pg.locator("#deleteFacilityDialog"), input = box.locator("input");
+      const trash = pg.locator("#btnDeleteFacility"), pencil = pg.locator("#btnRenameFacility"), closeBtn = pg.locator("#btnSettingsClose"), box = pg.locator("#deleteFacilityDialog"), input = box.locator("input");
       const sec = box;
       const del = box.getByRole("button", { name: "この施設を削除する" });
-      // 画面の最下部に削除の欄はない。見出し右端の「︙」→「施設を削除」(赤いゴミ箱)→ダイアログ
+      // 見出しは左から「編集(鉛筆)」「削除(ゴミ箱)」「注文画面に戻る」。「︙」メニューと、最下部の削除欄はない
       assert.equal(await pg.locator('[data-section="delete"]').count(), 0);
+      assert.equal(await pg.locator("#btnSettingsMore").count(), 0);
       assert.equal(await box.isHidden(), true);
-      assert.equal(await menuItem.isHidden(), true);
-      const headBox = await pg.locator(".settings-head").boundingBox(), moreBox = await more.boundingBox();
-      assert.ok(moreBox.x + moreBox.width > headBox.x + headBox.width - 40, "見出しの右端にある");
-      assert.ok(moreBox.y < headBox.y + headBox.height + 1);
-      await more.click();
-      assert.equal(await menuItem.isVisible(), true);
-      assert.equal(await menuItem.locator("svg").count(), 1);
-      assert.equal(await menuItem.evaluate(e => getComputedStyle(e).color), "rgb(220, 38, 38)", "赤");
-      assert.equal(await menuItem.innerText(), "施設を削除");
-      await pg.keyboard.press("Escape");   // Escで閉じる
-      assert.equal(await menuItem.isHidden(), true);
-      await more.click();
-      await pg.mouse.click(5, 600);       // 外側のクリックで閉じる
-      assert.equal(await menuItem.isHidden(), true);
-      await more.click();
-      await menuItem.click();
+      const [pb, tb, cb] = [await pencil.boundingBox(), await trash.boundingBox(), await closeBtn.boundingBox()];
+      assert.ok(Math.abs(pb.y - tb.y) < 3 && pb.x + pb.width <= tb.x && tb.x + tb.width <= cb.x + 1 || tb.y < cb.y, "鉛筆→ゴミ箱→戻る の順");
+      assert.ok(Math.abs(pb.width - tb.width) < 1 && Math.abs(pb.height - tb.height) < 1, "鉛筆と同じ大きさ");
+      const bgOf = (l) => l.evaluate(e => getComputedStyle(e).backgroundColor);
+      assert.equal(await bgOf(trash), await bgOf(pencil), "背景色は鉛筆と同じ");
+      assert.equal(await trash.locator("svg").count(), 1);
+      assert.equal(await trash.getAttribute("aria-label"), "施設を削除");
+      assert.equal(await trash.evaluate(e => getComputedStyle(e).color), "rgb(220, 38, 38)", "赤いアイコン");
+      await trash.click();
       assert.equal(await box.isVisible(), true);
       assert.match(await box.innerText(), /注文履歴がある施設/);
-      assert.equal(await menuItem.isHidden(), true, "メニューは閉じる");
       // 見た目: 見出しは削除対象の施設名入り・プレースホルダー・ボタンの色。ダークモードでも背景は白・文字は濃いグレー
       assert.equal(await box.locator(".delete-prompt").innerText(), "確認のため『テスト施設』と入力してください");
       assert.equal(await input.getAttribute("placeholder"), "施設名を入力");
@@ -123,24 +116,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await box.isHidden(), true, "成功でダイアログは閉じる");
 
       // キャンセルで確認欄が閉じる
-      await more.click(); await menuItem.click();
+      await trash.click();
       assert.equal(await input.inputValue(), "", "開き直すと入力は空");
       await box.getByRole("button", { name: "キャンセル" }).click();
       assert.equal(await box.isHidden(), true);
       // PC幅でも同じ
       await pg.setViewportSize({ width: 1100, height: 900 });
-      await more.click();
-      assert.equal(await menuItem.isVisible(), true);
-      const mb = await pg.locator(".more-menu").boundingBox();
-      assert.ok(mb.x >= 0 && mb.x + mb.width <= 1100);
-      await pg.keyboard.press("Escape");
+      const [pb2, tb2, cb2] = [await pencil.boundingBox(), await trash.boundingBox(), await closeBtn.boundingBox()];
+      assert.ok(Math.abs(pb2.y - tb2.y) < 3 && pb2.x + pb2.width <= tb2.x && tb2.x + tb2.width <= cb2.x + 1, "PC幅でも 鉛筆→ゴミ箱→戻る");
+      assert.ok(Math.abs(pb2.width - tb2.width) < 1 && Math.abs(pb2.height - tb2.height) < 1);
       await pg.setViewportSize({ width: 390, height: 900 });
       assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
 
-      // 削除用の関数がなければ、「︙」は出ない
+      // 削除用の関数がなければ、ゴミ箱は出ない
       await pg.goto(base + "norename");
       await pg.waitForFunction(() => window.__ready);
-      assert.equal(await pg.locator("#btnSettingsMore").count(), 0);
+      assert.equal(await pg.locator("#btnDeleteFacility").count(), 0);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

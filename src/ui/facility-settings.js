@@ -650,8 +650,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     return section;
   }
 
-  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出し右端の「︙」メニューから、施設名を入力するダイアログで確認) ----------
-  const moreIcon = () => icon("M12 5.5v.01M12 12v.01M12 18.5v.01");
+  // ---------- 施設の削除(施設管理者のみ。条件の判定・削除はサーバー。見出しのゴミ箱ボタンから、施設名を入力するダイアログで確認) ----------
   function deleteMenu() {
     const input = h("input", { type: "text", class: "form-control", maxlength: "100", autocomplete: "off", placeholder: "施設名を入力", "aria-label": "削除する施設名の確認入力" });
     const prompt = h("label", { class: "form-label delete-prompt" });
@@ -664,22 +663,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       prompt, input,
       msg,
       h("div", { class: "form-row" }, doDelete, cancel));
-    const trash = trashIcon(); trash.setAttribute("width", "16"); trash.setAttribute("height", "16");
-    const item = h("button", { type: "button", class: "more-menu-item", role: "menuitem", id: "btnDeleteFacility" }, trash, h("span", {}, "施設を削除"));
-    const menu = h("div", { class: "more-menu", role: "menu", hidden: true }, item);
-    const trigger = h("button", { type: "button", class: "btn btn-outline-sm more-trigger", id: "btnSettingsMore", "aria-label": "その他の操作", "aria-haspopup": "menu", "aria-expanded": "false", title: "その他" }, moreIcon());
-    const wrap = h("div", { class: "more-wrap" }, trigger, menu);
-
-    const setMenu = (on) => { menu.hidden = !on; trigger.setAttribute("aria-expanded", on ? "true" : "false"); };
-    trigger.addEventListener("click", (ev) => { ev.stopPropagation(); setMenu(menu.hidden); });
-    document.addEventListener("click", (ev) => { if (!menu.hidden && !wrap.contains(ev.target)) setMenu(false); });
-    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !menu.hidden) { setMenu(false); trigger.focus(); } });
+    // 編集(鉛筆)と同じ大きさ・背景のゴミ箱ボタン(アイコンだけ赤)
+    const trigger = h("button", { type: "button", class: "btn btn-outline-sm delete-trigger", id: "btnDeleteFacility", "aria-label": "施設を削除", title: "施設を削除" }, trashIcon());
 
     const same = () => input.value.trim() !== "" && input.value.replace(/\s+/g, " ").trim() === (facility.name || "").replace(/\s+/g, " ").trim();
     input.addEventListener("input", () => { doDelete.disabled = !same(); });
     const closeDialog = () => { if (dialog.open) dialog.close(); };
-    item.addEventListener("click", () => {
-      setMenu(false);
+    trigger.addEventListener("click", () => {
       input.value = ""; doDelete.disabled = true; msg.hidden = true;
       prompt.textContent = `確認のため『${facility.name}』と入力してください`;   // 削除対象の施設名を自動表示(textContent)
       dialog.showModal();
@@ -703,7 +693,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         deleting = false; doDelete.disabled = !same();
       }
     });
-    return { wrap, dialog, reset: () => { setMenu(false); closeDialog(); } };
+    return { wrap: trigger, dialog, reset: () => closeDialog() };
   }
 
   // ---------- 画面全体 ----------
@@ -765,7 +755,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
     // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない
-    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, closeBtn, del && del.wrap),
+    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, del && del.wrap, closeBtn),
     del && del.dialog,
     nameBox,
     status,
