@@ -2045,3 +2045,7 @@ input[type="date"].form-control {
 /* ダークモードの端末でも、手術日のカレンダー(日付入力)と選択メニューは、ライトモード(白背景・濃い文字)で表示する。
    ページ全体のテーマは変えず、これらの入力要素だけに適用する */
 input[type="date"], .lens-line select { color-scheme: light; }
+
+/* ディーラーの並び替え: 先頭の行の「↑」は非表示。スマホ幅では「↑」のみ(「↓」は隠す)、PCは「↑↓」 */
+.dealer-item [data-act][hidden] { display: none !important; }
+@media (max-width: 640px) { .dealer-item .orderer-actions [data-act="down"] { display: none; } }

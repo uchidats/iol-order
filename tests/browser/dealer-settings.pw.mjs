@@ -89,12 +89,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       // 2) 担当医と同じサイズ・スタイル・配置のボタン
       const geom = (loc) => loc.locator(".orderer-actions button").evaluateAll(bs => bs.map(b => { const r = b.getBoundingClientRect(); const s = getComputedStyle(b); return { w: Math.round(r.width), h: Math.round(r.height), cls: b.className, radius: s.borderRadius, bg: s.backgroundColor, right: Math.round(window.innerWidth - r.right) }; }));
-      const gDealer = await geom(rows.nth(0)), gDoctor = await geom(page.locator('[data-section="orderers"] .orderer-item').nth(0));
+      const gDealer = await geom(rows.nth(1)), gDoctor = await geom(page.locator('[data-section="orderers"] .orderer-item').nth(1));   // 先頭の行は「↑」が非表示のため、2行目で比べる
       assert.deepEqual(gDealer.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), gDoctor.map(g => [g.w, g.h, g.cls, g.radius, g.bg]), "ボタンのサイズ・スタイルが担当医と同じ");
       assert.equal(gDealer[3].right, gDoctor[3].right, "右端の位置が担当医と同じ");
       const addBtns = async (sel) => page.locator(`${sel} .settings-actions button`).evaluateAll(bs => bs.map(b => [b.className, b.textContent.trim()]));
       assert.equal((await addBtns('[data-section="dealers"]'))[0][0], (await addBtns('[data-section="orderers"]'))[0][0], "追加ボタンのデザインが担当医と同じ(担当医は自動保存のため、保存ボタンはない。ディーラーは従来どおり保存ボタン)");
-      assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["ディーラーを追加", "ディーラーを保存"]);
+      assert.deepEqual((await addBtns('[data-section="dealers"]')).map(x => x[1]), ["ディーラーを追加"], "「ディーラーを保存」ボタンは廃止(自動保存)");
+      // 先頭の行の「↑」は非表示。PC幅では「↑↓」
+      assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true);
+      assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
+      assert.equal(await rows.nth(1).locator('[data-act="down"]').isVisible(), true);
 
       // 3) 編集ボタンを押した行だけ入力欄になる。発注用・使用報告用メールは編集時に確認・変更できる
       await rows.nth(0).locator('[data-act="edit"]').click();
@@ -103,10 +107,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await rows.nth(0).locator('[data-f="usageEmails"]').inputValue(), "ar@example.jp");
       await rows.nth(0).locator('[data-f="name"]').fill("A商会(新)");
       await rows.nth(0).locator('[data-f="orderEmails"]').fill("a1@example.jp\nnew@example.jp");
-      // 編集中に「ディーラーを保存」を押しても保存されない(担当医と同じ)
-      await sec.locator('[data-act="save"]').click();
+      // 入力途中は保存されない(行の「保存」で確定した時点で自動保存される)
+      await page.waitForTimeout(500);
       assert.equal(await page.evaluate(() => window.__saved.length), 0);
-      assert.match(await sec.locator("[data-msg]").innerText(), /編集中の行/);
       // 行の「保存」: 検証 → 保存。sortOrder は表示順(10刻み)。メールは変更が反映され、使用報告用は維持
       await rows.nth(0).locator('[data-act="save-row"]').click();
       await page.waitForFunction(() => window.__saved.length === 1);
@@ -125,11 +128,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await rows.nth(1).locator('[data-act="cancel-row"]').click();
       assert.equal(await rows.nth(1).locator('[data-v="name"]').innerText(), "B医療", "キャンセルで元に戻る");
 
-      // 5) ↑↓で並び替え → 保存すると sortOrder が入れ替わる(発注先の判定には使わない。表示順だけ)
+      // 5) ↑で並び替え → 自動保存され sortOrder が入れ替わる(発注先の判定には使わない。表示順だけ)
       await rows.nth(2).locator('[data-act="up"]').click();
       assert.deepEqual(await rows.locator('[data-v="name"]').allInnerTexts(), ["A商会(新)", "C商会", "B医療"]);
-      await sec.locator('[data-act="save"]').click();
-      await page.waitForFunction(() => window.__saved.length === 2);
+      await page.waitForFunction(() => window.__saved.length === 2);   // 並び替えで自動保存
       const w2 = await page.evaluate(() => window.__saved[1]);
       assert.deepEqual(w2.map(x => [x.id, x.data.sortOrder]).sort(), [["d2", 30], ["d3", 20]].sort());
       assert.ok(w2.every(x => "orderEmails" in x.data && "usageReportEmails" in x.data), "メール設定は維持される");

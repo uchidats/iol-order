@@ -113,8 +113,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     };
     return api;
   }
-  let orderSaver = null, iolSaver = null;   // 担当医・採用IOLの自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver].filter(Boolean);
+  let orderSaver = null, iolSaver = null, dealerSaver = null;   // 担当医・採用IOL・ディーラーの自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver, dealerSaver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -440,7 +440,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     };
     row._commit = () => {
       row._state.name = nameInput.value; row._state.orderEmailsText = orderInput.value; row._state.usageEmailsText = usageInput.value;
-      editing = false; paint(); markDirty();
+      editing = false; paint();
     };
     row._cancel = () => {
       const s = row._state;
@@ -451,8 +451,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     row.querySelector('[data-act="edit"]').addEventListener("click", () => row._startEdit());
     row.querySelector('[data-act="cancel-row"]').addEventListener("click", () => row._cancel());
     row.querySelector('[data-act="save-row"]').addEventListener("click", () => saveDealerRow(row));
-    row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); markDirty(); });
-    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); markDirty(); });
+    row.querySelector('[data-act="up"]').addEventListener("click", () => { if (row.previousElementSibling) { row.parentNode.insertBefore(row, row.previousElementSibling); dealerSaver.request(); } });
+    row.querySelector('[data-act="down"]').addEventListener("click", () => { if (row.nextElementSibling) { row.parentNode.insertBefore(row.nextElementSibling, row); dealerSaver.request(); } });
     row.querySelector('[data-act="delete"]').addEventListener("click", () => deleteDealerRow(row));
     paint();
     return row;
@@ -479,17 +479,31 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       row.querySelector('[data-f="usageEmails"]').value = typed.usage;
       return message(section, "入力内容を確認してください。", true);
     }
-    await saveDealersNow(section);
+    message(section, "");
+    dealerSaver.request();   // 行の「保存」(追加・設定変更の確定)で、自動保存する
   }
 
-  async function saveDealersNow(section) {
-    const v = validateDealers(readDealerRows(section));
-    showRowErrors(section, v.errors);
-    if (!v.ok) return message(section, "入力内容を確認してください。", true);
+  /**
+   * ディーラーの自動保存の実体: 確定済みの行だけを、画面に並んでいる順(sortOrder)に保存する。
+   * 入力途中の行(追加して未確定の行・編集中の入力)は含めない(確定した時点で保存される)。
+   */
+  async function runDealerSave() {
+    const section = sections.dealers;
+    const entries = [...section.querySelectorAll(".dealer-item")].filter(r => !(r._isEditing() && !r._state.id));   // 未確定の追加行は除く
+    const v = validateDealers(entries.map(r => ({ id: r._state.id, name: r._state.name, orderEmailsText: r._state.orderEmailsText, usageEmailsText: r._state.usageEmailsText })));
+    section.querySelectorAll("[data-err]").forEach(p => { p.textContent = ""; });
+    v.errors.forEach(e => { const p = entries[e.index] && entries[e.index].querySelector("[data-err]"); if (p) p.textContent = (p.textContent ? p.textContent + " / " : "") + e.message; });
+    if (!v.ok) throw new Error("ディーラーの入力内容を確認してください");
     const writes = planDealerWrites(data.dealers, v.cleaned, facility.id);   // 並び順は sortOrder として保存される
-    if (!writes.length) return message(section, "変更はありません。");
-    const ok = await saveWith(section, section.querySelector('[data-act="save"]'), () => settingsApi.saveDealers(facility.id, writes));
-    if (ok) { renderDealers(section); message(section, "ディーラーを保存しました。"); }
+    if (!writes.length) return;
+    await settingsApi.saveDealers(facility.id, writes);
+    await load();   // 最新の保存内容を読み直す(新しいディーラーの ID もここで分かる。入力途中の行は壊さない)
+    entries.forEach((r, i) => {
+      if (r._state.id) return;
+      const saved = data.dealers.find(d => d.name === v.cleaned[i].name);
+      if (saved) { r._state.id = saved.id; r.setAttribute("data-id", saved.id); }
+    });
+    await onSaved();
   }
 
   /**
@@ -506,9 +520,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     btn.disabled = true;
     message(section, "削除しています…");
     try {
-      await settingsApi.deleteDealer(facility.id, id);
-      data.dealers = data.dealers.filter(x => x.id !== id);
-      row.remove();
+      await dealerSaver.exclusive(async () => {   // 自動保存と同時に走らせない(削除したディーラーを、保存が書き戻さないように)
+        await settingsApi.deleteDealer(facility.id, id);
+        data.dealers = data.dealers.filter(x => x.id !== id);
+        row.remove();
+      });
       await onSaved();
       message(section, `「${name}」を削除しました。`);
     } catch (e) {
@@ -520,22 +536,20 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function dealerSection() {
     const section = h("section", { class: "settings-section", "data-section": "dealers" },
-      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑↓で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。現在は登録のみで、メール送信は行われません。"),
+      createSectionHeading("ディーラー", "発注先ディーラーの連絡先を登録します。注文用と使用報告用のメールアドレスを別々に設定できます。鉛筆で編集、↑で並び替え(選択肢の表示順だけに使います)、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。現在は登録のみで、メール送信は行われません。"),
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
-        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "ディーラーを追加"),
-        h("button", { type: "button", class: "btn btn-primary", "data-act": "save" }, "ディーラーを保存")),
+        h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "ディーラーを追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
-      const row = dealerRow(); section.querySelector("[data-list]").appendChild(row); markDirty();
-      row._startEdit(); // 追加した行は編集状態で表示する
+      const row = dealerRow(); section.querySelector("[data-list]").appendChild(row);
+      row._startEdit(); // 追加した行は編集状態で表示する。行の「保存」で確定した時点で自動保存される(入力途中は保存しない)
     });
-    section.querySelector('[data-act="save"]').addEventListener("click", async () => {
-      if ([...section.querySelectorAll(".dealer-item")].some(r => r._isEditing())) {
-        return message(section, "編集中の行を、保存またはキャンセルしてください。", true);
-      }
-      await saveDealersNow(section);
-    });
+    dealerSaver = createAutoSaver(section, runDealerSave);   // 「ディーラーを保存」ボタンは廃止(追加・設定変更の確定・並び替え・削除で自動保存)
+    // 並び替えの↑: 先頭の行では非表示(スマホでは↑のみ・PCは↑↓。スマホで↓を隠すのは CSS)。行の追加・削除・移動のたびに更新する
+    const list = section.querySelector("[data-list]");
+    const updateMoves = () => [...list.querySelectorAll(".dealer-item")].forEach((r, i) => { const up = r.querySelector('[data-act="up"]'); if (up) up.hidden = i === 0; });
+    new MutationObserver(updateMoves).observe(list, { childList: true });
     return section;
   }
 

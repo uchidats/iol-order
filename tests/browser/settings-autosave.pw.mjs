@@ -19,7 +19,8 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 import { createFacilitySettings } from "/src/ui/facility-settings.js";
 import { IOL_MODELS } from "/src/data/iol-models.js";
 const KEY = "__settingsDb";
-const load = () => JSON.parse(localStorage.getItem(KEY) || "null") || { orderers: [{ id: "d1", name: "山田", email: "y@example.jp", sortOrder: 10 }, { id: "d2", name: "佐藤", sortOrder: 20 }], adopted: [{ id: "alcon-cna0t0", catalogIolId: "alcon-cna0t0", enabled: true }], iolOrder: null, seq: 0 };
+const load = () => JSON.parse(localStorage.getItem(KEY) || "null") || { orderers: [{ id: "d1", name: "山田", email: "y@example.jp", sortOrder: 10 }, { id: "d2", name: "佐藤", sortOrder: 20 }], adopted: [{ id: "alcon-cna0t0", catalogIolId: "alcon-cna0t0", enabled: true }], iolOrder: null, seq: 0,
+  dealers: [{ id: "s1", name: "A商会", sortOrder: 10, orderEmails: ["a@example.jp"], usageReportEmails: [] }, { id: "s2", name: "B医療", sortOrder: 20, orderEmails: [], usageReportEmails: ["r@example.jp"] }] };
 const store = (db) => localStorage.setItem(KEY, JSON.stringify(db));
 window.__delay = 0; window.__fail = 0; window.__calls = []; window.__inflight = 0; window.__maxInflight = 0; window.__changed = 0;
 const guarded = async (kind, fn) => {
@@ -33,7 +34,7 @@ const guarded = async (kind, fn) => {
 const repository = {
   listOrderers: async () => load().orderers.slice().sort((a, b) => a.sortOrder - b.sortOrder).map(o => ({ ...o })),
   listAdoptedIols: async () => load().adopted.map(a => ({ ...a })),
-  listDealers: async () => [], listMembers: async () => [],
+  listDealers: async () => load().dealers.slice().sort((a, b) => a.sortOrder - b.sortOrder).map(d => ({ ...d })), listMembers: async () => [],
   getIolOrder: async () => load().iolOrder
 };
 const settingsApi = {
@@ -41,7 +42,8 @@ const settingsApi = {
   deleteOrderer: (fid, id) => guarded("delete", () => { const db = load(); db.orderers = db.orderers.filter(o => o.id !== id); store(db); }),
   saveAdoptedIols: (fid, writes) => guarded("adopted", () => { const db = load(); for (const w of writes) { const i = db.adopted.findIndex(a => a.id === w.id); const rec = { id: w.id, ...w.data }; if (i >= 0) db.adopted[i] = rec; else db.adopted.push(rec); } store(db); }),
   saveIolOrder: (fid, o) => guarded("iolOrder", () => { const db = load(); db.iolOrder = { makerOrder: o.makerOrder, modelOrder: o.modelOrder }; store(db); }),
-  saveDealers: async () => {}
+  saveDealers: (fid, writes) => guarded("dealers", () => { const db = load(); for (const w of writes) { const id = w.id || ("dn" + (++db.seq)); const i = db.dealers.findIndex(o => o.id === id); const rec = { id, ...w.data }; if (i >= 0) db.dealers[i] = rec; else db.dealers.push(rec); } store(db); }),
+  deleteDealer: (fid, id) => guarded("deleteDealer", () => { const db = load(); db.dealers = db.dealers.filter(o => o.id !== id); store(db); })
 };
 const s = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, masters: IOL_MODELS, onSaved: async () => { window.__changed++; }, onClose() {} });
 await s.open({ id: "f1", name: "テスト施設" });
@@ -206,6 +208,117 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.setViewportSize({ width: 1100, height: 900 });
       await open();
       assert.deepEqual(await docs.locator('[data-v="name"]').allInnerTexts(), (await db()).orderers.sort((a, b) => a.sortOrder - b.sortOrder).map(o => o.name));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`施設設定のディーラーの自動保存(保存ボタンなし・スマホは↑のみ・先頭の↑は非表示): ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 1200 } });
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      const open = async () => { await page.goto(base); await page.waitForFunction(() => window.__ready); };
+      const db = () => page.evaluate(() => JSON.parse(localStorage.getItem("__settingsDb") || "null"));
+      const idle = () => page.waitForFunction(() => window.__inflight === 0);
+      const sec = page.locator('[data-section="dealers"]');
+      const rows = sec.locator(".dealer-item");
+      const names = () => rows.locator('[data-v="name"]').allInnerTexts();
+      await open();
+
+      // 保存ボタンは廃止。スマホ幅は「↑」のみ(「↓」は出ない)。先頭の行の「↑」は非表示
+      assert.equal(await sec.locator('[data-act="save"]').count(), 0);
+      assert.ok(!(await sec.innerText()).includes("ディーラーを保存"));
+      assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true, "先頭の↑は非表示");
+      assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
+      for (let i = 0; i < 2; i++) assert.equal(await rows.nth(i).locator('[data-act="down"]').isHidden(), true, "スマホでは↓なし");
+      const btnBoxes = await rows.nth(1).locator(".orderer-actions button").evaluateAll(bs => bs.filter(b => b.offsetParent).map(b => { const r = b.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }));
+      for (let i = 0; i < btnBoxes.length; i++) for (let j = i + 1; j < btnBoxes.length; j++) assert.ok(btnBoxes[i][1] <= btnBoxes[j][0] + 0.5 || btnBoxes[j][1] <= btnBoxes[i][0] + 0.5, "ボタンが重ならない");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+
+      // 並び替え(↑): 自動保存。保存中の連続操作でも、最終状態が保存される
+      await page.evaluate(() => { window.__delay = 120; window.__calls = []; window.__maxInflight = 0; });
+      await rows.nth(1).locator('[data-act="up"]').click();                        // [B, A]
+      assert.deepEqual(await names(), ["B医療", "A商会"]);
+      assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true, "移動後も、先頭の↑は非表示");
+      assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
+      await rows.nth(1).locator('[data-act="up"]').click();                        // [A, B]
+      await rows.nth(1).locator('[data-act="up"]').click();                        // [B, A]
+      await page.waitForTimeout(700); await idle();
+      assert.equal(await page.evaluate(() => window.__maxInflight), 1, "保存は同時に1つだけ");
+      await page.evaluate(() => { window.__delay = 0; });
+      assert.deepEqual((await db()).dealers.sort((a, b) => a.sortOrder - b.sortOrder).map(d => d.name), await names(), "最終状態が保存される");
+      assert.deepEqual((await db()).dealers.find(d => d.id === "s1").orderEmails, ["a@example.jp"], "既存のメール設定は維持");
+
+      // 追加: 入力途中は保存されない。行の「保存」で確定した時点で1回保存。IDが付き、続けて並び替えても重複しない
+      await page.evaluate(() => { window.__calls = []; });
+      await sec.locator('[data-act="add"]').click();
+      await sec.locator(".dealer-item.is-editing [data-f=name]").fill("C商会");
+      await sec.locator(".dealer-item.is-editing [data-f=orderEmails]").fill("c@example.jp");
+      await page.waitForTimeout(450);
+      assert.deepEqual(await page.evaluate(() => window.__calls), [], "入力途中は保存しない");
+      assert.equal((await db()).dealers.length, 2);
+      await sec.locator(".dealer-item.is-editing [data-act=save-row]").click();
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem("__settingsDb")).dealers.length === 3);
+      await idle();
+      assert.deepEqual((await db()).dealers.find(d => d.name === "C商会").orderEmails, ["c@example.jp"]);
+      assert.notEqual(await rows.nth(2).getAttribute("data-id"), "", "追加したディーラーにIDが付く");
+      await rows.nth(2).locator('[data-act="up"]').click();
+      await page.waitForFunction(() => { const d = JSON.parse(localStorage.getItem("__settingsDb")).dealers; return d.find(x => x.name === "C商会").sortOrder < d.find(x => x.name === "A商会").sortOrder; });
+      await idle();
+      assert.equal((await db()).dealers.length, 3, "重複して作られない");
+
+      // 設定変更(メール): 編集中は保存されず、確定で保存
+      await rows.nth(0).locator('[data-act="edit"]').click();
+      await rows.nth(0).locator('[data-f="orderEmails"]').fill("b1@example.jp\nb2@example.jp");
+      await page.waitForTimeout(350);
+      assert.deepEqual((await db()).dealers.find(d => d.id === "s2").orderEmails, [], "編集中は保存しない");
+      await rows.nth(0).locator("[data-act=save-row]").click();
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem("__settingsDb")).dealers.find(d => d.id === "s2").orderEmails.length === 2);
+      await idle();
+
+      // 削除: 保存と直列。削除したディーラーは復活しない
+      await page.evaluate(() => { window.__delay = 100; });
+      await rows.nth(1).locator('[data-act="up"]').click();
+      page.once("dialog", d => d.accept());
+      await rows.last().locator('[data-act="delete"]').click();
+      await page.waitForTimeout(700); await idle();
+      await page.evaluate(() => { window.__delay = 0; });
+      assert.equal((await db()).dealers.length, 2);
+      assert.equal(await page.evaluate(() => window.__maxInflight), 1);
+
+      // リフレッシュしても保持される(並び順・メール)
+      const saved = (await db()).dealers.sort((a, b) => a.sortOrder - b.sortOrder);
+      await open();
+      assert.deepEqual(await names(), saved.map(d => d.name));
+      await rows.nth(0).locator('[data-act="edit"]').click();
+      assert.equal(await rows.nth(0).locator('[data-f="orderEmails"]').inputValue(), saved[0].orderEmails.join("\n"));
+      await rows.nth(0).locator("[data-act=cancel-row]").click();
+
+      // 保存失敗: エラー+再試行(画面の並びは残る・保存されていない)。再試行で保存される
+      await page.evaluate(() => { window.__fail = 1; });
+      await rows.nth(1).locator('[data-act="up"]').click();
+      await sec.locator('[data-act="retry-autosave"]').waitFor();
+      assert.match(await sec.locator("[data-msg]").innerText(), /保存できませんでした.*保存されていません/);
+      const shown = await names();
+      assert.notDeepEqual((await db()).dealers.sort((a, b) => a.sortOrder - b.sortOrder).map(d => d.name), shown, "保存されていない");
+      await sec.locator('[data-act="retry-autosave"]').click();
+      await sec.locator('[data-act="retry-autosave"]').waitFor({ state: "detached" });
+      assert.deepEqual((await db()).dealers.sort((a, b) => a.sortOrder - b.sortOrder).map(d => d.name), shown, "再試行で画面の並びが保存される");
+
+      // PC幅: 「↑↓」(先頭の↑は非表示)
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await open();
+      assert.equal(await rows.nth(0).locator('[data-act="up"]').isHidden(), true);
+      assert.equal(await rows.nth(1).locator('[data-act="up"]').isVisible(), true);
+      assert.equal(await rows.nth(0).locator('[data-act="down"]').isVisible(), true, "PCでは↓も表示");
+      assert.equal(await rows.nth(1).locator('[data-act="down"]').isVisible(), true);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
       assert.deepEqual(errors, []);
       await context.close();
