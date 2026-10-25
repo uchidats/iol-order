@@ -62,7 +62,23 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(base);
       await page.waitForFunction(() => window.__ready);
-      await page.click("#btnModeRegister");
+      // 初期選択は「既存施設に参加する」。縦並びのラジオで、選んだ方の入力欄だけを表示。入力済みの内容は切り替えても保持
+      assert.equal(await page.locator("#modeJoin").isChecked(), true);
+      assert.equal(await page.locator("#modeRegister").isChecked(), false);
+      assert.equal(await page.locator("#joinToken").isVisible(), true);
+      assert.equal(await page.locator("#regFacilityName").count(), 0);
+      const r1 = await page.locator("#modeRegister").boundingBox(), r2 = await page.locator("#modeJoin").boundingBox();
+      assert.ok(r2.y > r1.y + 10 && Math.abs(r1.x - r2.x) < 2, "縦並び");
+      await page.fill("#joinToken", "TOKEN-123");
+      await page.check("#modeRegister");
+      assert.equal(await page.locator("#joinToken").count(), 0);
+      await page.fill("#regFacilityName", "保持テスト施設");
+      await page.check("#modeJoin");
+      assert.equal(await page.locator("#joinToken").inputValue(), "TOKEN-123", "招待コードを保持");
+      await page.check("#modeRegister");
+      assert.equal(await page.locator("#regFacilityName").inputValue(), "保持テスト施設", "施設名を保持");
+      await page.evaluate(() => { window.__checks.length = 0; });
+      await page.fill("#regFacilityName", "");
       const input = page.locator("#regFacilityName"), hint = page.locator("#regNameHint");
       assert.equal(await hint.isHidden(), true);
 
@@ -125,8 +141,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // ボタン配置: 主なボタン(登録する/参加する)は左、「ログアウト」(所属済みなら「注文画面に戻る」)は同じ行の右。説明文との間に16〜20px。登録画面・参加画面とも、PC・スマホで同じ
       for (const width of [390, 1100]) {
         await page.setViewportSize({ width, height: 900 });
-        for (const [mode, primary, hintSel] of [["#btnModeJoin", "#btnJoinSubmit", "#joinToken ~ .form-hint"], ["#btnModeRegister", "#btnRegSubmit", "#regFacilityName ~ .form-hint"]]) {
-          await page.click(mode);
+        for (const [mode, primary, hintSel] of [["#modeJoin", "#btnJoinSubmit", "#joinToken ~ .form-hint"], ["#modeRegister", "#btnRegSubmit", "#regFacilityName ~ .form-hint"]]) {
+          await page.check(mode);
           const p = await page.locator(primary).boundingBox(), s = await page.locator("#btnAuthSignOut").boundingBox();
           const hint = await page.locator(hintSel).first().boundingBox();
           assert.ok(Math.abs(p.y - s.y) < 6, `${width} ${primary}: 同じ行`);

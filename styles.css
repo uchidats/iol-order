@@ -2099,3 +2099,10 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .form-group + .onboarding-actions { margin-top: 0; }   /* 直前の入力欄グループの下余白(18px)をそのまま使う */
 .onboarding-actions > :only-child { margin-right: auto; }
 .onboarding-primary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* 施設の登録・参加: 縦並びのラジオボタン(白背景・青のアクセント) */
+.onboarding-mode { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 16px; }
+.mode-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #fff; color: #1f2937; cursor: pointer; }
+.mode-option:has(input:checked) { border-color: var(--primary); background: var(--primary-light); }
+.mode-option input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); flex: none; }
+.mode-option input[type="radio"]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

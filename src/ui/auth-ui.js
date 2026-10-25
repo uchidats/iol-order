@@ -90,6 +90,7 @@ export function createAuthUi(handlers) {
     const showDup = Boolean(reg.duplicate) && dupName === normalizeFacilityName(draft.name);
     const disabled = reg.busy || unverified ? "disabled" : "";
 
+    if (!draft.mode) draft.mode = "join";   // 初期選択は「既存施設に参加する」
     let body = "", primary = "";   // primary: 左側に並べる主なボタン(右側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
     if (draft.mode === "register") {
       body = `
@@ -126,9 +127,9 @@ export function createAuthUi(handlers) {
           ? `${who} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録するか、招待を受けた別の施設に参加できます。`
           : `${who} でログインしています。利用を始めるには、新しい施設を登録するか、招待を受けた施設に参加してください。`}</p>
         ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
-        <div class="facility-select-list">
-          <button type="button" class="btn btn-secondary" id="btnModeRegister" ${draft.mode === "register" ? 'aria-pressed="true"' : ""}>新しい施設を登録</button>
-          <button type="button" class="btn btn-secondary" id="btnModeJoin" ${draft.mode === "join" ? 'aria-pressed="true"' : ""}>既存施設に参加する</button>
+        <div class="onboarding-mode" role="radiogroup" aria-label="施設の登録・参加">
+          <label class="mode-option"><input type="radio" name="onboardingMode" id="modeRegister" value="register" ${draft.mode === "register" ? "checked" : ""}><span>新しい施設を登録</span></label>
+          <label class="mode-option"><input type="radio" name="onboardingMode" id="modeJoin" value="join" ${draft.mode === "join" ? "checked" : ""}><span>既存施設に参加する</span></label>
         </div>
         ${body}
         <div class="onboarding-actions">
@@ -141,8 +142,15 @@ export function createAuthUi(handlers) {
       </div>`;
 
     const rerender = () => lastArgs && render(lastArgs);
-    $("btnModeRegister").addEventListener("click", () => { draft.mode = "register"; handlers.onRegisterCancel(); rerender(); });
-    $("btnModeJoin").addEventListener("click", () => { draft.mode = "join"; handlers.onRegisterCancel(); rerender(); });
+    // 切り替えても、入力済みの内容(施設名・招待コード)は draft に保持される
+    const switchMode = (mode) => {
+      if (draft.mode === mode) return;
+      draft.mode = mode; handlers.onRegisterCancel(); rerender();
+      const again = $("regFacilityName");
+      if (again && normalizeFacilityName(again.value).length >= 2) scheduleNameCheck(again);   // 施設名が入力済みなら、候補を出し直す
+    };
+    $("modeRegister").addEventListener("change", () => switchMode("register"));
+    $("modeJoin").addEventListener("change", () => switchMode("join"));
     const signOutBtn = $("btnAuthSignOut");
     if (signOutBtn) signOutBtn.addEventListener("click", () => handlers.onSignOut());
     const closeBtn = $("btnOnboardingClose");
