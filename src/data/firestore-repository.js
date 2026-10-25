@@ -47,6 +47,11 @@ export function createFirestoreRepository(db, fs) {
     listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
     /** 所属ユーザー（管理者・副管理者のみ読める）。id = uid */
     listMembers: async (facilityId) => (await listSub(facilityId, "members")).map(m => ({ ...m, uid: m.uid || m.id })),
+    /** 利用者管理の表示順(管理者・副管理者のみ読める)。未設定は null */
+    async getMemberOrder(facilityId) {
+      const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"));
+      return snap.exists() && Array.isArray(snap.data().order) ? snap.data().order : null;
+    },
     /** 参加待ち(事前登録。管理者・副管理者のみ読める。施設で絞った問い合わせだけが Rules で許可される) */
     async listPendingMembers(facilityId) {
       const snap = await fs.getDocs(fs.query(fs.collection(db, "pendingMembers"), fs.where("facilityId", "==", facilityId)));
@@ -95,6 +100,10 @@ export function createFirestoreSettingsApi(db, fs) {
     saveIolOrder: (facilityId, { makerOrder, modelOrder }) => fs.setDoc(
       fs.doc(db, "facilities", facilityId, "displaySettings", "iolOrder"),
       { makerOrder, modelOrder, updatedAt: fs.serverTimestamp() }),
+    /** 利用者管理の表示順の保存(管理者・副管理者のみ。Rules が検証する)。所属・参加待ち・権限には影響しない */
+    saveMemberOrder: (facilityId, order) => fs.setDoc(
+      fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"),
+      { order, updatedAt: fs.serverTimestamp() }),
     deleteOrderer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "orderers", id)),
     /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
     deleteDealer: (facilityId, id) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "facilityDealers", id)),

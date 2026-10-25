@@ -204,13 +204,20 @@ service cloud.firestore {
       // 表示設定(施設ごとのIOLモデルの表示順)。順番だけの設定で、採用状態・注文内容には影響しない。
       // 読めるのは所属メンバー(注文画面が使う)、書けるのは自施設の管理者・副管理者のみ。
       match /displaySettings/{docId} {
-        allow read: if isPlatformAdmin() || isMember(fid);
+        // memberOrder(利用者管理の表示順。所属の uid・参加待ちのIDの並び)は、利用者一覧と同じく管理者・副管理者だけが読める
+        allow read: if isPlatformAdmin()
+          || (docId != 'memberOrder' && isMember(fid))
+          || (docId == 'memberOrder' && isFacilityManager(fid));
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && docId == 'iolOrder'
-          && request.resource.data.keys().hasOnly(['makerOrder', 'modelOrder', 'updatedAt'])
-          && request.resource.data.keys().hasAll(['makerOrder', 'modelOrder'])
-          && request.resource.data.makerOrder is list && request.resource.data.makerOrder.size() <= 50
-          && request.resource.data.modelOrder is list && request.resource.data.modelOrder.size() <= 200;
+          && ((docId == 'iolOrder'
+              && request.resource.data.keys().hasOnly(['makerOrder', 'modelOrder', 'updatedAt'])
+              && request.resource.data.keys().hasAll(['makerOrder', 'modelOrder'])
+              && request.resource.data.makerOrder is list && request.resource.data.makerOrder.size() <= 50
+              && request.resource.data.modelOrder is list && request.resource.data.modelOrder.size() <= 200)
+            || (docId == 'memberOrder'
+              && request.resource.data.keys().hasOnly(['order', 'updatedAt'])
+              && request.resource.data.keys().hasAll(['order'])
+              && request.resource.data.order is list && request.resource.data.order.size() <= 500));
         allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 

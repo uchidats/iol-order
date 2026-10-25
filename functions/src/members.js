@@ -22,7 +22,7 @@ export const PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 参加待ちの有�
 const NAME_MAX = 50;
 const RATE = {
   windowMs: 60 * 60 * 1000,
-  max: { removeMember: 60, addMember: 60, cancelPendingMember: 60, renewPendingMember: 60, changeMemberRole: 60, listMyPendingMemberships: 120, respondMembership: 30 }
+  max: { removeMember: 60, addMember: 60, cancelPendingMember: 60, renewPendingMember: 60, changeMemberRole: 60, listMyPendingMemberships: 120, respondMembership: 30, updateMember: 120, updatePendingMember: 60 }
 };
 const ROLE_LABEL = { admin: "管理者", subadmin: "副管理者", orderer: "注文者", proxy: "代行入力者" };
 const NOT_MANAGER = "この施設の管理者・副管理者のみ操作できます";
@@ -42,6 +42,11 @@ function parseEmail(v) {
   const email = typeof v === "string" ? v.trim().toLowerCase() : "";
   if (!email || email.length > 254 || !EMAIL_RE.test(email)) throw new RegistrationError("invalid-argument", "メールアドレスの形式が正しくありません");
   return email;
+}
+function parseName(v) {
+  const name = typeof v === "string" ? normalizeName(v) : "";
+  if (!name || name.length > NAME_MAX) throw new RegistrationError("invalid-argument", `名前は1〜${NAME_MAX}文字で入力してください`);
+  return name;
 }
 function parseRole(v) {
   if (typeof v !== "string" || !MEMBER_ROLES.includes(v)) throw new RegistrationError("invalid-argument", "役割が正しくありません");
@@ -94,6 +99,15 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
     });
   }
   const expired = (p) => !p.get("expiresAt") || p.get("expiresAt").toMillis() <= now();
+  // 利用者管理の表示順(facilities/{施設ID}/displaySettings/memberOrder の order: ["m:{uid}" | "p:{参加待ちID}", ...])。画面が自動保存する
+  const orderRef = (facilityId) => db.doc(`facilities/${facilityId}/displaySettings/memberOrder`);
+  /** 表示順の中のキーを置き換える(参加・メールアドレスの変更で、同じ位置のまま表示する)。読み取りは呼び出し側で済ませておく */
+  function replaceInOrder(tx, orderSnap, from, to) {
+    if (!orderSnap || !orderSnap.exists) return;
+    const list = orderSnap.get("order");
+    if (!Array.isArray(list) || !list.includes(from)) return;
+    tx.update(orderSnap.ref, { order: list.map(k => (k === from ? to : k)).filter((k, i, a) => a.indexOf(k) === i), updatedAt: FieldValue.serverTimestamp() });
+  }
   const iso = (ms) => new Date(ms).toISOString();
 
   // ---------- 事前登録(参加待ち) ----------
@@ -205,7 +219,7 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       const facilityId = p.get("facilityId");
       const role = p.get("role");
       if (!MEMBER_ROLES.includes(role) || role === ROLES.ADMIN) throw new RegistrationError("failed-precondition", INVALID_PENDING);
-      const [fac, mem] = await Promise.all([tx.get(db.doc(`facilities/${facilityId}`)), tx.get(db.doc(`facilities/${facilityId}/members/${user.uid}`))]);
+      const [fac, mem, order] = await Promise.all([tx.get(db.doc(`facilities/${facilityId}`)), tx.get(db.doc(`facilities/${facilityId}/members/${user.uid}`)), tx.get(orderRef(facilityId))]);
       if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_PENDING);
 
       if (!data.accept) {
@@ -223,8 +237,78 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
         email: user.email, updatedAt: FieldValue.serverTimestamp()
       });
       tx.delete(ref);
+      replaceInOrder(tx, order, `p:${data.pendingId}`, `m:${user.uid}`);   // 参加待ちの表示位置のまま、参加済みとして表示する
       log(tx, facilityId, user, { action: "member.join", via: "preregistration", targetUid: user.uid, targetEmail: user.email, targetRole: role });
       return { status: "joined", facilityId, role };
+    });
+  }
+
+  // ---------- 編集(氏名・参加待ちの内容) ----------
+  /**
+   * 参加済みの利用者の氏名(この施設の所属に記録した表示名だけ。Firebase Authentication・他施設の所属は変えない)。
+   * 自分自身の氏名は誰でも(管理者・副管理者)変更できる。他人は、その役割を扱える人だけ(副管理者は注文者・代行入力者のみ)。
+   */
+  async function updateMemberName({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    assertShape(data, ["facilityId", "uid", "name"]);
+    const facilityId = assertId(data.facilityId);
+    const targetUid = assertId(data.uid);
+    const name = parseName(data.name);
+    await consumeRate(user.uid, "updateMember");
+    const targetRef = db.doc(`facilities/${facilityId}/members/${targetUid}`);
+    return db.runTransaction(async (tx) => {
+      const { actorRole } = await readManager(tx, facilityId, user.uid);
+      const target = await tx.get(targetRef);
+      if (!target.exists) throw new RegistrationError("not-found", "所属が見つかりません(既に削除されています)");
+      if (targetUid !== user.uid) assertCanManage(actorRole, target.get("role"));
+      const from = target.get("displayName") || null;
+      if (from === name) return { changed: false, name };
+      tx.update(targetRef, { displayName: name, updatedAt: FieldValue.serverTimestamp() });
+      log(tx, facilityId, user, { action: "member.rename", targetUid, targetRole: target.get("role"), ...(from ? { fromName: String(from).slice(0, 100) } : {}), toName: name });
+      return { changed: true, name };
+    });
+  }
+
+  /**
+   * 参加待ち(参加待ち・期限切れ・辞退)の氏名・メールアドレス・役割の編集。状態と期限はそのまま(期限切れ・辞退は「再登録」で戻す)。
+   * メールアドレスを変えると、参加待ちのID(施設ID_メールのハッシュ)も変わる: 古い参加待ちを消し、新しいIDで作り直す(1トランザクション)。
+   * 以前のメールアドレスでは参加できなくなり、新しいメールアドレス(メール確認済み)の本人だけが参加できる。表示順も引き継ぐ。
+   */
+  async function updatePendingMember({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    assertShape(data, ["facilityId", "pendingId", "name", "email", "role"]);
+    const name = parseName(data.name);
+    const email = parseEmail(data.email);
+    const role = parseRole(data.role);
+    if (role === ROLES.ADMIN) throw new RegistrationError("invalid-argument", "管理者は事前登録できません。参加後に役割を変更してください");
+    await consumeRate(user.uid, "updatePendingMember");
+    return db.runTransaction(async (tx) => {
+      const { facilityId, ref, p, actorRole } = await readPendingForManager(tx, user, data);
+      assertCanManage(actorRole, role);
+      const newRef = db.doc(`pendingMembers/${pendingIdOf(facilityId, email)}`);
+      const moved = newRef.id !== ref.id;
+      let order = null;
+      if (moved) {
+        const [dst, sameEmail, ord] = await Promise.all([
+          tx.get(newRef), tx.get(db.collection(`facilities/${facilityId}/members`).where("email", "==", email).limit(1)), tx.get(orderRef(facilityId))]);
+        if (!sameEmail.empty) throw new RegistrationError("already-exists", "このメールアドレスの利用者は、既にこの施設に所属しています");
+        if (dst.exists) throw new RegistrationError("already-exists", "このメールアドレスは、既に利用者管理に登録されています");
+        order = ord;
+      }
+      const changes = { name, email, role, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid };
+      if (moved) {
+        tx.set(newRef, { ...p.data(), ...changes });
+        tx.delete(ref);
+        replaceInOrder(tx, order, `p:${ref.id}`, `p:${newRef.id}`);
+      } else {
+        tx.update(ref, changes);
+      }
+      log(tx, facilityId, user, {
+        action: "member.preregister.update",
+        fromEmail: p.get("email"), targetEmail: email, fromRole: p.get("role"), targetRole: role,
+        ...(p.get("name") !== name ? { fromName: String(p.get("name") || "").slice(0, 100), targetName: name } : {})
+      });
+      return { pendingId: newRef.id, name, email, role, status: p.get("status"), expiresAt: p.get("expiresAt") ? iso(p.get("expiresAt").toMillis()) : null };
     });
   }
 
@@ -316,5 +400,5 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
     });
   }
 
-  return { removeMember, addMember, cancelPendingMember, renewPendingMember, listMyPendingMemberships, respondMembership, changeMemberRole };
+  return { removeMember, addMember, cancelPendingMember, renewPendingMember, listMyPendingMemberships, respondMembership, changeMemberRole, updateMemberName, updatePendingMember };
 }

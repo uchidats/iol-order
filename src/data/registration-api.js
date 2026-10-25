@@ -33,6 +33,10 @@ export function createRegistrationApi({ functions, httpsCallable }) {
     /** 期限切れ・辞退の再登録(今日から30日) */
     renewPendingMember: ({ facilityId, pendingId }) => call("renewPendingMember", { facilityId, pendingId }),
     changeMemberRole: ({ facilityId, uid, role }) => call("changeMemberRole", { facilityId, uid, role }),
+    /** 参加済みの利用者の氏名(この施設の表示名のみ。認証情報・他施設は変わらない) */
+    updateMemberName: ({ facilityId, uid, name }) => call("updateMemberName", { facilityId, uid, name }),
+    /** 参加待ちの氏名・メールアドレス・役割。メールアドレスを変えると参加待ちのIDも変わる(戻り値の pendingId) */
+    updatePendingMember: ({ facilityId, pendingId, name, email, role }) => call("updatePendingMember", { facilityId, pendingId, name, email, role }),
     /** ログイン中の本人宛ての参加待ち。@returns {Promise<{memberships:Array<{pendingId:string, facilityId:string, facilityName:string, role:string, roleLabel:string, invitedByName:string|null, expiresAt:string}>}>} */
     listMyPendingMemberships: () => call("listMyPendingMemberships", {}),
     /** 参加の承認(accept=true)・辞退(false)。@returns {Promise<{status:"joined"|"already-member"|"declined", facilityId:string, role?:string}>} */

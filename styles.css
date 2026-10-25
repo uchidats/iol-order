@@ -2133,3 +2133,16 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .pending-invite-facility { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
 .pending-invite-meta { margin-top: 4px; font-size: 0.85rem; color: #4b5563; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pending-invite .onboarding-actions { margin-top: 12px; }
+
+/* 利用者管理: 担当医・ディーラーと同じ行(↑・編集・削除)。使えない操作は場所だけ残して見えなくする */
+.orderer-actions .is-placeholder { visibility: hidden; }
+.member-item .orderer-namebox [data-f="name"] { font-weight: 600; overflow-wrap: anywhere; }
+.member-role-badge.is-action { gap: 2px; cursor: pointer; font-family: inherit; }
+.member-role-badge.is-action:hover, .member-role-badge.is-action:focus-visible { border-color: var(--primary); background: var(--primary-light); outline: none; }
+.member-role-caret { font-size: 0.65rem; line-height: 1; }
+.member-renew { min-height: 0; padding: 1px 8px; font-size: 0.75rem; }
+.member-edit.is-pending-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; }
+.member-edit-fixed { font-size: 0.85rem; color: #6b7280; overflow-wrap: anywhere; }
+.member-edit-note { grid-column: 1 / -1; margin: 0; }
+.member-item .member-role-edit { margin: 6px 0 2px; }
+@media (max-width: 640px) { .member-edit.is-pending-edit { grid-template-columns: minmax(0, 1fr); } }

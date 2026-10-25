@@ -87,3 +87,5 @@ export const renewPendingMember = onCall(options, wrap(memberService.renewPendin
 export const listMyPendingMemberships = onCall(options, wrap(memberService.listMyPendingMemberships));
 export const respondMembership = onCall(options, wrap(memberService.respondMembership));
 export const changeMemberRole = onCall(options, wrap(memberService.changeMemberRole));
+export const updateMemberName = onCall(options, wrap(memberService.updateMemberName));         // 参加済みの利用者の氏名(この施設の表示名のみ)
+export const updatePendingMember = onCall(options, wrap(memberService.updatePendingMember));   // 参加待ちの氏名・メール・役割

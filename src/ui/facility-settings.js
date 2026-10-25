@@ -121,8 +121,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
-  let orderSaver = null, iolSaver = null, dealerSaver = null;   // 担当医・採用IOL・ディーラーの自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver].filter(Boolean);
+  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理の自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -669,6 +669,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       canPreregister ? form : null,
       canPreregister ? h("div", { class: "settings-actions" }, addBtn) : null,
       h("p", { class: "form-hint", "data-msg": "" }));
+    memberSaver = createAutoSaver(section, runMemberOrderSave);   // 並び替え(↑)の自動保存。編集・削除などは同じ保存の列で順に行う(exclusive)
+    const memberList = section.querySelector("[data-list]");
+    new MutationObserver(() => [...memberList.querySelectorAll(".member-item")].forEach((r, i) => markFirst(r.querySelector('[data-act="up"]'), i === 0)))
+      .observe(memberList, { childList: true });
     if (!canPreregister) return section;
 
     const reset = () => { nameIn.value = ""; emailIn.value = ""; if (roleIn.querySelector('option[value="orderer"]')) roleIn.value = "orderer"; };
@@ -699,69 +703,122 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   async function reloadMembers() {
-    data.members = await repository.listMembers(facility.id);
-    data.pending = canPreregister ? await repository.listPendingMembers(facility.id) : [];
+    const [members, pending, order] = await Promise.all([
+      repository.listMembers(facility.id),
+      canPreregister ? repository.listPendingMembers(facility.id) : Promise.resolve([]),
+      repository.getMemberOrder ? repository.getMemberOrder(facility.id).catch(() => null) : Promise.resolve(null)
+    ]);
+    data.members = members; data.pending = pending; data.memberOrder = Array.isArray(order) ? order : [];
   }
 
-  /** 行の操作を実行し、一覧を読み込み直す(失敗時は理由を表示し、ボタンを戻す) */
+  /** 表示順の自動保存の実体: 画面に並んでいる順(参加済み "m:{uid}"・参加待ち "p:{ID}")を保存する(施設ごと) */
+  async function runMemberOrderSave() {
+    const keys = [...sections.members.querySelectorAll(".member-item")].map(r => r.getAttribute("data-key"));
+    if (!settingsApi.saveMemberOrder || keys.join("\n") === (data.memberOrder || []).join("\n")) return;
+    await settingsApi.saveMemberOrder(facility.id, keys);
+    data.memberOrder = keys;
+  }
+
+  /**
+   * 行の操作(編集・役割変更・削除・取り消し・再登録)を、並び替えの自動保存と同じ列で順に実行し、一覧を読み込み直す。
+   * 失敗時は理由を表示し、操作を残す(もう一度押せば再試行)。成功すれば true
+   */
   async function runRowAction(section, btns, busyText, fn, doneText) {
     btns.forEach(b => { b.disabled = true; });
     message(section, busyText);
     try {
-      await fn();
-      await reloadMembers();
+      await memberSaver.exclusive(async () => { await fn(); await reloadMembers(); });
       renderMembers(section);
       message(section, doneText);
+      return true;
     } catch (e) {
       console.error("利用者管理の操作に失敗しました:", e);
       message(section, describeCallableError(e), true);
       btns.forEach(b => { b.disabled = false; });
+      return false;
     }
   }
 
+  /** 操作ボタン(左から ↑・編集・削除)。使えない操作は、場所だけ残して見えなくする(行ごとのボタンの位置をそろえる) */
+  function memberActions(label, { edit, del, delLabel }) {
+    const btn = (act, title, child, enabled) => {
+      const b = h("button", { type: "button", class: `btn btn-outline-sm orderer-icon${enabled ? "" : " is-placeholder"}`, "data-act": act, "aria-label": enabled ? `${label}: ${title}` : null, title: enabled ? title : null }, child);
+      if (!enabled) { b.disabled = true; b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); }
+      return b;
+    };
+    return h("span", { class: "orderer-actions" },
+      btn("up", "上へ", "↑", true),
+      btn("edit", "編集", pencilIcon(), edit),
+      btn("delete", delLabel, trashIcon(), del));
+  }
+
+  function moveUp(row) {
+    if (!row.previousElementSibling) return;
+    row.parentNode.insertBefore(row, row.previousElementSibling);
+    memberSaver.request();
+  }
+
   function memberRow(section, m) {
-    const plan = planMemberRemoval(data.members, m, currentUser.uid, actorRole);
-    const choices = roleChoices(data.members, m, actorRole);   // 副管理者は自分を含め副管理者を変更できない。最後の管理者は降格できない
+    const isSelf = m.uid === currentUser.uid;
     const label = memberLabel(m);
-    const edit = choices.length
-      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "edit-role", "aria-label": `${label} の役割を変更`, title: "役割を変更" }, pencilIcon())
-      : null;
-    const del = plan.ok
-      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "remove-member", "aria-label": `${label} の所属を削除`, title: "所属を削除" }, trashIcon())
-      : null;
-    // 1段目: 氏名 + 役割バッジ + 右端に操作 / 2段目: メール(登録がある場合のみ)
-    const row = h("div", { class: "settings-row settings-row-member", "data-uid": m.uid },
-      h("span", { class: "settings-member-title" },
-        h("span", { "data-f": "name" }, label),
-        h("span", { class: "member-role-badge", "data-f": "role", "data-role": m.role }, roleLabel(m.role))),
-      h("span", { class: "settings-member-action" }, edit, del),
-      m.email ? h("span", { class: "settings-member-meta" }, h("span", { "data-f": "email" }, m.email)) : null);
-    if (edit) {
-      edit.addEventListener("click", () => {
+    const plan = planMemberRemoval(data.members, m, currentUser.uid, actorRole);
+    const canRename = isSelf || canManageRole(actorRole, m.role);   // 自分の氏名は変更できる(管理者自身も)
+    // 役割の変更は氏名の編集とは別: 役割バッジを押す。自分自身の役割は(誤操作を防ぐため)変更しない。最後の管理者は降格しない
+    const choices = isSelf ? [] : roleChoices(data.members, m, actorRole);
+    const badge = choices.length
+      ? h("button", { type: "button", class: "member-role-badge is-action", "data-f": "role", "data-role": m.role, "data-act": "role", "aria-label": `${label} の役割（${roleLabel(m.role)}）を変更`, title: "役割を変更" }, roleLabel(m.role), h("span", { class: "member-role-caret", "aria-hidden": "true" }, "▾"))
+      : h("span", { class: "member-role-badge", "data-f": "role", "data-role": m.role }, roleLabel(m.role));
+    const actions = memberActions(label, { edit: canRename, del: plan.ok, delLabel: "所属を削除" });
+    const nameIn = h("input", { class: "form-control", type: "text", maxlength: "50", "data-f": "editName", "aria-label": "氏名" });
+    const save = h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存");
+    const cancel = h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル");
+    const editBox = h("div", { class: "orderer-edit member-edit", hidden: true },
+      nameIn, h("span", { class: "member-edit-fixed" }, m.email ? `${m.email}（変更できません）` : ""),
+      h("div", { class: "orderer-edit-actions" }, save, cancel));
+    const err = h("p", { class: "error-message", "data-err": "" });
+    const view = h("div", { class: "orderer-view" },
+      h("span", { class: "orderer-namebox" }, h("span", { "data-f": "name" }, label), badge),
+      h("span", { class: `orderer-email${m.email ? "" : " is-empty"}`, "data-f": "email" }, m.email || "メール未登録"),
+      actions);
+    const row = h("div", { class: "orderer-item member-item", "data-key": `m:${m.uid}`, "data-uid": m.uid }, view, editBox, err);
+    const setEditing = (on) => { view.hidden = on; editBox.hidden = !on; row.classList.toggle("is-editing", on); if (on) { err.textContent = ""; nameIn.focus(); } };
+
+    actions.querySelector('[data-act="up"]').addEventListener("click", () => moveUp(row));
+    if (canRename) actions.querySelector('[data-act="edit"]').addEventListener("click", () => { nameIn.value = m.displayName || ""; setEditing(true); });
+    cancel.addEventListener("click", () => setEditing(false));
+    save.addEventListener("click", async () => {
+      const name = nameIn.value.replace(/\s+/g, " ").trim();
+      if (!name) { err.textContent = "氏名を入力してください。"; return; }
+      if (name === (m.displayName || "")) { setEditing(false); return; }
+      const ok = await runRowAction(section, [save, cancel], "保存しています…",
+        () => inviteApi.updateMemberName({ facilityId: facility.id, uid: m.uid, name }), `${name} の氏名を保存しました。`);
+      if (!ok) err.textContent = "保存できませんでした。もう一度「保存」を押すと再試行します。";
+    });
+    if (plan.ok) {
+      actions.querySelector('[data-act="delete"]').addEventListener("click", (ev) => {
+        if (!window.confirm(confirmMessage(m))) return;
+        runRowAction(section, [ev.currentTarget], "削除しています…",
+          () => inviteApi.removeMember({ facilityId: facility.id, uid: m.uid }), `${label} の所属を削除しました。`);
+      });
+    }
+    if (choices.length) {
+      badge.addEventListener("click", () => {
         if (row.querySelector(".member-role-edit")) return;
         const sel = h("select", { class: "form-control", "aria-label": `${label} の役割` }, choices.map(r => h("option", { value: r }, roleLabel(r))));
         sel.value = m.role;
-        const save = h("button", { type: "button", class: "btn btn-primary", "data-act": "role-save" }, "変更");
-        const back = h("button", { type: "button", class: "btn btn-secondary", "data-act": "role-cancel" }, "キャンセル");
-        const box = h("div", { class: "member-role-edit" }, sel, save, back);
-        row.appendChild(box);
+        const ok = h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "role-save" }, "変更");
+        const back = h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "role-cancel" }, "キャンセル");
+        const box = h("div", { class: "member-role-edit" }, sel, ok, back);
+        row.insertBefore(box, err);
         sel.focus();
         back.addEventListener("click", () => box.remove());
-        save.addEventListener("click", () => {
+        ok.addEventListener("click", () => {
           if (sel.value === m.role) { box.remove(); return; }
           if (sel.value === "admin" && !window.confirm(`${label} を管理者にしますか？\n管理者は、施設名の変更・施設削除・管理者や副管理者の権限管理ができます。`)) return;
-          runRowAction(section, [save, back, sel], "変更しています…",
+          runRowAction(section, [ok, back, sel], "変更しています…",
             () => inviteApi.changeMemberRole({ facilityId: facility.id, uid: m.uid, role: sel.value }),
             `${label} の役割を${roleLabel(sel.value)}に変更しました。`);
         });
-      });
-    }
-    if (del) {
-      del.addEventListener("click", () => {
-        if (!window.confirm(confirmMessage(m))) return;
-        runRowAction(section, [del].concat(edit ? [edit] : []), "削除しています…",
-          () => inviteApi.removeMember({ facilityId: facility.id, uid: m.uid }),
-          `${label} の所属を削除しました。`);
       });
     }
     return row;
@@ -771,31 +828,56 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const st = pendingState(p);
     const label = memberLabel(p);
     const manageable = canManageRole(actorRole, p.role);
+    const canEdit = manageable && Boolean(inviteApi.updatePendingMember);
+    const canCancel = manageable && Boolean(inviteApi.cancelPendingMember);
     const renew = manageable && st !== "pending" && inviteApi.renewPendingMember
-      ? h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "renew" }, "再登録")
+      ? h("button", { type: "button", class: "btn btn-outline-sm member-renew", "data-act": "renew" }, "再登録")
       : null;
-    const cancelBtn = manageable && inviteApi.cancelPendingMember
-      ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "cancel-pending", "aria-label": `${label} の登録を取り消す`, title: "登録を取り消す" }, trashIcon())
-      : null;
+    const actions = memberActions(label, { edit: canEdit, del: canCancel, delLabel: "登録を取り消す" });
     const meta = [p.email, st === "pending" ? `${formatExpiry(p.expiresAt)} まで有効` : null].filter(Boolean).join(" ・ ");
-    const row = h("div", { class: "settings-row settings-row-member is-pending", "data-pending": p.id, "data-state": st },
-      h("span", { class: "settings-member-title" },
+    // 編集: 氏名・メールアドレス・役割(副管理者は注文者・代行入力者のみ)。状態・期限はそのまま
+    const nameIn = h("input", { class: "form-control", type: "text", maxlength: "50", "data-f": "editName", "aria-label": "氏名" });
+    const emailIn = h("input", { class: "form-control", type: "email", maxlength: "254", "data-f": "editEmail", "aria-label": "メールアドレス" });
+    const roleIn = h("select", { class: "form-control", "data-f": "editRole", "aria-label": "役割" }, assignableRoles(actorRole).map(r => h("option", { value: r }, roleLabel(r))));
+    const save = h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "save-row" }, "保存");
+    const cancel = h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancel-row" }, "キャンセル");
+    const editBox = h("div", { class: "orderer-edit member-edit is-pending-edit", hidden: true }, nameIn, emailIn, roleIn,
+      h("p", { class: "form-hint member-edit-note" }, "メールアドレスを変更すると、以前のメールアドレスでは参加できなくなります。"),
+      h("div", { class: "orderer-edit-actions" }, save, cancel));
+    const err = h("p", { class: "error-message", "data-err": "" });
+    const view = h("div", { class: "orderer-view" },
+      h("span", { class: "orderer-namebox" },
         h("span", { "data-f": "name" }, label),
         h("span", { class: "member-role-badge", "data-f": "role", "data-role": p.role }, roleLabel(p.role)),
-        h("span", { class: `member-state-badge is-${st}`, "data-f": "state" }, PENDING_STATE_LABELS[st])),
-      h("span", { class: "settings-member-action" }, renew, cancelBtn),
-      meta ? h("span", { class: "settings-member-meta" }, meta) : null);
+        h("span", { class: `member-state-badge is-${st}`, "data-f": "state" }, PENDING_STATE_LABELS[st]),
+        renew),
+      h("span", { class: "orderer-email", "data-f": "email" }, meta),
+      actions);
+    const row = h("div", { class: "orderer-item member-item is-pending", "data-key": `p:${p.id}`, "data-pending": p.id, "data-state": st }, view, editBox, err);
+    const setEditing = (on) => { view.hidden = on; editBox.hidden = !on; row.classList.toggle("is-editing", on); if (on) { err.textContent = ""; nameIn.focus(); } };
+
+    actions.querySelector('[data-act="up"]').addEventListener("click", () => moveUp(row));
+    if (canEdit) actions.querySelector('[data-act="edit"]').addEventListener("click", () => { nameIn.value = p.name || ""; emailIn.value = p.email || ""; roleIn.value = p.role; setEditing(true); });
+    cancel.addEventListener("click", () => setEditing(false));
+    save.addEventListener("click", async () => {
+      const name = nameIn.value.replace(/\s+/g, " ").trim();
+      const email = emailIn.value.trim();
+      if (!name) { err.textContent = "氏名を入力してください。"; return; }
+      if (!isValidEmail(email)) { err.textContent = "メールアドレスの形式が正しくありません。"; return; }
+      if (name === p.name && email.toLowerCase() === String(p.email).toLowerCase() && roleIn.value === p.role) { setEditing(false); return; }
+      const ok = await runRowAction(section, [save, cancel], "保存しています…",
+        () => inviteApi.updatePendingMember({ facilityId: facility.id, pendingId: p.id, name, email, role: roleIn.value }), `${name} の登録内容を保存しました。`);
+      if (!ok) err.textContent = "保存できませんでした。内容を確認して、もう一度「保存」を押してください。";
+    });
     if (renew) {
-      renew.addEventListener("click", () => runRowAction(section, [renew].concat(cancelBtn ? [cancelBtn] : []), "再登録しています…",
-        () => inviteApi.renewPendingMember({ facilityId: facility.id, pendingId: p.id }),
-        `${label} を再登録しました（30日間有効）。`));
+      renew.addEventListener("click", () => runRowAction(section, [renew], "再登録しています…",
+        () => inviteApi.renewPendingMember({ facilityId: facility.id, pendingId: p.id }), `${label} を再登録しました（30日間有効）。`));
     }
-    if (cancelBtn) {
-      cancelBtn.addEventListener("click", () => {
+    if (canCancel) {
+      actions.querySelector('[data-act="delete"]').addEventListener("click", (ev) => {
         if (!window.confirm(`${label}（${p.email}）の登録を取り消しますか？\nこの人は、このメールアドレスでログインしても参加できなくなります。`)) return;
-        runRowAction(section, [cancelBtn].concat(renew ? [renew] : []), "取り消しています…",
-          () => inviteApi.cancelPendingMember({ facilityId: facility.id, pendingId: p.id }),
-          `${label} の登録を取り消しました。`);
+        runRowAction(section, [ev.currentTarget], "取り消しています…",
+          () => inviteApi.cancelPendingMember({ facilityId: facility.id, pendingId: p.id }), `${label} の登録を取り消しました。`);
       });
     }
     return row;
@@ -803,10 +885,14 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function renderMembers(section) {
     const list = section.querySelector("[data-list]");
-    const rows = [
-      ...sortMembers(data.members).map(m => memberRow(section, m)),
-      ...sortPending(data.pending || []).map(p => pendingRow(section, p))
+    // 保存された表示順(施設ごと)。まだ並べていない人は、既定の順(役割 → 氏名、参加待ちは状態 → 氏名)で後ろに並ぶ
+    const items = [
+      ...sortMembers(data.members).map(m => ({ key: `m:${m.uid}`, el: () => memberRow(section, m) })),
+      ...sortPending(data.pending || []).map(p => ({ key: `p:${p.id}`, el: () => pendingRow(section, p) }))
     ];
+    const pos = new Map((data.memberOrder || []).map((k, i) => [k, i]));
+    const ordered = items.map((it, i) => ({ ...it, i })).sort((a, b) => (pos.has(a.key) ? pos.get(a.key) : 1e6 + a.i) - (pos.has(b.key) ? pos.get(b.key) : 1e6 + b.i));
+    const rows = ordered.map(it => it.el());
     list.replaceChildren(...(rows.length ? rows : [h("p", { class: "form-hint" }, "所属ユーザーはいません。")]));
   }
 

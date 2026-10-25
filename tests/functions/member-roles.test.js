@@ -296,3 +296,96 @@ test("参加待ちは、クライアントから直接は作成・承認でき�
   await assertFails(getDocs(query(collection(cli("ordA"), "pendingMembers"), where("facilityId", "==", F))));
   await assertFails(setDoc(doc(cli("x", { email: "x@example.jp", email_verified: true }), `facilities/${F}/members/x`), { uid: "x", role: "orderer" }));
 });
+
+// ================= 編集(氏名・参加待ち)と表示順 =================
+const rename = (auth, uid, name, f = F) => svc.updateMemberName({ auth, data: { facilityId: f, uid, name } });
+const editPending = (auth, pendingId, d, f = F) => svc.updatePendingMember({ auth, data: { facilityId: f, pendingId, ...d } });
+
+test("氏名の変更: この施設の所属の表示名だけが変わる(他施設の所属は変わらない)。管理者は自分を含め全員、副管理者は自分と注文者・代行入力者", async () => {
+  await db.doc(`facilities/${G}/members/ordA`).set({ uid: "ordA", role: "orderer", displayName: "他施設の名前", email: "orda@example.jp" });
+  assert.deepEqual(await rename(user("adminA"), "ordA", "  新しい　名前 "), { changed: true, name: "新しい 名前" });
+  assert.equal((await mem(F, "ordA")).get("displayName"), "新しい 名前");
+  assert.equal((await mem(F, "ordA")).get("email"), "orda@example.jp", "メールは変わらない");
+  assert.equal((await mem(G, "ordA")).get("displayName"), "他施設の名前", "他施設の所属は変わらない");
+  assert.equal((await rename(user("adminA"), "adminA", "管理者 本人")).changed, true, "管理者自身も変更できる");
+  assert.equal((await rename(user("adminA"), "subA", "副管理者 改")).changed, true);
+  assert.equal((await rename(user("subA"), "subA", "副 自分")).changed, true, "副管理者は自分の氏名を変更できる");
+  assert.equal((await rename(user("subA"), "proxyA", "代行 改")).changed, true);
+  await rejects(rename(user("subA"), "adminA", "乗っ取り"), "permission-denied");
+  await db.doc(`facilities/${F}/members/sub2`).set({ uid: "sub2", role: "subadmin" });
+  await rejects(rename(user("subA"), "sub2", "x"), "permission-denied");
+  for (const uid of ["ordA", "proxyA", "adminB", "stranger"]) await rejects(rename(user(uid), "proxyA", "x"), "permission-denied");
+  await rejects(rename(user("adminA"), "ordA", ""), "invalid-argument");
+  await rejects(rename(user("adminA"), "ordA", "あ".repeat(51)), "invalid-argument");
+  await rejects(svc.updateMemberName({ auth: user("adminA"), data: { facilityId: F, uid: "ordA", name: "x", role: "admin" } }), "invalid-argument");
+  await rejects(rename(user("adminA"), "nobody", "x"), "not-found");
+  assert.deepEqual(await rename(user("adminA"), "ordA", "新しい 名前"), { changed: false, name: "新しい 名前" });
+  assert.equal((await mem(F, "adminA")).get("role"), "admin", "役割は変わらない");
+  assert.ok((await logs()).some(l => l.action === "member.rename" && l.targetUid === "ordA" && l.toName === "新しい 名前"));
+});
+
+test("参加待ちの編集: 氏名・役割を変更できる。状態と期限はそのまま(期限切れ・辞退も編集でき、状態は変わらない)", async () => {
+  const a = await add(user("adminA"), { name: "旧名", email: "p@example.jp", role: "orderer" });
+  const r = await editPending(user("subA"), a.pendingId, { name: "新名", email: "p@example.jp", role: "proxy" });
+  assert.equal(r.pendingId, a.pendingId);
+  const p = await pend(F, "p@example.jp");
+  assert.deepEqual([p.get("name"), p.get("role"), p.get("status"), p.get("expiresAt").toMillis()], ["新名", "proxy", "pending", T0 + PENDING_TTL_MS]);
+  await svc.respondMembership({ auth: invitee("d1", "p@example.jp"), data: { pendingId: a.pendingId, accept: false } });
+  clock.t = T0 + 40 * DAY;
+  await editPending(user("adminA"), a.pendingId, { name: "辞退後に編集", email: "p@example.jp", role: "orderer" });
+  assert.equal((await pend(F, "p@example.jp")).get("status"), "declined", "辞退のまま(再登録で戻す)");
+  assert.ok((await logs()).some(l => l.action === "member.preregister.update"));
+});
+
+test("参加待ちの編集(メールアドレスの変更): 新しいIDで作り直し、古いメールでは参加できず、新しいメール(確認済み)の本人だけが参加できる。表示順も引き継ぐ", async () => {
+  const a = await add(user("adminA"), { name: "新人", email: "old@example.jp", role: "orderer" });
+  await db.doc(`facilities/${F}/displaySettings/memberOrder`).set({ order: ["m:adminA", `p:${a.pendingId}`, "m:ordA"] });
+  const r = await editPending(user("adminA"), a.pendingId, { name: "新人", email: " NEW@example.jp ", role: "orderer" });
+  assert.equal(r.pendingId, pendingIdOf(F, "new@example.jp"));
+  assert.equal((await pend(F, "old@example.jp")).exists, false);
+  const np = await pend(F, "new@example.jp");
+  assert.deepEqual([np.get("email"), np.get("status"), np.get("expiresAt").toMillis(), np.get("createdBy").uid], ["new@example.jp", "pending", T0 + PENDING_TTL_MS, "adminA"]);
+  assert.deepEqual((await db.doc(`facilities/${F}/displaySettings/memberOrder`).get()).get("order"), ["m:adminA", `p:${r.pendingId}`, "m:ordA"]);
+  // 古いメールの人は参加できない(一覧にも出ない)。新しいメールの人は参加でき、表示順は同じ位置で参加済みになる
+  assert.deepEqual((await svc.listMyPendingMemberships({ auth: invitee("oldUid", "old@example.jp") })).memberships, []);
+  await rejects(svc.respondMembership({ auth: invitee("oldUid", "old@example.jp"), data: { pendingId: a.pendingId, accept: true } }), "failed-precondition");
+  await rejects(svc.respondMembership({ auth: invitee("newUid", "new@example.jp", { email_verified: false }), data: { pendingId: r.pendingId, accept: true } }), "permission-denied");
+  assert.equal((await svc.respondMembership({ auth: invitee("newUid", "new@example.jp"), data: { pendingId: r.pendingId, accept: true } })).status, "joined");
+  assert.deepEqual((await db.doc(`facilities/${F}/displaySettings/memberOrder`).get()).get("order"), ["m:adminA", "m:newUid", "m:ordA"]);
+});
+
+test("参加待ちの編集: 所属済み・登録済みのメールへの変更、管理者への変更、副管理者による昇格・副管理者宛ての編集は不可。他施設は不可", async () => {
+  const a = await add(user("adminA"), { name: "x", email: "x@example.jp", role: "orderer" });
+  await add(user("adminA"), { name: "y", email: "y@example.jp", role: "orderer" });
+  const s = await add(user("adminA"), { name: "s", email: "s@example.jp", role: "subadmin" });
+  await rejects(editPending(user("adminA"), a.pendingId, { name: "x", email: "orda@example.jp", role: "orderer" }), "already-exists");
+  await rejects(editPending(user("adminA"), a.pendingId, { name: "x", email: "y@example.jp", role: "orderer" }), "already-exists");
+  await rejects(editPending(user("adminA"), a.pendingId, { name: "x", email: "x@example.jp", role: "admin" }), "invalid-argument");
+  await rejects(editPending(user("subA"), a.pendingId, { name: "x", email: "x@example.jp", role: "subadmin" }), "permission-denied");
+  await rejects(editPending(user("subA"), s.pendingId, { name: "s", email: "s@example.jp", role: "orderer" }), "permission-denied");
+  await rejects(editPending(user("ordA"), a.pendingId, { name: "x", email: "x@example.jp", role: "orderer" }), "permission-denied");
+  await rejects(editPending(user("adminB"), a.pendingId, { name: "x", email: "x@example.jp", role: "orderer" }, G), "invalid-argument", "他施設のIDは指定できない");
+  await rejects(editPending(user("adminB"), a.pendingId, { name: "x", email: "x@example.jp", role: "orderer" }), "permission-denied");
+  await rejects(editPending(user("adminA"), a.pendingId, { name: "x", email: "bad", role: "orderer" }), "invalid-argument");
+  const p = await pend(F, "x@example.jp");
+  assert.deepEqual([p.get("email"), p.get("role")], ["x@example.jp", "orderer"]);
+  assert.equal((await pend(F, "s@example.jp")).get("role"), "subadmin");
+});
+
+test("表示順(memberOrder)は Rules で管理者・副管理者だけが読み書きでき、形式を検証する。注文者・代行入力者・他施設は読めない", async () => {
+  const c = (uid) => env.authenticatedContext(uid).firestore();
+  const ref = (db) => doc(db, `facilities/${F}/displaySettings/memberOrder`);
+  await assertSucceeds(setDoc(ref(c("subA")), { order: ["m:adminA", "m:ordA"] }));
+  await assertSucceeds(setDoc(ref(c("adminA")), { order: ["m:ordA", "m:adminA"] }));
+  await assertSucceeds(getDoc(ref(c("subA"))));
+  for (const uid of ["ordA", "proxyA", "adminB", "stranger"]) {
+    await assertFails(getDoc(ref(c(uid))));
+    await assertFails(setDoc(ref(c(uid)), { order: [] }));
+  }
+  await assertFails(setDoc(ref(c("adminA")), { order: "x" }));
+  await assertFails(setDoc(ref(c("adminA")), { order: [], extra: 1 }));
+  await assertFails(setDoc(ref(c("adminA")), { order: Array.from({ length: 501 }, (_, i) => `m:${i}`) }));
+  // 既存の IOL の表示順は、これまでどおり所属メンバー全員が読める
+  await db.doc(`facilities/${F}/displaySettings/iolOrder`).set({ makerOrder: [], modelOrder: [] });
+  await assertSucceeds(getDoc(doc(c("ordA"), `facilities/${F}/displaySettings/iolOrder`)));
+});

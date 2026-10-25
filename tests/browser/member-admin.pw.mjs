@@ -32,14 +32,26 @@ const pending = [
   { id: "f1_" + "c".repeat(64), facilityId: "f1", name: "辞退D", email: "dec@example.jp", role: "orderer", status: "declined", expiresAt: new Date(now + DAY).toISOString() },
   { id: "f1_" + "d".repeat(64), facilityId: "f1", name: "副候補S", email: "sub2@example.jp", role: "subadmin", status: "pending", expiresAt: new Date(now + DAY).toISOString() }
 ];
-window.__calls = [];
+window.__calls = []; window.__order = null; window.__orderSaves = []; window.__failOrder = false; window.__inflight = 0;
 const rec = (name) => async (a) => { window.__calls.push([name, a]); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/permission-denied"; throw e; } return {}; };
 const repository = { listOrderers: async () => [], listAdoptedIols: async () => [], listDealers: async () => [],
-  listMembers: async () => members.map(m => ({ ...m })), listPendingMembers: async () => pending.map(p => ({ ...p })) };
-const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {} };
+  listMembers: async () => members.map(m => ({ ...m })), listPendingMembers: async () => pending.map(p => ({ ...p })),
+  getMemberOrder: async () => window.__order };
+const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {},
+  // 表示順の保存: 遅延つき。同時に2つ走ったら記録する(保存の順序の競合の検出)
+  saveMemberOrder: async (fid, order) => {
+    window.__inflight++; if (window.__inflight > 1) window.__overlap = true;
+    await new Promise(r => setTimeout(r, 150));
+    window.__inflight--;
+    window.__orderSaves.push([...order]);
+    if (window.__failOrder) throw new Error("network");
+    window.__order = [...order];
+  } };
 const inviteApi = {
   createInvite: rec("createInvite"), renameFacility: rec("renameFacility"), deleteFacility: rec("deleteFacility"),
   removeMember: rec("removeMember"), changeMemberRole: rec("changeMemberRole"), cancelPendingMember: rec("cancelPendingMember"), renewPendingMember: rec("renewPendingMember"),
+  updateMemberName: async (a) => { window.__calls.push(["updateMemberName", a]); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/permission-denied"; throw e; } const m = members.find(x => x.uid === a.uid); if (m) m.displayName = a.name; return { changed: true, name: a.name }; },
+  updatePendingMember: async (a) => { window.__calls.push(["updatePendingMember", a]); const p = pending.find(x => x.id === a.pendingId); Object.assign(p, { name: a.name, email: a.email, role: a.role }); return { pendingId: p.id }; },
   addMember: async (a) => { window.__calls.push(["addMember", a]); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/already-exists"; throw e; }
     pending.push({ id: "f1_" + "e".repeat(64), facilityId: "f1", ...a, status: "pending", expiresAt: new Date(now + 30 * DAY).toISOString() });
     return { ...a, pendingId: "x", status: "pending", expiresAt: new Date(now + 30 * DAY).toISOString() }; }
@@ -92,16 +104,19 @@ async function launch(type, name) {
   }
   return null;
 }
-const rowOf = (page, name) => page.locator(".settings-row-member", { has: page.locator('[data-f="name"]', { hasText: new RegExp(`^${name}$`) }) });
-const acts = (row) => row.locator(".settings-member-action button").evaluateAll(bs => bs.map(b => b.getAttribute("data-act")));
+const rowOf = (page, name) => page.locator(".member-item", { has: page.locator('[data-f="name"]', { hasText: new RegExp(`^${name}$`) }) });
+// 見えている操作ボタン(先頭の↑・使えない操作は、場所だけ残して見えない)
+const acts = (row) => row.locator(".orderer-actions button").evaluateAll(bs => bs.filter(b => getComputedStyle(b).visibility !== "hidden").map(b => b.getAttribute("data-act")));
+const allActs = (row) => row.locator(".orderer-actions button").evaluateAll(bs => bs.map(b => b.getAttribute("data-act")));
+const names = (page) => page.locator('[data-section="members"] .member-item [data-f="name"]').allInnerTexts();
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`利用者管理(管理者): 一覧・追加・役割変更・削除・取り消し・再登録。招待コードの発行画面はない: ${name}`, async (t) => {
+  test(`利用者管理(管理者): ↑・編集・削除の並び、役割はバッジから、氏名・参加待ちの編集、並び替えの自動保存、削除・取り消し・再登録: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
       for (const width of [390, 1100]) {
-        const page = await browser.newPage({ viewport: { width, height: 1200 } });
+        const page = await browser.newPage({ viewport: { width, height: 1400 } });
         const errors = [];
         page.on("pageerror", e => errors.push(String(e)));
         page.on("dialog", d => d.accept());
@@ -109,68 +124,95 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.waitForFunction(() => window.__ready);
         const sec = page.locator('[data-section="members"]');
         assert.equal(await page.locator('[data-section="invites"]').count(), 0, "「メンバーの招待」カードは廃止");
-        assert.equal(await page.getByText("招待コードを発行").count(), 0);
-        assert.match(await sec.locator("h3").first().innerText(), /利用者管理/);
-        // 一覧: 参加済み(役割順) → 参加待ち → 期限切れ → 辞退。役割・状態はバッジ
-        const names = await sec.locator('.settings-row-member [data-f="name"]').allInnerTexts();
-        assert.deepEqual(names, ["自分", "副管理者X", "注文者A", "代行A", "新人P", "副候補S", "期限切れE", "辞退D"]);
-        assert.deepEqual(await sec.locator('.settings-row-member [data-f="role"]').allInnerTexts(), ["管理者", "副管理者", "注文者", "代行入力者", "注文者", "副管理者", "代行入力者", "注文者"]);
+        // 一覧(表示順の保存がない間は 参加済み(役割順) → 参加待ち → 期限切れ → 辞退)
+        assert.deepEqual(await names(page), ["自分", "副管理者X", "注文者A", "代行A", "新人P", "副候補S", "期限切れE", "辞退D"]);
         assert.deepEqual(await sec.locator('[data-f="state"]').allInnerTexts(), ["参加待ち", "参加待ち", "期限切れ", "辞退"]);
-        // 操作: 自分(最後の管理者)は変更・削除なし。他は鉛筆・ゴミ箱。参加待ちはゴミ箱(取り消し)、期限切れ・辞退は再登録も
-        assert.deepEqual(await acts(rowOf(page, "自分")), []);
-        assert.deepEqual(await acts(rowOf(page, "副管理者X")), ["edit-role", "remove-member"]);
-        assert.deepEqual(await acts(rowOf(page, "注文者A")), ["edit-role", "remove-member"]);
-        assert.deepEqual(await acts(rowOf(page, "新人P")), ["cancel-pending"]);
-        assert.deepEqual(await acts(rowOf(page, "期限切れE")), ["renew", "cancel-pending"]);
-        assert.deepEqual(await acts(rowOf(page, "辞退D")), ["renew", "cancel-pending"]);
-        // 鉛筆・ゴミ箱は既存のアイコン(SVG)
-        assert.equal(await rowOf(page, "注文者A").locator('[data-act="edit-role"] svg').count(), 1);
-        assert.equal(await rowOf(page, "注文者A").locator('[data-act="remove-member"] svg').count(), 1);
-        // 見出しの施設名の編集・施設削除は管理者に表示
-        assert.equal(await page.locator("#btnRenameFacility").count(), 1);
-        assert.equal(await page.locator("#btnDeleteFacility").count(), 1);
-
-        // 追加: 名前・メール・役割(副管理者・注文者・代行入力者。初期は注文者)。押すまで入力欄は出さない
-        assert.equal(await sec.locator(".member-add-form").isHidden(), true);
-        await sec.locator('[data-act="add"]').click();
-        assert.equal(await sec.locator(".member-add-form").isVisible(), true);
-        assert.deepEqual(await sec.locator('[data-f="addRole"] option').allInnerTexts(), ["副管理者", "注文者", "代行入力者"]);
-        assert.equal(await sec.locator('[data-f="addRole"]').inputValue(), "orderer");
-        await sec.locator('[data-f="addName"]').fill("追加 太郎");
-        await sec.locator('[data-f="addEmail"]').fill("bad");
-        await sec.locator('[data-act="add-submit"]').click();
-        assert.match(await sec.locator("[data-msg]").innerText(), /メールアドレスの形式/);
-        await sec.locator('[data-f="addEmail"]').fill("add@example.jp");
-        await sec.locator('[data-f="addRole"]').selectOption("proxy");
-        await sec.locator('[data-act="add-submit"]').click();
-        await rowOf(page, "追加 太郎").waitFor();
-        assert.deepEqual((await page.evaluate(() => window.__calls)).at(-1), ["addMember", { facilityId: "f1", name: "追加 太郎", email: "add@example.jp", role: "proxy" }]);
-        assert.match(await sec.locator("[data-msg]").innerText(), /代行入力者として登録しました/);
-        assert.equal(await sec.locator(".member-add-form").isHidden(), true);
-
-        // 役割の変更(鉛筆 → 選択 → 変更)
-        await rowOf(page, "注文者A").locator('[data-act="edit-role"]').click();
+        // ボタンは全行とも 左から ↑・編集・削除。先頭の↑と使えない操作は見えない(場所は残る)
+        for (const n of await names(page)) assert.deepEqual(await allActs(rowOf(page, n)), ["up", "edit", "delete"], n);
+        assert.deepEqual(await acts(rowOf(page, "自分")), ["edit"], "自分: 先頭の↑なし・氏名は編集できる・削除なし");
+        assert.deepEqual(await acts(rowOf(page, "副管理者X")), ["up", "edit", "delete"]);
+        assert.deepEqual(await acts(rowOf(page, "新人P")), ["up", "edit", "delete"]);
+        for (const act of ["up", "edit", "delete"]) {
+          const xs = await sec.locator(`.member-item [data-act="${act}"]`).evaluateAll(bs => bs.map(b => Math.round(b.getBoundingClientRect().left)));
+          assert.ok(xs.every(x => Math.abs(x - xs[0]) <= 1), `${width} ${act}: 位置がそろう ${xs}`);
+        }
+        // 担当医・ディーラーと同じボタン(同じ大きさ・クラス)
+        const sz = await rowOf(page, "注文者A").locator('[data-act="edit"]').evaluate(b => [b.className.includes("btn-outline-sm"), b.className.includes("orderer-icon"), Math.round(b.getBoundingClientRect().height)]);
+        assert.deepEqual(sz.slice(0, 2), [true, true]);
+        // 役割: 自分のバッジは押せない(誤操作防止)。他の人のバッジから変更
+        assert.equal(await rowOf(page, "自分").locator('button[data-act="role"]').count(), 0);
+        await rowOf(page, "注文者A").locator('[data-act="role"]').click();
         const sel = rowOf(page, "注文者A").locator(".member-role-edit select");
         assert.deepEqual(await sel.locator("option").allInnerTexts(), ["管理者", "副管理者", "注文者", "代行入力者"]);
         await sel.selectOption("proxy");
         await rowOf(page, "注文者A").locator('[data-act="role-save"]').click();
         await page.waitForFunction(() => window.__calls.some(c => c[0] === "changeMemberRole"));
-        assert.deepEqual((await page.evaluate(() => window.__calls)).find(c => c[0] === "changeMemberRole"), ["changeMemberRole", { facilityId: "f1", uid: "ordA", role: "proxy" }]);
+        assert.deepEqual((await page.evaluate(() => window.__calls)).find(c => c[0] === "changeMemberRole")[1], { facilityId: "f1", uid: "ordA", role: "proxy" });
+
+        // 参加済みの氏名の編集: 氏名だけ(メールは変更できない)。管理者自身も
+        await rowOf(page, "自分").locator('[data-act="edit"]').click();
+        const meEdit = rowOf(page, "自分").locator(".member-edit");
+        assert.equal(await meEdit.locator('[data-f="editEmail"]').count(), 0, "メールアドレスは変更できない");
+        assert.match(await meEdit.innerText(), /me@example\.jp（変更できません）/);
+        await meEdit.locator('[data-f="editName"]').fill("自分 改");
+        await meEdit.locator('[data-act="save-row"]').click();
+        await rowOf(page, "自分 改").waitFor();
+        assert.deepEqual((await page.evaluate(() => window.__calls)).find(c => c[0] === "updateMemberName")[1], { facilityId: "f1", uid: "me", name: "自分 改" });
+
+        // 参加待ちの編集: 氏名・メール・役割
+        await rowOf(page, "新人P").locator('[data-act="edit"]').click();
+        const pe = rowOf(page, "新人P").locator(".member-edit");
+        assert.deepEqual(await pe.locator('[data-f="editRole"] option').allInnerTexts(), ["副管理者", "注文者", "代行入力者"]);
+        await pe.locator('[data-f="editEmail"]').fill("bad");
+        await pe.locator('[data-act="save-row"]').click();
+        assert.match(await rowOf(page, "新人P").locator("[data-err]").innerText(), /形式/);
+        await pe.locator('[data-f="editName"]').fill("新人Q");
+        await pe.locator('[data-f="editEmail"]').fill("q@example.jp");
+        await pe.locator('[data-f="editRole"]').selectOption("proxy");
+        await pe.locator('[data-act="save-row"]').click();
+        await rowOf(page, "新人Q").waitFor();
+        assert.deepEqual((await page.evaluate(() => window.__calls)).find(c => c[0] === "updatePendingMember")[1], { facilityId: "f1", pendingId: "f1_" + "a".repeat(64), name: "新人Q", email: "q@example.jp", role: "proxy" });
+
+        // 並び替え(↑)は自動保存。連続して押しても保存は1つずつ順に行い、最後の並びが保存される
+        await rowOf(page, "注文者A").locator('[data-act="up"]').click();
+        await rowOf(page, "注文者A").locator('[data-act="up"]').click();
+        await rowOf(page, "辞退D").locator('[data-act="up"]').click();
+        const expected = ["注文者A", "自分 改", "副管理者X", "代行A", "新人Q", "副候補S", "辞退D", "期限切れE"];
+        assert.deepEqual(await names(page), expected);
+        await page.waitForFunction(() => window.__inflight === 0 && window.__order && window.__order[6] && window.__order[6].startsWith("p:f1_c"));
+        assert.equal(await page.evaluate(() => window.__overlap || false), false, "保存が重ならない");
+        assert.deepEqual(await page.evaluate(() => window.__order), ["m:ordA", "m:me", "m:subX", "m:proxyA", "p:f1_" + "a".repeat(64), "p:f1_" + "d".repeat(64), "p:f1_" + "c".repeat(64), "p:f1_" + "b".repeat(64)]);
+        // 先頭が変わると、先頭の↑だけ見えない
+        assert.deepEqual(await acts(rowOf(page, "注文者A")), ["edit", "delete"]);
+        assert.deepEqual(await acts(rowOf(page, "自分 改")), ["up", "edit"]);
+        // 保存の失敗: 理由を表示し、再試行で保存
+        await page.evaluate(() => { window.__failOrder = true; });
+        await rowOf(page, "代行A").locator('[data-act="up"]').click();
+        await sec.locator('[data-act="retry-autosave"]').waitFor();
+        assert.match(await sec.locator("[data-msg]").innerText(), /保存できませんでした/);
+        await page.evaluate(() => { window.__failOrder = false; });
+        await sec.locator('[data-act="retry-autosave"]').click();
+        await page.waitForFunction(() => window.__order && window.__order[2] === "m:proxyA");
+        await sec.locator('[data-act="retry-autosave"]').waitFor({ state: "detached" });
+
         // 削除・取り消し・再登録
-        await rowOf(page, "代行A").locator('[data-act="remove-member"]').click();
-        await rowOf(page, "新人P").locator('[data-act="cancel-pending"]').click();
+        await rowOf(page, "代行A").locator('[data-act="delete"]').click();
+        await rowOf(page, "新人Q").locator('[data-act="delete"]').click();
         await rowOf(page, "期限切れE").locator('[data-act="renew"]').click();
         await page.waitForFunction(() => ["removeMember", "cancelPendingMember", "renewPendingMember"].every(n => window.__calls.some(c => c[0] === n)));
         const calls = await page.evaluate(() => window.__calls);
         assert.deepEqual(calls.find(c => c[0] === "removeMember")[1], { facilityId: "f1", uid: "proxyA" });
         assert.deepEqual(calls.find(c => c[0] === "cancelPendingMember")[1], { facilityId: "f1", pendingId: "f1_" + "a".repeat(64) });
         assert.deepEqual(calls.find(c => c[0] === "renewPendingMember")[1], { facilityId: "f1", pendingId: "f1_" + "b".repeat(64) });
-        assert.equal(calls.some(c => c[0] === "createInvite"), false);
-        // サーバーが拒否した場合は理由を表示
+        // サーバーが拒否した場合は理由を表示し、編集内容を残す(もう一度「保存」で再試行)
         await page.evaluate(() => { window.__fail = "この施設の管理者・副管理者のみ操作できます"; });
-        await rowOf(page, "副管理者X").locator('[data-act="remove-member"]').click();
+        await rowOf(page, "副管理者X").locator('[data-act="edit"]').click();
+        await rowOf(page, "副管理者X").locator('[data-f="editName"]').fill("失敗する名前");
+        await rowOf(page, "副管理者X").locator('[data-act="save-row"]').click();
         await sec.locator("[data-msg].error-message").waitFor();
         assert.match(await sec.locator("[data-msg]").innerText(), /管理者・副管理者のみ/);
+        assert.equal(await rowOf(page, "副管理者X").locator('[data-f="editName"]').inputValue(), "失敗する名前");
+        assert.match(await rowOf(page, "副管理者X").locator("[data-err]").innerText(), /もう一度/);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `${width}: 横スクロールなし`);
         assert.deepEqual(errors, []);
         await page.close();
@@ -178,30 +220,40 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 
-  test(`利用者管理(副管理者): 注文者・代行入力者だけを操作でき、管理者・副管理者の変更・削除や施設名の編集・施設削除は表示しない: ${name}`, async (t) => {
+  test(`利用者管理(副管理者): 注文者・代行入力者だけを編集・削除・役割変更でき、自分の氏名は編集できる。施設名の編集・施設削除は表示しない: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
-      const page = await browser.newPage({ viewport: { width: 390, height: 1200 } });
-      const errors = [];
-      page.on("pageerror", e => errors.push(String(e)));
-      page.on("dialog", d => d.accept());
-      await page.goto(base + "/subadmin");
-      await page.waitForFunction(() => window.__ready);
-      const sec = page.locator('[data-section="members"]');
-      assert.equal(await page.locator("#btnRenameFacility").count(), 0, "施設名の編集は管理者のみ");
-      assert.equal(await page.locator("#btnDeleteFacility").count(), 0, "施設削除は管理者のみ");
-      for (const who of ["自分", "管理者A", "副管理者X"]) assert.deepEqual(await acts(rowOf(page, who)), [], who);
-      assert.deepEqual(await acts(rowOf(page, "注文者A")), ["edit-role", "remove-member"]);
-      assert.deepEqual(await acts(rowOf(page, "代行A")), ["edit-role", "remove-member"]);
-      assert.deepEqual(await acts(rowOf(page, "副候補S")), [], "副管理者宛ての参加待ちは操作できない");
-      assert.deepEqual(await acts(rowOf(page, "期限切れE")), ["renew", "cancel-pending"]);
-      await rowOf(page, "注文者A").locator('[data-act="edit-role"]').click();
-      assert.deepEqual(await rowOf(page, "注文者A").locator(".member-role-edit select option").allInnerTexts(), ["注文者", "代行入力者"]);
-      await sec.locator('[data-act="add"]').click();
-      assert.deepEqual(await sec.locator('[data-f="addRole"] option').allInnerTexts(), ["注文者", "代行入力者"]);
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
-      assert.deepEqual(errors, []);
+      for (const width of [390, 1100]) {
+        const page = await browser.newPage({ viewport: { width, height: 1200 } });
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await page.goto(base + "/subadmin");
+        await page.waitForFunction(() => window.__ready);
+        const sec = page.locator('[data-section="members"]');
+        assert.equal(await page.locator("#btnRenameFacility").count(), 0);
+        assert.equal(await page.locator("#btnDeleteFacility").count(), 0);
+        assert.deepEqual(await names(page), ["管理者A", "自分", "副管理者X", "注文者A", "代行A", "新人P", "副候補S", "期限切れE", "辞退D"]);
+        assert.deepEqual(await acts(rowOf(page, "管理者A")), [], "先頭の↑なし・管理者は操作なし");
+        assert.deepEqual(await acts(rowOf(page, "自分")), ["up", "edit"], "自分の氏名は編集できる");
+        assert.deepEqual(await acts(rowOf(page, "副管理者X")), ["up"]);
+        assert.deepEqual(await acts(rowOf(page, "注文者A")), ["up", "edit", "delete"]);
+        assert.deepEqual(await acts(rowOf(page, "副候補S")), ["up"], "副管理者宛ての参加待ちは操作できない");
+        assert.deepEqual(await acts(rowOf(page, "期限切れE")), ["up", "edit", "delete"]);
+        for (const n of ["管理者A", "自分", "副管理者X", "副候補S"]) assert.equal(await rowOf(page, n).locator('button[data-act="role"]').count(), 0, n);
+        await rowOf(page, "注文者A").locator('[data-act="role"]').click();
+        assert.deepEqual(await rowOf(page, "注文者A").locator(".member-role-edit select option").allInnerTexts(), ["注文者", "代行入力者"]);
+        await rowOf(page, "期限切れE").locator('[data-act="edit"]').click();
+        assert.deepEqual(await rowOf(page, "期限切れE").locator('[data-f="editRole"] option').allInnerTexts(), ["注文者", "代行入力者"]);
+        await sec.locator('[data-act="add"]').click();
+        assert.deepEqual(await sec.locator('[data-f="addRole"] option').allInnerTexts(), ["注文者", "代行入力者"]);
+        // 副管理者も並び替えできる(表示順だけ。権限は変わらない)
+        await rowOf(page, "注文者A").locator('[data-act="up"]').click();
+        await page.waitForFunction(() => window.__order && window.__order[2] === "m:ordA");
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
     } finally { await browser.close(); }
   });
 
