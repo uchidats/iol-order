@@ -42,6 +42,18 @@ export function copyRecipient(mailSettings) {
   return cleanEmail(mailSettings.copyEmail);
 }
 
+/** 送信元の表示名「施設名（IOL Order）」。施設名がなければ「IOL Order」 */
+export function senderName(facilityName) {
+  const name = oneLine(facilityName).replace(/[\u0000-\u001f"\\<>]/g, "").slice(0, 60).trim();
+  return name ? `${name}（IOL Order）` : "IOL Order";
+}
+
+/** ディーラー宛ての返信先: 入力者本人。注文控えが ON なら施設共通アドレス(控えの宛先)も。同じアドレスは1件にする */
+export function replyToList(order, copyTo) {
+  const list = [cleanEmail(order.createdBy && order.createdBy.email), copyTo].filter(Boolean);
+  return [...new Set(list)];
+}
+
 /** 注文の要約(注文控えに載せる。患者情報は含まない) */
 export function orderSummaryText(order) {
   const lines = orderLinesOf(order).map(describeLine);
@@ -68,7 +80,8 @@ export function buildOrderOutbox({ facilityId, orderId, order, dealers, mailSett
   const profile = profileFromSettings(mailSettings, dealers);
   const preview = buildOrderMailPreview(order, { facilityName: order.facilityName, dealers: Object.fromEntries(dealers.map(d => [d.id, d])), profile });
   const copyTo = copyRecipient(mailSettings);
-  const replyTo = copyTo || cleanEmail(order.createdBy && order.createdBy.email);   // ディーラーの返信先: 注文控えの宛先(施設)、なければ入力者
+  const replyTo = replyToList(order, copyTo);
+  const fromName = senderName(order.facilityName);   // 送信元のアドレスは MAIL_FROM(認証済み)。表示名だけ施設ごと
   const testOrder = order.testOrder === true;
   const notifications = [], mails = [];
   for (const m of preview.mails) {
@@ -76,14 +89,14 @@ export function buildOrderOutbox({ facilityId, orderId, order, dealers, mailSett
     const base = { id, kind: "dealer", dealerId: m.dealerId, dealerName: m.dealerName, lineNos: m.lineNos };
     if (m.status !== "ready") { notifications.push({ ...base, status: MAIL_STATUS.NOT_SENT, reason: m.blockedReason }); continue; }
     notifications.push({ ...base, status: MAIL_STATUS.PENDING });
-    mails.push({ id, data: { ...base, to: m.to, replyTo, subject: m.subject, text: m.body, status: MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, id) } });
+    mails.push({ id, data: { ...base, to: m.to, replyTo, fromName, subject: m.subject, text: m.body, status: MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, id) } });
   }
   if (preview.unrouted.length) {
     notifications.push({ id: "unrouted", kind: "dealer", dealerId: null, dealerName: "（発注先未設定）", lineNos: preview.unrouted.map(u => u.lineNo), status: MAIL_STATUS.NOT_SENT, reason: "dealer-unset" });
   }
   if (copyTo) {
     const waiting = mails.length > 0;   // ディーラー宛てがあれば、その結果が出てから送る
-    const data = { id: "copy", kind: "copy", dealerName: "注文控え", to: [copyTo], replyTo: null, summary: orderSummaryText(order), status: waiting ? MAIL_STATUS.WAITING : MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, "copy") };
+    const data = { id: "copy", kind: "copy", dealerName: "注文控え", to: [copyTo], replyTo: null, fromName, summary: orderSummaryText(order), status: waiting ? MAIL_STATUS.WAITING : MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, "copy") };
     if (!waiting) Object.assign(data, buildCopyContent(order, data.summary, [], notifications));
     notifications.push({ id: "copy", kind: "copy", dealerName: "注文控え", status: data.status });
     mails.push({ id: "copy", data });
@@ -132,14 +145,30 @@ export function overallOrderStatus(notifications) {
 }
 
 // ---------------- 配信サービス(Resend) ----------------
+/** MAIL_FROM(`IOL Order <order@...>` またはアドレスのみ)から、認証済みの送信元アドレスを取り出す */
+export function senderAddress(from) {
+  const m = String(from ?? "").match(/<([^<>]*)>\s*$/);
+  return cleanEmail(m ? m[1] : from);
+}
+
+/** From ヘッダー。表示名に区切り記号があれば引用符で囲む */
+export function formatFrom(name, address) {
+  const n = oneLine(name).replace(/["\\<>]/g, "");
+  if (!n) return address;
+  return `${/[()[\]:;@,.]/.test(n) ? `"${n}"` : n} <${address}>`;
+}
+
 /**
  * Resend の送信API。成功は「配信サービスが受け付けた」だけで、配信の完了ではない(配信結果は Webhook)。
- * @returns {{send: (msg:{to:string[], subject:string, text:string, replyTo?:string|null, idempotencyKey:string}) => Promise<{ok:true,id:string}|{ok:false,retryable:boolean,error:string}>}}
+ * From のアドレスは MAIL_FROM(認証済み)、表示名は fromName(なければ MAIL_FROM のまま)。Reply-To は複数可(Resend は配列で受け付ける)。
+ * @returns {{send: (msg:{to:string[], subject:string, text:string, fromName?:string|null, replyTo?:string[]|string|null, idempotencyKey:string}) => Promise<{ok:true,id:string}|{ok:false,retryable:boolean,error:string}>}}
  */
 export function createResendSender({ apiKey, from, fetchImpl = globalThis.fetch, endpoint = "https://api.resend.com/emails", timeoutMs = 15000 }) {
   return {
-    async send({ to, subject, text, replyTo, idempotencyKey: key }) {
-      if (!apiKey || !from) return { ok: false, retryable: false, error: "not-configured" };
+    async send({ to, subject, text, fromName, replyTo, idempotencyKey: key }) {
+      const address = senderAddress(from);
+      if (!apiKey || !address) return { ok: false, retryable: false, error: "not-configured" };
+      const replies = [...new Set((Array.isArray(replyTo) ? replyTo : [replyTo]).map(cleanEmail).filter(Boolean))];
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       let res;
@@ -147,7 +176,7 @@ export function createResendSender({ apiKey, from, fetchImpl = globalThis.fetch,
         res = await fetchImpl(endpoint, {
           method: "POST", signal: controller.signal,
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Idempotency-Key": key },
-          body: JSON.stringify({ from, to, subject, text, ...(replyTo ? { reply_to: replyTo } : {}) })
+          body: JSON.stringify({ from: fromName ? formatFrom(fromName, address) : from, to, subject, text, ...(replies.length ? { reply_to: replies } : {}) })
         });
       } catch (e) {
         return { ok: false, retryable: true, error: short(`network: ${e && e.name === "AbortError" ? "timeout" : (e && e.message) || e}`) };
@@ -220,8 +249,8 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
     const m = claim.m;
     const test = m.testOrder === true;
     const msg = test
-      ? { to: [testRecipient()], subject: `【テスト】${m.subject}`, text: `(テスト注文の送信です。本来の宛先 ${m.to.length} 件には送信していません)\n\n${m.text}`, replyTo: null, idempotencyKey: `${m.idempotencyKey}-test` }
-      : { to: m.to, subject: m.subject, text: m.text, replyTo: m.replyTo || null, idempotencyKey: m.idempotencyKey };
+      ? { to: [testRecipient()], subject: `【テスト】${m.subject}`, text: `(テスト注文の送信です。本来の宛先 ${m.to.length} 件には送信していません)\n\n${m.text}`, fromName: m.fromName || null, replyTo: null, idempotencyKey: `${m.idempotencyKey}-test` }
+      : { to: m.to, subject: m.subject, text: m.text, fromName: m.fromName || null, replyTo: m.replyTo || null, idempotencyKey: m.idempotencyKey };
     let r;
     try { r = await getSender().send(msg); } catch (e) { r = { ok: false, retryable: true, error: short(e && e.message) }; }
 

@@ -61,7 +61,8 @@ test("注文の保存と同時に、発注先ごとの送信待ちメールを�
   assert.deepEqual(Object.keys(mails).sort(), ["copy", "d_dA", "d_dB"]);
   assert.deepEqual([mails.d_dA.status, mails.d_dA.to, mails.copy.status], ["pending", ["order-a@example.jp"], "waiting"]);
   assert.ok(mails.d_dA.text.startsWith("株式会社A商会御中") && mails.d_dA.text.endsWith("〒100-0001 東京都\nテスト眼科"));
-  assert.equal(mails.d_dA.replyTo, "info@clinic.example.jp");
+  assert.deepEqual(mails.d_dA.replyTo, ["ord@login.jp", "info@clinic.example.jp"], "返信先は入力者本人と施設共通アドレス(注文控えON)");
+  assert.deepEqual([mails.d_dA.fromName, mails.copy.replyTo], ["テスト眼科（IOL Order）", null]);
   assert.equal(sent.length, 0);
   const o = await orderOf(r.orderId);
   assert.equal(o.status, "accepted");
@@ -81,6 +82,8 @@ test("送信: 配信サービスが受け付けたら accepted。全発注先が
   assert.equal(sent.length, 3, "ディーラー2通 + 控え1通");
   assert.deepEqual(sent.map(m => m.to[0]), ["order-a@example.jp", "order-b@example.jp", "info@clinic.example.jp"]);
   assert.equal(sent[0].idempotencyKey, (await mailsOf(r.orderId)).d_dA.idempotencyKey, "冪等キーを付けて送る");
+  assert.deepEqual([sent[0].fromName, sent[0].replyTo], ["テスト眼科（IOL Order）", ["ord@login.jp", "info@clinic.example.jp"]]);
+  assert.deepEqual([sent[2].fromName, sent[2].replyTo], ["テスト眼科（IOL Order）", null], "注文控えは返信先なし");
   assert.match(sent[2].subject, /^【注文控え】テスト眼科 IOL-/);
   assert.match(sent[2].text, /株式会社A商会: 配信サービスが送信を受け付けました/);
   const mails = await mailsOf(r.orderId);
@@ -160,6 +163,7 @@ test("テスト注文(開発用受付): テスト用の宛先がなければ送�
   assert.deepEqual(sent.map(m => m.to), [["dev@example.jp"], ["dev@example.jp"]], "ディーラー宛て・控えとも、テスト用の宛先だけ");
   assert.match(sent[0].subject, /^【テスト】/);
   assert.match(sent[0].text, /本来の宛先 1 件には送信していません/);
+  assert.equal(sent[0].replyTo, null, "テスト送信はディーラー向けの返信先を付けない");
 });
 
 test("配信結果(Webhook): 受付の後の配信済み・不達を記録する。弱い結果で上書きしない。知らないメールは無視", async () => {

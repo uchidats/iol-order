@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import {
   buildOrderOutbox, buildCopyContent, overallOrderStatus, createResendSender, verifyWebhookSignature,
-  idempotencyKey, copyRecipient, MAIL_STATUS
+  idempotencyKey, copyRecipient, senderName, senderAddress, formatFrom, replyToList, MAIL_STATUS
 } from "../functions/src/order-mail-outbox.js";
 import { validateMailSettings, planMailSettingsWrite, validateDealers, planDealerWrites } from "../src/domain/facility-settings.js";
 
@@ -23,7 +23,8 @@ test("注文時のメール: 発注先ごとに1通(注文時点の宛先・件�
   assert.ok(m.data.text.startsWith("株式会社A商会御中\n"), "宛名は施設設定の正式表記");
   assert.ok(m.data.text.endsWith("〒100-0001 東京\nテスト眼科"), "署名は施設設定");
   assert.ok(m.data.text.includes("備考: 右眼") && m.data.text.includes("発注者: 入力 花子"));
-  assert.equal(m.data.replyTo, "nurse@example.jp", "控えの宛先がなければ、入力者に返信");
+  assert.deepEqual(m.data.replyTo, ["nurse@example.jp"], "注文控えOFF: 返信先は入力者本人だけ");
+  assert.equal(m.data.fromName, "テスト眼科（IOL Order）", "送信元の表示名は「施設名（IOL Order）」");
   assert.equal(m.data.status, MAIL_STATUS.PENDING);
   assert.equal(m.data.idempotencyKey, idempotencyKey("f1", "o1", "d_dA"));
   assert.deepEqual(ob.notifications.map(n => [n.id, n.status, n.reason || null]), [["d_dA", "pending", null], ["d_dB", "not_sent", "no-order-email"], ["unrouted", "not_sent", "dealer-unset"]]);
@@ -39,13 +40,32 @@ test("注文控え: 初期はOFF。ONで有効な送信先1件のときだけ。
   const ob = buildOrderOutbox({ facilityId: "f1", orderId: "o1", order: order([line(1, A)]), dealers: [A], mailSettings: settings });
   const copy = ob.mails.find(m => m.id === "copy");
   assert.deepEqual([copy.data.status, copy.data.to, copy.data.subject], ["waiting", ["info@senju.example.jp"], undefined]);
-  assert.equal(ob.mails[0].data.replyTo, "info@senju.example.jp", "ディーラーの返信先は施設の控えの宛先");
+  assert.deepEqual(ob.mails[0].data.replyTo, ["nurse@example.jp", "info@senju.example.jp"], "注文控えON: 返信先は入力者本人と施設共通アドレス");
+  assert.deepEqual([copy.data.replyTo, copy.data.fromName], [null, "テスト眼科（IOL Order）"], "注文控えには返信先を付けない");
   // ディーラー宛てがない(発注用メール未登録)ときは、すぐに送る控えに「送信していない」と書く
   const none = buildOrderOutbox({ facilityId: "f1", orderId: "o2", order: order([line(1, B)]), dealers: [B], mailSettings: settings });
   const c2 = none.mails.find(m => m.id === "copy").data;
   assert.equal(c2.status, "pending");
   assert.match(c2.subject, /^【注文控え・未送信あり】/);
   assert.match(c2.text, /B医療: 発注用メールが登録されていないため送信していません/);
+});
+
+test("返信先(Reply-To): 同じアドレスは1件(大文字小文字も同一視)。入力者のアドレスが無効なら施設共通アドレスだけ", () => {
+  const same = buildOrderOutbox({ facilityId: "f1", orderId: "o1", order: order([line(1, A)]), dealers: [A], mailSettings: { copyEnabled: true, copyEmail: "Nurse@Example.jp" } });
+  assert.deepEqual(same.mails[0].data.replyTo, ["nurse@example.jp"]);
+  assert.deepEqual(replyToList({ createdBy: { email: "bad" } }, "info@example.jp"), ["info@example.jp"]);
+  assert.deepEqual(replyToList({ createdBy: null }, null), []);
+});
+
+test("送信元: 表示名は「施設名（IOL Order）」(施設名がなければ IOL Order)。アドレスは MAIL_FROM の認証済みアドレス", () => {
+  assert.equal(senderName("テスト眼科"), "テスト眼科（IOL Order）");
+  assert.equal(senderName(""), "IOL Order");
+  assert.equal(senderName('悪い"<x@evil.jp>\\\r\n眼科'), "悪いx@evil.jp 眼科（IOL Order）", "改行は空白に、引用符・山括弧・バックスラッシュは除く");
+  assert.equal(senderAddress("IOL Order <Order@Mail.example.jp>"), "order@mail.example.jp");
+  assert.equal(senderAddress("order@mail.example.jp"), "order@mail.example.jp");
+  assert.equal(senderAddress("IOL Order"), null);
+  assert.equal(formatFrom("テスト眼科（IOL Order）", "order@mail.example.jp"), "テスト眼科（IOL Order） <order@mail.example.jp>");
+  assert.equal(formatFrom("Dr. 眼科(本院)（IOL Order）", "order@mail.example.jp"), '"Dr. 眼科(本院)（IOL Order）" <order@mail.example.jp>', "区切り記号があれば引用符で囲む");
 });
 
 test("注文控えの本文: 受付・失敗・停止中を区別し、受付は「配信の完了ではない」と書く。送ったメールの内容を載せる", () => {
@@ -86,7 +106,13 @@ test("Resend への送信: 冪等キーを付ける。成功は受付のID。429
   assert.equal(calls[0].url, "https://api.resend.com/emails");
   assert.equal(init.headers["Idempotency-Key"], "iol-k1");
   assert.equal(init.headers.Authorization, "Bearer re_test");
-  assert.deepEqual(JSON.parse(init.body), { from: "IOL <order@mail.example.jp>", to: ["a@example.jp"], subject: "件名", text: "本文", reply_to: "r@example.jp" });
+  assert.deepEqual(JSON.parse(init.body), { from: "IOL <order@mail.example.jp>", to: ["a@example.jp"], subject: "件名", text: "本文", reply_to: ["r@example.jp"] });
+  // 表示名は施設ごと(アドレスは MAIL_FROM のまま)。Reply-To は配列で複数(重複は除く)
+  await s.send({ to: ["a@example.jp"], subject: "件名", text: "本文", fromName: "テスト眼科（IOL Order）", replyTo: ["u@example.jp", "info@example.jp", "U@example.jp"], idempotencyKey: "iol-k2" });
+  const b2 = JSON.parse(calls[1].init.body);
+  assert.deepEqual([b2.from, b2.reply_to], ["テスト眼科（IOL Order） <order@mail.example.jp>", ["u@example.jp", "info@example.jp"]]);
+  await s.send({ to: ["a@example.jp"], subject: "件名", text: "本文", replyTo: null, idempotencyKey: "iol-k3" });
+  assert.ok(!("reply_to" in JSON.parse(calls[2].init.body)), "返信先がなければ付けない");
   for (const [status, retryable] of [[429, true], [500, true], [503, true], [422, false], [401, false], [409, false]]) {
     const r = await createResendSender({ apiKey: "k", from: "f@x.jp", fetchImpl: fake(status, { message: "m" }) }).send({ to: ["a@x.jp"], subject: "s", text: "t", idempotencyKey: "k" });
     assert.deepEqual([r.ok, r.retryable], [false, retryable], String(status));
@@ -96,6 +122,8 @@ test("Resend への送信: 冪等キーを付ける。成功は受付のID。429
   assert.deepEqual([net.ok, net.retryable], [false, true]);
   const notConfigured = await createResendSender({ apiKey: "", from: "f@x.jp", fetchImpl: fake(200, { id: "x" }) }).send({ to: ["a@x.jp"], subject: "s", text: "t", idempotencyKey: "k" });
   assert.deepEqual([notConfigured.ok, notConfigured.error], [false, "not-configured"]);
+  const badFrom = await createResendSender({ apiKey: "k", from: "IOL Order", fetchImpl: fake(200, { id: "x" }) }).send({ to: ["a@x.jp"], subject: "s", text: "t", idempotencyKey: "k" });
+  assert.deepEqual([badFrom.ok, badFrom.error], [false, "not-configured"], "MAIL_FROM にアドレスがなければ送らない");
 });
 
 test("Webhook の署名(Svix): 正しい署名だけ受理。改ざん・別の秘密鍵・5分より古い・署名なしは拒否。複数の署名のどれかが一致すればよい", () => {
