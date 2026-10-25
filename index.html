@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=e89185c6d5">
+  <link rel="stylesheet" href="styles.css?v=7fe039f19e">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -200,19 +200,6 @@
 
       <div class="modal-body">
         <dl class="summary-list">
-          <!-- 発注元(施設)と発注先(ディーラー)を1つのカードに。左: 発注元 / 右: 発注先(縦の区切り線) -->
-          <div class="summary-item" id="summaryPartiesRow">
-            <dt class="summary-label sr-only">発注元・発注先</dt>
-            <dd class="summary-value summary-parties">
-              <div class="summary-party" id="summaryFacilityBox">
-                <span class="summary-party-label">発注元：</span><span class="summary-party-body" id="summaryFacility">-</span>
-              </div>
-              <div class="summary-party summary-party-dealers">
-                <span class="summary-party-label">発注先：</span><div class="summary-party-body" id="summaryDealers"></div>
-              </div>
-            </dd>
-          </div>
-
           <div class="summary-item summary-item-lines">
             <dt class="summary-label sr-only">発注するレンズ</dt>
             <dd class="summary-value">
@@ -228,6 +215,21 @@
           <div class="summary-item">
             <dt class="summary-label">備考（フリーコメント）</dt>
             <dd class="summary-value text-break" id="summaryNotes">（なし）</dd>
+          </div>
+
+          <!-- 発注元(施設)と発注先(ディーラー): 確認内容の一番下。左右2列・中央に細い縦の区切り線。備考と同じ控えめなデザイン -->
+          <div class="summary-item" id="summaryPartiesRow">
+            <dt class="summary-label sr-only">発注元・発注先</dt>
+            <dd class="summary-value summary-parties">
+              <div class="summary-party" id="summaryFacilityBox">
+                <span class="summary-party-label">発注元</span>
+                <span class="summary-party-body" id="summaryFacility">-</span>
+              </div>
+              <div class="summary-party summary-party-dealers">
+                <span class="summary-party-label">発注先</span>
+                <div class="summary-party-body" id="summaryDealers"></div>
+              </div>
+            </dd>
           </div>
 
         </dl>
