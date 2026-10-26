@@ -98,6 +98,24 @@ async function fillOrder(page, notes) {
 
 const visible = (page, sel) => page.locator(sel).evaluate(e => !e.classList.contains("hidden"));
 
+test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は、「レンズ1」の外枠と左右端がそろう(PC・スマートフォン)", async (t) => {
+  for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+    const browser = await launch(type, name);
+    if (!browser) { t.diagnostic(`${name} を起動できません`); continue; }
+    try {
+      for (const width of [1280, 768, 390, 360]) {
+        const page = await browser.newPage({ viewport: { width, height: 900 } });
+        await page.goto(base);
+        await page.waitForFunction(() => window.__ready);
+        const edges = await page.evaluate(() => ["#lensLines .lens-line", "#notesInput", "#groupNotes .ref-links-accordion"].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right]; }));
+        assert.deepEqual(edges[1], edges[0], `${name} ${width}px: 備考の入力欄`);
+        assert.deepEqual(edges[2], edges[0], `${name} ${width}px: 各社Calculator関連リンク`);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  }
+});
+
 test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さず、ディーラーへ送信することと注文履歴での確認を案内する: chromium", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");

@@ -497,9 +497,7 @@ body {
 .lens-line .date-input-wrapper { max-width: 14rem; }
 .lens-lines-actions { margin: 4px 0 14px; }
 .lens-line [hidden] { display: none !important; }
-#groupNotes { max-width: 36rem; }
-
-/* 備考・各社Calculator関連リンク・計測結果の読み取りは、備考欄(#groupNotes)と同じ幅・同じ左右端にそろえる */
+/* 備考・各社Calculator関連リンク・計測結果の読み取りは、「レンズN」の外枠(.lens-line)と同じ幅・同じ左右端にそろえる(フォームの全幅) */
 #groupNotes .textarea-field,
 #groupNotes .ref-links-accordion,
 #ocrFeatureCard {
@@ -508,7 +506,6 @@ body {
 }
 
 #ocrFeatureCard {
-  max-width: 36rem;
   margin: 0 0 18px;   /* 他の入力項目(.form-group)と同じ縦の間隔 */
 }
 
