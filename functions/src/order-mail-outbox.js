@@ -222,7 +222,9 @@ const EVENT_DELIVERY = { "email.delivered": "delivered", "email.delivery_delayed
  * @param {() => string} [deps.testRecipient] テスト注文の送信先(空なら送らない)
  * @param {() => number} [deps.now]
  */
-export function createMailDispatchService({ db, FieldValue, Timestamp, getSender, isEnabled, testRecipient = () => "", now = Date.now }) {
+export function createMailDispatchService({ db, FieldValue, Timestamp, getSender, isEnabled, testRecipient = () => "", testOnly = () => false, now = Date.now }) {
+  // testOnly(MAIL_TEST_ONLY): true の間は、テスト注文でなくても、すべてのメールをテスト用の宛先だけに送る(ディーラー・注文控えの宛先には送らない)
+  const asTest = (m) => m.testOrder === true || testOnly() === true;
   const ms = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : 0);
   const orderRefOf = (mailRef) => mailRef.parent.parent;
 
@@ -238,16 +240,16 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
         || (m.status === MAIL_STATUS.SENDING && ms(m.leaseUntil) <= t);   // 送信中のまま処理が止まった(冪等キーで二重送信にならない)
       if (!due) return null;
       if (!isEnabled()) { tx.update(mailRef, { status: MAIL_STATUS.HELD, statusAt: FieldValue.serverTimestamp() }); return { m, done: MAIL_STATUS.HELD }; }
-      if (m.testOrder && !testRecipient()) { tx.update(mailRef, { status: MAIL_STATUS.SKIPPED_TEST, statusAt: FieldValue.serverTimestamp() }); return { m, done: MAIL_STATUS.SKIPPED_TEST }; }
+      if (asTest(m) && !testRecipient()) { tx.update(mailRef, { status: MAIL_STATUS.SKIPPED_TEST, statusAt: FieldValue.serverTimestamp() }); return { m, done: MAIL_STATUS.SKIPPED_TEST }; }
       const attempts = (m.attempts || 0) + 1;
       tx.update(mailRef, { status: MAIL_STATUS.SENDING, attempts, leaseUntil: Timestamp.fromMillis(t + MAIL_LIMITS.leaseMs), lastAttemptAt: FieldValue.serverTimestamp(), statusAt: FieldValue.serverTimestamp() });
-      return { m: { ...m, attempts }, done: null };
+      return { m: { ...m, attempts }, done: null, test: asTest(m) };
     });
     if (!claim) return "skipped";
     if (claim.done) { await syncOrder(orderRefOf(mailRef)); return claim.done; }
 
     const m = claim.m;
-    const test = m.testOrder === true;
+    const test = claim.test;
     const msg = test
       ? { to: [testRecipient()], subject: `【テスト】${m.subject}`, text: `(テスト注文の送信です。本来の宛先 ${m.to.length} 件には送信していません)\n\n${m.text}`, fromName: m.fromName || null, replyTo: null, idempotencyKey: `${m.idempotencyKey}-test` }
       : { to: m.to, subject: m.subject, text: m.text, fromName: m.fromName || null, replyTo: m.replyTo || null, idempotencyKey: m.idempotencyKey };

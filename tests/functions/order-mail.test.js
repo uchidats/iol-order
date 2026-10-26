@@ -166,6 +166,22 @@ test("テスト注文(開発用受付): テスト用の宛先がなければ送�
   assert.equal(sent[0].replyTo, null, "テスト送信はディーラー向けの返信先を付けない");
 });
 
+test("MAIL_TEST_ONLY: テスト注文でなくても、ディーラー宛て・注文控えともテスト用の宛先だけに送る。宛先がなければ送らない", async () => {
+  const guarded = createMailDispatchService({
+    db, FieldValue, Timestamp, now: () => clock.t, isEnabled: () => enabled, testRecipient: () => testTo, testOnly: () => true,
+    getSender: () => ({ send: async (msg) => { sent.push(msg); return behavior(msg, sent.length); } })
+  });
+  const r = await place();
+  for (const id of ["d_dA", "d_dB"]) await guarded.processMail(ref(r.orderId, id));
+  assert.equal(sent.length, 0);
+  assert.deepEqual(Object.values(await mailsOf(r.orderId)).map(m => m.status).sort(), ["skipped_test", "skipped_test", "skipped_test"]);
+  testTo = "dev@example.jp";
+  const r2 = await place(undefined, { notes: "2件目" });
+  for (const id of ["d_dA", "d_dB"]) await guarded.processMail(ref(r2.orderId, id));
+  assert.deepEqual(sent.map(m => m.to), [["dev@example.jp"], ["dev@example.jp"], ["dev@example.jp"]], "ディーラー2通・控え1通とも、テスト用の宛先だけ");
+  assert.ok(sent.every(m => m.subject.startsWith("【テスト】") && m.replyTo === null));
+});
+
 test("配信結果(Webhook): 受付の後の配信済み・不達を記録する。弱い結果で上書きしない。知らないメールは無視", async () => {
   const r = await place([line()]);
   await dispatch.processMail(ref(r.orderId, "d_dA"));

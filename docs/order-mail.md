@@ -39,6 +39,7 @@ IOL Order だけで、注文受付 → ディーラーへの注文メール → 
 | 名前 | 種類 | 内容 |
 |---|---|---|
 | `MAIL_SENDING_ENABLED` | .env | 送信のキルスイッチ(既定 false)。false の間は送らず `held` |
+| `MAIL_TEST_ONLY` | .env | 既定 true。true の間は、テスト注文でなくても、すべてのメールを `MAIL_TEST_RECIPIENT` だけに送る(ディーラー・注文控えの宛先には送らない)。実際のディーラーへの送信を始めるときに、明示的に false にする |
 | `MAIL_FROM` | .env | 送信元(例 `IOL Order <order@mail.example.jp>`)。配信サービスで認証済みのドメイン。空なら送らない。実際の From は、このアドレスに表示名「施設名（IOL Order）」を付ける(施設名は注文時点) |
 | `MAIL_TEST_RECIPIENT` | Secret Manager | テスト注文の送信先(個人のアドレスのためリポジトリに書かない。空ならテスト注文は送らない) |
 | `RESEND_API_KEY` | Secret Manager | 送信用の API キー(送信のみの権限・ドメイン限定で作る)。コード・.env に書かない |
