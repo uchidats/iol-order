@@ -82,6 +82,8 @@ test("注文控えの本文: 受付・失敗・停止中を区別し、受付は
   assert.ok(c.text.includes("本文A") && !c.text.includes("本文C"), "送ったメールの内容だけを載せる");
   const ok = buildCopyContent(order([]), "要約", [mails[0]], [ns[0]]);
   assert.doesNotMatch(ok.subject, /未送信/);
+  const t = buildCopyContent(order([]), "要約", [{ ...mails[0], sentTo: "test" }], [ns[0]]);
+  assert.match(t.text, /A商会: テスト用の宛先に送信しました\(ディーラーには送信していません\)/);
 });
 
 test("注文の状態: 全発注先が受付済み → notified、失敗・不達あり → notification_failed、送信中 → pending、停止中・対象外のみ → accepted", () => {
@@ -95,6 +97,7 @@ test("注文の状態: 全発注先が受付済み → notified、失敗・不�
   assert.equal(overallOrderStatus([d("accepted", { delivery: "delivered" })]), "notified");
   assert.equal(overallOrderStatus([d("accepted", { delivery: "bounced" })]), "notification_failed");
   assert.equal(overallOrderStatus([d("accepted"), d("failed")]), "notification_failed");
+  assert.equal(overallOrderStatus([d("accepted", { sentTo: "test", delivery: "delivered" })]), "accepted", "テスト用の宛先への送信は、ディーラーへの通知ではない");
 });
 
 test("Resend への送信: 冪等キーを付ける。成功は受付のID。429・5xx・通信断は再試行、それ以外の4xxは再試行しない。キー未設定は送らない", async () => {

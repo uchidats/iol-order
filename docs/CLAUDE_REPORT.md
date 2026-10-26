@@ -3,29 +3,27 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-26
-- **作業**: テストメール送信の有効化(`medconf-iol-dev`)。前回: Rules・インデックスと5つの Functions をデプロイ済み(Secret の参照権限・Cloud Scheduler API・`resendWebhook` の公開を伴う。`auditFacilitySettings` の再試行のため `--force`)。
-- `ORDER_INTAKE_ENABLED=false` を維持。注文の作成・実メール送信・既存データの変更はしていない(Firestore は読み取りのみ)。
+- **作業**: 開発者限定のテスト注文の有効化(`medconf-iol-dev`)と、テスト注文の表示・重複確認の区別
+- 前段: commit 36b0ace(`MAIL_TEST_ONLY`・送信有効化)を `main` に push 済み。
+- 設定: `ORDER_INTAKE_ENABLED=true`・`ORDER_INTAKE_UNRESTRICTED=false`(許可施設・許可ユーザーの制限は既存のまま)・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=true`。
+- 注文の作成・メールの送信はしていない(利用者が画面から行う)。
 
 ## 変更内容
-- **`MAIL_TEST_ONLY`(新規・既定 true)**: true の間は、テスト注文の印に関係なく、すべてのメール(ディーラー宛て・注文控え)を `MAIL_TEST_RECIPIENT` だけに送る。宛先がなければ送らない(skipped_test)。実際のディーラーへの送信には、この値を明示的に false にする必要がある。
-- `functions/.env.medconf-iol-dev`: `MAIL_SENDING_ENABLED=true`、`MAIL_TEST_ONLY=true`。
-- `docs/order-mail.md` の設定表に追記。
-
-## 確認結果
-- テスト注文の宛先: テスト注文は `MAIL_TEST_RECIPIENT` だけ(ディーラー宛て・控えとも。Reply-To なし・件名に【テスト】)。加えて `MAIL_TEST_ONLY` で、テスト注文でない場合も同じ扱い。
-- 過去の未送信: Firestore の `mails` は 0 件(読み取りで確認)。既存の注文には送信待ちがない。停止中に作られた held は自動では送らない(定期実行の対象外)。
-- ディーラー宛ての経路: `mails` はクライアントから書き込めない(Rules)。メールは `createOrder` だけが作り、`ORDER_INTAKE_ENABLED=false` の間は注文自体を受け付けない。さらに `MAIL_TEST_ONLY=true` で送信時に宛先をテスト用に限定。
-- **重要**: `ORDER_INTAKE_ENABLED=false` のままでは、テスト注文も作成できない(`createOrder` が全件拒否)。
+- **重複確認**: テスト注文(`testOrder`)を過去の注文との照合から除外。
+- **注文履歴**: テスト注文の状態は「テスト注文（ディーラー未通知）」。テスト用の宛先に送ったメールは「テスト用の宛先に送信（ディーラーには未送信）」(配信結果があれば併記)。一覧・詳細の「テスト」バッジは既存。
+- **送信処理**: 注文の `notifications` に送信先の種別(`sentTo: "test"`。アドレスは含めない)を記録。テスト用の宛先への送信は、注文全体の状態でディーラーへの通知(notified)に数えない。注文控えの本文も「テスト用の宛先に送信しました(ディーラーには送信していません)」と書く。
+- 送信先の限定(確認済み): テスト注文・`MAIL_TEST_ONLY=true` のどちらでも、ディーラー宛て・注文控えとも `MAIL_TEST_RECIPIENT` だけに送る。ディーラー・施設共通アドレスへの送信経路はない(`mails` はクライアントから書けない)。
 
 ## デプロイ
-- `sendOrderMail`・`retryOrderMails` のみ再デプロイ(成功)。
+- `createOrder` のみ(成功)。`sendOrderMail`・`retryOrderMails`・`resendWebhook` は上の送信処理の変更を含むが、未デプロイ(承認待ち)。未デプロイの間も宛先の限定は変わらない。注文の状態の表示は画面側で「テスト注文」になるが、メールごとの表示は「送信受付済み」「配信済み」のままになる。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。push は未実施(指示待ち)。
 
 ## テスト結果
-- unit 230 / Functions 136(`MAIL_TEST_ONLY` のテストを追加)/ Functions E2E 10 成功。Functions は1回目に注文の同時実行テスト4件が失敗、再実行で全件成功(既知の負荷による不安定)。
+- unit 230 / Rules 59 / Functions 136 / Functions E2E 10 / ブラウザ回帰 95 成功。ブラウザ回帰は注文履歴の期待値を新しい表示に更新。WebKit の手術日入力のテストが1回失敗し、単独の再実行で成功(既知の不安定)。
 
 ## 判断待ち
-- テスト注文を画面から作るには、`ORDER_INTAKE_ENABLED=true`(`ORDER_INTAKE_UNRESTRICTED=false` のまま。許可した施設・ユーザーだけ)で `createOrder` を再デプロイし、ローカルの `src/config.local.js` を `server-dev` にする必要がある。
-- push。
+- `sendOrderMail`・`retryOrderMails`・`resendWebhook` の再デプロイ。
+- この commit の push。
+- テスト後に `ORDER_INTAKE_ENABLED=false` に戻すか(`docs/order-intake.md` は確認後に戻す運用を推奨)。

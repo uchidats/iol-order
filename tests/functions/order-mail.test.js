@@ -164,6 +164,9 @@ test("テスト注文(開発用受付): テスト用の宛先がなければ送�
   assert.match(sent[0].subject, /^【テスト】/);
   assert.match(sent[0].text, /本来の宛先 1 件には送信していません/);
   assert.equal(sent[0].replyTo, null, "テスト送信はディーラー向けの返信先を付けない");
+  const o2 = await orderOf(r2.orderId);
+  assert.equal(o2.status, "accepted", "テスト用の宛先への送信は、ディーラーへの通知(notified)にしない");
+  assert.deepEqual(o2.notifications.filter(n => n.kind === "dealer").map(n => n.sentTo), ["test"]);
 });
 
 test("MAIL_TEST_ONLY: テスト注文でなくても、ディーラー宛て・注文控えともテスト用の宛先だけに送る。宛先がなければ送らない", async () => {

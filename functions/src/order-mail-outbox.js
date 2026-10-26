@@ -108,6 +108,7 @@ const REASON_TEXT = { "dealer-unset": "発注先が未設定のため送信し�
 function dealerResultText(n, mail) {
   if (n.status === MAIL_STATUS.NOT_SENT) return REASON_TEXT[n.reason] || "送信していません";
   if (!mail) return "状態を確認できません";
+  if (mail.status === MAIL_STATUS.ACCEPTED && mail.sentTo === "test") return "テスト用の宛先に送信しました(ディーラーには送信していません)";
   if (mail.status === MAIL_STATUS.ACCEPTED) return "配信サービスが送信を受け付けました(ディーラーへの配信の完了は、注文履歴で確認してください)";
   if (mail.status === MAIL_STATUS.FAILED) return "送信に失敗しました。ディーラーには届いていません。電話などで直接ご連絡ください";
   if (mail.status === MAIL_STATUS.HELD) return "メール送信が停止中のため、送信していません。ディーラーには届いていません";
@@ -137,7 +138,7 @@ export function buildCopyContent(order, summary, dealerMails, notifications) {
 
 /** 注文全体の状態(ORDER_STATUS の値)。ディーラー宛ての状態から決める */
 export function overallOrderStatus(notifications) {
-  const ns = notifications.filter(n => n.kind === "dealer" && n.status !== MAIL_STATUS.NOT_SENT);
+  const ns = notifications.filter(n => n.kind === "dealer" && n.status !== MAIL_STATUS.NOT_SENT && n.sentTo !== "test");   // テスト用の宛先への送信は、ディーラーへの通知ではない
   if (!ns.length || ns.every(n => [MAIL_STATUS.HELD, MAIL_STATUS.SKIPPED_TEST].includes(n.status))) return "accepted";
   if (ns.some(n => n.status === MAIL_STATUS.FAILED || ["bounced", "complained", "failed"].includes(n.delivery))) return "notification_failed";
   if (ns.every(n => n.status === MAIL_STATUS.ACCEPTED || n.status === MAIL_STATUS.HELD || n.status === MAIL_STATUS.SKIPPED_TEST)) return "notified";
@@ -289,6 +290,7 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
         if (!m) return n;
         const next = { ...n, status: m.status, attempts: m.attempts || 0 };
         if (m.statusAt) next.statusAt = m.statusAt;
+        if (m.sentTo) next.sentTo = m.sentTo;   // "test"(テスト用の宛先)/"recipients"。アドレスは含めない
         if (m.lastError && m.status !== MAIL_STATUS.ACCEPTED) next.error = m.lastError; else delete next.error;
         if (m.delivery) { next.delivery = m.delivery; if (m.deliveryAt) next.deliveryAt = m.deliveryAt; }
         return next;

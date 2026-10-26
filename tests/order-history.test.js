@@ -76,6 +76,7 @@ test("詳細: 保存済みの備考と注文状態。メール送信結果(将�
   const { orderStatusLabel } = await import("../src/domain/order-history.js");
   const o = summarizeOrder({ id: "x", status: "accepted", notes: "午前の手術分\n2行目", lines: [] });
   assert.deepEqual([o.status, o.statusLabel, o.notes, o.notifications], ["accepted", "受付済み（ディーラー未通知）", "午前の手術分\n2行目", []]);
+  assert.equal(summarizeOrder({ id: "t", status: "notified", testOrder: true, lines: [] }).statusLabel, "テスト注文（ディーラー未通知）", "テスト注文はディーラーへ通知したように見せない");
   const old = summarizeOrder({ id: "y", item: { quantity: 1 } });
   assert.deepEqual([old.statusLabel, old.notes], ["（記録なし）", ""]);
   for (const s of Object.values(ORDER_STATUS).filter(s => s !== "draft")) assert.ok(!orderStatusLabel(s).includes(s), `サーバーの状態 ${s} に表示名がある`);
@@ -98,10 +99,13 @@ test("メール送信の状態: 配信サービスの受付と、実際の配信
     { kind: "dealer", dealerName: "D商会", status: "not_sent", reason: "no-order-email" },
     { kind: "dealer", dealerName: "（発注先未設定）", status: "not_sent", reason: "dealer-unset" },
     { kind: "dealer", dealerName: "E商会", status: "held" },
-    { kind: "copy", dealerName: "注文控え", status: "waiting" }] });
+    { kind: "copy", dealerName: "注文控え", status: "waiting" },
+    { kind: "dealer", dealerName: "F商会", status: "accepted", sentTo: "test" },
+    { kind: "dealer", dealerName: "G商会", status: "accepted", sentTo: "test", delivery: "delivered" }] });
   assert.deepEqual(ns.map(n => n.statusLabel), [
     "送信受付済み（配信の確認待ち）", "配信済み", "配信失敗（宛先エラー）", "送信対象外（発注用メール未登録）", "送信対象外（発注先未設定）",
-    "未送信（メール送信は停止中）", "送信待ち（ディーラーへの送信の後）"]);
+    "未送信（メール送信は停止中）", "送信待ち（ディーラーへの送信の後）",
+    "テスト用の宛先に送信（ディーラーには未送信）", "テスト用の宛先に送信・配信済み（ディーラーには未送信）"]);
   assert.deepEqual(ns.slice(0, 2).map(n => n.atLabel), ["2026/10/25 14:30", "2026/10/25 14:31"]);
   assert.equal(ns[6].kind, "copy");
   for (const st of Object.values(MAIL_STATUS)) {

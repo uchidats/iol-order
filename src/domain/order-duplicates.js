@@ -4,7 +4,7 @@
  * 重複とみなす条件: **IOLモデル・度数・手術日・担当医** がすべて一致(枚数は含めない)。
  *  - IOLモデルは、系列ID + トーリックの正式型番(トーリックのモデル違いは別のモデル)。
  *  - レンズ(明細)ごとに判定する。同じレンズに一致する過去の注文が複数あれば、すべての注文日を返す。
- *  - 下書き・送信失敗(キャンセル・却下を含む)の注文と明細は対象外。新旧の注文形式(旧 orderer)を読める。
+ *  - 下書き・送信失敗(キャンセル・却下を含む)の注文と明細、テスト注文(開発用受付。testOrder)は対象外。新旧の注文形式(旧 orderer)を読める。
  * 確認後は発注を許可する(警告だけ。サーバー側の処理・入力チェックは変更しない)。
  */
 import { orderLinesOf, toMillis } from "./order-history.js";
@@ -33,7 +33,7 @@ export function formatOrderDate(createdAt) {
 export function findPastOrderDuplicates(currentLines, orders) {
   const index = new Map();   // 過去の明細のキー → 注文(重複なし)
   for (const o of orders || []) {
-    if (!isCounted(o.status)) continue;
+    if (o.testOrder === true || !isCounted(o.status)) continue;
     for (const l of orderLinesOf(o)) {
       if (!isCounted(l.status)) continue;
       const item = l.item || {};

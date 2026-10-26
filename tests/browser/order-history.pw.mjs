@@ -91,7 +91,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(lines[0], /レンズ1 J&J DIB00V \+20\.0D 1枚.*手術日 2026年11月10日.*担当医 山田 ・ 発注先 A商会/);
       assert.match(lines[1], /レンズ2 J&J DIW300 トーリック \+18\.5D 2枚.*手術日 2026年11月12日.*担当医 佐藤 ・ 発注先未設定/);
       assert.match(await page.locator(".history-total").innerText(), /2件・合計3枚/);
-      assert.equal(await page.locator(".history-status").innerText(), "状態 ディーラーへの送信に失敗あり");
+      assert.equal(await page.locator(".history-status").innerText(), "状態 テスト注文（ディーラー未通知）", "テスト注文はディーラーへの送信状態を注文の状態として出さない");
       assert.equal(await page.locator(".history-notes p").innerText(), "午前の手術分\n2行目", "保存済みの備考(改行を保持)");
       // メールの送信状態: 発注先ごと・注文控え。受付と配信の結果を区別し、失敗は理由とともに表示
       assert.deepEqual(await page.locator(".history-notifications li").allInnerTexts(), [

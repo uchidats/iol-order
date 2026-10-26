@@ -88,10 +88,11 @@ export function describeNotifications(order) {
     const delivery = n && n.delivery ? DELIVERY_LABELS[n.delivery] || String(n.delivery) : "";
     const reason = n && n.reason ? REASON_LABELS[n.reason] || String(n.reason) : "";
     const base = NOTIFICATION_LABELS[n && n.status] || (n && n.status ? String(n.status) : "（記録なし）");
+    const toTest = n && n.sentTo === "test";   // テスト用の宛先に送った(ディーラーには届いていない)
     return {
       kind: (n && n.kind) || "dealer",
       dealerName: (n && n.dealerName) || "（発注先未設定）",
-      statusLabel: delivery ? delivery : reason ? `${base}（${reason}）` : base,
+      statusLabel: toTest ? `テスト用の宛先に送信${delivery ? `・${delivery}` : ""}（ディーラーには未送信）` : delivery ? delivery : reason ? `${base}（${reason}）` : base,
       atLabel: n && (n.deliveryAt || n.statusAt || n.at) ? formatDateTimeJst(n.deliveryAt || n.statusAt || n.at) : "",
       error: n && n.error ? String(n.error) : ""
     };
@@ -114,7 +115,7 @@ export function summarizeOrder(order) {
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
     testOrder: order.testOrder === true,
     status: order.status || "",
-    statusLabel: orderStatusLabel(order.status),
+    statusLabel: order.testOrder === true ? "テスト注文（ディーラー未通知）" : orderStatusLabel(order.status),
     notes: typeof order.notes === "string" ? order.notes : "",
     notifications: describeNotifications(order),
     lines
