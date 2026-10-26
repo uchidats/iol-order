@@ -1830,6 +1830,17 @@ input[type="date"].form-control {
   white-space: nowrap;
 }
 
+/* テーマカラー(ヘッダーの色): 色見本の格子(10色×3段)・その他の色(HEX) */
+.theme-swatches { display: grid; grid-template-columns: repeat(10, 28px); gap: 5px; margin: 4px 0 12px; }
+.theme-swatch { width: 28px; height: 28px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.15); border-radius: 4px; cursor: pointer; }
+.theme-swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.theme-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f172a; }
+.theme-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.theme-custom .form-label { margin: 0; }
+.theme-picker { width: 44px; height: 36px; padding: 2px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: #ffffff; cursor: pointer; }
+.theme-hex { width: 7.5rem; min-height: 36px; padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+[data-section="theme"] .settings-check { margin-bottom: 10px; }
+
 /* 採用IOL: メーカーごとの折りたたみ */
 .iol-maker { border: 1px solid #e5e7eb; border-radius: var(--radius-md); margin: 8px 0; min-width: 0; }
 .iol-maker-summary {

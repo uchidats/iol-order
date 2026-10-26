@@ -510,6 +510,31 @@ test("注文履歴: 自施設の所属メンバーは「新しい順・50件」�
   await assertFails(deleteDoc(doc(as("adminA"), "facilities/fA/orders/ord1")));
 });
 
+// ---------- ヘッダーのテーマカラー(displaySettings/headerTheme) ----------
+test("テーマカラー: 管理者・副管理者だけが保存・初期設定に戻す(削除)ことができる。所属メンバーは読める。他施設・未ログインは不可", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), "facilities/fA/members/subA"), member("subA", "subadmin")); });
+  const path = "facilities/fA/displaySettings/headerTheme";
+  const body = { color: "#15803d", gradient: true, updatedAt: serverTimestamp() };
+  await assertSucceeds(setDoc(doc(as("adminA"), path), body));
+  await assertSucceeds(setDoc(doc(as("subA"), path), { ...body, gradient: false }));
+  await assertSucceeds(getDoc(doc(as("ordA"), path)));
+  await assertFails(setDoc(doc(as("ordA"), path), body));
+  await assertFails(deleteDoc(doc(as("ordA"), path)));
+  await assertFails(setDoc(doc(as("adminB"), path), body));
+  await assertFails(getDoc(doc(as("ordB"), path)));
+  await assertFails(getDoc(doc(anon(), path)));
+  await assertSucceeds(deleteDoc(doc(as("subA"), path)));
+});
+
+test("テーマカラー: 形式の検証(#rrggbb の小文字・グラデーションは真偽値・必須項目・余計なキーは拒否)", async () => {
+  const db = as("adminA"), path = "facilities/fA/displaySettings/headerTheme";
+  for (const bad of [{ color: "#15803D", gradient: true }, { color: "#abc", gradient: true }, { color: "red", gradient: true }, { color: "#15803d", gradient: "yes" },
+    { color: "#15803d" }, { gradient: true }, { color: "#15803d", gradient: true, textColor: "#000000" }]) {
+    await assertFails(setDoc(doc(db, path), bad), JSON.stringify(bad));
+  }
+  await assertSucceeds(setDoc(doc(db, path), { color: "#15803d", gradient: true }));
+});
+
 // ---------- 役割の拡張(副管理者・代行入力者)と参加待ち ----------
 async function seedRoles() {
   await env.withSecurityRulesDisabled(async (ctx) => {

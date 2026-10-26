@@ -12,6 +12,8 @@ import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/
 import { lensBadgeElements } from "./lens-badges.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
+import { HEADER_THEME_PALETTE, validateHeaderTheme, readHeaderTheme } from "../domain/header-theme.js";
+import { applyHeaderTheme, cacheHeaderTheme } from "./header-theme.js";
 
 /** 要素生成の小さなヘルパー（ユーザー入力は textContent / value で扱い、HTMLとして解釈しない） */
 function h(tag, attrs = {}, ...children) {
@@ -121,8 +123,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
-  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver].filter(Boolean);
+  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -139,7 +141,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const iolOrder = repository.getIolOrder ? await repository.getIolOrder(facility.id) : null;
     // メール設定(注文控え・署名)。読めない場合(権限・未デプロイ)は未設定として表示し、他の設定の読み込みは止めない
     const mailSettings = repository.getMailSettings ? await repository.getMailSettings(facility.id).catch((e) => { console.warn("メール設定を読み込めませんでした:", e); return null; }) : null;
-    data = { orderers, adopted, dealers, iolOrder, mailSettings, members: [], pending: [] };
+    // ヘッダーのテーマカラー。読めない場合は未設定(標準の青)として表示する
+    const headerTheme = repository.getHeaderTheme ? readHeaderTheme(await repository.getHeaderTheme(facility.id).catch((e) => { console.warn("テーマカラーを読み込めませんでした:", e); return null; })) : null;
+    data = { orderers, adopted, dealers, iolOrder, mailSettings, headerTheme, members: [], pending: [] };
     if (canManageMembers) await reloadMembers();
   }
 
@@ -694,6 +698,61 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     message(section, "");
   }
 
+  // ---------- テーマカラー(ヘッダーの色。施設ごと) ----------
+  // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーションに戻す(設定を削除)。
+  function themeSection() {
+    const DEFAULT_COLOR = "#1d4ed8";
+    const swatches = h("div", { class: "theme-swatches", role: "group", "aria-label": "色見本" },
+      HEADER_THEME_PALETTE.flat().map(c => h("button", { type: "button", class: "theme-swatch", "data-color": c, title: c, "aria-label": c, "aria-pressed": "false", style: `background:${c}` })));
+    const picker = h("input", { type: "color", class: "theme-picker", "data-f": "themePicker", "aria-label": "その他の色" });
+    const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": "themeHex", placeholder: "#1d4ed8", "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
+    const chk = h("input", { type: "checkbox", "data-f": "themeGradient" });
+    const reset = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "theme-reset" }, "初期設定に戻す");
+    const section = h("section", { class: "settings-section", "data-section": "theme" },
+      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。白い文字が読みにくい明るい色は選べません。"),
+      swatches,
+      h("div", { class: "theme-custom" }, h("span", { class: "form-label" }, "その他の色"), picker, hexIn),
+      h("label", { class: "settings-check" }, chk, h("span", {}, "グラデーションを使用する")),
+      h("div", {}, reset),
+      h("p", { class: "form-hint", "data-msg": "" }));
+    const show = () => {
+      const t = data.headerTheme;
+      for (const b of swatches.children) b.setAttribute("aria-pressed", String(Boolean(t) && b.dataset.color === t.color));
+      picker.value = t ? t.color : DEFAULT_COLOR;
+      hexIn.value = t ? t.color : "";
+      chk.checked = t ? t.gradient : true;
+      reset.disabled = !t;
+    };
+    const use = (theme) => {   // ヘッダーにすぐ反映し、自動保存する
+      data.headerTheme = theme;
+      applyHeaderTheme(theme);
+      cacheHeaderTheme(facility.id, theme);
+      show();
+      themeSaver.request();
+    };
+    const choose = (color) => {
+      const v = validateHeaderTheme({ color, gradient: chk.checked });
+      if (!v.ok) { message(section, v.error, true); return; }   // 明るすぎる・形式違いは反映も保存もしない
+      message(section, "");
+      use(v.theme);
+    };
+    swatches.addEventListener("click", (e) => { const b = e.target.closest(".theme-swatch"); if (b) choose(b.dataset.color); });
+    picker.addEventListener("change", () => choose(picker.value));
+    hexIn.addEventListener("change", () => choose(hexIn.value));
+    chk.addEventListener("change", () => { if (data.headerTheme) use({ ...data.headerTheme, gradient: chk.checked }); });
+    reset.addEventListener("click", () => { message(section, ""); use(null); });
+    let saved = null;   // 最後に保存した内容(同じ内容は保存しない)
+    themeSaver = createAutoSaver(section, async () => {
+      const t = data.headerTheme;
+      if (JSON.stringify(t) === JSON.stringify(saved)) return;
+      if (t) await settingsApi.saveHeaderTheme(facility.id, t);
+      else await settingsApi.resetHeaderTheme(facility.id);
+      saved = t;
+    });
+    section._render = () => { saved = data.headerTheme; message(section, ""); show(); };
+    return section;
+  }
+
   // ---------- 利用者管理 ----------
   // 所属に有効/無効はない。参加済みの利用者(所属)と、事前登録した参加待ちを1つの一覧で管理する。
   // 管理者はすべての役割、副管理者は注文者・代行入力者だけを操作できる(最終判定はサーバー)。
@@ -991,10 +1050,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- 画面全体 ----------
-  const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null };
+  const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null,
+    theme: settingsApi.saveHeaderTheme && settingsApi.resetHeaderTheme ? themeSection() : null };
   if (canManageMembers) built.members = memberSection();
-  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール(作成の順番・機能は変えない)
-  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.mail ? { mail: built.mail } : {}) };
+  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → テーマカラー(作成の順番・機能は変えない)
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.mail ? { mail: built.mail } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   const isAdmin = actorRole === "admin";   // 施設名の編集・施設削除は管理者のみ表示(サーバーでも管理者のみ)
   const del = isAdmin && inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });
@@ -1087,6 +1147,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         renderIols(sections.iols);
         renderDealers(sections.dealers);
         if (sections.mail) renderMail(sections.mail);
+        if (sections.theme) sections.theme._render();
         if (sections.members) renderMembers(sections.members);
         status.textContent = "";
         dirty = false;

@@ -10,6 +10,7 @@ import { isManagerRole } from "./domain/member-admin.js";
 import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
+import { loadHeaderTheme } from "./ui/header-theme.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
@@ -267,6 +268,7 @@ async function bootstrapWithFirebase(config) {
     const access = render();
     if (access.state === ACCESS.GRANTED && !formUid) {
       formUid = state.user.uid;
+      loadHeaderTheme(access.facilityId, ctx.repository);   // ヘッダーのテーマカラー(施設ごと。待たずに注文画面を表示する)
       await initOrderForm({
         config,
         orderApi: ctx.orderApi,
