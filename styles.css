@@ -722,7 +722,7 @@ input[type="date"].form-control {
 }
 
 .btn-submit {
-  width: min(100%, 240px); /* 全幅にせず、左揃え。狭い画面では画面幅まで */
+  width: min(100%, 240px); /* 全幅にせず、右揃え(.form-actions)。狭い画面では画面幅まで */
   min-height: 46px;        /* スマホで押しやすい高さは維持 */
   font-size: 1rem;
   padding: 10px 16px;
@@ -730,6 +730,8 @@ input[type="date"].form-control {
 }
 
 .form-actions {
+  display: flex;
+  justify-content: flex-end;   /* 「注文内容を確認」は右揃え(「レンズN」の外枠・備考欄と右端をそろえる) */
   margin-top: 8px;
   padding: 4px 0 20px;
 }

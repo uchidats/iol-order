@@ -98,7 +98,7 @@ async function fillOrder(page, notes) {
 
 const visible = (page, sel) => page.locator(sel).evaluate(e => !e.classList.contains("hidden"));
 
-test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は、「レンズ1」の外枠と左右端がそろう(PC・スマートフォン)", async (t) => {
+test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は、「レンズ1」の外枠と左右端がそろう。「注文内容を確認」は右端にそろう(PC・スマートフォン)", async (t) => {
   for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
     const browser = await launch(type, name);
     if (!browser) { t.diagnostic(`${name} を起動できません`); continue; }
@@ -107,9 +107,11 @@ test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は�
         const page = await browser.newPage({ viewport: { width, height: 900 } });
         await page.goto(base);
         await page.waitForFunction(() => window.__ready);
-        const edges = await page.evaluate(() => ["#lensLines .lens-line", "#notesInput", "#groupNotes .ref-links-accordion"].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right]; }));
+        const edges = await page.evaluate(() => ["#lensLines .lens-line", "#notesInput", "#groupNotes .ref-links-accordion", "#btnConfirm"].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right]; }));
         assert.deepEqual(edges[1], edges[0], `${name} ${width}px: 備考の入力欄`);
         assert.deepEqual(edges[2], edges[0], `${name} ${width}px: 各社Calculator関連リンク`);
+        assert.equal(edges[3][1], edges[0][1], `${name} ${width}px: 「注文内容を確認」は右揃え(右端がそろう)`);
+        assert.equal(edges[3][1] - edges[3][0], Math.min(240, edges[0][1] - edges[0][0]), `${name} ${width}px: ボタンの幅は変えない`);
         await page.close();
       }
     } finally { await browser.close(); }
