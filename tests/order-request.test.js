@@ -98,3 +98,9 @@ test("本番(server): 公開サイトの既定(SITE_ORDER_MODE)は server(2026-1
   assert.deepEqual(resolveConfig({ orderMode: "server-dev" }, ORDER_MODES.SERVER), { orderMode: "server-dev" }, "ローカルの設定が優先");
   assert.deepEqual([sendsOrders("dryrun"), sendsOrders("server-dev"), sendsOrders("server")], [false, true, true]);
 });
+
+test("ヘッダーのモード表示は、HTML の初期状態では非表示(本番で再読み込み時に「開発モード」が一瞬出ない)", async () => {
+  const fs = await import("node:fs");
+  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /<span class="system-badge" id="systemBadge" hidden><\/span>/);
+});

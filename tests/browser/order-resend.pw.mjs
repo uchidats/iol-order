@@ -123,6 +123,8 @@ test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さ
   if (!browser) return t.skip("chromium を起動できません");
   try {
     const { page, errors } = await open(browser);
+    assert.equal(await page.locator("#systemBadge").isVisible(), true, "開発用(server-dev)ではモード表示を出す");
+    assert.equal(await page.locator("#systemBadge").innerText(), "開発用受付");
     await page.evaluate(() => { const s = JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'); s.mode = "ok"; s.real = true; localStorage.setItem("__srv", JSON.stringify(s)); });
     await fillOrder(page, "本番");
     await page.click("#btnConfirm");

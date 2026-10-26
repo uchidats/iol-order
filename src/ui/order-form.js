@@ -143,12 +143,13 @@ function updateAlconGuide() {
   alconCalculatorUrl = url;
 }
 
-/** ヘッダー右側の状態表示。HTML の既定は「開発モード」。表示だけで、送信の可否は config.orderMode で決まる */
+/** ヘッダー右側の状態表示。HTML の既定は非表示(本番で再読み込み時に一瞬出ないように)。開発用のモードだけ表示する。表示だけで、送信の可否は config.orderMode で決まる */
 function renderModeBadge() {
   const badge = document.getElementById("systemBadge");
   if (!badge) return;
   if (appConfig.orderMode === ORDER_MODES.SERVER) { badge.hidden = true; return; }   // 本番は表示しない
   badge.textContent = appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
+  badge.hidden = false;
 }
 
 function setupEventListeners() {
