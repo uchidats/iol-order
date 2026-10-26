@@ -89,6 +89,13 @@ body {
   z-index: 10;
 }
 
+/* テーマカラーで「フォントを黒にする」: ヘッダー内の文字・アイコン・枠を黒系に(メニューを開いたときの白いパネルは変えない) */
+.app-header.is-dark-text { color: #000000; }
+.app-header.is-dark-text .header-subtitle { color: rgba(0, 0, 0, 0.85); }
+.app-header.is-dark-text .header-icon { background-color: rgba(0, 0, 0, 0.08); }
+.app-header.is-dark-text .system-badge { background-color: rgba(0, 0, 0, 0.08); border-color: rgba(0, 0, 0, 0.3); }
+.app-header.is-dark-text .header-menu-btn { color: #000000; background-color: rgba(0, 0, 0, 0.06); border-color: rgba(0, 0, 0, 0.3); }
+
 .header-inner {
   display: flex;
   align-items: center;
@@ -1840,7 +1847,9 @@ input[type="date"].form-control {
 .theme-custom .form-label { margin: 0; }
 .theme-picker { width: 44px; height: 36px; padding: 2px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: #ffffff; cursor: pointer; }
 .theme-hex { width: 7.5rem; min-height: 36px; padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-[data-section="theme"] .settings-check { margin-bottom: 10px; }
+[data-section="theme"] .settings-check { display: flex; width: fit-content; margin-bottom: 10px; }
+.theme-advice { margin: -4px 0 10px; font-size: 0.82rem; color: #4b5563; }   /* 読みにくい配色の案内(控えめ。保存は止めない) */
+.theme-advice[hidden] { display: none; }
 
 /* 採用IOL: メーカーごとの折りたたみ */
 .iol-maker { border: 1px solid #e5e7eb; border-radius: var(--radius-md); margin: 8px 0; min-width: 0; }

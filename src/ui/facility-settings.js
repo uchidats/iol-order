@@ -12,7 +12,7 @@ import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/
 import { lensBadgeElements } from "./lens-badges.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { HEADER_THEME_PALETTE, validateHeaderTheme, readHeaderTheme } from "../domain/header-theme.js";
+import { HEADER_THEME_PALETTE, validateHeaderTheme, readHeaderTheme, isReadable } from "../domain/header-theme.js";
 import { applyHeaderTheme, cacheHeaderTheme } from "./header-theme.js";
 
 /** 要素生成の小さなヘルパー（ユーザー入力は textContent / value で扱い、HTMLとして解釈しない） */
@@ -708,7 +708,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
 
   // ---------- テーマカラー(ヘッダーの色。施設ごと) ----------
-  // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーションに戻す(設定を削除)。
+  // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーション + 白い文字に戻す(設定を削除)。
+  // 背景色は明るさに関係なく選べる。文字は白(既定)か黒。読みにくい組み合わせは控えめに案内するだけで、反映・保存は止めない。
   function themeSection() {
     const DEFAULT_COLOR = "#1d4ed8";
     const swatches = h("div", { class: "theme-swatches", role: "group", "aria-label": "色見本" },
@@ -716,12 +717,16 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const picker = h("input", { type: "color", class: "theme-picker", "data-f": "themePicker", "aria-label": "その他の色" });
     const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": "themeHex", placeholder: "#1d4ed8", "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
     const chk = h("input", { type: "checkbox", "data-f": "themeGradient" });
+    const dark = h("input", { type: "checkbox", "data-f": "themeDarkText" });
+    const advice = h("p", { class: "theme-advice", "data-f": "themeAdvice", hidden: true }, "文字が読みやすい配色を推奨します");
     const reset = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "theme-reset" }, "初期設定に戻す");
     const section = h("section", { class: "settings-section", "data-section": "theme" },
-      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。白い文字が読みにくい明るい色は選べません。"),
+      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。"),
       swatches,
       h("div", { class: "theme-custom" }, h("span", { class: "form-label" }, "その他の色"), picker, hexIn),
       h("label", { class: "settings-check" }, chk, h("span", {}, "グラデーションを使用する")),
+      h("label", { class: "settings-check" }, dark, h("span", {}, "フォントを黒にする")),
+      advice,
       h("div", {}, reset),
       h("p", { class: "form-hint", "data-msg": "" }));
     const show = () => {
@@ -730,6 +735,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       picker.value = t ? t.color : DEFAULT_COLOR;
       hexIn.value = t ? t.color : "";
       chk.checked = t ? t.gradient : true;
+      dark.checked = Boolean(t && t.darkText);
+      advice.hidden = isReadable(t);
       reset.disabled = !t;
     };
     const use = (theme) => {   // ヘッダーにすぐ反映し、自動保存する
@@ -740,8 +747,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       themeSaver.request();
     };
     const choose = (color) => {
-      const v = validateHeaderTheme({ color, gradient: chk.checked });
-      if (!v.ok) { message(section, v.error, true); return; }   // 明るすぎる・形式違いは反映も保存もしない
+      const v = validateHeaderTheme({ color, gradient: chk.checked, darkText: dark.checked });
+      if (!v.ok) { message(section, v.error, true); return; }   // 形式違い(#RRGGBB でない)だけは反映も保存もしない
       message(section, "");
       use(v.theme);
     };
@@ -749,6 +756,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     picker.addEventListener("change", () => choose(picker.value));
     hexIn.addEventListener("change", () => choose(hexIn.value));
     chk.addEventListener("change", () => { if (data.headerTheme) use({ ...data.headerTheme, gradient: chk.checked }); });
+    // 未設定(標準の青)のまま黒い文字にしたときは、標準の青を基準にした設定として保存する
+    dark.addEventListener("change", () => use({ ...(data.headerTheme || { color: DEFAULT_COLOR, gradient: chk.checked }), darkText: dark.checked }));
     reset.addEventListener("click", () => { message(section, ""); use(null); });
     let saved = null;   // 最後に保存した内容(同じ内容は保存しない)
     themeSaver = createAutoSaver(section, async () => {

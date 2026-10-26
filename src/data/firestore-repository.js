@@ -144,9 +144,9 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
       fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"),
       { order, updatedAt: fs.serverTimestamp() }),
     /** ヘッダーのテーマカラーの保存(管理者・副管理者のみ。Rules が検証する)。初期設定に戻すときは削除する */
-    saveHeaderTheme: (facilityId, { color, gradient }) => fs.setDoc(
+    saveHeaderTheme: (facilityId, { color, gradient, darkText }) => fs.setDoc(
       fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme"),
-      { color, gradient, updatedAt: fs.serverTimestamp() }),
+      { color, gradient, darkText: darkText === true, updatedAt: fs.serverTimestamp() }),
     resetHeaderTheme: (facilityId) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme")),
     /** 施設のメール設定の保存(管理者・副管理者のみ。Rules が検証する)。変更者の記録(updatedBy)も付ける */
     saveMailSettings: async (facilityId, data) => {

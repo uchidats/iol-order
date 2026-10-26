@@ -1,4 +1,4 @@
-// 回帰テスト(ブラウザ): 施設設定の「テーマカラー」。色見本・自由な色(HEX)・グラデーション・初期設定に戻す。ヘッダーへの即時反映と自動保存。
+// 回帰テスト(ブラウザ): 施設設定の「テーマカラー」。色見本・自由な色(HEX)・グラデーション・フォントを黒にする・読みやすさの案内・初期設定に戻す。ヘッダーへの即時反映と自動保存。
 // 実際の施設設定の画面(facility-settings.js)を、偽のリポジトリ・保存APIで動かす(ログイン・Firebase は使わない)。  npm run test:browser
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -61,7 +61,7 @@ async function launch(type, name) {
   return null;
 }
 
-const headerBg = (page) => page.evaluate(() => { const e = document.querySelector(".app-header"); return { inline: e.style.background, image: getComputedStyle(e).backgroundImage, color: getComputedStyle(e).backgroundColor }; });
+const headerBg = (page) => page.evaluate(() => { const e = document.querySelector(".app-header"); return { inline: e.style.background, image: getComputedStyle(e).backgroundImage, color: getComputedStyle(e).backgroundColor, text: getComputedStyle(e.querySelector(".header-title")).color }; });
 const calls = (page) => page.evaluate(() => window.__calls);
 const settle = (page) => page.waitForTimeout(150);
 
@@ -77,19 +77,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.waitForFunction(() => window.__ready);
       const sec = page.locator('[data-section="theme"]');
       assert.deepEqual((await page.locator("[data-section]").evaluateAll(es => es.map(e => e.getAttribute("data-section")))).slice(-2), ["mail", "theme"], "注文メールの後");
-      // 未設定: 標準の青いグラデーションのまま(インラインの指定なし)。グラデーションは初期値 ON、初期設定に戻すは押せない
+      // 未設定: 標準の青いグラデーション + 白い文字(インラインの指定なし)。グラデーションは初期値 ON、黒い文字は OFF、初期設定に戻すは押せない
       const initial = await headerBg(page);
       assert.equal(initial.inline, "");
       assert.match(initial.image, /linear-gradient/);
+      assert.equal(initial.text, "rgb(255, 255, 255)");
       assert.equal(await sec.locator(".theme-swatch").count(), 30);
       assert.equal(await sec.locator('[data-f="themeGradient"]').isChecked(), true);
+      assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), false);
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), false);
       assert.equal(await sec.locator('[data-act="theme-reset"]').isDisabled(), true);
 
       // 色見本を選ぶ → すぐにヘッダーに反映(グラデーション)・保存
       await sec.locator('.theme-swatch[data-color="#15803d"]').click();
       await settle(page);
-      assert.match((await headerBg(page)).inline, /linear-gradient\(135deg, rgb\(14, 83, 40\) 0%, rgb\(21, 128, 61\) 100%\)/);
-      assert.deepEqual(await calls(page), [["save", { color: "#15803d", gradient: true }]]);
+      assert.equal((await headerBg(page)).inline, "linear-gradient(135deg, rgb(14, 83, 40) 0%, rgb(21, 128, 61) 100%)");
+      assert.deepEqual(await calls(page), [["save", { color: "#15803d", gradient: true, darkText: false }]]);
       assert.equal(await sec.locator('.theme-swatch[data-color="#15803d"]').getAttribute("aria-pressed"), "true");
 
       // グラデーションを OFF → 単色
@@ -98,39 +101,58 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const solid = await headerBg(page);
       assert.equal(solid.image, "none");
       assert.equal(solid.color, "rgb(21, 128, 61)");
-      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#15803d", gradient: false }]);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#15803d", gradient: false, darkText: false }]);
 
-      // 明るすぎる色(白い文字が読めない)は、反映も保存もしない
-      const n = (await calls(page)).length;
+      // 明るい色も選べる(反映・保存する)。白い文字では読みにくいので、控えめな案内を出す
       await sec.locator('[data-f="themeHex"]').fill("#fde047");
-      await sec.locator('[data-f="themeHex"]').press("Enter");
       await sec.locator('[data-f="themeHex"]').blur();
       await settle(page);
-      assert.match(await sec.locator(".error-message").innerText(), /明るすぎて白い文字が読みにくい/);
-      assert.equal((await calls(page)).length, n);
-      assert.equal((await headerBg(page)).color, "rgb(21, 128, 61)");
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#fde047", gradient: false, darkText: false }]);
+      assert.equal((await headerBg(page)).color, "rgb(253, 224, 71)");
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), true);
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').innerText(), "文字が読みやすい配色を推奨します");
+      assert.equal(await sec.locator(".error-message").count(), 0, "エラーにはしない");
 
-      // 自由な色(HEX)
+      // フォントを黒にする → ヘッダーの文字・アイコンが黒。読みやすいので案内は消える
+      await sec.locator('[data-f="themeDarkText"]').check();
+      await settle(page);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#fde047", gradient: false, darkText: true }]);
+      assert.equal((await headerBg(page)).text, "rgb(0, 0, 0)");
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), false);
+
+      // 自由な色(HEX)。濃い色に黒い文字は読みにくいので案内(保存はする)
       await sec.locator('[data-f="themeHex"]').fill("#7A1F5C");
       await sec.locator('[data-f="themeHex"]').blur();
       await settle(page);
-      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#7a1f5c", gradient: false }]);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#7a1f5c", gradient: false, darkText: true }]);
       assert.equal((await headerBg(page)).color, "rgb(122, 31, 92)");
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), true);
       assert.equal(await sec.locator(".theme-swatch[aria-pressed=true]").count(), 0);
+      // 形式が違う値だけは、反映も保存もしない
+      const n = (await calls(page)).length;
+      await sec.locator('[data-f="themeHex"]').fill("blue");
+      await sec.locator('[data-f="themeHex"]').blur();
+      await settle(page);
+      assert.match(await sec.locator(".error-message").innerText(), /#RRGGBB/);
+      assert.equal((await calls(page)).length, n);
 
       // 開き直すと保存した内容を表示
       await page.evaluate(() => window.__reopen());
       assert.equal(await sec.locator('[data-f="themeHex"]').inputValue(), "#7a1f5c");
       assert.equal(await sec.locator('[data-f="themeGradient"]').isChecked(), false);
+      assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), true);
 
-      // 初期設定に戻す → 設定を削除し、標準の青いグラデーションに戻る(グラデーションは ON に戻る)
+      // 初期設定に戻す → 設定を削除し、標準の青いグラデーション + 白い文字に戻る(グラデーション ON・黒い文字 OFF)
       await sec.locator('[data-act="theme-reset"]').click();
       await settle(page);
       assert.deepEqual((await calls(page)).at(-1), ["reset"]);
       const back = await headerBg(page);
       assert.equal(back.inline, "");
       assert.equal(back.image, initial.image);
+      assert.equal(back.text, "rgb(255, 255, 255)");
       assert.equal(await sec.locator('[data-f="themeGradient"]').isChecked(), true);
+      assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), false);
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), false);
       assert.equal(await sec.locator('[data-act="theme-reset"]').isDisabled(), true);
 
       // スマートフォンの幅でも色見本が欄からはみ出さない

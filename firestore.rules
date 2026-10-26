@@ -256,12 +256,13 @@ service cloud.firestore {
               && request.resource.data.keys().hasOnly(['order', 'updatedAt'])
               && request.resource.data.keys().hasAll(['order'])
               && request.resource.data.order is list && request.resource.data.order.size() <= 500)
-            // ヘッダーのテーマカラー(所属者が読める。白い文字が読める色かは画面で確認する)。初期設定に戻すときは削除
+            // ヘッダーのテーマカラー(所属者が読める。背景色は明るさに関係なく可。darkText=黒い文字。項目がない既存の設定は白い文字)。初期設定に戻すときは削除
             || (docId == 'headerTheme'
-              && request.resource.data.keys().hasOnly(['color', 'gradient', 'updatedAt'])
+              && request.resource.data.keys().hasOnly(['color', 'gradient', 'darkText', 'updatedAt'])
               && request.resource.data.keys().hasAll(['color', 'gradient'])
               && request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-f]{6}$')
-              && request.resource.data.gradient is bool));
+              && request.resource.data.gradient is bool
+              && (!('darkText' in request.resource.data) || request.resource.data.darkText is bool)));
         allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 

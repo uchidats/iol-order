@@ -526,13 +526,16 @@ test("テーマカラー: 管理者・副管理者だけが保存・初期設定
   await assertSucceeds(deleteDoc(doc(as("subA"), path)));
 });
 
-test("テーマカラー: 形式の検証(#rrggbb の小文字・グラデーションは真偽値・必須項目・余計なキーは拒否)", async () => {
+test("テーマカラー: 形式の検証(#rrggbb の小文字・グラデーションと黒い文字は真偽値・必須項目・余計なキーは拒否)。明るい色・黒い文字も保存できる", async () => {
   const db = as("adminA"), path = "facilities/fA/displaySettings/headerTheme";
   for (const bad of [{ color: "#15803D", gradient: true }, { color: "#abc", gradient: true }, { color: "red", gradient: true }, { color: "#15803d", gradient: "yes" },
-    { color: "#15803d" }, { gradient: true }, { color: "#15803d", gradient: true, textColor: "#000000" }]) {
+    { color: "#15803d" }, { gradient: true }, { color: "#15803d", gradient: true, textColor: "#000000" }, { color: "#fde047", gradient: true, darkText: "on" }]) {
     await assertFails(setDoc(doc(db, path), bad), JSON.stringify(bad));
   }
-  await assertSucceeds(setDoc(doc(db, path), { color: "#15803d", gradient: true }));
+  await assertSucceeds(setDoc(doc(db, path), { color: "#15803d", gradient: true }), "黒い文字の項目がない形式(既存の設定)");
+  await assertSucceeds(setDoc(doc(db, path), { color: "#fde047", gradient: false, darkText: true }), "明るい色 + 黒い文字");
+  await assertSucceeds(setDoc(doc(db, path), { color: "#ffffff", gradient: true, darkText: false }), "読みにくい組み合わせも保存は妨げない");
+  await assertFails(setDoc(doc(as("ordA"), path), { color: "#fde047", gradient: false, darkText: true }), "注文者は変更できない");
 });
 
 // ---------- 役割の拡張(副管理者・代行入力者)と参加待ち ----------
