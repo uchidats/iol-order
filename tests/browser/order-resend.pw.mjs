@@ -127,8 +127,12 @@ test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さ
     await fillOrder(page, "本番");
     await page.click("#btnConfirm");
     await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+    // 「注文を送信」の紙飛行機アイコンは文字の右(「注文内容を確認 →」とそろえる)。送信後に戻したボタンも同じ
+    const iconAfterText = () => page.locator("#btnModalSubmit").evaluate(b => { const t = [...b.childNodes].find(n => n.nodeType === 3 && n.textContent.trim()); const s = b.querySelector("svg"); return t.textContent.trim() === "注文を送信" && Boolean(t.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING); });
+    assert.equal(await iconAfterText(), true);
     await page.click("#btnModalSubmit");
     await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+    assert.equal(await iconAfterText(), true, "送信後に戻したボタン");
     assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
     assert.match(await page.locator("#completeSubtitle").innerText(), /ディーラーへ注文メールを送信します[\s\S]*注文履歴で確認/);
     assert.deepEqual(errors, []);
