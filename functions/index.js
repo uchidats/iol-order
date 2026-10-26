@@ -112,16 +112,16 @@ export const auditFacilitySettings = auditTrigger("settings");   // 施設のメ
 // 送信のキルスイッチ。true にするまで送信せず、送信待ちのメールは held(未送信)になる。true にしても ORDER_INTAKE_ENABLED は別。
 const MAIL_SENDING_ENABLED = defineBoolean("MAIL_SENDING_ENABLED", { default: false });
 const MAIL_FROM = defineString("MAIL_FROM", { default: "" });                     // 例: "IOL Order <order@mail.example.jp>"(配信サービスで認証済みのドメイン)
-const MAIL_TEST_RECIPIENT = defineString("MAIL_TEST_RECIPIENT", { default: "" }); // テスト注文(開発用受付)の送信先。空ならテスト注文は送らない
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");                              // Secret Manager(コード・.env に書かない)
 const RESEND_WEBHOOK_SECRET = defineSecret("RESEND_WEBHOOK_SECRET");
+const MAIL_TEST_RECIPIENT = defineSecret("MAIL_TEST_RECIPIENT");                   // テスト注文(開発用受付)の送信先。個人のアドレスなので Secret Manager(リポジトリに書かない)
 const mailDispatch = createMailDispatchService({
   db: getFirestore(), FieldValue, Timestamp,
   isEnabled: () => MAIL_SENDING_ENABLED.value() && Boolean(MAIL_FROM.value()),
-  testRecipient: () => MAIL_TEST_RECIPIENT.value(),
+  testRecipient: () => String(MAIL_TEST_RECIPIENT.value() || "").trim(),
   getSender: () => createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
 });
-const mailOptions = { region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [RESEND_API_KEY] };
+const mailOptions = { region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [RESEND_API_KEY, MAIL_TEST_RECIPIENT] };
 // 送信待ちのメールが作られたら送る(再試行はこの関数ではなく、定期実行が状態を見て行う)
 export const sendOrderMail = onDocumentCreated({ ...mailOptions, document: "facilities/{facilityId}/orders/{orderId}/mails/{mailId}" },
   (event) => (event.data ? mailDispatch.processMail(event.data.ref) : null));
