@@ -82,7 +82,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(initial.inline, "");
       assert.match(initial.image, /linear-gradient/);
       assert.equal(initial.text, "rgb(255, 255, 255)");
-      assert.equal(await sec.locator(".theme-swatch").count(), 30);
+      assert.equal(await sec.locator(".theme-swatch").count(), 20);
+      assert.deepEqual(await sec.locator(".theme-row-label").allInnerTexts(), ["白文字向け", "黒文字向け"]);
+      assert.deepEqual(await sec.locator(".theme-swatches").evaluateAll(rs => rs.map(r => r.querySelectorAll(".theme-swatch").length)), [10, 10]);
       assert.equal(await sec.locator('[data-f="themeGradient"]').isChecked(), true);
       assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), false);
       assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), false);
@@ -94,6 +96,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await headerBg(page)).inline, "linear-gradient(135deg, rgb(14, 83, 40) 0%, rgb(21, 128, 61) 100%)");
       assert.deepEqual(await calls(page), [["save", { color: "#15803d", gradient: true, darkText: false }]]);
       assert.equal(await sec.locator('.theme-swatch[data-color="#15803d"]').getAttribute("aria-pressed"), "true");
+
+      // 2行目(黒文字向け)の色見本を選ぶと、文字も黒に自動で設定。1行目に戻すと白に戻る。チェックボックスで手動でも変えられる
+      await sec.locator('.theme-swatch[data-color="#fdba74"]').click();
+      await settle(page);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#fdba74", gradient: true, darkText: true }]);
+      assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), true);
+      assert.equal((await headerBg(page)).text, "rgb(0, 0, 0)");
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), false);
+      await sec.locator('[data-f="themeDarkText"]').uncheck();
+      await settle(page);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#fdba74", gradient: true, darkText: false }]);
+      assert.equal(await sec.locator('[data-f="themeAdvice"]').isVisible(), true, "手動で白にすると読みにくいので案内(保存はする)");
+      await sec.locator('.theme-swatch[data-color="#15803d"]').click();
+      await settle(page);
+      assert.deepEqual((await calls(page)).at(-1), ["save", { color: "#15803d", gradient: true, darkText: false }]);
+      assert.equal((await headerBg(page)).text, "rgb(255, 255, 255)");
 
       // グラデーションを OFF → 単色
       await sec.locator('[data-f="themeGradient"]').uncheck();

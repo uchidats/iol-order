@@ -5,12 +5,14 @@
  * darkText がない保存値(この項目の追加前の設定)は白い文字として読む。
  */
 
-/** 色見本(Word・Excel のような格子。列=色相、行=濃さ) */
+/**
+ * 色見本(Word・Excel のような格子。10色×2行。列=色相: 青・紺・紫・ピンク・赤・オレンジ・緑・ティール・水色・グレー、上下で色相をそろえる)。
+ * 1行目は白い文字向けの濃い色、2行目は黒い文字向けの明るい色。色見本を選ぶと文字の色も自動で設定する(darkText)。
+ */
 export const HEADER_THEME_PALETTE = Object.freeze([
-  ["#1d4ed8", "#4338ca", "#7e22ce", "#be185d", "#b91c1c", "#c2410c", "#15803d", "#0f766e", "#0e7490", "#334155"],
-  ["#1e40af", "#3730a3", "#6b21a8", "#9d174d", "#991b1b", "#9a3412", "#166534", "#115e59", "#155e75", "#1e293b"],
-  ["#1e3a8a", "#312e81", "#581c87", "#831843", "#7f1d1d", "#7c2d12", "#14532d", "#134e4a", "#164e63", "#0f172a"]
-].map(row => Object.freeze(row)));
+  { label: "白文字向け", darkText: false, colors: ["#1d4ed8", "#1e3a8a", "#7e22ce", "#be185d", "#b91c1c", "#c2410c", "#15803d", "#0f766e", "#0e7490", "#475569"] },
+  { label: "黒文字向け", darkText: true, colors: ["#93c5fd", "#a5b4fc", "#d8b4fe", "#f9a8d4", "#fca5a5", "#fdba74", "#86efac", "#5eead4", "#67e8f9", "#cbd5e1"] }
+].map(row => Object.freeze({ ...row, colors: Object.freeze(row.colors) })));
 
 /** 読みやすさの目安のコントラスト比(WCAG AA・通常の文字)。下回るときは案内を出す(保存は止めない) */
 export const READABLE_CONTRAST = 4.5;

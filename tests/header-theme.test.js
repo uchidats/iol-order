@@ -5,11 +5,14 @@ import {
 } from "../src/domain/header-theme.js";
 import { cachedHeaderTheme, cacheHeaderTheme } from "../src/ui/header-theme.js";
 
-test("色見本: 10色×3段の格子で重複しない。白い文字(既定)で読みやすい濃さ", () => {
-  assert.deepEqual(HEADER_THEME_PALETTE.map(r => r.length), [10, 10, 10]);
-  const all = HEADER_THEME_PALETTE.flat();
-  assert.equal(new Set(all).size, all.length);
-  for (const c of all) assert.ok(contrastWithWhite(c) >= READABLE_CONTRAST, c);
+test("色見本: 10色×2行(1行目=白文字向けの濃い色、2行目=黒文字向けの明るい色)で重複しない。各行の文字色で、グラデーションの両端とも読みやすい", () => {
+  assert.deepEqual(HEADER_THEME_PALETTE.map(r => [r.label, r.darkText, r.colors.length]), [["白文字向け", false, 10], ["黒文字向け", true, 10]]);
+  const all = HEADER_THEME_PALETTE.flatMap(r => r.colors);
+  assert.equal(new Set(all).size, 20);
+  for (const row of HEADER_THEME_PALETTE) for (const color of row.colors) {
+    for (const gradient of [true, false]) assert.ok(isReadable({ color, gradient, darkText: row.darkText }), `${row.label} ${color} gradient=${gradient}`);
+  }
+  for (const c of HEADER_THEME_PALETTE[0].colors) assert.ok(contrastWithWhite(c) >= READABLE_CONTRAST, c);
 });
 
 test("色の検証: 形式だけを確認(#RRGGBB・#RGB を #rrggbb に)。明るい色も選べる。グラデーションの初期値は ON、文字の初期値は白", () => {

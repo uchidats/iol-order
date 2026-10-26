@@ -1839,7 +1839,9 @@ input[type="date"].form-control {
 }
 
 /* テーマカラー(ヘッダーの色): 色見本の格子(10色×3段)・その他の色(HEX) */
-.theme-swatches { display: grid; grid-template-columns: repeat(10, 28px); gap: 5px; margin: 4px 0 12px; }
+.theme-palette { margin: 4px 0 12px; }
+.theme-row-label { display: block; margin: 0 0 3px; font-size: 0.75rem; color: #6b7280; }
+.theme-swatches { display: grid; grid-template-columns: repeat(10, 28px); gap: 5px; margin: 0 0 8px; }
 .theme-swatch { width: 28px; height: 28px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.15); border-radius: 4px; cursor: pointer; }
 .theme-swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .theme-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f172a; }

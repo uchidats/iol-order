@@ -712,8 +712,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 背景色は明るさに関係なく選べる。文字は白(既定)か黒。読みにくい組み合わせは控えめに案内するだけで、反映・保存は止めない。
   function themeSection() {
     const DEFAULT_COLOR = "#1d4ed8";
-    const swatches = h("div", { class: "theme-swatches", role: "group", "aria-label": "色見本" },
-      HEADER_THEME_PALETTE.flat().map(c => h("button", { type: "button", class: "theme-swatch", "data-color": c, title: c, "aria-label": c, "aria-pressed": "false", style: `background:${c}` })));
+    // 色見本: 行ごとに「白文字向け」「黒文字向け」の小さな見出し。選ぶと文字の色もその行に合わせる(後から「フォントを黒にする」で変更できる)
+    const swatches = h("div", { class: "theme-palette", role: "group", "aria-label": "色見本" },
+      HEADER_THEME_PALETTE.flatMap(row => [
+        h("span", { class: "theme-row-label" }, row.label),
+        h("div", { class: "theme-swatches" }, row.colors.map(c => h("button", { type: "button", class: "theme-swatch", "data-color": c, "data-dark-text": String(row.darkText),
+          title: `${c}(${row.label})`, "aria-label": `${c}(${row.label})`, "aria-pressed": "false", style: `background:${c}` })))]));
     const picker = h("input", { type: "color", class: "theme-picker", "data-f": "themePicker", "aria-label": "その他の色" });
     const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": "themeHex", placeholder: "#1d4ed8", "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
     const chk = h("input", { type: "checkbox", "data-f": "themeGradient" });
@@ -731,7 +735,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("p", { class: "form-hint", "data-msg": "" }));
     const show = () => {
       const t = data.headerTheme;
-      for (const b of swatches.children) b.setAttribute("aria-pressed", String(Boolean(t) && b.dataset.color === t.color));
+      for (const b of swatches.querySelectorAll(".theme-swatch")) b.setAttribute("aria-pressed", String(Boolean(t) && b.dataset.color === t.color));
       picker.value = t ? t.color : DEFAULT_COLOR;
       hexIn.value = t ? t.color : "";
       chk.checked = t ? t.gradient : true;
@@ -746,13 +750,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       show();
       themeSaver.request();
     };
-    const choose = (color) => {
-      const v = validateHeaderTheme({ color, gradient: chk.checked, darkText: dark.checked });
+    const choose = (color, darkText = dark.checked) => {
+      const v = validateHeaderTheme({ color, gradient: chk.checked, darkText });
       if (!v.ok) { message(section, v.error, true); return; }   // 形式違い(#RRGGBB でない)だけは反映も保存もしない
       message(section, "");
       use(v.theme);
     };
-    swatches.addEventListener("click", (e) => { const b = e.target.closest(".theme-swatch"); if (b) choose(b.dataset.color); });
+    swatches.addEventListener("click", (e) => { const b = e.target.closest(".theme-swatch"); if (b) choose(b.dataset.color, b.dataset.darkText === "true"); });
     picker.addEventListener("change", () => choose(picker.value));
     hexIn.addEventListener("change", () => choose(hexIn.value));
     chk.addEventListener("change", () => { if (data.headerTheme) use({ ...data.headerTheme, gradient: chk.checked }); });
