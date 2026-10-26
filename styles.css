@@ -1641,6 +1641,7 @@ input[type="date"].form-control {
 }
 
 .settings-heading h3, .settings-heading h2 { margin: 0; }
+.settings-heading > .settings-actions { margin: 0 0 0 auto; flex: none; }   /* 「追加」ボタンは見出しと同じ行の右端(縦中央) */
 .info-tip { display: inline-flex; }
 
 .info-tip-btn {

@@ -436,6 +436,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(adds.length >= 2, "追加ボタン");
         for (const a of adds) assert.deepEqual(a, adds[0], `${width}: 追加ボタンのデザインがそろう`);
         assert.deepEqual(adds[0].slice(0, 2), [60, 36], `${width}: 幅60px・高さ36px`);
+        // 「追加」はセクション見出しと同じ行の右端(縦中央をそろえる)
+        const addPos = await page.locator('#facilitySettings .settings-heading > .settings-actions > [data-act="add"]').evaluateAll(bs => bs.map(b => {
+          const head = b.closest(".settings-heading"), h3 = head.querySelector("h3").getBoundingClientRect(), r = b.getBoundingClientRect(), hr = head.getBoundingClientRect();
+          return { sec: b.closest("[data-section]").dataset.section, mid: Math.abs((r.top + r.bottom) / 2 - (h3.top + h3.bottom) / 2) <= 1, right: Math.abs(r.right - hr.right) <= 1 };
+        }));
+        assert.deepEqual(addPos.map(p => p.sec).filter(s => s !== "members"), ["orderers", "dealers"], `${width}: 担当医・ディーラー(利用者管理は権限があるとき)`);
+        for (const p of addPos) assert.deepEqual([p.mid, p.right], [true, true], `${width} ${p.sec}: 見出しと縦中央・右端`);
         // 常時表示の説明文は削除。「施設設定」の右横にⓘ(各設定項目と同じ見た目)
         assert.ok(!(await page.locator("#facilitySettings").innerText()).includes("この画面は施設管理者のみ変更できます。") || (await page.locator(".settings-head .info-tip-pop").isHidden()), "説明文は常時表示しない");
         assert.equal(await page.locator("#facilitySettings > p.form-hint:not([role])").count(), 0);

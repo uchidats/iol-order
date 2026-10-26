@@ -385,6 +385,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     }
   }
 
+  /** 「追加」ボタン(.settings-actions)を、セクション見出しと同じ行の右端へ移す(担当医・利用者管理・ディーラーで共通) */
+  function addButtonToHeading(section) {
+    const actions = section.querySelector(":scope > .settings-actions");
+    if (actions) section.querySelector(":scope > .settings-heading").append(actions);
+    return section;
+  }
+
   function ordererSection() {
     const section = h("section", { class: "settings-section", "data-section": "orderers" },
       createSectionHeading("担当医", "注文フォームの「担当医」に表示されます。鉛筆で編集、↑↓で並び替え、ゴミ箱で削除できます。変更は自動で保存されます(入力中の内容は、行の「保存」を押した時点で保存されます)。"),
@@ -392,6 +399,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
+    addButtonToHeading(section);
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = ordererRow(); section.querySelector("[data-list]").appendChild(row);
       row._startEdit(); // 追加した行は編集状態で表示する。行の「保存」で確定した時点で自動保存される(入力途中は保存しない)
@@ -639,6 +647,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
       h("p", { class: "form-hint", "data-msg": "" }));
+    addButtonToHeading(section);
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = dealerRow(); section.querySelector("[data-list]").appendChild(row);
       row._startEdit(); // 追加した行は編集状態で表示する。行の「保存」で確定した時点で自動保存される(入力途中は保存しない)
@@ -776,6 +785,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       canPreregister ? form : null,
       canPreregister ? h("div", { class: "settings-actions" }, addBtn) : null,
       h("p", { class: "form-hint", "data-msg": "" }));
+    addButtonToHeading(section);
     memberSaver = createAutoSaver(section, runMemberOrderSave);   // 並び替え(↑)の自動保存。編集・削除などは同じ保存の列で順に行う(exclusive)
     const memberList = section.querySelector("[data-list]");
     new MutationObserver(() => [...memberList.querySelectorAll(".member-item")].forEach((r, i) => markFirst(r.querySelector('[data-act="up"]'), i === 0)))
