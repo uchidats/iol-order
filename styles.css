@@ -282,23 +282,11 @@ body {
   margin-bottom: 8px;
 }
 
-.badge-required {
-  font-size: 0.68rem;
+/* 必須の印: 項目名のすぐ右に小さな赤い「*」(Google フォーム風)。任意の項目には何も付けない */
+.required-mark {
+  margin-left: 2px;
+  color: #d93025;
   font-weight: 600;
-  background-color: #fdf4f4;
-  color: #b07070;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid #f3dede;
-}
-
-.badge-optional {
-  font-size: 0.68rem;
-  font-weight: 600;
-  background-color: #f1f5f9;
-  color: #64748b;
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .badge {

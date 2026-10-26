@@ -91,8 +91,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     // ALCON製トーリックIOLを選んだ明細だけ、チェックボックスの右に小さなリンクを出す(別タブで開く。テキストとアイコン全体がリンク)
     line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Online Toric IOL Calculator", externalLinkIcon());
     line.badges = h("span", { class: "lens-badges" }); // 選択中のIOLの特徴(多焦点・トーリック)。情報表示のみ
+    // 必須の印: 項目名の右に小さな赤い「*」(読み上げでは「必須」)
+    const requiredMark = () => [h("span", { class: "required-mark", "aria-hidden": "true" }, "*"), h("span", { class: "sr-only" }, "（必須）")];
     const group = (labelText, control, errKey, forId, extra = null) => h("div", { class: "form-group", "data-group": errKey },
-      h("label", { class: "form-label required", for: forId }, labelText, " ", h("span", { class: "badge-required" }, "必須"), extra),
+      h("label", { class: "form-label required", for: forId }, h("span", {}, labelText, ...requiredMark()), extra),
       control, err(errKey));
 
     line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
@@ -107,7 +109,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         group("IOLパワー", h("div", { class: "select-wrapper" }, line.power), "power", id("lensPower"))),
       h("div", { class: "lens-row" },
         h("div", { class: "form-group", "data-group": "quantity" },
-          h("span", { class: "form-label required" }, "枚数 ", h("span", { class: "badge-required" }, "必須")),
+          h("span", { class: "form-label required" }, h("span", {}, "枚数", ...requiredMark())),
           h("div", { class: "quantity-selector", role: "radiogroup", "aria-label": "枚数選択" },
             line.qty.map(r => h("label", { class: "quantity-option" }, r, h("span", { class: "quantity-btn" }, `${r.value} 枚`)))),
           err("quantity")),
