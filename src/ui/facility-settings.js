@@ -882,7 +882,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       ? h("button", { type: "button", class: "btn btn-outline-sm member-renew", "data-act": "renew" }, "再登録")
       : null;
     const actions = memberActions(label, { edit: canEdit, del: canCancel, delLabel: "登録を取り消す" });
-    const meta = [p.email, st === "pending" ? `${formatExpiry(p.expiresAt)} まで有効` : null].filter(Boolean).join(" ・ ");
+    // メールアドレスの次の行に有効期限(左端をそろえる。小さめのグレー)
+    const expiry = st === "pending" ? h("span", { class: "member-expiry" }, `${formatExpiry(p.expiresAt)} まで有効`) : null;
     // 編集: 氏名・メールアドレス・役割(副管理者は注文者・代行入力者のみ)。状態・期限はそのまま
     const nameIn = h("input", { class: "form-control", type: "text", maxlength: "50", "data-f": "editName", "aria-label": "氏名" });
     const emailIn = h("input", { class: "form-control", type: "email", maxlength: "254", "data-f": "editEmail", "aria-label": "メールアドレス" });
@@ -899,7 +900,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         h("span", { class: "member-role-badge", "data-f": "role", "data-role": p.role }, roleLabel(p.role)),
         h("span", { class: `member-state-badge is-${st}`, "data-f": "state" }, PENDING_STATE_LABELS[st]),
         renew),
-      h("span", { class: "orderer-email", "data-f": "email" }, meta),
+      h("span", { class: "orderer-email", "data-f": "email" }, p.email || "", expiry),
       actions);
     const row = h("div", { class: "orderer-item member-item is-pending", "data-key": `p:${p.id}`, "data-pending": p.id, "data-state": st }, view, editBox, err);
     const setEditing = (on) => { view.hidden = on; editBox.hidden = !on; row.classList.toggle("is-editing", on); if (on) { err.textContent = ""; nameIn.focus(); } };

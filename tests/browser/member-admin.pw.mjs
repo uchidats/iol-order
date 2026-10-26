@@ -129,6 +129,17 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 一覧(表示順の保存がない間は 参加済み(役割順) → 参加待ち → 期限切れ → 辞退)
         assert.deepEqual(await names(page), ["自分", "副管理者X", "注文者A", "代行A", "新人P", "副候補S", "期限切れE", "辞退D"]);
         assert.deepEqual(await sec.locator('[data-f="state"]').allInnerTexts(), ["参加待ち", "参加待ち", "期限切れ", "辞退"]);
+        // 参加待ち: 有効期限はメールアドレスの次の行(左端をそろえる・小さめのグレー)。長いメールアドレスでも行からはみ出さない
+        const exp = await rowOf(page, "新人P").locator('[data-f="email"]').evaluate(e => {
+          const r = document.createRange(); r.selectNodeContents(e.firstChild); const mail = r.getBoundingClientRect();
+          const x = e.querySelector(".member-expiry"), xr = x.getBoundingClientRect(), cs = getComputedStyle(x);
+          const keep = e.firstChild.textContent; e.firstChild.textContent = "very.long.address." + "x".repeat(60) + "@example-clinic.co.jp";
+          const row = e.closest(".member-item"), fits = row.scrollWidth <= row.clientWidth + 1;
+          e.firstChild.textContent = keep;
+          return { mail: e.firstChild.textContent, below: xr.top >= mail.bottom - 1, left: Math.abs(xr.left - mail.left) <= 1, text: x.textContent, small: parseFloat(cs.fontSize) < parseFloat(getComputedStyle(e).fontSize), gray: cs.color !== getComputedStyle(e).color, fits };
+        });
+        assert.deepEqual(exp, { mail: "new@example.jp", below: true, left: true, text: exp.text, small: true, gray: true, fits: true }, `${width}: 有効期限の表示`);
+        assert.match(exp.text, /^\d{4}\/\d{2}\/\d{2} まで有効$/);
         // ボタンは全行とも 左から ↑・編集・削除。先頭の↑と使えない操作は見えない(場所は残る)
         for (const n of await names(page)) assert.deepEqual(await allActs(rowOf(page, n)), ["up", "edit", "delete"], n);
         assert.deepEqual(await acts(rowOf(page, "自分")), ["edit"], "自分: 先頭の↑なし・氏名は編集できる・削除なし");
