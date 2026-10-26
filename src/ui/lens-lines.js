@@ -2,7 +2,6 @@ import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { filterPowersByModel, keepPowerIfAvailable } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
-import { lensBadgeElements } from "./lens-badges.js";
 import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
 import { enhanceSelect } from "./custom-select.js";
 
@@ -90,7 +89,6 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
 
     // ALCON製トーリックIOLを選んだ明細だけ、チェックボックスの右に小さなリンクを出す(別タブで開く。テキストとアイコン全体がリンク)
     line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Online Toric IOL Calculator", externalLinkIcon());
-    line.badges = h("span", { class: "lens-badges" }); // 選択中のIOLの特徴(多焦点・トーリック)。情報表示のみ
     // 必須の印: 項目名の右に小さな赤い「*」(読み上げでは「必須」)
     const requiredMark = () => [h("span", { class: "required-mark", "aria-hidden": "true" }, "*"), h("span", { class: "sr-only" }, "（必須）")];
     const group = (labelText, control, errKey, forId, extra = null) => h("div", { class: "form-group", "data-group": errKey },
@@ -105,7 +103,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         line.alconLink),
       // 2行: [IOLモデル | IOLパワー] [枚数 | 手術日]。横幅が足りない画面では自然に縦に折り返す(CSS の flex-wrap)
       h("div", { class: "lens-row" },
-        group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel"), line.badges),
+        group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel")),   // 多焦点・トーリックのバッジは表示しない(絞り込みは上のチェックボックス)
         group("IOLパワー", h("div", { class: "select-wrapper" }, line.power), "power", id("lensPower"))),
       h("div", { class: "lens-row" },
         h("div", { class: "form-group", "data-group": "quantity" },
@@ -191,7 +189,6 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
    */
   function onModelChange(line) {
     const lens = findLensOption(getOptions(), line.model.value);
-    line.badges.replaceChildren(...(lens ? lensBadgeElements(lens.model) : []));
     const alcon = Boolean(lens && lens.manufacturer === "ALCON" && lens.isToric);   // 表示条件は従来どおり(ALCONのトーリックを選択したときだけ)
     line.alconLink.hidden = !alcon;
     if (alcon) line.alconLink.href = lens.model.calculatorUrl || ALCON_CALCULATOR_FALLBACK_URL;

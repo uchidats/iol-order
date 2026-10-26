@@ -83,6 +83,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         "レンズ1 ALCON CNA0T0 +18.0D 1枚", "レンズ5 SANTEN NX-70S +20.0D 1枚", "レンズ3 HOYA XY1 +19.5D 1枚"]);
       assert.equal(await page.locator(".summary-line", { hasText: "Dr." }).count(), 0, "各レンズの行に Dr. は出ない");
       assert.equal(await page.locator(".summary-line .lens-badge").count(), 0, "「トーリック」「多焦点」のバッジは出ない");
+      // 入力画面: トーリック・多焦点のモデルを選んでも、IOLモデル名の横にバッジは出ない。上部の絞り込みのチェックボックスは各レンズに残る
+      assert.equal(await page.locator(".lens-line .lens-badge").count(), 0, "入力画面のIOLモデルの横にもバッジは出ない");
+      assert.equal(await page.locator(".lens-line .lens-filter-check").count(), 2 * await page.locator(".lens-line").count());
       assert.equal(await page.locator(".summary-line", { hasText: /トーリック|多焦点/ }).count(), 0);
       assert.equal(await page.locator(".summary-line", { hasText: "手術日" }).count(), 0, "手術日は各レンズに繰り返さない");
       assert.equal(await page.locator("#summaryLines", { hasText: "担当医" }).count(), 0);
