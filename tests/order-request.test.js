@@ -81,16 +81,18 @@ test("createOrderApi は callable createOrder を呼び、結果の data を返�
   assert.deepEqual(calls, [[{ f: 1 }, "createOrder", { a: 1 }]]);
 });
 
-test("server-dev は設定で明示したときだけ有効。既定は dryrun のまま。旧経路(gas)は廃止され dryrun になり、GASのURLは持たない", () => {
-  assert.deepEqual(resolveConfig(), { orderMode: "dryrun" });
-  assert.deepEqual(resolveConfig({ orderMode: "bogus" }), { orderMode: "dryrun" });
-  assert.deepEqual(resolveConfig({ orderMode: "gas", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: "dryrun" });
+test("server-dev は設定で明示したときだけ有効。それ以外は公開サイトの既定。旧経路(gas)は廃止され既定になり、GASのURLは持たない", () => {
+  const dry = ORDER_MODES.DRYRUN;
+  assert.deepEqual(resolveConfig({}, dry), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "bogus" }, dry), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "gas", orderApiUrl: "https://script.google.com/macros/s/X/exec" }, dry), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "gas" }), { orderMode: SITE_ORDER_MODE });
   assert.deepEqual(resolveConfig({ orderMode: "server-dev", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: ORDER_MODES.SERVER_DEV });
   assert.equal("GAS" in ORDER_MODES, false);
 });
 
-test("本番(server): 公開サイトの既定(SITE_ORDER_MODE)は、本番の受付を始めるまで dryrun。server にすると送信する。不正な値は dryrun", () => {
-  assert.equal(SITE_ORDER_MODE, ORDER_MODES.DRYRUN, "本番の受付の承認前は dryrun のまま");
+test("本番(server): 公開サイトの既定(SITE_ORDER_MODE)は server(2026-10-26 本番の受付を開始)。不正な値は dryrun", () => {
+  assert.equal(SITE_ORDER_MODE, ORDER_MODES.SERVER, "公開サイトは本番の受付");
   assert.deepEqual(resolveConfig({}, ORDER_MODES.SERVER), { orderMode: "server" });
   assert.deepEqual(resolveConfig({}, "bogus"), { orderMode: "dryrun" });
   assert.deepEqual(resolveConfig({ orderMode: "server-dev" }, ORDER_MODES.SERVER), { orderMode: "server-dev" }, "ローカルの設定が優先");

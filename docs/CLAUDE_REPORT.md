@@ -3,32 +3,32 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-26
-- **作業**: 本番運用(許可リストのまま・運営者1名のみ)への切り替え準備。切り替え自体は最終承認待ち。
-- 現在の設定は変更なし: `ORDER_INTAKE_ENABLED=false`・`ORDER_INTAKE_UNRESTRICTED=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=true`。公開サイトは dryrun のまま。デプロイなし。
+- **作業**: 本番運用への切り替え(許可リストのまま。許可施設1件・許可ユーザー1名=運営者のみ。ほかの医師は従来の Google フォーム)
+- 注文・メール送信のテストは実行していない(実際の注文は利用者が行う)。
 
-## 見つかった問題と修正
-1. **許可リストの注文は常にテスト注文になっていた**(`testOrder: restricted`)。テスト注文は `MAIL_TEST_ONLY` に関係なくテスト用の宛先にしか送らないため、予定の設定ではディーラーに届かない。→ `ORDER_TEST_MODE`(既定 true)を追加。false で、許可リストのまま本番の注文(`testOrder: false`)として保存。`.env` には `ORDER_TEST_MODE=true` を明記。
-2. **公開サイトは常に dryrun**(送信できるのはローカル専用の server-dev だけ。完了画面は「ディーラー未通知」固定)。→ 本番の注文モード `server` を追加し、公開サイトの既定を `src/config.js` の `SITE_ORDER_MODE` に集約(現在 dryrun。切り替え時に server)。完了画面は保存された注文で判断し、本番の注文は「ディーラーへ注文メールを送信します・注文履歴で確認」、テスト注文は従来の「開発用受付・ディーラー未通知」。本番ではヘッダーの「開発モード」表示を出さない。
-- `docs/order-mail.md` に本番の受付の手順(設定値・再デプロイ・画面の切り替え・停止方法)を追記。
+## 事前確認(読み取りのみ)
+- 許可施設のディーラー: 1件。発注用メールは実際の宛先に修正済み(前回の仮のアドレスではない)。署名・注文控え(ON・送信先1件)は前回確認のとおり。
+- 送信待ちのメール: なし(既存は前回のテスト注文の送信済み1件のみ。切り替え後に過去分が送られることはない)。
 
-## 施設設定の確認(読み取りのみ。許可施設)
-- 署名: 設定済み(3行)。注文控え: ON・送信先1件。
-- **ディーラー: 1件のみ。発注用メールが仮のアドレス(example ドメイン)。実際の宛先への修正が必要**(施設設定の画面から。実データは変更していない)。宛名は登録名と同じ。
+## 設定(functions/.env.medconf-iol-dev)
+- `ORDER_INTAKE_ENABLED=true`・`ORDER_INTAKE_UNRESTRICTED=false`・`ORDER_TEST_MODE=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=false`。許可施設・許可ユーザーは変更なし。コメントを現状に合わせて更新。
 
-## 宛先の確認(テスト)
-- 本番の注文(テスト注文でない・`MAIL_TEST_ONLY=false`): テスト用の宛先が設定されていても、ディーラーの発注用メールと注文控えの宛先に送り、件名に【テスト】は付かない(Functions のテストを追加)。
-- テスト注文: 従来どおりテスト用の宛先だけ。
+## デプロイ・反映
+- Functions: `createOrder`・`sendOrderMail`・`retryOrderMails` を再デプロイ(成功)。デプロイ済みの環境変数を Cloud Functions API で確認し、上の値・許可リスト各1件・送信関数の Secret 参照を確認。
+- 画面: `src/config.js` の `SITE_ORDER_MODE` を `ORDER_MODES.SERVER`(本番)に変更。push 後、`scripts/verify-deployed.mjs` で公開サイトの反映を確認。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 232 / Rules 59 / Functions 138 / Functions E2E 10 / ブラウザ回帰 96 すべて成功(本番の完了画面のテストを追加。開発用の完了画面のテストの偽データに `testOrder: true` を明記)。
+- unit 232 / ブラウザ回帰 96 成功。Functions・Rules のコードは前回(Functions 138・Rules 59・E2E 10 成功)から変更なし。
 
-## 最終承認後の手順
-1. ディーラーの発注用メールを実際の宛先に修正(利用者)。
-2. `.env`: `ORDER_INTAKE_ENABLED=true`・`ORDER_TEST_MODE=false`・`MAIL_TEST_ONLY=false`(他は維持)→ `createOrder`・`sendOrderMail`・`retryOrderMails` を再デプロイ。
-3. `SITE_ORDER_MODE` を server にして push → `scripts/verify-deployed.mjs` で反映を確認。
+## 停止の方法
+- 注文の受付を止める: `ORDER_INTAKE_ENABLED=false` で `createOrder` を再デプロイ。
+- 送信だけ止める: `MAIL_SENDING_ENABLED=false` で `sendOrderMail`・`retryOrderMails` を再デプロイ(送信待ちは held になり、自動では送らない)。
+- 画面を送信不可に戻す: `SITE_ORDER_MODE` を `ORDER_MODES.DRYRUN` にして push。
 
-## 判断待ち
-- 本番の受付の最終承認。公開サイトを server にすると、許可外の利用者が開いた場合も注文画面は送信できる表示になり、送信時にサーバーが拒否する(注文・メールは作られない)。
+## 残課題
+- 初回の本番注文の後、注文履歴の送信状態(受付・配信)とディーラー・注文控えの着信の確認(利用者)。
+- 許可外の利用者が公開サイトで送信した場合はサーバーが拒否する(注文・メールは作られない)。
+- 前回の残り: 失敗したメールの画面からの再送、`actorRequired()=true` への切り替え、CLI が自動付与した権限の扱い、App Check、`firebase-functions` の更新。

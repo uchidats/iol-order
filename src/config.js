@@ -1,10 +1,10 @@
 /**
  * アプリ設定
  *
- * 既定は "dryrun"（ネットワーク送信を一切行わない）。
- * 注文の受付はサーバー(Cloud Functions の createOrder)だけ。保存を試すには、リポジトリ管理外の
- * src/config.local.js で orderMode: "server-dev" を設定する（src/config.local.example.js を参照。config.local.js は .gitignore 済み）。
- * 旧経路(ブラウザから GAS へ直接送信する orderMode: "gas")は廃止した。指定されても dryrun で動作する。
+ * 公開サイトの既定は SITE_ORDER_MODE(本番の受付 "server")。注文の受付はサーバー(Cloud Functions の createOrder)だけで、
+ * 受付の可否・対象のユーザー・テスト注文か・メールの宛先は、サーバー側の設定(functions/.env.<project>)で決まる。
+ * ローカルでは、リポジトリ管理外の src/config.local.js で orderMode を上書きできる（src/config.local.example.js を参照。.gitignore 済み）。
+ * 旧経路(ブラウザから GAS へ直接送信する orderMode: "gas")は廃止した。指定されても既定で動作する。
  */
 
 export const ORDER_MODES = Object.freeze({
@@ -17,7 +17,7 @@ export const ORDER_MODES = Object.freeze({
  * 公開サイト(config.local.js がないとき)の注文モード。本番の受付を始めるときに SERVER にする(docs/order-mail.md)。
  * 画面の設定は表示と送信の可否だけで、受付の可否・対象のユーザー・メールの宛先はサーバー側の設定で決まる。
  */
-export const SITE_ORDER_MODE = ORDER_MODES.DRYRUN;
+export const SITE_ORDER_MODE = ORDER_MODES.SERVER;
 
 export const STORAGE_KEY_EMAIL = "iol_order_saved_email";
 
