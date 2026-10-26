@@ -34,7 +34,7 @@ const orderApi = { async createOrder(req) {
   if (!replayed && s.mode !== "lost") {
     s.orders[id] = { id, orderNumber: "IOL-20991231-000" + (Object.keys(s.orders).length + 1), status: "accepted", testOrder: s.real !== true, notes: req.notes || "", createdAt: Date.now(),
       lines: req.lines.map((l, i) => ({ lineNo: i + 1, surgeryDate: l.surgeryDate,
-        item: { manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", power: l.power, quantity: l.quantity },
+        item: { modelId: l.modelId, toricModel: l.toricModel || "", manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", power: l.power, quantity: l.quantity },
         doctor: { id: l.doctorId, name: "山田(保存値)" }, dealer: { id: l.dealerId, name: "A商会(保存値)" } })) };
   }
   put(s);
@@ -118,6 +118,70 @@ test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は�
   }
 });
 
+/** n 番目のレンズを入力する(同じ条件のレンズを複数入力するため) */
+async function fillLine(page, n, quantity) {
+  while (await page.locator(".lens-line").count() <= n) await page.click("#btnAddLine");
+  const line = page.locator(".lens-line").nth(n);
+  await line.locator("[data-f=model]").selectOption("jj-dib00v");
+  await line.locator("[data-f=power]").selectOption("+20.0D");
+  await line.locator("[data-f=date]").fill(new Date(Date.now() + (9 * 3600 + 30 * 86400) * 1000).toISOString().slice(0, 10));
+  await line.locator("[data-f=doctor]").selectOption("o1");
+  await line.locator(".quantity-option", { hasText: `${quantity} 枚` }).click();
+}
+
+test("同じ注文の中の重複: 入力の誤りにせず、確認画面で警告と「重複を確認しました」。チェックしないと送信できない。了承して注文でき、過去の注文との重複と同時でも扱える: chromium", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, errors } = await open(browser);
+    // 本番の注文として保存する(テスト注文は過去の注文との重複確認の対象外のため)
+    await page.evaluate(() => { const s = JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'); s.mode = "ok"; s.real = true; localStorage.setItem("__srv", JSON.stringify(s)); });
+    await fillLine(page, 0, 2);
+    await fillLine(page, 1, 2);   // レンズ1が2枚、レンズ2も同じ条件で2枚(合計4枚)
+    const confirm = async () => { await page.click("#btnConfirm"); await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden")); };
+    await confirm();
+    assert.equal(await page.locator(".lens-line .error-message:not(:empty)").count(), 0, "入力の誤りにしない");
+    assert.equal(await page.locator("#dupAckBox").isVisible(), true);
+    assert.match(await page.locator("#dupAckText").innerText(), /同じ手術日・担当医・IOLモデル・度数のレンズが複数あります（レンズ1・レンズ2）/);
+    assert.equal(await page.locator("#dupAckCheck").isChecked(), false);
+    assert.equal(await page.locator("#btnModalSubmit").isDisabled(), true, "チェックしないと送信できない");
+    assert.match(await page.locator("#summaryTotal").innerText(), /2件・合計4枚/);
+    // チェックせずに戻れる。チェックしてから戻って確認し直すと、もう一度チェックが必要
+    await page.locator("#dupAckCheck").check();
+    assert.equal(await page.locator("#btnModalSubmit").isDisabled(), false);
+    await page.click("#btnModalBack");
+    assert.equal(await page.locator("#confirmModal").evaluate(e => e.classList.contains("hidden")), true);
+    await confirm();
+    assert.deepEqual([await page.locator("#dupAckCheck").isChecked(), await page.locator("#btnModalSubmit").isDisabled()], [false, true]);
+    // 了承して送信 → 了承を付けて、明細・枚数はそのまま送る
+    await page.locator("#dupAckCheck").check();
+    await page.click("#btnModalSubmit");
+    await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+    let s = await srv(page);
+    assert.equal(s.calls.length, 1);
+    assert.equal(s.calls[0].duplicateAcknowledged, true);
+    assert.deepEqual(s.calls[0].lines.map(l => [l.modelId, l.power, l.quantity]), [["jj-dib00v", "+20.0D", 2], ["jj-dib00v", "+20.0D", 2]]);
+    assert.match(await page.locator("#completeDetails").innerText(), /2件・合計4枚/);
+
+    // 同じ内容でもう一度(追加注文): 過去の注文との重複の警告 → 確認して続行 → 同じ注文の中の重複も確認して送信できる
+    await page.click("#btnNewOrder");
+    await fillLine(page, 0, 2);
+    await fillLine(page, 1, 2);
+    await page.click("#btnConfirm");
+    await page.waitForFunction(() => !document.getElementById("duplicateModal").classList.contains("hidden"));
+    await page.click("#btnDupContinue");
+    await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+    assert.equal(await page.locator("#btnModalSubmit").isDisabled(), true);
+    await page.locator("#dupAckCheck").check();
+    await page.click("#btnModalSubmit");
+    await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+    s = await srv(page);
+    assert.equal(s.calls.length, 2);
+    assert.equal(Object.keys(s.orders).length, 2, "確認すれば同じ条件の追加注文もできる");
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さず、ディーラーへ送信することと注文履歴での確認を案内する: chromium", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
@@ -132,6 +196,8 @@ test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さ
     // 「注文を送信」の紙飛行機アイコンは文字の右(「注文内容を確認 →」とそろえる)。送信後に戻したボタンも同じ
     const iconAfterText = () => page.locator("#btnModalSubmit").evaluate(b => { const t = [...b.childNodes].find(n => n.nodeType === 3 && n.textContent.trim()); const s = b.querySelector("svg"); return t.textContent.trim() === "注文を送信" && Boolean(t.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING); });
     assert.equal(await iconAfterText(), true);
+    assert.equal(await page.locator("#dupAckBox").isVisible(), false, "重複がなければ確認のチェックは出さない");
+    assert.equal(await page.locator("#btnModalSubmit").isDisabled(), false);
     await page.click("#btnModalSubmit");
     await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
     assert.equal(await iconAfterText(), true, "送信後に戻したボタン");

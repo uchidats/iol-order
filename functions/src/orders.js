@@ -49,7 +49,7 @@ const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const LINE_KEYS = ["modelId", "power", "toricModel", "quantity", "surgeryDate", "doctorId", "dealerId"];
 // ordererId(トップレベル)は旧形式の互換: 明細に doctorId が無いとき、その担当医を全明細に使う。LINE_KEYS をトップレベルに置くのは従来の単一IOL形式
-const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", ...LINE_KEYS];
+const ALLOWED_KEYS = ["facilityId", "requestId", "ordererId", "notes", "lines", "duplicateAcknowledged", ...LINE_KEYS];
 
 const bad = (message = "入力内容を確認してください") => new RegistrationError("invalid-argument", message);
 
@@ -116,16 +116,22 @@ export function parseOrderInput(data, nowMs) {
   }
   const lines = rawLines.map((l, i) => parseLine(l, i + 1, nowMs, legacyDoctorId));
 
+  // 同じ注文の中の重複(同じ手術日・担当医・IOLモデル(トーリックの型番を含む)・度数。枚数・発注先は含めない)は、
+  // 確認画面で「重複を確認しました」と了承した注文(duplicateAcknowledged: true)だけ受け付ける(画面 src/domain/order-lines.js と同じ条件)
+  const ack = data.duplicateAcknowledged;
+  if (ack !== undefined && typeof ack !== "boolean") throw bad();
   const seen = new Set();
-  lines.forEach((l, i) => {
-    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate, l.doctorId, l.dealerId]);
-    if (seen.has(k)) throw bad(`明細${i + 1}: 同じレンズ・度数・手術日の明細が重複しています。枚数で指定してください`);
+  const hasDuplicates = lines.some(l => {
+    const k = JSON.stringify([l.modelId, l.toricModel, l.power, l.surgeryDate, l.doctorId]);
+    if (seen.has(k)) return true;
     seen.add(k);
+    return false;
   });
+  if (hasDuplicates && ack !== true) throw bad("同じ手術日・担当医・IOLモデル・度数のレンズが複数あります。確認画面で「重複を確認しました」にチェックしてから送信してください");
   const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0);
   if (totalQuantity > ORDER_LIMITS.maxTotalQuantity) throw bad(`合計枚数は${ORDER_LIMITS.maxTotalQuantity}枚までです`);
 
-  return { facilityId, requestId, notes: notes.trim(), lines, totalQuantity };
+  return { facilityId, requestId, notes: notes.trim(), lines, totalQuantity, duplicateAcknowledged: hasDuplicates };
 }
 
 /** 注文内容(識別子・選択値)の正規化ハッシュ。同じ requestId での内容変更の検出に使う(単一IOL形式でも明細1件の形式でも同じ値になる) */
@@ -314,6 +320,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
         testOrder: restricted && policy.testMode !== false, // 開発用受付で保存された注文(本番の注文と区別・後から削除を判断するための印)
+        ...(input.duplicateAcknowledged ? { duplicateAcknowledged: true } : {}), // 同じ注文の中の重複を、確認画面で了承して注文した
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
         lines,
         lineCount: lines.length,

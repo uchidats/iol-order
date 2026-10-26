@@ -18,5 +18,7 @@ export function buildCreateOrderRequest(pending) {
     })
   };
   if (pending.notes) req.notes = pending.notes;
+  // 同じ注文の中の重複を、確認画面で確認した(チェックした)ときだけ送る。サーバーは重複があるのに了承がない注文を拒否する
+  if (pending.duplicateAcknowledged === true) req.duplicateAcknowledged = true;
   return req;
 }

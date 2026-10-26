@@ -1,7 +1,7 @@
 import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { filterPowersByModel, keepPowerIfAvailable } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
-import { MAX_LINES, findDuplicateLines } from "../domain/order-lines.js";
+import { MAX_LINES } from "../domain/order-lines.js";
 import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
 import { enhanceSelect } from "./custom-select.js";
 
@@ -316,13 +316,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
         v.doctor ? clearErr(l, "doctor") : fail("doctor", "担当医を選択してください", l.doctor);
         if (dealerMode(getDealers()) === "choose" && !v.dealer) fail("dealer", "発注先を選択してください", l.dealer); else clearErr(l, "dealer");
       });
-      // 同じレンズ・度数・手術日の重複(枚数で指定する)
-      if (!first) {
-        for (const i of findDuplicateLines(vals)) {
-          setErr(lines[i], "model", "同じレンズ・度数・手術日の明細が重複しています。枚数で指定してください", lines[i].model);
-          if (!first) first = lines[i].model;
-        }
-      }
+      // 同じ条件の明細の重複は、入力の誤りにしない(確認画面で「重複を確認しました」にチェックすれば注文できる。order-form.js)
       return { ok: !first, firstInvalid: first };
     },
     refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); }); },

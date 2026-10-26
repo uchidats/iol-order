@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCreateOrderRequest } from "../src/domain/order-request.js";
-import { toOrderLines, totalQuantity, findDuplicateLines, lineKey, MAX_LINES, MAX_TOTAL_QUANTITY } from "../src/domain/order-lines.js";
-import { ORDER_LIMITS } from "../functions/src/orders.js";
+import { toOrderLines, totalQuantity, findDuplicateLines, lineKey, sameConditionGroups, MAX_LINES, MAX_TOTAL_QUANTITY } from "../src/domain/order-lines.js";
+import { ORDER_LIMITS, parseOrderInput } from "../functions/src/orders.js";
 import { IOL_MODELS } from "../src/data/iol-models.js";
 import { buildLensOptions, findLensOption } from "../src/domain/lens-options.js";
 import { createOrderApi } from "../src/data/order-api.js";
@@ -47,6 +47,13 @@ test("備考なしでは notes を送らない。トーリックでない明細�
   assert.equal("toricModel" in r.lines[0], false);
 });
 
+test("同じ注文の中の重複を確認画面で了承したときだけ duplicateAcknowledged: true を送る(了承していなければ送らない)", () => {
+  assert.equal("duplicateAcknowledged" in buildCreateOrderRequest(pending()), false);
+  assert.equal("duplicateAcknowledged" in buildCreateOrderRequest({ ...pending(), duplicateAcknowledged: false }), false);
+  assert.equal(buildCreateOrderRequest({ ...pending(), duplicateAcknowledged: true, duplicateGroups: [[1, 2]] }).duplicateAcknowledged, true);
+  assert.equal("duplicateGroups" in buildCreateOrderRequest({ ...pending(), duplicateGroups: [[1, 2]] }), false, "画面用の情報は送らない");
+});
+
 test("同じ確認内容の再送は同じ requestId になる(画面が保持する clientRequestId をそのまま使う)", () => {
   assert.equal(buildCreateOrderRequest(pending()).requestId, buildCreateOrderRequest(pending()).requestId);
 });
@@ -67,6 +74,24 @@ test("明細の重複判定: 同じレンズ・型番・度数・手術日は重
   assert.deepEqual(findDuplicateLines([a, { ...a, power: "+19.0D" }]), []);
   assert.deepEqual(findDuplicateLines([a, { ...a, lens: lens("jj-diwxxx-toric|DIW225") }]), []);
   assert.equal(lineKey(a), lineKey({ ...a, quantity: 2 }));
+});
+
+test("同じ注文の中の重複(確認画面の警告): 同じ手術日・担当医・IOLモデル・トーリック型番・度数。枚数・発注先は無関係。サーバーと同じ条件", () => {
+  const l = (n, o = {}) => ({ lineNo: n, modelId: "jj-dib00v", toricModel: "", power: "+20.0D", quantity: 1, surgeryDate: "2026-11-10", doctorId: "o1", dealerId: "d1", ...o });
+  assert.deepEqual(sameConditionGroups([l(1, { quantity: 2 }), l(2, { quantity: 2 })]), [[1, 2]], "レンズ1・2が同じ条件(合計4枚)");
+  assert.deepEqual(sameConditionGroups([l(1), l(2, { dealerId: "d2" })]), [[1, 2]], "発注先が違っても重複として確認する");
+  for (const diff of [{ surgeryDate: "2026-11-11" }, { doctorId: "o2" }, { power: "+20.5D" }, { modelId: "nidek-nsp-2" }]) {
+    assert.deepEqual(sameConditionGroups([l(1), l(2, diff)]), [], JSON.stringify(diff));
+  }
+  assert.deepEqual(sameConditionGroups([l(1, { toricModel: "DIW300" }), l(2, { toricModel: "DIW225" })]), []);
+  assert.deepEqual(sameConditionGroups([l(1), l(2, { power: "+21.0D" }), l(3), l(4, { power: "+21.0D" }), l(5)]), [[1, 3, 5], [2, 4]]);
+  assert.deepEqual(sameConditionGroups([l(1)]), []);
+  // サーバーも同じ条件で了承を求める
+  const req = (lines, extra = {}) => ({ facilityId: "f1", requestId: "req-0123456789abcdef", lines: lines.map(({ lineNo, ...x }) => x), ...extra });
+  const now = Date.parse("2026-10-27T00:00:00Z");
+  assert.throws(() => parseOrderInput(req([l(1), l(2, { dealerId: "d2" })]), now), /重複を確認しました/);
+  assert.equal(parseOrderInput(req([l(1), l(2, { dealerId: "d2" })], { duplicateAcknowledged: true }), now).duplicateAcknowledged, true);
+  assert.equal(parseOrderInput(req([l(1), l(2, { power: "+20.5D" })]), now).duplicateAcknowledged, false);
 });
 
 test("クライアントの上限はサーバー(createOrder)の上限と一致している", () => {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=cf18b6a1bd">
+  <link rel="stylesheet" href="styles.css?v=815334e420">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -38,12 +38,12 @@
       "./src/domain/order-draft.js": "./src/domain/order-draft.js?v=0d0b9bda36",
       "./src/domain/order-duplicates.js": "./src/domain/order-duplicates.js?v=1f48871201",
       "./src/domain/order-history.js": "./src/domain/order-history.js?v=e6471f0335",
-      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=4f71e010f2",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=5cd460c4ce",
       "./src/domain/order-mail-profiles.js": "./src/domain/order-mail-profiles.js?v=6821054f7c",
       "./src/domain/order-mail.js": "./src/domain/order-mail.js?v=210b379c81",
-      "./src/domain/order-request.js": "./src/domain/order-request.js?v=89c1705835",
+      "./src/domain/order-request.js": "./src/domain/order-request.js?v=8b49e8157c",
       "./src/domain/order-validation.js": "./src/domain/order-validation.js?v=432a8bd522",
-      "./src/domain/pending-order.js": "./src/domain/pending-order.js?v=0007b3a4d7",
+      "./src/domain/pending-order.js": "./src/domain/pending-order.js?v=ea9edfe707",
       "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=9165d28630",
       "./src/domain/registration-flow.js": "./src/domain/registration-flow.js?v=f354be2979",
       "./src/domain/self-doctor.js": "./src/domain/self-doctor.js?v=e2ba492122",
@@ -65,8 +65,8 @@
       "./src/ui/header-theme.js": "./src/ui/header-theme.js?v=0e06a1922d",
       "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
       "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
-      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=5b0400a194",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=bb07379288",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=2110b04b47",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=fc76d1f0c8",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=f173f63a43",
       "./src/ui/undo-toast.js": "./src/ui/undo-toast.js?v=a5922dc06d"
     }
@@ -236,6 +236,12 @@
           </div>
 
         </dl>
+
+        <!-- 同じ注文の中の重複(同じ手術日・担当医・IOLモデル・度数)。重複があるときだけ表示し、確認のチェックがないと送信できない -->
+        <div class="dup-ack" id="dupAckBox" hidden>
+          <p class="dup-ack-text" id="dupAckText"></p>
+          <label class="dup-ack-check"><input type="checkbox" id="dupAckCheck"> 重複を確認しました</label>
+        </div>
 
         <!-- 送信失敗時のエラーアラート -->
         <div class="modal-error-alert hidden" id="modalSubmitError" role="alert">

@@ -8,7 +8,7 @@ import { createDraftStore } from "./draft-store.js";
 import { findPastOrderDuplicates } from "../domain/order-duplicates.js";
 import { renderDuplicateWarning } from "./duplicate-warning.js";
 import { showUndoToast, hideUndoToast } from "./undo-toast.js";
-import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
+import { toOrderLines, totalQuantity, sameConditionGroups } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
 import { ORDER_MODES, sendsOrders } from "../config.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
@@ -164,8 +164,19 @@ function setupEventListeners() {
 
   // 背景クリックでモーダル閉じ (送信中は不可)
   el.confirmModal.addEventListener("click", (e) => {
-    if (e.target === el.confirmModal && !el.btnModalSubmit.disabled) hideConfirmModal();
+    if (e.target === el.confirmModal && !submitting) hideConfirmModal();
   });
+  // 同じ注文の中の重複: 「重複を確認しました」にチェックしたときだけ送信できる
+  $("dupAckCheck").addEventListener("change", (e) => {
+    if (currentPendingOrderData) currentPendingOrderData.duplicateAcknowledged = e.target.checked;
+    syncSubmitEnabled();
+  });
+}
+
+/** 「注文を送信」を押せるか(送信中でなく、同じ注文の中に重複があれば確認済み) */
+function syncSubmitEnabled() {
+  const d = currentPendingOrderData;
+  el.btnModalSubmit.disabled = submitting || Boolean(d && d.duplicateGroups && d.duplicateGroups.length && !d.duplicateAcknowledged);
 }
 
 // ==========================================================================
@@ -304,12 +315,22 @@ function showConfirmModal(data) {
 
   el.modalSubmitError.classList.add("hidden");
 
+  // 同じ注文の中の重複(同じ手術日・担当医・IOLモデル・度数)。確認画面を開くたびに確認し直す(内容を変更したら、もう一度チェックが必要)
+  data.duplicateGroups = sameConditionGroups(data.lines);
+  data.duplicateAcknowledged = false;
+  $("dupAckBox").hidden = data.duplicateGroups.length === 0;
+  $("dupAckText").textContent = data.duplicateGroups.length
+    ? `同じ手術日・担当医・IOLモデル・度数のレンズが複数あります（${data.duplicateGroups.map(g => g.map(n => `レンズ${n}`).join("・")).join(" / ")}）。重複していないか確認してください。`
+    : "";
+  $("dupAckCheck").checked = false;
+  syncSubmitEnabled();
+
   el.confirmModal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
 }
 
 function hideConfirmModal() {
-  if (el.btnModalSubmit.disabled) return; // 送信中は閉じられない
+  if (submitting) return; // 送信中は閉じられない
   el.confirmModal.classList.add("hidden");
   document.body.style.overflow = "";
 }
@@ -332,6 +353,8 @@ let submitting = false; // 連続クリックによる重複送信の防止
 
 async function handleExecuteOrder() {
   if (!currentPendingOrderData || submitting) return;
+  const d = currentPendingOrderData;
+  if (d.duplicateGroups && d.duplicateGroups.length && !d.duplicateAcknowledged) return;   // 重複の確認(チェック)がないと送信しない
   if (!sendsOrders(appConfig.orderMode)) {
     // dryrun: 送信しない(完了扱いにしない)
     console.log("【dryrun】送信予定のペイロード（送信はしていません）:", buildCreateOrderRequest(currentPendingOrderData));
@@ -359,7 +382,7 @@ async function handleExecuteOrder() {
     let saved = null;
     try { saved = facilityRepository.getOrder ? await facilityRepository.getOrder(facilityRepositoryId, r.orderId) : null; }
     catch (e) { console.warn("保存した注文を読み込めませんでした:", e); }
-    el.btnModalSubmit.disabled = false;
+    submitting = false;
     el.btnModalBack.disabled = false;
     hideConfirmModal();
     if (draft) { draft.clear(); draft.setReady(false); }   // 注文が正常に完了したときだけ、下書きを削除する(失敗したときは下の catch に入り、下書きは残る)
@@ -371,7 +394,7 @@ async function handleExecuteOrder() {
     el.modalSubmitError.classList.remove("hidden");
   } finally {
     submitting = false;
-    el.btnModalSubmit.disabled = false;
+    syncSubmitEnabled();
     el.btnModalBack.disabled = false;
     el.btnModalSubmit.innerHTML = `
       注文を送信

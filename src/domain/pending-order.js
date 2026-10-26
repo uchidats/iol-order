@@ -15,7 +15,8 @@ export async function deriveOrderId(uid, requestId, subtle = globalThis.crypto.s
   return "o" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
 }
 
-const contentOf = (request) => { const { requestId, ...rest } = request; return JSON.stringify(rest); };
+// 重複の了承(duplicateAcknowledged)は注文の内容ではないので比べない(確認画面へ進む前の照会でも、同じ内容の再送として扱う)
+const contentOf = (request) => { const { requestId, duplicateAcknowledged, ...rest } = request; return JSON.stringify(rest); };
 /** requestId 以外の送信内容が同じか(送信内容は buildCreateOrderRequest が同じ順番で組み立てる) */
 export const sameRequestContent = (a, b) => contentOf(a) === contentOf(b);
 

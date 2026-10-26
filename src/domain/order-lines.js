@@ -25,6 +25,22 @@ export function findDuplicateLines(lines) {
   return dup;
 }
 
+/**
+ * 同じ注文の中の重複(同じ手術日・担当医・IOLモデル(トーリックの型番を含む)・度数。枚数・発注先は含めない)。
+ * 重複は確認すれば注文できる(確認画面で「重複を確認しました」。サーバー functions/src/orders.js も同じ条件で了承を確認する)。
+ * @param {Array<{lineNo:number, modelId:string, toricModel?:string, power:string, surgeryDate:string, doctorId:string}>} lines 注文の明細(toOrderLines の結果)
+ * @returns {Array<number[]>} 重複した明細のレンズ番号のまとまり(2件以上のものだけ。最初のレンズ番号の順)
+ */
+export function sameConditionGroups(lines) {
+  const groups = new Map();
+  for (const l of lines) {
+    const k = JSON.stringify([l.modelId, l.toricModel || "", l.power, l.surgeryDate, l.doctorId]);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(l.lineNo);
+  }
+  return [...groups.values()].filter(g => g.length > 1);
+}
+
 export const totalQuantity = (lines) => lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
 /**

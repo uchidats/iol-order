@@ -22,6 +22,8 @@ test("同じ確認内容は、requestId が違っても同じ送信内容と判�
   assert.ok(!sameRequestContent(req("a".repeat(16)), req("a".repeat(16), "変更")));
   const other = pending("c".repeat(16)); other.lines[0].dealerId = "d2";
   assert.ok(!sameRequestContent(req("a".repeat(16)), buildCreateOrderRequest(other)));
+  // 重複の了承は注文の内容ではない(了承して送った注文と、確認画面へ進む前の同じ内容は、同じ注文の再送として扱う=二重発注を防ぐ)
+  assert.ok(sameRequestContent({ ...req("a".repeat(16)), duplicateAcknowledged: true }, req("b".repeat(16))));
 });
 
 test("保存・読み込み・削除(利用者・施設ごと)。保存できない・壊れた値でも画面を止めない", () => {

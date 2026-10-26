@@ -322,9 +322,32 @@ test("複数明細: 明細数・合計枚数の上限、空、重複明細、ト
   await assert.rejects(order(user("ordA"), multi(heavy)), (e) => e.code === "invalid-argument");
   const twenty = Array.from({ length: 20 }, (_, i) => line({ quantity: 2, power: `+${(6 + i * 0.5).toFixed(1)}D` }));
   await order(user("ordA"), multi(twenty)); // 20明細・40枚は可
-  await rejects(order(user("ordA"), multi([line(), line()])), "invalid-argument"); // 同じレンズ・度数・手術日の重複
+  await rejects(order(user("ordA"), multi([line(), line()])), "invalid-argument"); // 同じレンズ・度数・手術日の重複(了承なし)
   await order(user("ordA"), multi([line(), line({ surgeryDate: "2026-11-11" })])); // 手術日が違えば別明細
   await rejects(order(user("ordA"), { ...multi([line()]), modelId: "jj-dib00v" }), "invalid-argument"); // 混在
+});
+
+test("同じ注文の中の重複: 同じ手術日・担当医・IOLモデル・度数の明細は、了承(duplicateAcknowledged: true)があれば受け付け、明細・枚数はそのまま保存する", async () => {
+  const dup = [line({ quantity: 2 }), line({ quantity: 2 })];   // レンズ1が2枚、レンズ2も同じ条件で2枚(合計4枚)
+  await assert.rejects(order(user("ordA"), multi(dup)), (e) => e.code === "invalid-argument" && /重複を確認しました/.test(e.message));
+  await rejects(order(user("ordA"), multi(dup, { duplicateAcknowledged: false })), "invalid-argument");
+  await rejects(order(user("ordA"), multi(dup, { duplicateAcknowledged: "yes" })), "invalid-argument");
+  assert.equal((await orders()).length, 0, "拒否された注文は保存しない");
+  const d = multi(dup, { duplicateAcknowledged: true });
+  const r = await order(user("ordA"), d);
+  assert.equal(r.lineCount, 2);
+  const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
+  assert.deepEqual(o.lines.map(l => [l.lineNo, l.item.modelId, l.item.power, l.item.quantity, l.surgeryDate, l.doctor.id]),
+    [[1, "jj-dib00v", "+20.0D", 2, "2026-11-10", "o1"], [2, "jj-dib00v", "+20.0D", 2, "2026-11-10", "o1"]]);
+  assert.equal(o.totalQuantity, 4);
+  assert.equal(o.duplicateAcknowledged, true, "重複を了承して注文したことを記録");
+  // 同じ requestId の再送(通信リトライ)は同じ注文(二重発注にならない)
+  const again = await order(user("ordA"), d);
+  assert.deepEqual([again.replayed, again.orderId, again.orderNumber], [true, r.orderId, r.orderNumber]);
+  assert.equal((await orders()).length, 1);
+  // 重複がない注文に了承を付けても受け付け、記録はしない
+  const plain = await order(user("ordA"), multi([line({ power: "+21.0D" })], { duplicateAcknowledged: true }));
+  assert.equal((await db.doc(`facilities/${F}/orders/${plain.orderId}`).get()).get("duplicateAcknowledged"), undefined);
 });
 
 test("複数明細: 同じ requestId の再送は同じ注文番号。明細の変更・順序変更・追加は拒否される。並列でも1件", async () => {
@@ -689,8 +712,10 @@ test("発注先: 採用IOLの dealerId には依存しない(あっても無視)
   await db.doc("facilities/fB/facilityDealers/dFB").set({ facilityId: "fB", name: "他施設", orderEmails: ["x@example.jp"] });
   await rejects(order(user("ordA"), multi([line({ dealerId: "dFB" })])), "invalid-argument");
   await addDealer("dB", "B医療", { orderEmails: ["b@example.jp"] });
-  const dup = [line({ dealerId: "dA" }), line({ dealerId: "dB" })];                                // 同じレンズ・度数・手術日・担当医でも、発注先が違えば別の明細
-  assert.equal((await dealerOf(await order(user("ordA"), multi(dup)))).length, 2);
+  // 同じレンズ・度数・手術日・担当医は、発注先が違っても重複として確認が必要(了承すれば、発注先ごとの明細として注文できる)
+  const dup = [line({ dealerId: "dA" }), line({ dealerId: "dB" })];
+  await rejects(order(user("ordA"), multi(dup)), "invalid-argument");
+  assert.equal((await dealerOf(await order(user("ordA"), multi(dup, { duplicateAcknowledged: true })))).length, 2);
   await rejects(order(user("ordA"), multi([line({ dealerId: "dA" }), line({ dealerId: "dA" })])), "invalid-argument");
 });
 
