@@ -48,8 +48,8 @@ IOL Order だけで、注文受付 → ディーラーへの注文メール → 
 1. **Resend のアカウント作成**(組織のアカウント。契約プランの確認)。
 2. **送信ドメインの認証**: 送信専用のサブドメイン(例 `mail.medconf.jp`。決定が必要)を Resend に追加し、表示される DNS レコード(SPF・DKIM・バウンス用の MX/TXT)を、そのドメインの DNS に登録する。DMARC(`_dmarc` の TXT)の設定も推奨。
 3. **API キーの作成**(送信のみ・上のドメイン限定)→ `firebase functions:secrets:set RESEND_API_KEY --project medconf-iol-dev`。
-4. **送信元・テスト用の宛先の決定** → `functions/.env.medconf-iol-dev` の `MAIL_FROM`・`MAIL_TEST_RECIPIENT`。
-5. Functions のデプロイ後、**Webhook の登録**: `resendWebhook` の URL を Resend に登録し(イベント: delivered・delivery_delayed・bounced・complained・failed)、表示された署名の秘密鍵を `firebase functions:secrets:set RESEND_WEBHOOK_SECRET`。
+4. **送信元・テスト用の宛先の決定** → `functions/.env.medconf-iol-dev` の `MAIL_FROM`(`order@mail.medconf.jp` に設定済み)・`MAIL_TEST_RECIPIENT`。
+5. **Webhook の登録**(Functions のデプロイ前に行う。`resendWebhook` は Secret がないとデプロイできないため): URL は決まっているので先に Resend に登録できる。`https://asia-northeast1-medconf-iol-dev.cloudfunctions.net/resendWebhook`(イベント: delivered・delivery_delayed・bounced・complained・failed)。表示された署名の秘密鍵を `firebase functions:secrets:set RESEND_WEBHOOK_SECRET --project medconf-iol-dev`。後から秘密鍵を変えたときは `resendWebhook` を再デプロイする(デプロイ時点の版を使うため)。
 6. **施設設定の入力**(各施設の管理者・副管理者が画面から): 立川病院の署名と、ディーラーの宛名(正式表記)。せんじゅ眼科の注文控え(ON・`info@senju-eye-clinic.jp`)。
 7. 動作確認(テスト注文 + `MAIL_TEST_RECIPIENT`)の後に `MAIL_SENDING_ENABLED=true`。実際のディーラーへの送信は `ORDER_INTAKE_ENABLED`・本番の判断とあわせて行う。
 

@@ -3,23 +3,28 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-26
-- **作業**: 注文メールの差出人表示名と Reply-To の改善(それ以外の仕様は変えていない)
-- **ブランチ**: `feature/order-mail`(`main` e6855fd から継続)→ `main` へ push
-- `ORDER_INTAKE_ENABLED=false`・`MAIL_SENDING_ENABLED=false` を維持。実メール送信・Firebase デプロイ・Resend への接続・実データの変更はしていない。
+- **作業**: Resend 接続の準備(送信元の設定・デプロイ準備)。前回分(差出人表示名・Reply-To)は `main` に push 済み。
+- **ブランチ**: `feature/order-mail`(この commit は未 push)
+- `ORDER_INTAKE_ENABLED=false`・`MAIL_SENDING_ENABLED=false` を維持。実メール送信・実注文・実データの変更・デプロイはしていない。API キーはコード・Git・ログに含めていない(Secret の登録は利用者が自分の端末で行う)。
 
 ## 変更内容
-- **From**: アドレスは `MAIL_FROM` の認証済みアドレス(`名前 <addr>` でもアドレスだけでも可。アドレスを取り出せなければ送らない)。表示名は「施設名（IOL Order）」(注文時点の施設名をメールに `fromName` として保存。施設名がなければ「IOL Order」)。表示名から引用符・山括弧・バックスラッシュ・改行を除き、区切り記号(`.` `(` など)があれば引用符で囲む。
-- **Reply-To(ディーラー宛て)**: 注文控え OFF → 入力者本人。ON → 入力者本人 + 施設共通アドレス(控えの宛先)。同じアドレスは1件にする(大文字小文字を同一視)。保存形式を配列に変更。
-- **Resend**: 公式ドキュメントで `reply_to` が複数の場合は文字列の配列で送ると確認。送信時は常に配列で渡す(返信先がなければ付けない)。
-- **注文控え**: 既存の仕様のまま(宛先・送るタイミング・本文・Reply-To なし)。From の表示名だけディーラー宛てと同じ。テスト注文の送信も Reply-To なしのまま。
-- `docs/order-mail.md` の `MAIL_FROM` と返信先の説明を更新。
+- `functions/.env.medconf-iol-dev`: `MAIL_FROM=order@mail.medconf.jp`。`MAIL_TEST_RECIPIENT` はアドレスの指定待ちで空のまま。
+- `docs/order-mail.md`: Webhook は URL が決まっているため Functions のデプロイ前に Resend に登録し、秘密鍵を Secret に入れてからデプロイする手順にした(`resendWebhook` は Secret がないとデプロイできない)。
+- Rules・インデックス: `firebase deploy --only firestore --dry-run` で、Rules のコンパイル成功を確認(反映はしていない)。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 230 / Rules 59 / Functions 135 / Functions E2E 10 すべて成功(偽の配信サービスとエミュレータ。実メールは送らない)。画面の変更がないため、ブラウザ回帰テストは実行していない。
+- unit すべて成功(設定とドキュメントだけの変更)。
 
-## 残課題・判断待ち
-- デプロイ・Resend への接続・テスト送信(承認待ち。手順は `docs/order-mail.md`)。実際の受信環境で、日本語の表示名・複数の Reply-To がどう表示されるかの確認は、テスト送信で行う。
+## 残りの手順(この順)
+1. 利用者: `RESEND_API_KEY` を Secret に登録(自分の端末で。値は入力欄に貼り付け)。
+2. 利用者: テスト用の宛先を指定 → `MAIL_TEST_RECIPIENT` に設定。
+3. 利用者: Resend に Webhook を登録 → `RESEND_WEBHOOK_SECRET` を Secret に登録。
+4. 指示があれば: Rules・インデックス → Functions(`createOrder`・`sendOrderMail`・`retryOrderMails`・`resendWebhook`・`auditFacilitySettings`)のデプロイ、画面の push。
+5. テスト送信: テスト注文(開発用受付)だけを使い、`MAIL_SENDING_ENABLED=true` にする判断が必要(`ORDER_INTAKE_ENABLED=false` のままなら、テスト注文以外は作られない)。
+
+## 判断待ち
+- テスト用の宛先アドレス。
 - 前回の残り: 失敗したメールの画面からの再送、`actorRequired()=true` への切り替え、CLI が自動付与した権限の扱い、App Check。
