@@ -729,7 +729,7 @@ input[type="date"].form-control {
 }
 
 .btn-submit {
-  width: min(100%, 240px); /* 全幅にせず、右揃え(.form-actions)。狭い画面では画面幅まで */
+  width: min(100%, 200px); /* 全幅にせず、右揃え(.form-actions)。文字と矢印の間隔はそのまま、左右の余白で幅を調整。狭い画面では画面幅まで */
   min-height: 46px;        /* スマホで押しやすい高さは維持 */
   font-size: 1rem;
   padding: 10px 16px;

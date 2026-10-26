@@ -111,7 +111,7 @@ test("横幅: 備考の入力欄と各社Calculator関連リンクの外枠は�
         assert.deepEqual(edges[1], edges[0], `${name} ${width}px: 備考の入力欄`);
         assert.deepEqual(edges[2], edges[0], `${name} ${width}px: 各社Calculator関連リンク`);
         assert.equal(edges[3][1], edges[0][1], `${name} ${width}px: 「注文内容を確認」は右揃え(右端がそろう)`);
-        assert.equal(edges[3][1] - edges[3][0], Math.min(240, edges[0][1] - edges[0][0]), `${name} ${width}px: ボタンの幅は変えない`);
+        assert.equal(edges[3][1] - edges[3][0], Math.min(200, edges[0][1] - edges[0][0]), `${name} ${width}px: ボタンの幅は200px(狭い画面では画面幅まで)`);
         await page.close();
       }
     } finally { await browser.close(); }
