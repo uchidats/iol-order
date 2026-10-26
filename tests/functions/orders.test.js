@@ -464,6 +464,13 @@ test("開発用受付: 制限のない通常の受付で保存した注文は te
   assert.equal((await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).get("testOrder"), false);
 });
 
+test("許可リストのまま本番(testMode: false): 許可した施設・ユーザーの注文は testOrder: false。許可外は従来どおり拒否", async () => {
+  const s = restrictedService({ ...POLICY, testMode: false });
+  const a = await s.createOrder({ auth: user("adminA"), data: body() });
+  assert.equal((await db.doc(`facilities/${F}/orders/${a.orderId}`).get()).get("testOrder"), false);
+  await rejects(s.createOrder({ auth: user("ordA"), data: body() }), "permission-denied");
+});
+
 test("開発用受付: 許可外の施設・ユーザーは、有効な所属者でも拒否され、何も書き込まれない(利用枠・レート制限も含む)", async () => {
   const s = restrictedService(POLICY);
   await rejects(s.createOrder({ auth: user("ordA"), data: body() }), "permission-denied");                      // 許可外のユーザー(自施設の注文者)

@@ -169,6 +169,16 @@ test("テスト注文(開発用受付): テスト用の宛先がなければ送�
   assert.deepEqual(o2.notifications.filter(n => n.kind === "dealer").map(n => n.sentTo), ["test"]);
 });
 
+test("本番(テスト注文でない・MAIL_TEST_ONLY=false): テスト用の宛先が設定されていても、ディーラーの発注用メールと注文控えの宛先に送る", async () => {
+  testTo = "dev@example.jp";
+  const r = await place();
+  await sendAll(r.orderId);
+  assert.deepEqual(sent.map(m => m.to), [["order-a@example.jp"], ["order-b@example.jp"], ["info@clinic.example.jp"]]);
+  assert.ok(sent.every(m => !m.subject.startsWith("【テスト】") && !m.to.includes("dev@example.jp")));
+  assert.deepEqual(sent[0].replyTo, ["ord@login.jp", "info@clinic.example.jp"]);
+  assert.deepEqual((await orderOf(r.orderId)).notifications.map(n => n.sentTo), ["recipients", "recipients", "recipients"]);
+});
+
 test("MAIL_TEST_ONLY: テスト注文でなくても、ディーラー宛て・注文控えともテスト用の宛先だけに送る。宛先がなければ送らない", async () => {
   const guarded = createMailDispatchService({
     db, FieldValue, Timestamp, now: () => clock.t, isEnabled: () => enabled, testRecipient: () => testTo, testOnly: () => true,

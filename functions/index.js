@@ -33,6 +33,8 @@ const ORDER_INTAKE_ENABLED = defineBoolean("ORDER_INTAKE_ENABLED", { default: fa
 const ORDER_TEST_FACILITY_IDS = defineString("ORDER_TEST_FACILITY_IDS", { default: "" });
 const ORDER_TEST_UIDS = defineString("ORDER_TEST_UIDS", { default: "" });
 const ORDER_INTAKE_UNRESTRICTED = defineBoolean("ORDER_INTAKE_UNRESTRICTED", { default: false });
+// 許可リストでの受付をテスト注文(testOrder: true。メールはテスト用の宛先だけ)として保存するか。false で、許可リストのまま本番の注文として保存する
+const ORDER_TEST_MODE = defineBoolean("ORDER_TEST_MODE", { default: true });
 const csv = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean);
 const orderService = createOrderService({
   db: getFirestore(), FieldValue,
@@ -40,7 +42,8 @@ const orderService = createOrderService({
   getPolicy: () => ({
     unrestricted: ORDER_INTAKE_UNRESTRICTED.value(),
     facilityIds: csv(ORDER_TEST_FACILITY_IDS.value()),
-    uids: csv(ORDER_TEST_UIDS.value())
+    uids: csv(ORDER_TEST_UIDS.value()),
+    testMode: ORDER_TEST_MODE.value()
   })
 });
 

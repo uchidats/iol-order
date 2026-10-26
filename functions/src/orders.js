@@ -200,9 +200,10 @@ export function validateLens(model, input) {
  * @param {typeof import("firebase-admin/firestore").FieldValue} deps.FieldValue
  * @param {() => number} [deps.now]
  * @param {() => boolean} [deps.isEnabled] 注文受付の有効/無効(キルスイッチ)。未指定は有効
- * @param {() => {unrestricted?:boolean, facilityIds?:string[], uids?:string[]}} [deps.getPolicy]
- *   受付の対象の制限。既定は制限なし。`unrestricted` でない場合は「開発用受付」で、許可リストに載った施設とユーザー
- *   (ログイン済み・メール確認済み)だけが注文でき(リストが空なら全員拒否)、保存される注文には testOrder: true が付く。
+ * @param {() => {unrestricted?:boolean, facilityIds?:string[], uids?:string[], testMode?:boolean}} [deps.getPolicy]
+ *   受付の対象の制限。既定は制限なし。`unrestricted` でない場合は、許可リストに載った施設とユーザー
+ *   (ログイン済み・メール確認済み)だけが注文できる(リストが空なら全員拒否)。`testMode` が false でない限り「開発用受付」で、
+ *   保存される注文には testOrder: true が付く(メールはテスト用の宛先だけ)。testMode: false は、許可リストのまま本番の注文として保存する。
  *   この制限はサーバー側で強制する(画面の設定には依存しない)。
  * @param {Array<object>} [deps.catalog]
  */
@@ -312,7 +313,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
-        testOrder: restricted, // 開発用受付で保存された注文(本番の注文と区別・後から削除を判断するための印)
+        testOrder: restricted && policy.testMode !== false, // 開発用受付で保存された注文(本番の注文と区別・後から削除を判断するための印)
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
         lines,
         lineCount: lines.length,

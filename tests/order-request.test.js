@@ -6,7 +6,7 @@ import { ORDER_LIMITS } from "../functions/src/orders.js";
 import { IOL_MODELS } from "../src/data/iol-models.js";
 import { buildLensOptions, findLensOption } from "../src/domain/lens-options.js";
 import { createOrderApi } from "../src/data/order-api.js";
-import { resolveConfig, ORDER_MODES } from "../src/config.js";
+import { resolveConfig, ORDER_MODES, SITE_ORDER_MODE, sendsOrders } from "../src/config.js";
 
 const options = buildLensOptions(IOL_MODELS);
 const lens = (key) => findLensOption(options, key);
@@ -87,4 +87,12 @@ test("server-dev は設定で明示したときだけ有効。既定は dryrun �
   assert.deepEqual(resolveConfig({ orderMode: "gas", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: "dryrun" });
   assert.deepEqual(resolveConfig({ orderMode: "server-dev", orderApiUrl: "https://script.google.com/macros/s/X/exec" }), { orderMode: ORDER_MODES.SERVER_DEV });
   assert.equal("GAS" in ORDER_MODES, false);
+});
+
+test("本番(server): 公開サイトの既定(SITE_ORDER_MODE)は、本番の受付を始めるまで dryrun。server にすると送信する。不正な値は dryrun", () => {
+  assert.equal(SITE_ORDER_MODE, ORDER_MODES.DRYRUN, "本番の受付の承認前は dryrun のまま");
+  assert.deepEqual(resolveConfig({}, ORDER_MODES.SERVER), { orderMode: "server" });
+  assert.deepEqual(resolveConfig({}, "bogus"), { orderMode: "dryrun" });
+  assert.deepEqual(resolveConfig({ orderMode: "server-dev" }, ORDER_MODES.SERVER), { orderMode: "server-dev" }, "ローカルの設定が優先");
+  assert.deepEqual([sendsOrders("dryrun"), sendsOrders("server-dev"), sendsOrders("server")], [false, true, true]);
 });

@@ -61,6 +61,15 @@ IOL Order だけで、注文受付 → ディーラーへの注文メール → 
    - 実行サービスアカウントに Secret の参照権限(`roles/secretmanager.secretAccessor`。CLI が Secret ごとに付与する)、定期実行のための Cloud Scheduler API の有効化、`resendWebhook` の公開(未認証の呼び出しを許可。署名で検証する)が伴う。
 4. 画面(push)。施設設定の「注文メール」は、Rules のデプロイ前は保存できない(読み込みは失敗しても他の設定は表示する)。
 
+## 本番の受付(許可リストのまま。最終承認の後に、この順で)
+許可した施設・ユーザー(`ORDER_TEST_FACILITY_IDS`・`ORDER_TEST_UIDS`)だけが注文でき、その注文を本番の注文としてディーラーへ送る。ほかの利用者は従来の Google フォーム。
+1. 施設設定の確認: ディーラーの発注用メール(実際の宛先)・宛名、注文控え(ON/OFF・送信先)、署名。
+2. `functions/.env.medconf-iol-dev`: `ORDER_INTAKE_ENABLED=true`・`ORDER_INTAKE_UNRESTRICTED=false`・`ORDER_TEST_MODE=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=false`。
+3. Functions の再デプロイ: `createOrder`(ORDER_*)と `sendOrderMail`・`retryOrderMails`(MAIL_*)。
+4. 画面: `src/config.js` の `SITE_ORDER_MODE` を `ORDER_MODES.SERVER` にして push → `node scripts/verify-deployed.mjs` で公開サイトの反映を確認。
+5. 停止するとき: `ORDER_INTAKE_ENABLED=false` で `createOrder` を再デプロイ(画面は dryrun に戻すか、受付停止の表示のまま)。送信だけ止めるときは `MAIL_SENDING_ENABLED=false`(送信待ちは held になり、自動では送らない)。
+- `ORDER_TEST_MODE=true`(既定)の間は、許可リストでの注文はテスト注文(メールはテスト用の宛先だけ)。テスト注文は、`MAIL_TEST_ONLY` に関係なく、ディーラーへは送らない。
+
 ## 現在の制限
 - 注文控えの送信先は1件。ディーラー宛ての CC・BCC はない。発注者(入力者)には送らない(旧 GAS は回答者にも送っていた)。ディーラー宛ての返信先(Reply-To)は入力者本人。注文控えが ON なら施設共通アドレス(控えの宛先)も加える(同じアドレスは1件。Resend は Reply-To を配列で複数受け付ける)。注文控えには Reply-To を付けない。
 - 失敗したメールの手動の再送(画面の操作)はない。失敗は注文履歴と注文控えで分かる。

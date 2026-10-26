@@ -10,7 +10,7 @@ import { renderDuplicateWarning } from "./duplicate-warning.js";
 import { showUndoToast, hideUndoToast } from "./undo-toast.js";
 import { toOrderLines, totalQuantity } from "../domain/order-lines.js";
 import { createLensLines } from "./lens-lines.js";
-import { ORDER_MODES } from "../config.js";
+import { ORDER_MODES, sendsOrders } from "../config.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { pendingOrderKey, createPendingOrderStore, deriveOrderId, reconcilePendingOrder, isDefinitiveRejection } from "../domain/pending-order.js";
@@ -118,7 +118,7 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   });
   setupEventListeners();
   setupDraft();
-  pendingStore = appConfig.orderMode === ORDER_MODES.SERVER_DEV && loginUser && loginUser.uid && facilityRepositoryId
+  pendingStore = sendsOrders(appConfig.orderMode) && loginUser && loginUser.uid && facilityRepositoryId
     ? createPendingOrderStore(window.localStorage, pendingOrderKey(loginUser.uid, facilityRepositoryId)) : null;
   renderModeBadge();
 }
@@ -147,6 +147,7 @@ function updateAlconGuide() {
 function renderModeBadge() {
   const badge = document.getElementById("systemBadge");
   if (!badge) return;
+  if (appConfig.orderMode === ORDER_MODES.SERVER) { badge.hidden = true; return; }   // 本番は表示しない
   badge.textContent = appConfig.orderMode === ORDER_MODES.SERVER_DEV ? "開発用受付" : "開発モード";
 }
 
@@ -330,7 +331,7 @@ let submitting = false; // 連続クリックによる重複送信の防止
 
 async function handleExecuteOrder() {
   if (!currentPendingOrderData || submitting) return;
-  if (appConfig.orderMode !== ORDER_MODES.SERVER_DEV) {
+  if (!sendsOrders(appConfig.orderMode)) {
     // dryrun: 送信しない(完了扱いにしない)
     console.log("【dryrun】送信予定のペイロード（送信はしていません）:", buildCreateOrderRequest(currentPendingOrderData));
     el.modalSubmitErrorText.textContent = `【開発モード】実際の発注は行われていません。${RETAIN_NOTE}`;
@@ -348,7 +349,7 @@ async function handleExecuteOrder() {
   // 送信の直前に、requestId と送信内容を端末に保存する(タイムアウト・画面を閉じる・再読み込みのあとも同じ requestId で再送できる)
   const retryable = pendingStore ? pendingStore.save(request) : false;
   try {
-    // 開発用テスト経路: サーバーで検証して保存する(ディーラーへは通知されない)
+    // サーバーで検証して保存する(テスト注文か・ディーラーへ送るかはサーバーが決める)
     if (!orderApi) throw Object.assign(new Error("サーバーに接続できません"), { code: "failed-precondition" });   // 送信していない
     const r = await orderApi.createOrder(request);
     if (pendingStore) pendingStore.clear();
@@ -386,9 +387,15 @@ async function handleExecuteOrder() {
  * 読み込めなかった場合は受付番号だけを出し、注文履歴での確認を案内する。
  */
 function showCompleteModal(saved, { orderNumber, replayed }) {
-  // 受付(accepted)まで。ディーラーへは通知していないので「発注済み」とは表示しない
-  $("completeTitle").textContent = replayed ? "この注文は受け付け済みです（開発用）" : "注文を受け付けました（開発用）";
-  $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+  // 受付(accepted)まで。メールはこの後に送るので「発注済み」とは表示しない。テスト注文はディーラーへ送らない
+  const test = saved ? saved.testOrder === true : appConfig.orderMode !== ORDER_MODES.SERVER;
+  if (test) {
+    $("completeTitle").textContent = replayed ? "この注文は受け付け済みです（開発用）" : "注文を受け付けました（開発用）";
+    $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+  } else {
+    $("completeTitle").textContent = replayed ? "この注文は受け付け済みです" : "注文を受け付けました";
+    $("completeSubtitle").innerHTML = "<strong>ディーラーへ注文メールを送信します</strong><br>送信の結果(受付・配信・失敗)は、注文履歴で確認してください。";
+  }
   const o = saved ? summarizeOrder(saved) : null;
   el.completeDetails.innerHTML = `
     <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml((o && o.orderNumber) || orderNumber || "—")}</div>

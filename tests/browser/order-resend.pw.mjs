@@ -32,7 +32,7 @@ const orderApi = { async createOrder(req) {
   const id = await deriveOrderId("u1", req.requestId);
   const replayed = Boolean(s.orders[id]);
   if (!replayed && s.mode !== "lost") {
-    s.orders[id] = { id, orderNumber: "IOL-20991231-000" + (Object.keys(s.orders).length + 1), status: "accepted", notes: req.notes || "", createdAt: Date.now(),
+    s.orders[id] = { id, orderNumber: "IOL-20991231-000" + (Object.keys(s.orders).length + 1), status: "accepted", testOrder: s.real !== true, notes: req.notes || "", createdAt: Date.now(),
       lines: req.lines.map((l, i) => ({ lineNo: i + 1, surgeryDate: l.surgeryDate,
         item: { manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", power: l.power, quantity: l.quantity },
         doctor: { id: l.doctorId, name: "山田(保存値)" }, dealer: { id: l.dealerId, name: "A商会(保存値)" } })) };
@@ -97,6 +97,23 @@ async function fillOrder(page, notes) {
 }
 
 const visible = (page, sel) => page.locator(sel).evaluate(e => !e.classList.contains("hidden"));
+
+test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さず、ディーラーへ送信することと注文履歴での確認を案内する: chromium", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, errors } = await open(browser);
+    await page.evaluate(() => { const s = JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'); s.mode = "ok"; s.real = true; localStorage.setItem("__srv", JSON.stringify(s)); });
+    await fillOrder(page, "本番");
+    await page.click("#btnConfirm");
+    await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+    await page.click("#btnModalSubmit");
+    await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+    assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
+    assert.match(await page.locator("#completeSubtitle").innerText(), /ディーラーへ注文メールを送信します[\s\S]*注文履歴で確認/);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`二重発注の防止: 受付後に応答が届かず、再読み込みして同じ内容で進む → 新しく送らず、保存済みの注文を完了画面に出す: ${name}`, async (t) => {
