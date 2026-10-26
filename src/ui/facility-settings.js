@@ -657,12 +657,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const chk = h("input", { type: "checkbox", "data-f": "copyEnabled" });
     const email = h("input", { class: "form-control", type: "email", maxlength: "254", "data-f": "copyEmail", placeholder: "info@example.jp", "aria-label": "注文控えの送信先メールアドレス", autocomplete: "off" });
     const emailBox = h("label", { class: "form-label mail-copy-email", hidden: true }, "注文控えの送信先", h("span", { class: "field-note" }, "（1件）"), email);
-    const sig = h("textarea", { class: "form-control", rows: "3", maxlength: "500", "data-f": "signature", placeholder: "〒000-0000 住所\n施設名", "aria-label": "署名" });
+    const sig = h("textarea", { class: "form-control", rows: "5", maxlength: "500", "data-f": "signature", placeholder: "施設名\n〒000-0000 住所\nTEL 00-0000-0000", "aria-label": "署名" });
     const section = h("section", { class: "settings-section", "data-section": "mail" },
       createSectionHeading("注文メール", "注文時にディーラーへ送るメールの設定です。宛先は各ディーラーの発注用メールアドレスです。「注文控えメールを送信する」をONにすると、ディーラーへの送信結果(受付・失敗・未送信)を書いた控えを、指定したアドレスに送ります。署名はディーラーへのメールの最後に入ります。変更は自動で保存されます。"),
       h("label", { class: "settings-check" }, chk, h("span", {}, "注文控えメールを送信する")),
       emailBox,
-      h("label", { class: "form-label" }, "署名", h("span", { class: "field-note" }, "（住所・施設名など。任意・10行まで）"), sig),
+      h("label", { class: "form-label" }, "署名", h("span", { class: "field-note" }, "（施設名・住所・電話番号など自由に記載。改行はそのままメールの最後に入ります。任意・10行・500文字まで）"), sig),
       h("p", { class: "form-hint", "data-msg": "" }));
     chk.addEventListener("change", () => {
       emailBox.hidden = !chk.checked;

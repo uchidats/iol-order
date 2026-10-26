@@ -3,21 +3,24 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-26
-- **作業**: テスト送信の確認後、注文の受付を停止(`medconf-iol-dev`)
-- 前段: 1bb0709(テスト注文の区別・`sentTo`)を `main` に push し、`createOrder`・`sendOrderMail`・`retryOrderMails`・`resendWebhook` をデプロイ済み。
+- **作業**: 施設設定「注文メール」の署名欄の改善(既存の署名設定 `settings/mail` の `signature` を活用。新しい項目・テンプレート編集は作らない)
+- 注文受付・メール送信の安全設定は変更なし(`ORDER_INTAKE_ENABLED=false`・`ORDER_INTAKE_UNRESTRICTED=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=true`)。デプロイなし(画面のみの変更)。
 
-## 結果
-- 利用者が localhost(server-dev)からテスト注文を1件実施。`MAIL_TEST_RECIPIENT` への着信と、注文履歴の「テスト用の宛先に送信・配信済み（ディーラーには未送信）」(Webhook の配信結果)を確認。
-- `ORDER_INTAKE_ENABLED=false` に戻し、`createOrder` を再デプロイ(成功)。
-- 維持: `ORDER_INTAKE_UNRESTRICTED=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=true`。受付停止中は新しい注文(メール)は作られない。
-- テスト注文の履歴は削除せず残している(`testOrder` の印つき。重複確認の対象外)。
+## 既存の機能(確認済み・変更なし)
+- 複数行の自由記述。施設の管理者・副管理者が編集でき、変更時に自動保存(Rules・操作履歴も既存)。
+- 改行(途中の空行を含む)を保ち、ディーラーへの注文メールの最後に入る(前後の空行は除く)。上限は 10行・500文字(画面・Rules・サーバー共通)。
+- 未設定なら署名なしで従来どおり送信。注文内容・その他の本文は変更なし。
+
+## 変更内容
+- 署名欄の説明を「施設名・住所・電話番号など自由に記載。改行はそのままメールの最後に入ります。任意・10行・500文字まで」に変更。例(placeholder)に電話番号を追加し、入力欄を5行の高さに。
+- テスト追加: 改行・途中の空行を保って最後に入ること、未設定でも送信待ちになり署名以外の本文が同じこと。
 
 ## commit ID
 - 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
 ## テスト結果
-- unit 成功(設定だけの変更)。
+- unit 231 成功。ブラウザ回帰 95 中 94 成功、Firefox の「施設設定の自動保存(採用IOL・担当医)」が1回失敗し、単独の再実行で成功(負荷による不安定。今回の変更箇所とは別のセクション)。
 
 ## 残課題・判断待ち
-- 実際のディーラーへの送信の開始(`MAIL_TEST_ONLY=false`・`ORDER_INTAKE_ENABLED`・本番の判断)。施設設定の入力(署名・ディーラーの宛名・注文控え)。
+- 実際のディーラーへの送信の開始(`MAIL_TEST_ONLY=false`・`ORDER_INTAKE_ENABLED`・本番の判断)。各施設の署名・ディーラーの宛名・注文控えの入力。
 - 前回の残り: 失敗したメールの画面からの再送、`actorRequired()=true` への切り替え、CLI が自動付与した権限の扱い、App Check、`firebase-functions` の更新。

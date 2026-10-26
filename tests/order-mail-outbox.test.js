@@ -31,6 +31,15 @@ test("注文時のメール: 発注先ごとに1通(注文時点の宛先・件�
   assert.ok(!JSON.stringify(ob.notifications).includes("@"), "注文の要約(全員が読める)にアドレスを含めない");
 });
 
+test("署名: 施設設定の自由記述を、改行(途中の空行を含む)を保ったまま本文の最後に入れる。未設定でも送信できる", () => {
+  const sig = "テスト眼科\n〒100-0001 東京都千代田区\n\nTEL 03-0000-0000";
+  const withSig = buildOrderOutbox({ facilityId: "f1", orderId: "o1", order: order([line(1, A)]), dealers: [A], mailSettings: { signature: sig } }).mails[0].data;
+  assert.ok(withSig.text.endsWith("\n" + sig));
+  const none = buildOrderOutbox({ facilityId: "f1", orderId: "o2", order: order([line(1, A)]), dealers: [A], mailSettings: null }).mails[0].data;
+  assert.equal(none.status, MAIL_STATUS.PENDING, "署名なしでも送信待ちになる");
+  assert.equal(withSig.text, `${none.text}\n${sig}`, "署名以外の本文は同じ(定型文の後に空行を1行あけて署名)");
+});
+
 test("注文控え: 初期はOFF。ONで有効な送信先1件のときだけ。ディーラー宛てがあれば、その結果が出るまで待つ", () => {
   assert.equal(copyRecipient(null), null);
   assert.equal(copyRecipient({ copyEnabled: false, copyEmail: "info@example.jp" }), null);
