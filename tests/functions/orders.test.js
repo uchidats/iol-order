@@ -65,7 +65,7 @@ test("正常系: 検証して保存され、受付済み(accepted)・サーバ�
   const r = await order(user("ordA"), d);
   assert.equal(r.status, ORDER_STATUS.ACCEPTED);
   assert.equal(r.replayed, false);
-  assert.match(r.orderNumber, /^IOL-20261024-0001$/);
+  assert.match(r.orderNumber, /^IOL-20261024-01$/);
   assert.equal(r.orderId, deriveOrderId("ordA", d.requestId));
 
   const o = (await db.doc(`facilities/${F}/orders/${r.orderId}`).get()).data();
@@ -109,10 +109,31 @@ test("注文番号は日付ごと・施設ごとの連番で、サーバーが�
   const a = await order(user("ordA"), body());
   const b = await order(user("ordA"), body());
   const c = await order(user("ordB", {}), body({ facilityId: "fB" }));
-  assert.deepEqual([a.orderNumber, b.orderNumber], ["IOL-20261024-0001", "IOL-20261024-0002"]);
-  assert.equal(c.orderNumber, "IOL-20261024-0001");
+  assert.deepEqual([a.orderNumber, b.orderNumber], ["IOL-20261024-01", "IOL-20261024-02"]);
+  assert.equal(c.orderNumber, "IOL-20261024-01");
   clock.t += 24 * 60 * 60 * 1000;
-  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261025-0001");
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261025-01");
+});
+
+test("注文番号の連番は最低2桁。10件目は2桁、100件目以降は3桁以上(連番のカウンターは従来どおり)", async () => {
+  const counter = db.doc(`facilities/${F}/orderCounters/20261024`);
+  await counter.set({ count: 9 });
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261024-10");
+  await counter.set({ count: 99 });
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261024-100");
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261024-101");
+  await counter.set({ count: 999 });
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261024-1000");
+});
+
+test("保存済みの注文番号(旧4桁)は変えない: 同じ requestId の再送は保存済みの番号を返す。同じ日の新しい注文は連番の続きで重複しない", async () => {
+  const d = body();
+  const a = await order(user("ordA"), d);
+  await db.doc(`facilities/${F}/orders/${a.orderId}`).update({ orderNumber: "IOL-20261024-0001" });   // 変更前に発行された注文を再現
+  const again = await order(user("ordA"), d);
+  assert.deepEqual([again.replayed, again.orderNumber, again.orderId], [true, "IOL-20261024-0001", a.orderId]);
+  assert.equal((await order(user("ordA"), body())).orderNumber, "IOL-20261024-02");
+  assert.equal((await orders()).length, 2);
 });
 
 test("クライアントは注文番号・状態・作成者・価格・レンズ名・注文者名などを指定できない(未知のキーは拒否)", async () => {
@@ -288,7 +309,7 @@ test("複数明細: 1つでも不正な明細があれば、注文全体を拒�
     await assert.rejects(order(user("ordA"), multi([line(), bad])), (e) => e.code === "invalid-argument" && re.test(e.message), JSON.stringify(bad));
   }
   assert.equal((await orders()).length, 0);
-  assert.equal((await order(user("ordA"), multi([line()]))).orderNumber, "IOL-20261024-0001");
+  assert.equal((await order(user("ordA"), multi([line()]))).orderNumber, "IOL-20261024-01");
 });
 
 test("複数明細: 明細数・合計枚数の上限、空、重複明細、トップレベルとの混在は拒否される", async () => {
@@ -386,7 +407,7 @@ test("同時送信(同じ requestId を並列で20回)でも注文は1件だけ�
 test("同時送信(別々の注文を並列で10件)では、注文番号が重複・欠番しない", async () => {
   const rs = await Promise.all(Array.from({ length: 10 }, () => order(user("ordA"), body())));
   const nums = rs.map(r => r.orderNumber).sort();
-  assert.deepEqual(nums, Array.from({ length: 10 }, (_, i) => `IOL-20261024-${String(i + 1).padStart(4, "0")}`));
+  assert.deepEqual(nums, Array.from({ length: 10 }, (_, i) => `IOL-20261024-${String(i + 1).padStart(2, "0")}`));
 });
 
 test("通信断後の再試行: 1回目は保存済みだが応答を受け取れなかった想定で、再試行しても1件のまま", async () => {
@@ -408,7 +429,7 @@ test("別のユーザーが同じ requestId を使っても、互いに干渉し
 test("検証に失敗した注文は、注文番号を消費せず、何も保存しない", async () => {
   await rejects(order(user("ordA"), body({ power: "+99.0D" })), "invalid-argument");
   const r = await order(user("ordA"), body());
-  assert.equal(r.orderNumber, "IOL-20261024-0001");
+  assert.equal(r.orderNumber, "IOL-20261024-01");
 });
 
 test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否される", async () => {

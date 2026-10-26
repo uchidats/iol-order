@@ -142,7 +142,7 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   const ok = await call("createOrder", data, verified.idToken);
   assert.equal(ok.http, 200);
   assert.equal(ok.body.result.status, "accepted");
-  assert.match(ok.body.result.orderNumber, /^IOL-\d{8}-0001$/);
+  assert.match(ok.body.result.orderNumber, /^IOL-\d{8}-01$/);
 
   const saved = await getDoc(`facilities/${fid}/orders/${ok.body.result.orderId}`);
   assert.equal(saved.fields.status.stringValue, "accepted");

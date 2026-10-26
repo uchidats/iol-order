@@ -305,7 +305,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         };
       });
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
-      const orderNumber = `IOL-${day}-${String(seq).padStart(4, "0")}`;
+      const orderNumber = `IOL-${day}-${String(seq).padStart(2, "0")}`;   // 連番は最低2桁(100件目以降は3桁以上)。保存済みの注文番号(旧4桁)は変えない
 
       tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp() });
       const orderDoc = {
