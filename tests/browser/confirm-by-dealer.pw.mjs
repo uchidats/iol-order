@@ -94,6 +94,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await text(page.locator("#summaryTotal")), "3件・合計4枚");
         assert.equal(await text(page.locator("#summaryDealers")), "A商会", "1社は名称を1回だけ(レンズ番号なし)");
         assert.deepEqual(await texts(page.locator("#summaryLines .lens-no-badge")), ["レンズ1", "レンズ2", "レンズ3"]);
+        const style = (loc) => loc.evaluate(e => { const c = getComputedStyle(e); return [c.fontWeight, c.color, c.fontSize]; });
+        const GRAY = "rgb(107, 114, 128)";
+        const single1 = await style(page.locator("#summaryDealers .summary-dealer-name"));
+        assert.deepEqual(single1.slice(0, 2), ["500", GRAY], "1社: ディーラー名は従来のグレー");
 
         // ---- 2社(+同じ手術日・別の担当医、複数レンズ、発注用メール未登録の警告) ----
         const two = [L(1, A), L(2, B, { power: "+21.0D" }), L(3, A, { doctor: "高橋", quantity: 2 }), L(4, B, { surgeryDate: "2026-11-01", power: "+22.0D" })];
@@ -113,6 +117,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await texts(bA.locator(".summary-date-head")), ["手術日 2026年10月29日(木) 内田Dr", "手術日 2026年10月29日(木) 高橋Dr"], "同じ手術日でも担当医ごとに分ける");
         assert.equal(await text(bA.locator('[data-part="total"]')), "2件・合計3枚");
         assert.equal(await text(bA.locator('[data-part="dealers"]')), "A商会");
+        // 2社以上: 各ディーラー名だけ黒の太字。文字サイズは同じ。見出し・発注元はグレーのまま
+        for (const b of [bA, bB]) {
+          const [w, c, size] = await style(b.locator(".summary-dealer-name"));
+          assert.deepEqual([w, c, size], ["600", "rgb(15, 23, 42)", single1[2]]);
+          assert.equal((await style(b.locator('[data-part="facility"]')))[1], GRAY);
+          for (const label of await b.locator(".summary-party-label").all()) assert.notEqual((await style(label))[1], "rgb(15, 23, 42)");
+        }
         assert.deepEqual(await texts(bB.locator(".lens-no-badge")), ["レンズ2", "レンズ4"]);
         assert.deepEqual(await texts(bB.locator(".summary-date-head")), ["手術日 2026年10月29日(木) 内田Dr", "手術日 2026年11月1日(日) 内田Dr"]);
         assert.equal(await text(bB.locator('[data-part="total"]')), "2件・合計2枚");

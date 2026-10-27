@@ -96,7 +96,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       h("label", { class: "form-label required", for: forId }, h("span", {}, labelText, ...requiredMark()), extra),
       control, err(errKey));
 
-    // 最上部: [レンズN](展開・折りたたみで位置を変えない) …… 右端に [折りたたみ矢印][ゴミ箱]。折りたたみ中はゴミ箱を出さない
+    // 最上部: [レンズN][折りたたみ矢印](バッジのすぐ右。展開・折りたたみで位置を変えない) …… 右端に [ゴミ箱](離して置く)。折りたたみ中はゴミ箱を出さない
     line.body = h("div", { class: "lens-line-body" },
       h("div", { class: "lens-filter", role: "group", "aria-label": "レンズの種類" },
         h("label", { class: "lens-filter-check" }, line.chkToric, " トーリック"),
@@ -116,7 +116,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       // 発注先: 施設の登録ディーラーが2社以上のときだけ表示(選択必須)。1社は自動、0社は「発注先未設定」
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
     line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
-      h("div", { class: "lens-line-head" }, line.title, h("div", { class: "lens-line-actions" }, line.toggleBtn, line.removeBtn)),
+      h("div", { class: "lens-line-head" }, h("div", { class: "lens-line-head-start" }, line.title, line.toggleBtn), line.removeBtn),
       line.summary, line.body);
     // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });

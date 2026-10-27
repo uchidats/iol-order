@@ -91,6 +91,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await fill(c1, { model: "alcon-cna0t0", power: "+7.5D" });
         const badgeBefore = await box(c1.locator(".lens-line-title"));
         const cardBefore = await box(c1);
+        // 矢印はバッジのすぐ右、ゴミ箱は右端(押し間違えないよう離す)
+        const tg = await box(c1.locator('[data-act="toggle"]')), tr = await box(c1.locator('[data-act="remove"]'));
+        assert.ok(tg.x - (badgeBefore.x + badgeBefore.width) < 12, `${width}: 矢印はバッジのすぐ右`);
+        assert.ok(cardBefore.x + cardBefore.width - (tr.x + tr.width) < 16, `${width}: ゴミ箱は右端`);
+        assert.ok(tr.x - (tg.x + tg.width) >= 120, `${width}: 矢印とゴミ箱は十分に離れる(${tr.x - (tg.x + tg.width)}px)`);
+        assert.ok(Math.abs((tg.y + tg.height / 2) - (badgeBefore.y + badgeBefore.height / 2)) < 3, "矢印はバッジと同じ高さ");
         // 「レンズを追加」: 入力済みのレンズ1は自動で折りたたみ、レンズ2は展開して追加
         await page.click("#btnAddLine");
         assert.deepEqual(await page.evaluate(() => window.__lines.collapsedLineNos()), [1]);
@@ -106,6 +112,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const cardAfter = await box(c1);
         assert.ok(Math.abs((badgeAfter.x - cardAfter.x) - (badgeBefore.x - cardBefore.x)) < 1 && Math.abs((badgeAfter.y - cardAfter.y) - (badgeBefore.y - cardBefore.y)) < 1, "バッジの位置が変わらない");
         assert.ok(cardAfter.height < cardBefore.height / 2, `折りたたみで縦が短くなる(${cardBefore.height}→${cardAfter.height})`);
+        const tgAfter = await box(c1.locator('[data-act="toggle"]'));
+        assert.ok(Math.abs((tgAfter.x - cardAfter.x) - (tg.x - cardBefore.x)) < 1 && Math.abs((tgAfter.y - cardAfter.y) - (tg.y - cardBefore.y)) < 1, "折りたたみ中も矢印の位置は同じ");
         // 折りたたみ中: ゴミ箱は出さず、右端は矢印だけ。入力欄は隠れる
         assert.equal(await c1.locator('[data-act="remove"]').isVisible(), false);
         assert.equal(await c1.locator('[data-act="toggle"]').isVisible(), true);
