@@ -10,51 +10,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright-core";
 import { MANUAL_PAGES } from "../../src/manual/manual-pages.js";
+import { newFakeContext } from "./fake-firebase.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
-
-// 偽の Firebase SDK(main.js が読み込む4つのモジュール)。データは window.__fakeUser・window.__fakeDb
-const FAKE_SDK = {
-  "firebase-app.js": "export const initializeApp = (c) => ({ c });",
-  "firebase-auth.js": `
-    export const getAuth = () => ({ get currentUser() { return window.__fakeUser || null; } });
-    export function onAuthStateChanged(auth, cb) { setTimeout(() => cb(window.__fakeUser || null), 0); return () => {}; }
-    export class GoogleAuthProvider {}
-    export const signInWithPopup = async () => { throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); };
-    export const sendSignInLinkToEmail = async () => {};
-    export const isSignInWithEmailLink = () => false;
-    export const signInWithEmailLink = async () => ({});
-    export const signOut = async () => {};`,
-  "firebase-firestore.js": `
-    const store = () => window.__fakeDb || {};
-    const snap = (p, d) => ({ id: p.split("/").pop(), exists: () => d !== undefined, data: () => (d === undefined ? undefined : JSON.parse(JSON.stringify(d))),
-      ref: { path: p, parent: { parent: { id: p.split("/").slice(-3)[0] } } } });
-    export const getFirestore = () => ({});
-    export const doc = (db, ...s) => ({ kind: "doc", path: s.join("/") });
-    export const collection = (db, ...s) => ({ kind: "col", path: s.join("/") });
-    export const collectionGroup = (db, id) => ({ kind: "group", id });
-    export const where = (f, op, v) => ({ t: "where", f, v });
-    export const orderBy = () => ({ t: "orderBy" });
-    export const limit = () => ({ t: "limit" });
-    export const query = (ref, ...cs) => ({ ...ref, cs });
-    export const serverTimestamp = () => ({});
-    export async function getDoc(ref) { return snap(ref.path, store()[ref.path]); }
-    export async function getDocs(q) {
-      const docs = [];
-      for (const [p, d] of Object.entries(store())) {
-        const s = p.split("/");
-        if (q.kind === "col" && !(p.startsWith(q.path + "/") && s.length === q.path.split("/").length + 1)) continue;
-        if (q.kind === "group" && s[s.length - 2] !== q.id) continue;
-        if ((q.cs || []).some(c => c.t === "where" && d[c.f] !== c.v)) continue;
-        docs.push(snap(p, d));
-      }
-      return { docs, empty: !docs.length, size: docs.length, forEach: (fn) => docs.forEach(fn) };
-    }`,
-  "firebase-functions.js": `
-    export const getFunctions = () => ({});
-    export const httpsCallable = (fns, name) => async () => ({ data: name === "listMyPendingMemberships" ? { memberships: [] } : {} });`
-};
 
 const LOGGED_IN = {
   user: { uid: "u1", email: "u1@example.jp", emailVerified: true, displayName: "テスト 太郎" },
@@ -85,25 +44,26 @@ async function launch(type, name) {
   return null;
 }
 
-/** 偽の SDK を返し、ローカル以外への通信は止める */
-async function newContext(browser, width, session) {
-  const context = await browser.newContext({ viewport: { width, height: 800 } });
-  await context.route(/^https?:\/\//, (route) => {
-    const url = route.request().url();
-    if (url.startsWith(base)) return route.continue();
-    const m = url.match(/^https:\/\/www\.gstatic\.com\/firebasejs\/[\d.]+\/(firebase-[a-z]+\.js)$/);
-    if (m && FAKE_SDK[m[1]]) return route.fulfill({ status: 200, contentType: "text/javascript", body: FAKE_SDK[m[1]] });
-    return route.abort();
-  });
-  await context.addInitScript((s) => {
-    window.__fakeUser = s ? { ...s.user, getIdTokenResult: async () => ({ claims: {} }) } : null;
-    window.__fakeDb = s ? s.db : {};
-  }, session);
-  return context;
-}
+const newContext = (browser, width, session) => newFakeContext(browser, base, width, session);
 
 const visible = (page, sel) => page.locator(sel).evaluate(el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)).catch(() => false);
 const noOverflow = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+/** 本文中のマニュアルのページへのリンク */
+const helpLinks = (page) => page.locator('.manual-body a[href^="#help"]').evaluateAll(as => [...new Set(as.map(a => a.getAttribute("href")))]);
+/** 表示されたページの題名を記録する(範囲外のページが一時的にも表示されないことの確認) */
+const watchTitles = (page) => page.addInitScript((titles) => {
+  window.__firstSeen = {};
+  new MutationObserver(() => {
+    const t = document.querySelector("#manualView .manual-body h1")?.textContent;
+    for (const [id, title] of Object.entries(titles)) if (t === title && !(id in window.__firstSeen)) window.__firstSeen[id] = performance.now();
+  }).observe(document, { subtree: true, childList: true, characterData: true });
+}, Object.fromEntries(MANUAL_PAGES.map(p => [p.id, p.title])));
+const seenTitles = (page, id) => page.evaluate((id) => (window.__firstSeen && id in window.__firstSeen ? [id] : []), id);
+/** 役割ごとのログイン(施設1件) */
+const withRole = (role, claims, authDelay = 0) => ({
+  user: { uid: "u1", email: "u1@example.jp", emailVerified: true, displayName: "テスト 太郎" }, claims, authDelay,
+  db: { "facilities/f1": { name: "テスト眼科", status: "active" }, "facilities/f1/members/u1": { uid: "u1", role, name: "テスト 太郎" } }
+});
 
 async function openHelpFromMenu(page) {
   await page.click("#btnHeaderMenu");
@@ -114,15 +74,17 @@ async function openHelpFromMenu(page) {
 test("ヘルプ: メニューの項目とハッシュの処理は、他の画面へ移るときにヘルプを閉じる", () => {
   const main = fs.readFileSync(path.join(ROOT, "src/main.js"), "utf8");
   for (const k of ["onOpenHistory", "onOpenSettings", "onOpenApplications", "onOpenPreregistrations", "onRegisterFacility", "onSignOut"]) {
-    assert.match(main, new RegExp(`${k}: \\(\\) => \\{ leaveHelp\\(\\);`), k);
+    assert.match(main, new RegExp(`${k}: \\(\\) => \\{ leaveOverlay\\(\\);`), k);
   }
-  assert.match(main, /onSwitchFacility: async \(\) => \{\s*leaveHelp\(\);/);
-  const view = fs.readFileSync(path.join(ROOT, "src/ui/manual-view.js"), "utf8");
-  assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(view), "マニュアルの表示は HTML として解釈しない");
+  assert.match(main, /onSwitchFacility: async \(\) => \{\s*leaveOverlay\(\);/);
+  for (const f of ["src/ui/manual-view.js", "src/ui/markdown-view.js", "src/ui/about-view.js"]) {
+    const view = fs.readFileSync(path.join(ROOT, f), "utf8");
+    assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(view), `${f}: Markdown の表示は HTML として解釈しない`);
+  }
 });
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`ヘルプ(ログイン前): メニューから目次・全ページ・リンク・戻る・#help の URL。スマートフォン/PC: ${name}`, async (t) => {
+  test(`ヘルプ(ログイン前): 目次と「1. 初めて利用する方へ」だけ。リンク・戻る・#help の URL(範囲外は目次へ)。スマートフォン/PC: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
@@ -138,31 +100,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.click("#menuHelp");
         await page.locator("#manualView:not([hidden]) .manual-body h1").waitFor();
         assert.equal(new URL(page.url()).hash, "#help");
-        assert.equal(await page.locator(".manual-body h1").innerText(), MANUAL_PAGES[0].title);
+        assert.equal(await page.locator(".manual-body h1").innerText(), "オンラインマニュアル");
         assert.equal(await page.getByText("ログインが必要です", { exact: true }).isVisible(), false, "ログイン画面は隠れる");
-        assert.deepEqual(await page.locator(".manual-nav a").allInnerTexts(), MANUAL_PAGES.map(p => p.label));
+        assert.deepEqual(await page.locator(".manual-nav a").allInnerTexts(), ["目次", "1. 初めて利用する方へ"], "上部のページ一覧は閲覧できるページだけ");
+        assert.deepEqual(await helpLinks(page), ["#help/01-first-time"], "目次の本文も閲覧できるページだけ");
+        assert.deepEqual(await page.locator(".manual-pager a").allInnerTexts(), ["1. 初めて利用する方へ →"]);
         assert.deepEqual(await page.locator(".manual-back").allInnerTexts(), ["ログイン画面に戻る", "ログイン画面に戻る"]);
         assert.ok(await noOverflow(page), `${width}: 目次が横にはみ出さない`);
 
-        // 目次から各ページへ(本文のリンク)。全ページが表示でき、横にはみ出さない
-        for (const p of MANUAL_PAGES.slice(1)) {
-          await page.goto(`${base}#help`);
-          await page.locator(`.manual-body a[href="#help/${p.id}"]`).first().click();
-          await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, p.title);
-          assert.equal(new URL(page.url()).hash, `#help/${p.id}`);
-          assert.equal(await page.locator(".manual-nav a[aria-current=page]").innerText(), p.label);
-          assert.ok(await noOverflow(page), `${width}: ${p.id} が横にはみ出さない`);
-          // 本文のリンク: ページ内は #help/…、外部は別タブ(noopener)。それ以外のリンクはない
-          const hrefs = await page.locator(".manual-body a").evaluateAll(as => as.map(a => [a.getAttribute("href"), a.target, a.rel]));
-          for (const [href, target, rel] of hrefs) {
-            if (href.startsWith("#help")) assert.ok(MANUAL_PAGES.some(x => href === (x.id === "index" ? "#help" : `#help/${x.id}`)), href);
-            else assert.deepEqual([/^https:\/\//.test(href), target, rel], [true, "_blank", "noopener noreferrer"], href);
-          }
-        }
-        // ページ間のリンク(本文中の別ページへのリンク)・目次へ戻る・ブラウザの戻る
-        await page.goto(`${base}#help/02-orderer`);
-        await page.locator(".manual-body a[href='#help/01-first-time']").first().click();
-        await page.waitForFunction(() => location.hash === "#help/01-first-time");
+        // 目次から「1.」へ。範囲外のページへのリンクは文字だけ。前後のページは目次だけ
+        await page.locator('.manual-body a[href="#help/01-first-time"]').first().click();
+        await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, MANUAL_PAGES[1].title);
+        assert.deepEqual(await helpLinks(page), [], "2〜4 へのリンクは出さない");
+        assert.ok((await page.locator(".manual-body").innerText()).includes("注文者・代理入力者向けマニュアル"), "文は残す(リンクだけ外す)");
+        assert.deepEqual(await page.locator(".manual-pager a").allInnerTexts(), ["← 目次"]);
+        assert.ok(await noOverflow(page), `${width}: 1. が横にはみ出さない`);
+        const hrefs = await page.locator(".manual-body a").evaluateAll(as => as.map(a => [a.getAttribute("href"), a.target, a.rel]));
+        for (const [href, target, rel] of hrefs) assert.deepEqual([/^https:\/\//.test(href), target, rel], [true, "_blank", "noopener noreferrer"], href);
+        // 目次へ戻る・ブラウザの戻る
         await page.locator(".manual-toc").click();
         await page.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1"));
         await page.goBack();
@@ -176,13 +131,69 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(errors, []);
         await context.close();
 
-        // #help/… 付きの URL で開くと、ログイン前でもそのページを表示する
-        const c2 = await newContext(browser, width, null);
-        const p2 = await c2.newPage();
-        await p2.goto(`${base}#help/04-admin`);
-        await p2.waitForFunction((title) => document.querySelector("#manualView:not([hidden]) .manual-body h1")?.textContent === title, MANUAL_PAGES[4].title);
-        await c2.close();
+        // #help/… の URL: 範囲内はそのページ、範囲外(2・3、統合前の旧ページを含む)は目次へ戻す(一時的にも本文を表示しない)
+        for (const id of ["02-orderer", "03-managers", "03-subadmin", "04-admin"]) {
+          const c2 = await newContext(browser, width, null);
+          const p2 = await c2.newPage();
+          await watchTitles(p2);
+          await p2.goto(`${base}#help/${id}`);
+          await p2.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1")?.textContent === "オンラインマニュアル");
+          assert.deepEqual([...await seenTitles(p2, "02-orderer"), ...await seenTitles(p2, "03-managers")], [], `${id} は表示しない`);
+          await c2.close();
+        }
       }
+    } finally { await browser.close(); }
+  });
+
+  test(`ヘルプ(役割ごと): 注文者・代行入力者は1〜2、副管理者・管理者・運営者は1〜3。旧ページの URL は統合ページへ(範囲外は目次へ)。確認中は上位のページを出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const labels = MANUAL_PAGES.map(p => p.label);
+      for (const [role, claims, count] of [["orderer", {}, 3], ["proxy", {}, 3], ["subadmin", {}, 4], ["admin", {}, 4], ["orderer", { platformAdmin: true }, 4]]) {
+        const who = `${role}${claims.platformAdmin ? "(運営者)" : ""}`;
+        const context = await newContext(browser, 390, withRole(role, claims, 600));
+        const page = await context.newPage();
+        // 確認中(ログイン状態が分かる前)に旧ページ(4. 施設管理者向け)の URL を開く: 本文は出さず、分かってから統合ページ(3.)または目次へ
+        await watchTitles(page);
+        await page.goto(`${base}#help/04-admin`);
+        if (count === 4) {
+          await page.waitForFunction((title) => location.hash === "#help/03-managers" && document.querySelector(".manual-body h1")?.textContent === title, MANUAL_PAGES[3].title);
+          const [first, authAt] = await page.evaluate(() => [window.__firstSeen["03-managers"], window.__authAt]);
+          assert.ok(first >= authAt, `${who}: ログインの確認の前には表示しない`);
+        } else {
+          await page.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1")?.textContent === "オンラインマニュアル");
+          assert.deepEqual(await seenTitles(page, "03-managers"), [], `${who}: 3. を一時的にも表示しない`);
+        }
+        assert.deepEqual(await page.locator(".manual-nav a").allInnerTexts(), labels.slice(0, count), who);
+        await page.evaluate(() => { location.hash = "#help"; });
+        await page.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1")?.textContent === "オンラインマニュアル");
+        assert.deepEqual(await helpLinks(page), MANUAL_PAGES.slice(1, count).map(p => `#help/${p.id}`), `${who}: 目次の本文`);
+        // 最後に閲覧できるページには「次へ」がない
+        await page.evaluate((id) => { location.hash = `#help/${id}`; }, MANUAL_PAGES[count - 1].id);
+        await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, MANUAL_PAGES[count - 1].title);
+        assert.equal(await page.locator(".manual-pager .is-next").count(), 0, `${who}: 次へなし`);
+        await context.close();
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`ヘルプ(副管理者・施設管理者向け): 施設管理者のみの項目に赤い * 。旧ページ(3. 副管理者向け)の URL も統合ページへ: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await newContext(browser, 390, withRole("subadmin", {}));
+      const page = await context.newPage();
+      await page.goto(`${base}#help/03-subadmin`);
+      await page.waitForFunction((title) => location.hash === "#help/03-managers" && document.querySelector(".manual-body h1")?.textContent === title, MANUAL_PAGES[3].title);
+      const marks = page.locator(".manual-body .manual-admin-mark");
+      assert.ok(await marks.count() >= 6, "印の数");
+      assert.equal(await marks.first().evaluate(e => getComputedStyle(e).color), "rgb(220, 38, 38)", "赤");
+      assert.equal(await marks.first().innerText(), "*");
+      assert.ok(!(await page.locator(".manual-body").innerText()).includes("{*}"), "原稿の印の書き方は表示しない");
+      assert.match(await page.locator(".manual-body > p").last().innerText(), /^\*\s*施設管理者のみ操作できます。$/);
+      assert.ok(await noOverflow(page), "横にはみ出さない(表を含む)");
+      await context.close();
     } finally { await browser.close(); }
   });
 
@@ -196,7 +207,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const errors = [];
         page.on("pageerror", e => errors.push(String(e)));
         await page.goto(base);
-        await page.locator("#iolOrderForm:not(.hidden) #notesInput").waitFor();
+        await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();   // 注文画面の準備(ログインの確認・初期化)が済んでから入力する
         await page.fill("#notesInput", "入力途中の備考");
         const formBox = await page.locator("#iolOrderForm").boundingBox();
         await page.click("#btnHeaderMenu");

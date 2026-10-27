@@ -67,6 +67,11 @@ export function createFirestoreRepository(db, fs) {
       const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "memberOrder"));
       return snap.exists() && Array.isArray(snap.data().order) ? snap.data().order : null;
     },
+    /** サービス紹介「IOL Orderについて」の本文(Rules で platformAdmin だけが読める)。未登録は null */
+    async getServiceIntroduction() {
+      const snap = await fs.getDoc(fs.doc(db, "platformContent", "serviceIntroduction"));
+      return snap.exists() ? snap.data() : null;
+    },
     /** 参加待ち(事前登録。管理者・副管理者のみ読める。施設で絞った問い合わせだけが Rules で許可される) */
     async listPendingMembers(facilityId) {
       const snap = await fs.getDocs(fs.query(fs.collection(db, "pendingMembers"), fs.where("facilityId", "==", facilityId)));

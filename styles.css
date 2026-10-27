@@ -2312,5 +2312,28 @@ input[type="date"], .lens-line select { color-scheme: light; }
 @media (max-width: 560px) {
   .manual-body { padding: 14px 14px; font-size: 0.92rem; }
   .manual-body h1 { font-size: 1.15rem; }
-  .manual-body table { min-width: 520px; }   /* 狭い画面では表だけを横にスクロールする(ページは横にはみ出さない) */
+  .manual-body .is-wide table { min-width: 520px; }   /* 狭い画面では、列の多い表だけを横にスクロールする(ページは横にはみ出さない) */
 }
+
+/* ==========================================================================
+   IOL Orderについて(サービス紹介。当面は運営者だけ。表示はマニュアルと同じ部品を使う)
+   ========================================================================== */
+.main-content.about-open > :not(#aboutView) { display: none !important; }
+button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer; }
+.markdown-details {
+  margin: 12px 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+.markdown-details > summary {
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style-position: inside;
+}
+.markdown-details[open] > summary { border-bottom: 1px solid var(--border-light); }
+.markdown-details-body { padding: 4px 14px 10px; }
+.about-body h2 { scroll-margin-top: 12px; }
+/* マニュアルの「施設管理者のみ」の印(原稿の {*}) */
+.manual-body .manual-admin-mark { color: #dc2626; font-weight: 700; margin: 0 1px; }

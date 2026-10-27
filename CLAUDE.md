@@ -28,10 +28,19 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - `src/`・`styles.css`・`docs/manual/` を変更したら `node scripts/stamp-assets.mjs` を実行する(マニュアルの表示データの作成と index.html のバージョン付与。更新漏れはテストが検出する)。
 
 ## オンラインマニュアル(画面の「使い方・ヘルプ」)
-- 原稿の正式な管理元は `docs/manual/` の Markdown(README.md = 目次、01〜04 = 各ページ)。画面はその内容を表示する(`src/manual/manual-pages.js` は `scripts/build-manual.mjs` の自動生成。直接編集しない。原稿との不一致は `tests/manual.test.js` が検出する)。
+- 原稿の正式な管理元は `docs/manual/` の Markdown(README.md = 目次、01 初めて利用する方 / 02 注文者・代行入力者 / 03 副管理者・施設管理者)。画面はその内容を表示する(`src/manual/manual-pages.js` は `scripts/build-manual.mjs` の自動生成。直接編集しない。原稿との不一致は `tests/manual.test.js` が検出する)。
 - **機能・操作画面・表示の文言を変更したら、同じ作業で関連するマニュアルも更新する**(該当する役割のページ・目次)。更新後は `node scripts/stamp-assets.mjs` を実行し、`npm test` と `tests/browser/manual.pw.mjs` で表示・リンクを確認する。
 - 未実装・未公開の機能を利用できるものとして書かない。運営者(platformAdmin)専用の内部操作の手順は、通常利用者向けのマニュアルに詳しく載せない。
-- `docs/introduction/`(サービス紹介。Codex 作成)は別の成果物。マニュアルの作業では変更しない。
+- 表示するページはログイン状態と施設内の役割で分ける(`src/domain/manual-access.js`。未ログイン: 目次・1 / 注文者・代行入力者: 〜2 / 副管理者・管理者・運営者: 〜3。統合前の旧ページの URL は `src/ui/manual-view.js` の `MANUAL_PAGE_ALIASES` で統合先へ)。画面の整理のためで、権限・Rules とは別。ページを追加したら範囲も決める。
+- 3 では、施設管理者のみが操作できる項目に `{*}`(画面では赤い *)を付け、末尾に「{*} 施設管理者のみ操作できます。」と書く。
+- 当面、マニュアルにはサービス名「IOL Order」とサイトの URL を載せない(「本システム」などと書く。テストが検出する)。
+- `docs/introduction/` はマニュアルの作業では変更しない。
+
+## 紹介ページ「IOL Orderについて」(当面は運営者 platformAdmin だけ)
+- 原稿の正式な管理元は `docs/introduction/service-introduction-web.md`(元原稿 `service-introduction.md` は変更しない)。**git に入れない**(公開サイトはリポジトリのファイルをそのまま配信するため、入れると誰でも読める)。
+- 画面は Firestore `platformContent/serviceIntroduction` の本文を表示する。Rules で platformAdmin だけが読める(メニューの非表示だけに頼らない)。原稿を変えたら `node scripts/publish-introduction.mjs`(確認のみ)→ `--apply`(登録。既存の内容を `backups/` に保存してから上書き)。
+- 一般公開は運営者の承認後だけ: `firestore.rules` の `introductionPublic()` と `src/domain/service-introduction.js` の `INTRODUCTION_PUBLIC_RELEASE` を両方 true にし、メニューの表示範囲も見直す。
+- 内容は現行の実装と照合し、未実装の機能を実装済みとして書かない。
 - デプロイ・移行の手順は `docs/release-plan.md` に従う。
 
 ## テスト範囲(変更内容に応じて調整する)

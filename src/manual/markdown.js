@@ -5,7 +5,8 @@
  *
  * 対応する書式(マニュアルで使うものだけ): 見出し(#〜######)・段落・行末の空白2つの改行・区切り線(---)・
  * 箇条書き(-・*・+、番号付き。字下げで入れ子)・引用(>)・表(| 区切り。列の揃え)・コード(``` と `…`)・太字(**…**)・
- * リンク([文字](URL))・本文中の https:// の URL。
+ * リンク([文字](URL))・本文中の https:// の URL・施設管理者のみの印(`{*}`。画面では赤い *)・折りたたみ(`<details>` の行、`<summary>見出し</summary>` の行、`</details>` の行。
+ * この決まった形だけを折りたたみとして扱い、見出しも文字として表示する。それ以外の HTML はすべて文字のまま)。
  *
  * リンク先は resolveLink に任せる。解決できないもの(javascript: など)はリンクにせず、文字だけを表示する。
  */
@@ -15,6 +16,9 @@ const HR = /^\s*(?:-\s*){3,}$|^\s*(?:\*\s*){3,}$|^\s*(?:_\s*){3,}$/;
 const QUOTE = /^\s{0,3}>/;
 const FENCE = /^\s{0,3}```/;
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+const DETAILS_OPEN = /^\s*<details>\s*$/i;
+const DETAILS_CLOSE = /^\s*<\/details>\s*$/i;
+const SUMMARY = /^\s*<summary>(.*?)<\/summary>\s*$/i;
 const TABLE_SEP = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/;
 
 const indentOf = (line) => line.match(/^\s*/)[0].replace(/\t/g, "    ").length;
@@ -30,7 +34,7 @@ const dedent = (line, n) => {
 
 /** 段落などの終わり(別の種類のブロックの始まり) */
 const startsBlock = (line, next) =>
-  HEADING.test(line) || HR.test(line) || QUOTE.test(line) || FENCE.test(line) || ITEM.test(line) ||
+  DETAILS_OPEN.test(line) || HEADING.test(line) || HR.test(line) || QUOTE.test(line) || FENCE.test(line) || ITEM.test(line) ||
   (line.includes("|") && next !== undefined && TABLE_SEP.test(next));
 
 /**
@@ -57,6 +61,11 @@ function parseBlocks(lines, options) {
       i++;   // 閉じの ```(なければ末尾まで)
       out.push({ type: "code", text: body.join("\n") });
       continue;
+    }
+
+    if (DETAILS_OPEN.test(line)) {
+      const d = parseDetails(lines, i, options);
+      if (d) { out.push(d.block); i = d.next; continue; }
     }
 
     const hm = line.match(HEADING);
@@ -131,6 +140,21 @@ function parseList(lines, i, out, options) {
   return i;
 }
 
+/** 折りたたみ: <details> から対応する </details> まで(入れ子も数える)。最初の行が <summary>…</summary> でなければ null(文字のまま) */
+function parseDetails(lines, i, options) {
+  let depth = 0, end = -1;
+  for (let j = i; j < lines.length; j++) {
+    if (DETAILS_OPEN.test(lines[j])) depth++;
+    else if (DETAILS_CLOSE.test(lines[j]) && --depth === 0) { end = j; break; }
+  }
+  if (end < 0) return null;
+  const inner = lines.slice(i + 1, end);
+  const k = inner.findIndex(l => !isBlank(l));
+  const sm = k >= 0 ? inner[k].match(SUMMARY) : null;
+  if (!sm) return null;
+  return { block: { type: "details", summary: parseInline(sm[1], { ...options, noLinks: true }), children: parseBlocks(inner.slice(k + 1), options) }, next: end + 1 };
+}
+
 function splitRow(line) {
   let s = line.trim();
   if (s.startsWith("|")) s = s.slice(1);
@@ -157,6 +181,7 @@ function paragraphInline(lines, options) {
 
 const INLINE_RULES = [
   { type: "code", re: /`([^`]+)`/ },
+  { type: "adminMark", re: /\{\*\}/ },   // マニュアルの「施設管理者のみ」の印(画面では赤い *)
   { type: "strong", re: /\*\*(.+?)\*\*/ },
   { type: "link", re: /\[([^\]]+)\]\(([^)\s]+)\)/ },
   { type: "url", re: /https?:\/\/[^\s<>()（）「」『』、。，]+[^\s<>()（）「」『』、。，.,:;!?]/ }
@@ -179,6 +204,7 @@ export function parseInline(text, options = {}) {
     const { rule, m } = best;
     if (m.index > 0) out.push({ type: "text", text: rest.slice(0, m.index) });
     if (rule.type === "code") out.push({ type: "code", text: m[1] });
+    else if (rule.type === "adminMark") out.push({ type: "adminMark" });
     else if (rule.type === "strong") out.push({ type: "strong", children: parseInline(m[1], options) });
     else {
       const label = rule.type === "link" ? m[1] : m[0];
@@ -222,5 +248,5 @@ function mergeText(nodes) {
 
 /** 見出しなどの行内の構造から、書式を除いた文字だけを取り出す */
 export function inlineText(nodes) {
-  return (nodes || []).map(n => (n.type === "text" || n.type === "code" ? n.text : n.type === "br" ? " " : inlineText(n.children))).join("");
+  return (nodes || []).map(n => (n.type === "text" || n.type === "code" ? n.text : n.type === "br" ? " " : n.type === "adminMark" ? "*" : inlineText(n.children))).join("");
 }

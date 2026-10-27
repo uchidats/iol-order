@@ -15,6 +15,8 @@ import { confirmDialog } from "./ui/confirm-dialog.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
+import { canViewIntroduction, INTRODUCTION_HASH } from "./domain/service-introduction.js";
+import { manualAudience } from "./domain/manual-access.js";
 
 /**
  * ログイン + 施設への有効な所属が確認でき、施設が確定するまで注文画面を表示しない。
@@ -87,7 +89,9 @@ async function bootstrapWithFirebase(config) {
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
   let manual = null;  // 使い方・ヘルプ(ログインの前後どちらでも。URL のハッシュ #help/… で開く)
+  let about = null;   // IOL Orderについて(当面は運営者だけ。URL のハッシュ #about。本文は Rules で platformAdmin だけが読める)
   let isPlatformAdmin = false;   // メニューの表示だけに使う(ID トークンの platformAdmin)
+  let adminChecked = false;   // ログインの状態と platformAdmin の確認が済んだか(済むまで #about は判定しない)
   let canApproveFacilities = false;   // メニューの表示だけに使う(ID トークンの platformAdmin。サーバーでも必ず確認する)
 
   const ui = createAuthUi({
@@ -108,7 +112,7 @@ async function bootstrapWithFirebase(config) {
 
   const menu = createHeaderMenu({
     onSwitchFacility: async () => {
-      leaveHelp();
+      leaveOverlay();
       const dirty = isOrderFormDirty() || biometryState.userConfirmedValues.isConfirmed;
       // 入力中なら確認(既存のモーダルと同じ見た目。キャンセルなら入力内容・現在の施設はそのまま)
       if (dirty && !(await confirmDialog({ message: "入力中の内容は破棄されます。施設を切り替えますか？", okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
@@ -116,22 +120,30 @@ async function bootstrapWithFirebase(config) {
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
-    onOpenHistory: () => { leaveHelp(); openHistory(); },
-    onOpenSettings: () => { leaveHelp(); openSettings(); },
-    onOpenApplications: () => { leaveHelp(); openApplications(); },
-    onOpenPreregistrations: () => { leaveHelp(); openPreregistrations(); },
-    onRegisterFacility: () => { leaveHelp(); openOnboarding("register"); },
+    onOpenHistory: () => { leaveOverlay(); openHistory(); },
+    onOpenSettings: () => { leaveOverlay(); openSettings(); },
+    onOpenApplications: () => { leaveOverlay(); openApplications(); },
+    onOpenPreregistrations: () => { leaveOverlay(); openPreregistrations(); },
+    onRegisterFacility: () => { leaveOverlay(); openOnboarding("register"); },
     onOpenHelp: () => openHelp(),
-    onSignOut: () => { leaveHelp(); signOut(); }
+    onOpenAbout: () => openAbout(),
+    onSignOut: () => { leaveOverlay(); signOut(); }
   });
 
   const ORDER_VIEW_IDS = ["iolOrderForm", "ocrFeatureCard"];
   const setOrderViewHidden = (hidden) => ORDER_VIEW_IDS.forEach(id => document.getElementById(id).classList.toggle("hidden", hidden));
 
-  /** 使い方・ヘルプの戻るボタンの文言(開いている間に、ログインの状態が変わったら更新する) */
+  /** 使い方・ヘルプ / IOL Orderについて の戻るボタンの文言(開いている間に、ログインの状態が変わったら更新する) */
   const helpBackLabel = () => {
     if (decideAccess(state).state === ACCESS.GRANTED) return "注文画面に戻る";
     return state.user ? "元の画面に戻る" : "ログイン画面に戻る";
+  };
+
+  /** マニュアルの閲覧範囲(ログイン状態と、選択中の施設での役割。確認中は null。画面の整理のためで、権限の判定ではない) */
+  const helpAudience = () => {
+    const access = decideAccess(state);
+    return manualAudience({ checked: adminChecked, user: state.user, isPlatformAdmin, membershipsLoaded: state.membershipsLoaded,
+      grantedRole: access.state === ACCESS.GRANTED ? access.role : null });
   };
 
   /** URL のハッシュに合わせて、使い方・ヘルプを開く・閉じる(ブラウザの戻る・進む、リンクの共有に対応) */
@@ -140,7 +152,7 @@ async function bootstrapWithFirebase(config) {
     const pageId = pageIdFromHash(location.hash);
     if (pageId === null) { if (manual && manual.isOpen()) manual.close(); return; }
     if (!manual) {
-      manual = createManualView({ mount: document.querySelector("main.main-content"), backLabel: helpBackLabel, onBack: () => backFromHelp() });
+      manual = manual || createManualView({ mount: document.querySelector("main.main-content"), backLabel: helpBackLabel, onBack: () => backFromHelp(), audience: helpAudience });
     }
     manual.show(pageId);
   }
@@ -151,15 +163,42 @@ async function bootstrapWithFirebase(config) {
     else location.hash = "#help";   // hashchange で開く
   }
 
-  /** ハッシュを外して閉じる(他の画面へ移る・再読み込みの前。再読み込みでヘルプが開き直さないように) */
-  function leaveHelp() {
-    if (pageIdFromHashLike(location.hash)) history.pushState(null, "", location.pathname + location.search);
-    if (manual && manual.isOpen()) manual.close();
+  /**
+   * IOL Orderについて: URL のハッシュが #about のときだけ開く。閲覧できない人(未ログイン・一般利用者)には何も表示せず、
+   * ハッシュも黙って外す(ページの存在を示さない)。本文の読み込みは Rules で platformAdmin に限られる(画面の判定だけに頼らない)
+   */
+  async function syncAboutFromHash() {
+    if (location.hash !== INTRODUCTION_HASH) { if (about && about.isOpen()) about.close(); return; }
+    if (!adminChecked) return;   // ログインの状態が分かってから(確認後にもう一度呼ぶ)
+    if (!ctx || !state.user || !canViewIntroduction({ isPlatformAdmin })) {
+      if (about && about.isOpen()) about.close();
+      history.replaceState(null, "", location.pathname + location.search);
+      return;
+    }
+    if (!about) {
+      const { createAboutView } = await import("./ui/about-view.js");
+      about = about || createAboutView({ mount: document.querySelector("main.main-content"), loadContent: () => ctx.repository.getServiceIntroduction(), backLabel: helpBackLabel, onBack: () => backFromHelp() });
+    }
+    if (location.hash === INTRODUCTION_HASH && !about.isOpen()) about.show();
   }
 
-  /** 戻るボタン: ヘルプを閉じ、施設に入っていれば注文画面を表示する(開いていた施設設定・注文履歴なども閉じる) */
+  /** メニューの「IOL Orderについて」(運営者だけに表示) */
+  function openAbout() {
+    if (!canViewIntroduction({ isPlatformAdmin })) return;
+    if (location.hash === INTRODUCTION_HASH) syncAboutFromHash();
+    else location.hash = INTRODUCTION_HASH;   // hashchange で開く
+  }
+
+  /** ハッシュを外して、ヘルプ・紹介を閉じる(他の画面へ移る・再読み込みの前。再読み込みで開き直さないように) */
+  function leaveOverlay() {
+    if (pageIdFromHashLike(location.hash) || location.hash === INTRODUCTION_HASH) history.pushState(null, "", location.pathname + location.search);
+    if (manual && manual.isOpen()) manual.close();
+    if (about && about.isOpen()) about.close();
+  }
+
+  /** 戻るボタン: ヘルプ・紹介を閉じ、施設に入っていれば注文画面を表示する(開いていた施設設定・注文履歴なども閉じる) */
   function backFromHelp() {
-    leaveHelp();
+    leaveOverlay();
     if (decideAccess(state).state !== ACCESS.GRANTED) return;
     for (const v of [settings, orderHistory, applications, preregistrations]) if (v && v.isOpen()) v.close();
     if (registration.open) closeOnboarding();
@@ -167,7 +206,7 @@ async function bootstrapWithFirebase(config) {
     window.scrollTo(0, 0);
   }
 
-  window.addEventListener("hashchange", () => { syncHelpFromHash(); });
+  window.addEventListener("hashchange", () => { syncHelpFromHash(); syncAboutFromHash(); });
   if (pageIdFromHashLike(location.hash)) syncHelpFromHash();   // #help 付きの URL で開いたとき(ログインの前でも表示する)
 
   /** 施設登録の申請の一覧を開く(承認権限のある運営者のみ。一覧・承認・却下の権限はサーバーが確認する) */
@@ -328,13 +367,15 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin
+        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin,
+        canAbout: canViewIntroduction({ isPlatformAdmin })
       });
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       menu.update(null);
     }
-    if (manual && manual.isOpen()) manual.updateBackLabel();
+    if (manual && manual.isOpen()) manual.updateAudience();   // 閲覧範囲(ログイン・役割の確認が進んだら表示し直す)・戻るボタンの文言
+    if (about && about.isOpen()) about.updateBackLabel();
     return access;
   };
 
@@ -568,6 +609,8 @@ async function bootstrapWithFirebase(config) {
 
       state.authReady = true;
       state.user = user;
+      adminChecked = false;
+      if (!user) { isPlatformAdmin = false; adminChecked = true; syncAboutFromHash(); }
       state.membershipsLoaded = false;
       state.memberships = [];
       state.facilities = [];
@@ -589,6 +632,8 @@ async function bootstrapWithFirebase(config) {
         // 施設登録の申請を承認できるか(メニューの表示だけ。権限はサーバーが確認する)
         try { isPlatformAdmin = (await user.getIdTokenResult()).claims.platformAdmin === true; } catch { isPlatformAdmin = false; }
         canApproveFacilities = isPlatformAdmin;   // 施設登録の承認権限(現在は運営者のみ。将来の委任では別に判定する)
+        adminChecked = true;
+        syncAboutFromHash();   // #about 付きの URL で開いたとき(運営者でなければ何も表示しない)
         state.membershipsLoaded = true;
         if (state.pendingInvites.length) { render(); return; } // 参加確認を先に表示する(答え終わったら respondPending から先へ進む)
         if (await autoSelectFacility()) return; // 現在地判定の中で描画・遷移済み
@@ -600,6 +645,7 @@ async function bootstrapWithFirebase(config) {
     console.error("Firebaseの初期化に失敗しました:", e);
     error = "認証サービスに接続できません。時間をおいて再度お試しください。";
     state.authReady = true; state.user = null; // 画面は閉じたまま
+    adminChecked = true; syncAboutFromHash();
     render();
   }
 }
