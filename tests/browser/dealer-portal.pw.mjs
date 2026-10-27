@@ -250,6 +250,47 @@ test("ディーラー画面: 有効な所属が2社なら会社を選ぶ。選�
   } finally { await browser.close(); }
 });
 
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面のログイン: 上段に「Googleでログイン」(推奨・毎回アカウントを選択)、下段にメールリンク(代替)。キャンセル・ブロックの案内。スマートフォン/PC: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [390, 1100]) {
+        const context = await newFakeContext(browser, base, width, null);
+        const page = await context.newPage();
+        await installFakeServer(page, "staff");
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await page.goto(`${base}dealer.html`);
+        const google = page.locator("#btnDealerGoogle"), send = page.locator("#btnDealerSendLink");
+        await google.waitFor();
+        assert.equal(await google.innerText(), "Googleでログイン");
+        const [g, m] = [await google.boundingBox(), await page.locator("#dealerEmail").boundingBox()];
+        assert.ok(g.y < m.y, `${width}: Google が上段`);
+        assert.match(await google.getAttribute("class"), /btn-primary/);
+        assert.match(await send.getAttribute("class"), /btn-secondary/, "メールリンクは代替");
+        assert.match(await page.locator('[data-login="google"]').innerText(), /推奨/);
+        // 押すとアカウントの選択画面を出す指定で呼ぶ。閉じた・ブロックされたときは案内(サーバーには問い合わせない)
+        await google.click();
+        await page.getByText("ログインがキャンセルされました。").waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__googleCalls), [{ prompt: "select_account" }]);
+        await page.evaluate(() => { window.__fakeGoogle = async () => { throw Object.assign(new Error("blocked"), { code: "auth/popup-blocked" }); }; });
+        await google.click();
+        await page.getByText(/ポップアップがブロックされました/).waitFor();
+        assert.equal(await google.isEnabled(), true, "失敗の後はもう一度押せる");
+        // メールリンクも従来どおり(戻り先は dealer.html)
+        await page.fill("#dealerEmail", "x1@corp.example.jp");
+        await send.click();
+        await page.waitForFunction(() => (window.__linkSent || []).length === 1);
+        assert.deepEqual(await calls(page, "context"), [], "ログイン前はサーバーに問い合わせない");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
+
 test("ディーラー画面: 未ログインはメールリンクのログイン(戻り先は dealer.html)。所属のない人には会社名・施設名を出さない。参加の確認(chromium)", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");

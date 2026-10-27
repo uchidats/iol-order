@@ -31,6 +31,16 @@ test("Googleログインはポップアップ + GoogleAuthProvider", async () =>
   assert.deepEqual(calls[0], ["popup", true]);
 });
 
+test("Googleログイン: selectAccount を指定すると毎回アカウントの選択画面(ディーラー画面)。指定なしは従来どおり(医療機関の画面)", async () => {
+  const params = [];
+  class GoogleAuthProvider { setCustomParameters(p) { this.p = p; } }
+  const { fns } = makeFns({ GoogleAuthProvider, signInWithPopup: async (a, p) => { params.push(p.p || null); return { user: { uid: "u" } }; } });
+  const s = createAuthService({ auth: {}, fns, currentUrl: () => "https://x/y/" });
+  await s.signInWithGoogle();
+  await s.signInWithGoogle({ selectAccount: true });
+  assert.deepEqual(params, [null, { prompt: "select_account" }]);
+});
+
 test("メールリンク送信は handleCodeInApp とクエリ無しの戻り先を使う", async () => {
   const { fns, calls } = makeFns();
   const storage = memStore();

@@ -21,8 +21,13 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
       return fns.onAuthStateChanged(auth, callback);
     },
 
-    async signInWithGoogle() {
+    /**
+     * Googleでログイン(ポップアップ)。
+     * @param {{selectAccount?:boolean}} [opts] selectAccount: 毎回アカウントの選択画面を出す(個人のアカウントなどで自動的にログインしないように。ディーラー画面で使う)
+     */
+    async signInWithGoogle({ selectAccount = false } = {}) {
       const provider = new fns.GoogleAuthProvider();
+      if (selectAccount && typeof provider.setCustomParameters === "function") provider.setCustomParameters({ prompt: "select_account" });
       return fns.signInWithPopup(auth, provider);
     },
 

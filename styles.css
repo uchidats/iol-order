@@ -2343,6 +2343,9 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
    ========================================================================== */
 .dealer-panel { display: flex; flex-direction: column; gap: 10px; }
 .dealer-panel [hidden] { display: none !important; }   /* .btn の display より優先(「さらに表示」などを隠す) */
+.dealer-login-block { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }   /* ログイン: 上段 Google(推奨)・下段メールリンク(代替) */
+.dealer-login-block + .dealer-login-block { border-top: 1px solid var(--border-light); }
+.dealer-login-block .form-hint { margin: 0; }
 .dealer-title-row { justify-content: space-between; align-items: center; gap: 8px; }
 .dealer-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: #ffffff; }
 .dealer-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

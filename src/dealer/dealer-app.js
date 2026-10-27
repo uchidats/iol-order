@@ -42,26 +42,54 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       withSignOut ? h("div", { class: "onboarding-actions" }, signOutBtn()) : null].filter(Boolean));
   }
 
-  // ---------- ログイン(メールリンク) ----------
-  function showLogin({ notice = "", error = "", onSend }) {
+  // ---------- ログイン(Google: 推奨 / メールリンク: 代替) ----------
+  /** ログインの失敗を利用者向けの文言に(Firebase Auth のエラーコード) */
+  function describeLoginError(e, mode) {
+    const code = String((e && e.code) || "");
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request" || code === "auth/user-cancelled") return "ログインがキャンセルされました。";
+    if (code === "auth/popup-blocked") return "ポップアップがブロックされました。ブラウザでポップアップを許可するか、下のメールアドレスでのログインをお使いください。";
+    if (code === "auth/account-exists-with-different-credential") return "このメールアドレスは別のログイン方法で登録されています。メールアドレスでのログインをお試しください。";
+    if (code === "auth/network-request-failed") return "通信に失敗しました。通信状況を確認して、もう一度お試しください。";
+    if (code.startsWith("auth/")) return mode === "google" ? "Googleでのログインに失敗しました。もう一度お試しいただくか、メールアドレスでログインしてください。" : "ログインリンクを送信できませんでした。メールアドレスを確認してください。";
+    if (e && /メールアドレスを入力/.test(String(e.message))) return e.message;
+    return describeCallableError(e);
+  }
+
+  /**
+   * ログイン画面。上段に「Googleでログイン」(推奨)、下段にメールリンク(代替。Googleアカウントがない企業メール向け)。
+   * どちらでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
+   */
+  function showLogin({ notice = "", error = "", onGoogle = null, onSend }) {
+    const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
     const email = h("input", { class: "form-control", type: "email", id: "dealerEmail", autocomplete: "email", "aria-label": "企業メールアドレス", maxlength: "254" });
-    const send = h("button", { type: "button", class: "btn btn-primary", id: "btnDealerSendLink" }, "ログインリンクを送信");
+    const send = h("button", { type: "button", class: onGoogle ? "btn btn-secondary" : "btn btn-primary", id: "btnDealerSendLink" }, "ログインリンクを送信");
     const msg = h("p", { class: notice ? "form-hint" : "error-message", role: "status" }, notice || error);
-    send.addEventListener("click", async () => {
-      send.disabled = true; msg.className = "form-hint"; msg.textContent = "";
-      try { await onSend(email.value); msg.className = "form-hint"; msg.textContent = "ログインリンクを送信しました。メール内のリンクをこの端末で開いてください。"; }
-      catch (e) {
-        msg.className = "error-message";
-        msg.textContent = String((e && e.code) || "").startsWith("auth/") ? "ログインリンクを送信できませんでした。メールアドレスを確認してください。"
-          : (e && /メールアドレスを入力/.test(String(e.message)) ? e.message : describeCallableError(e));
-      }
-      finally { send.disabled = false; }
+    const busy = (b) => { send.disabled = b; if (google) google.disabled = b; };
+    if (google) google.addEventListener("click", async () => {
+      busy(true); msg.className = "form-hint"; msg.textContent = "";
+      try { await onGoogle(); }   // 成功すると認証状態の変化で画面が切り替わる
+      catch (e) { msg.className = "error-message"; msg.textContent = describeLoginError(e, "google"); }
+      finally { busy(false); }
     });
-    panel.replaceChildren(
+    send.addEventListener("click", async () => {
+      busy(true); msg.className = "form-hint"; msg.textContent = "";
+      try { await onSend(email.value); msg.className = "form-hint"; msg.textContent = "ログインリンクを送信しました。メール内のリンクをこの端末で開いてください。"; }
+      catch (e) { msg.className = "error-message"; msg.textContent = describeLoginError(e, "email"); }
+      finally { busy(false); }
+    });
+    panel.replaceChildren(...[
       h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー用 受注一覧")),
-      h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。登録された企業メールアドレスを入力すると、ログイン用のリンクが届きます(パスワードは不要です)。"),
-      h("label", { class: "form-label", for: "dealerEmail" }, "企業メールアドレス"), email,
-      h("div", { class: "onboarding-actions" }, send), msg);
+      h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
+      google ? h("div", { class: "dealer-login-block", "data-login": "google" },
+        h("div", { class: "form-label" }, "Googleアカウントでログイン(推奨)"),
+        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。"),
+        h("div", { class: "onboarding-actions" }, google)) : null,
+      h("div", { class: "dealer-login-block", "data-login": "email" },
+        h("label", { class: "form-label", for: "dealerEmail" }, google ? "メールアドレスでログイン(Googleアカウントがない場合。パスワード不要)" : "企業メールアドレス"),
+        h("p", { class: "form-hint" }, "招待された企業メールアドレスを入力すると、ログイン用のリンクが届きます。"),
+        email,
+        h("div", { class: "onboarding-actions" }, send)),
+      msg].filter(Boolean));
   }
 
   // ---------- 参加の確認 ----------

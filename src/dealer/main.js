@@ -6,7 +6,8 @@ import { createDealerApp } from "./dealer-app.js";
 
 /**
  * ディーラー専用画面(dealer.html)の起動。医療機関の画面(index.html)とは別の入口。
- * Firebase のプロジェクトとメールリンク認証は共用するが、施設の所属・施設登録の画面には進まない。
+ * Firebase のプロジェクトと認証(Googleログイン・メールリンク)は医療機関の画面と共用するが、施設の所属・施設登録の画面には進まない。
+ * ログインの方法にかかわらず、招待先のメールとの一致・会社の所属・施設の許可はサーバーが毎回確認する(確認済みのメールと UID で判定)。
  * メールリンクの戻り先は同じドメインの dealer.html に固定する(任意の URL へは戻さない)。
  */
 async function bootstrap() {
@@ -38,7 +39,14 @@ async function bootstrap() {
   let uid = null;
   service.onChange(async (user) => {
     if (uid && (!user || user.uid !== uid)) { location.reload(); return; }   // 別のユーザーへの切り替え: 画面の状態を持ち越さない
-    if (!user) { ui.showLogin({ error, onSend: (email) => service.sendEmailLink(email) }); return; }
+    if (!user) {
+      ui.showLogin({
+        error,
+        onGoogle: () => service.signInWithGoogle({ selectAccount: true }),   // 会社のアカウントを選べるよう、毎回アカウントの選択画面を出す
+        onSend: (email) => service.sendEmailLink(email)
+      });
+      return;
+    }
     uid = user.uid;
     if (user.emailVerified === false) { ui.showMessage("ディーラー画面", "メールアドレスの確認が済んだアカウントのみ利用できます。", { error: true }); return; }
     await ui.enter();
