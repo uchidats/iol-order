@@ -11,12 +11,13 @@ import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebas
 import { getDocs, getDoc, doc, collection, query, where, setDoc } from "firebase/firestore";
 import { createMemberService, pendingIdOf, PENDING_TTL_MS } from "../../functions/src/members.js";
 import { createRegistrationService } from "../../functions/src/registration.js";
+import { createFacilityApplicationService } from "../../functions/src/facility-applications.js";
 
 const PROJECT = "demo-iol-functions";
 const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").split(":");
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
 
-let env, db, svc, registration, clock;
+let env, db, svc, registration, applications, clock;
 const T0 = Date.parse("2026-10-24T00:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -26,6 +27,7 @@ before(async () => {
   clock = { t: T0 };
   svc = createMemberService({ db, FieldValue, Timestamp, now: () => clock.t });
   registration = createRegistrationService({ db, FieldValue, Timestamp, now: () => clock.t });
+  applications = createFacilityApplicationService({ db, FieldValue, Timestamp, registration, now: () => clock.t });
   env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: fs.readFileSync(rulesPath, "utf8"), host, port: Number(port) } });
 });
 after(async () => { await env.clearFirestore(); await env.cleanup(); });
@@ -267,10 +269,17 @@ test("削除: 削除した人宛ての参加待ちも消え、その施設に再
   assert.equal((await pend(G, "x@example.jp")).exists, true);
 });
 
+// 新しい施設は「申請 → 運営者の承認」で作られる(申請者が最初の管理者)
+async function createFacility(auth, name) {
+  const r = await applications.applyFacility({ auth, data: { name, requestId: crypto.randomUUID(), confirmDuplicate: true } });
+  const ops = { uid: "ops-approver", token: { email: "ops@medconf.example", email_verified: true, platformAdmin: true } };
+  return applications.decideApplication({ auth: ops, data: { applicationId: r.applicationId, decision: "approve", confirmDuplicate: true } });
+}
+
 // ================= 施設の削除 =================
 test("施設の削除: その施設の参加待ちも削除される。他施設の参加待ちは残る。副管理者は施設を削除できない", async () => {
   const a = user("adminZ");
-  const { facilityId } = await registration.registerFacility({ auth: a, data: { name: "削除する施設", requestId: crypto.randomUUID() } });
+  const { facilityId } = await createFacility(a, "削除する施設");
   await svc.addMember({ auth: a, data: { facilityId, name: "x", email: "x@example.jp", role: "orderer" } });
   await svc.addMember({ auth: user("adminB"), data: { facilityId: G, name: "x", email: "x@example.jp", role: "orderer" } });
   await db.doc(`facilities/${facilityId}/members/subZ`).set({ uid: "subZ", role: "subadmin" });
@@ -283,7 +292,7 @@ test("施設の削除: その施設の参加待ちも削除される。他施設
 
 test("施設名の変更は管理者のみ(副管理者は不可)", async () => {
   const a = user("adminZ");
-  const { facilityId } = await registration.registerFacility({ auth: a, data: { name: "名前変更の施設", requestId: crypto.randomUUID() } });
+  const { facilityId } = await createFacility(a, "名前変更の施設");
   await db.doc(`facilities/${facilityId}/members/subZ`).set({ uid: "subZ", role: "subadmin" });
   await rejects(registration.renameFacility({ auth: user("subZ"), data: { facilityId, name: "乗っ取り" } }), "permission-denied");
   assert.equal((await db.doc(`facilities/${facilityId}`).get()).get("name"), "名前変更の施設");

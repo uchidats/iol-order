@@ -308,6 +308,11 @@ service cloud.firestore {
     match /registrationQuota/{uid} {
       allow read, write: if false;
     }
+    // 新しい施設の登録申請(申請者名・メールアドレスを含む)。申請・一覧・承認・却下はサーバー(Cloud Functions)だけが行う。
+    // 承認権限の確認もサーバー(運営者を含め、クライアントから直接は読み書きできない)
+    match /facilityApplications/{applicationId} {
+      allow read, write: if false;
+    }
     match /rateLimits/{id} {
       allow read, write: if false;
     }

@@ -15,6 +15,14 @@ export const MEMBER_ROLES = Object.freeze([ROLES.ADMIN, ROLES.SUBADMIN, ROLES.OR
 /** 施設設定・利用者管理ができる役割 */
 export const MANAGER_ROLES = Object.freeze([ROLES.ADMIN, ROLES.SUBADMIN]);
 
+/**
+ * 新しい施設の登録申請を承認・却下できるか(施設登録の承認権限)。platformAdmin 権限とは別の判定として、ここだけで決める。
+ * 現在は運営者(platformAdmin)だけ。将来、信頼できる担当者に委任する場合は、この判定に専用の権限を加える
+ * (承認権限は申請の一覧・承認・却下だけに使い、施設の注文履歴・取引情報などを読む権限は与えない)。
+ * @param {{isPlatformAdmin?:boolean}} user assertVerifiedUser の結果
+ */
+export const canApproveFacilities = (user) => Boolean(user && user.isPlatformAdmin === true);
+
 export const isMemberRole = (role) => MEMBER_ROLES.includes(role);
 export const isManagerRole = (role) => MANAGER_ROLES.includes(role);
 

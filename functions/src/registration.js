@@ -2,7 +2,7 @@
  * 施設のセルフ登録・施設名の確認と変更・施設の削除（サーバー側ロジック）
  *
  * Admin SDK 経由で実行される（Firestore Security Rules を介さない）ため、
- * ここが唯一の「施設作成」の経路になる(既存施設への参加は利用者管理の事前登録: members.js。旧招待コード方式は廃止)。クライアントには一切の権限を与えない。
+ * 新しい施設は、申請と運営者の承認(facility-applications.js)でだけ作られる(既存施設への参加は利用者管理の事前登録: members.js。旧招待コード方式は廃止)。クライアントには一切の権限を与えない。
  * - 依存（db, FieldValue など）は注入する。テストはエミュレータ上の本物の Firestore で実行する。
  * - 入力は厳格に検証する（未知のキーは拒否）。クライアントは role / platformAdmin / facilityId を指定できない。
  */
@@ -82,7 +82,10 @@ function assertKnownKeys(data, allowed) {
 }
 
 export function parseRegisterInput(data) {
-  assertKnownKeys(data, ["name", "requestId", "confirmDuplicate"]);
+  assertKnownKeys(data, ["name", "requestId", "confirmDuplicate", "applicantName"]);
+  // 申請者名(任意。未入力ならログイン情報の表示名)
+  const applicantName = data.applicantName === undefined || data.applicantName === null ? "" : (typeof data.applicantName === "string" ? normalizeName(data.applicantName) : null);
+  if (applicantName === null || applicantName.length > 50) throw new RegistrationError("invalid-argument", "申請者のお名前は50文字以内で入力してください");
   const name = typeof data.name === "string" ? normalizeName(data.name) : "";
   if (!name || name.length > LIMITS.nameMax) {
     throw new RegistrationError("invalid-argument", `施設名は1〜${LIMITS.nameMax}文字で入力してください`);
@@ -93,7 +96,7 @@ export function parseRegisterInput(data) {
   if (data.confirmDuplicate !== undefined && typeof data.confirmDuplicate !== "boolean") {
     throw new RegistrationError("invalid-argument", "リクエストの形式が正しくありません");
   }
-  return { name, requestId: data.requestId, confirmDuplicate: data.confirmDuplicate === true };
+  return { name, requestId: data.requestId, confirmDuplicate: data.confirmDuplicate === true, applicantName };
 }
 
 // ---------- 認証 ----------
@@ -262,59 +265,6 @@ export function createRegistrationService({ db, FieldValue, Timestamp, now = Dat
     });
   }
 
-  /** 新しい施設を登録し、呼び出したユーザーを最初の管理者にする */
-  async function registerFacility({ auth, data }) {
-    const user = assertVerifiedUser(auth);
-    const input = parseRegisterInput(data);
-    await consumeRate(user.uid, "registerFacility");
-    const key = nameKey(input.name);
-    const facilityId = deriveFacilityId(user.uid, input.requestId);
-    const facRef = db.doc(`facilities/${facilityId}`);
-    const memRef = db.doc(`facilities/${facilityId}/members/${user.uid}`);
-    const quotaRef = db.doc(`registrationQuota/${user.uid}`);
-
-    // 同じ要求の再試行（途中失敗後・二重送信）は、作成済みの施設をそのまま返す
-    const existing = await facRef.get();
-    if (existing.exists) {
-      if (existing.get("createdBy") === user.uid) return { status: "exists", facilityId };
-      throw new RegistrationError("already-exists", "登録できませんでした。もう一度お試しください");
-    }
-
-    // 重複候補（確認済みでなければ登録せず、候補の有無だけ返す）
-    if (!input.confirmDuplicate) {
-      const dup = await findNameCandidates(key);
-      if (dup.exact || dup.similarCount > 0) return { status: "duplicate-candidate", exact: dup.exact, similarCount: dup.similarCount };
-    }
-
-    // 施設・最初の管理者の所属・利用枠の更新を1つのトランザクションで行う（全部成功か全部失敗）
-    return db.runTransaction(async (tx) => {
-      const [fac, quota] = await Promise.all([tx.get(facRef), tx.get(quotaRef)]);
-      if (fac.exists) {
-        if (fac.get("createdBy") === user.uid) return { status: "exists", facilityId };
-        throw new RegistrationError("already-exists", "登録できませんでした。もう一度お試しください");
-      }
-      const count = quota.exists ? quota.get("count") || 0 : 0;
-      const keys = quota.exists ? quota.get("keys") || [] : [];
-      if (count >= LIMITS.maxFacilitiesPerUser) {
-        throw new RegistrationError("resource-exhausted", `セルフ登録できる施設は1ユーザーあたり${LIMITS.maxFacilitiesPerUser}件までです`);
-      }
-      // 同一ユーザーの同時登録（別タブ等）でも、同名の二重作成を直列化して検出する
-      if (!input.confirmDuplicate && keys.includes(key)) {
-        return { status: "duplicate-candidate", exact: true, similarCount: 1 };
-      }
-      tx.create(facRef, {
-        name: input.name, status: "active",
-        createdBy: user.uid, selfRegistered: true,
-        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
-      });
-      tx.create(memRef, {
-        uid: user.uid, role: "admin",
-        displayName: user.displayName, email: user.email, updatedAt: FieldValue.serverTimestamp()
-      });
-      tx.set(quotaRef, { count: count + 1, keys: [...keys, key], updatedAt: FieldValue.serverTimestamp() });
-      return { status: "created", facilityId };
-    });
-  }
-
-  return { registerFacility, checkFacilityName, renameFacility, deleteFacility };
+  // 新しい施設の登録は、運営者の承認制(facility-applications.js)。ここでは施設を作らない。重複候補の確認・回数制限は申請でも使う
+  return { checkFacilityName, renameFacility, deleteFacility, findNameCandidates, consumeRate };
 }

@@ -12,6 +12,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineString, defineBoolean, defineSecret } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
+import { createFacilityApplicationService, createApplicationNotifier } from "./src/facility-applications.js";
 import { createOrderService } from "./src/orders.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
@@ -24,6 +25,8 @@ initializeApp();
 
 const REGION = "asia-northeast1";
 const service = createRegistrationService({ db: getFirestore(), FieldValue, Timestamp });
+// 新しい施設の登録は運営者の承認制(申請 → 承認・却下。docs/facility-applications.md)
+const applications = createFacilityApplicationService({ db: getFirestore(), FieldValue, Timestamp, registration: service });
 
 // 注文受付(第1段階: 検証して保存するまで。ディーラーへの通知はしない)。
 // 明示的に有効化するまで受け付けない(キルスイッチ)。functions/.env.<project> で ORDER_INTAKE_ENABLED=true にする。
@@ -73,7 +76,11 @@ const options = {
   serviceAccount: RUNTIME_SERVICE_ACCOUNT
 };
 
-export const registerFacility = onCall(options, wrap(service.registerFacility));
+// 施設の登録申請(呼び出し名は従来どおり registerFacility。申請の時点では施設を作らず、管理者の権限も付けない)
+export const registerFacility = onCall(options, wrap(applications.applyFacility));
+// 申請の一覧・承認・却下(施設登録の承認権限をサーバーで確認する。現在は運営者のみ)
+export const listFacilityApplications = onCall(options, wrap(applications.listApplications));
+export const decideFacilityApplication = onCall(options, wrap(applications.decideApplication));
 export const deleteFacility = onCall(options, wrap(service.deleteFacility));   // 施設の削除(施設管理者のみ・注文履歴なし・自分以外の所属なし)
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)
@@ -131,6 +138,18 @@ const mailOptions = { region: REGION, maxInstances: 5, serviceAccount: RUNTIME_S
 // 送信待ちのメールが作られたら送る(再試行はこの関数ではなく、定期実行が状態を見て行う)
 export const sendOrderMail = onDocumentCreated({ ...mailOptions, document: "facilities/{facilityId}/orders/{orderId}/mails/{mailId}" },
   (event) => (event.data ? mailDispatch.processMail(event.data.ref) : null));
+// 施設の登録申請を運営者に通知する(申請の作成時に1回。失敗しても申請は残り、結果を申請に記録する)。送信の可否・テスト用の宛先は注文メールと同じ設定
+const OPERATOR_NOTIFY_RECIPIENT = defineSecret("OPERATOR_NOTIFY_RECIPIENT");      // 運営者の通知先(カンマ区切り)。個人のアドレスなので Secret Manager
+const applicationNotifier = createApplicationNotifier({
+  db: getFirestore(), FieldValue,
+  isEnabled: () => MAIL_SENDING_ENABLED.value() && Boolean(MAIL_FROM.value()),
+  recipients: () => String(OPERATOR_NOTIFY_RECIPIENT.value() || "").split(","),
+  testOnly: () => MAIL_TEST_ONLY.value(),
+  testRecipient: () => String(MAIL_TEST_RECIPIENT.value() || "").trim(),
+  getSender: () => createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
+});
+export const notifyFacilityApplication = onDocumentCreated({ ...mailOptions, secrets: [...mailOptions.secrets, OPERATOR_NOTIFY_RECIPIENT], document: "facilityApplications/{applicationId}" },
+  (event) => (event.data ? applicationNotifier.notify(event.data.ref) : null));
 // 再送待ち・送信中のまま止まったメール・送信できる注文控えの処理(10分ごと)
 export const retryOrderMails = onSchedule({ ...mailOptions, schedule: "every 10 minutes", timeZone: "Asia/Tokyo" }, () => mailDispatch.processDue());
 // 配信結果(Resend の Webhook。署名を検証する)。受付と配信の結果を区別して記録する

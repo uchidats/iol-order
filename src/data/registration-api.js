@@ -12,9 +12,17 @@ export function createRegistrationApi({ functions, httpsCallable }) {
   return {
     /** 施設名の入力中の重複候補の確認(読み取りのみ。完全一致の有無と似た施設の件数だけ。他施設の情報は返らない) @returns {Promise<{exact:boolean, similarCount:number, candidates:string[]}>} candidates は施設名のみ・最大5件 */
     checkFacilityName: ({ name }) => call("checkFacilityName", { name }),
-    /** @returns {Promise<{status:"created"|"exists", facilityId:string}|{status:"duplicate-candidate", exact:boolean, similarCount:number}>} */
-    registerFacility: ({ name, requestId, confirmDuplicate }) =>
-      call("registerFacility", confirmDuplicate ? { name, requestId, confirmDuplicate: true } : { name, requestId }),
+    /**
+     * 新しい施設の登録申請(運営者の承認制。申請の時点では施設は有効にならず、管理者の権限も付かない)。
+     * @returns {Promise<{status:"submitted", applicationId:string, applicationStatus:string}|{status:"duplicate-candidate", exact:boolean, similarCount:number}>}
+     */
+    registerFacility: ({ name, requestId, confirmDuplicate, applicantName }) =>
+      call("registerFacility", { name, requestId, ...(confirmDuplicate ? { confirmDuplicate: true } : {}), ...(applicantName ? { applicantName } : {}) }),
+    /** 施設登録の申請の一覧(承認権限のある運営者のみ。サーバーが確認する) */
+    listFacilityApplications: () => call("listFacilityApplications", {}),
+    /** 申請の承認・却下(承認権限のある運営者のみ)。firstAdmin を指定すると、その人が参加を承諾したときに最初の管理者になる */
+    decideFacilityApplication: ({ applicationId, decision, firstAdmin, reason, confirmDuplicate }) =>
+      call("decideFacilityApplication", { applicationId, decision, ...(firstAdmin ? { firstAdmin } : {}), ...(reason ? { reason } : {}), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
     /** 施設名の変更(施設管理者のみ。重複候補があれば status:"duplicate-candidate" を返し、confirmDuplicate なしでは変更しない) */
     renameFacility: ({ facilityId, name, confirmDuplicate }) =>
       call("renameFacility", confirmDuplicate ? { facilityId, name, confirmDuplicate: true } : { facilityId, name }),

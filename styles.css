@@ -2183,3 +2183,17 @@ input[type="date"], .lens-line select { color-scheme: light; }
   font-size: 0.9rem;
   border-radius: var(--radius-sm);
 }
+
+/* 施設登録の申請(承認権限のある運営者のみ。facility-applications.js) */
+.application-list { list-style: none; margin: 0 0 16px; padding: 0; }
+.application-item, .application-recent { padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+.application-name { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.application-dup { margin: 6px 0; padding: 6px 10px; border: 1px solid #fcd34d; border-radius: var(--radius-sm); background: #fffbeb; color: #92400e; font-size: 0.88rem; }
+.application-admin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 6px; }
+.application-admin .form-label { margin: 0; }
+.application-other-admin { display: grid; gap: 6px; margin-bottom: 6px; }
+.application-other-admin[hidden] { display: none; }
+.application-actions { justify-content: flex-end; margin-top: 8px; }
+.application-status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: #f3f4f6; color: #374151; }
+.application-status.is-approved { background: #dcfce7; color: #166534; }
+.application-status.is-rejected { background: #fee2e2; color: #991b1b; }

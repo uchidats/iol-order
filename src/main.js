@@ -81,6 +81,8 @@ async function bootstrapWithFirebase(config) {
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
   let orderHistory = null;  // 注文履歴（所属メンバー全員。閲覧のみ・初回表示時に生成）
+  let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
+  let canApproveFacilities = false;   // メニューの表示だけに使う(ID トークンの platformAdmin。サーバーでも必ず確認する)
 
   const ui = createAuthUi({
     onGoogle: () => run(() => ctx.service.signInWithGoogle()),
@@ -109,6 +111,7 @@ async function bootstrapWithFirebase(config) {
     },
     onOpenHistory: () => openHistory(),
     onOpenSettings: () => openSettings(),
+    onOpenApplications: () => openApplications(),
     onRegisterFacility: () => openOnboarding("register"),
     onSignOut: () => signOut()
   });
@@ -116,11 +119,25 @@ async function bootstrapWithFirebase(config) {
   const ORDER_VIEW_IDS = ["iolOrderForm", "ocrFeatureCard"];
   const setOrderViewHidden = (hidden) => ORDER_VIEW_IDS.forEach(id => document.getElementById(id).classList.toggle("hidden", hidden));
 
+  /** 施設登録の申請の一覧を開く(承認権限のある運営者のみ。一覧・承認・却下の権限はサーバーが確認する) */
+  async function openApplications() {
+    if (!canApproveFacilities || !ctx || !ctx.registrationApi) return;
+    if (settings && settings.isOpen()) settings.close();
+    if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (!applications) {
+      const { createFacilityApplications } = await import("./ui/facility-applications.js");
+      applications = createFacilityApplications({ mount: document.querySelector("main.main-content"), api: ctx.registrationApi, onClose: () => setOrderViewHidden(false) });
+    }
+    setOrderViewHidden(true);
+    await applications.open();
+  }
+
   /** 注文履歴を開く(閲覧のみ)。表示するのは選択中の施設の注文だけ。権限は Firestore Rules でも検証される */
   async function openHistory() {
     const access = decideAccess(state);
     if (access.state !== ACCESS.GRANTED) return;
     if (settings && settings.isOpen()) settings.close();
+    if (applications && applications.isOpen()) applications.close();
     if (!orderHistory) {
       const { createOrderHistory } = await import("./ui/order-history.js");
       orderHistory = createOrderHistory({
@@ -154,6 +171,7 @@ async function bootstrapWithFirebase(config) {
       });
     }
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (applications && applications.isOpen()) applications.close();
     setOrderViewHidden(true);
     await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
   }
@@ -203,6 +221,7 @@ async function bootstrapWithFirebase(config) {
     if (decideAccess(state).state !== ACCESS.GRANTED) return;
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (applications && applications.isOpen()) { applications.close(); setOrderViewHidden(false); }
     registration.duplicate = null; error = ""; notice = "";
     registration.open = mode;
     render();
@@ -240,9 +259,9 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role)
+        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities
       });
-      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
+      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       menu.update(null);
     }
@@ -329,8 +348,8 @@ async function bootstrapWithFirebase(config) {
     render();
   }
 
-  /** 新しい施設を登録する（施設・最初の管理者所属の作成はサーバー側で一括して行われる） */
-  async function handleRegister({ name, confirmDuplicate }) {
+  /** 新しい施設の登録を申請する(運営者の承認制。承認されるまで施設は有効にならず、管理者の権限も付かない) */
+  async function handleRegister({ name, applicantName, confirmDuplicate }) {
     if (registration.busy) return;
     error = ""; notice = "";
     const invalid = registrationFlow.validateFacilityName(name);
@@ -341,16 +360,15 @@ async function bootstrapWithFirebase(config) {
     try {
       // 再試行しても同じ要求として扱われるよう、施設名ごとに要求IDを保持する
       const requestId = registrationFlow.getRequestId(window.sessionStorage, name);
-      const r = await ctx.registrationApi.registerFacility({ name, requestId, confirmDuplicate });
+      const r = await ctx.registrationApi.registerFacility({ name, requestId, confirmDuplicate, applicantName });
       if (r.status === "duplicate-candidate") {
         registration.duplicate = { ...r, forName: registrationFlow.normalizeFacilityName(name) };
       } else {
         registrationFlow.clearRequestId(window.sessionStorage);
         registration.duplicate = null;
-        registration.busy = false;
-        if (registration.open) { await refreshWhileGranted(r.facilityId); return; }
-        await refreshAfterMembershipChange(r.facilityId, { openSettingsAfter: true });
-        return;
+        notice = r.applicationStatus === "pending" || r.applicationStatus === undefined
+          ? `「${registrationFlow.normalizeFacilityName(name)}」の登録を申請しました。IOL Order 運営者が確認し、承認されると利用できるようになります(承認後にページを再読み込みしてください)。`
+          : `「${registrationFlow.normalizeFacilityName(name)}」の申請は処理済みです。ページを再読み込みしてください。`;
       }
     } catch (e) {
       console.error("施設の登録に失敗しました:", e);
@@ -498,6 +516,8 @@ async function bootstrapWithFirebase(config) {
           state.facilities = [];
         }
         state.pendingInvites = await loadPendingInvites();
+        // 施設登録の申請を承認できるか(メニューの表示だけ。権限はサーバーが確認する)
+        try { canApproveFacilities = (await user.getIdTokenResult()).claims.platformAdmin === true; } catch { canApproveFacilities = false; }
         state.membershipsLoaded = true;
         if (state.pendingInvites.length) { render(); return; } // 参加確認を先に表示する(答え終わったら respondPending から先へ進む)
         if (await autoSelectFacility()) return; // 現在地判定の中で描画・遷移済み

@@ -218,7 +218,8 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       if (expired(p)) throw new RegistrationError("failed-precondition", "参加の有効期限(30日)が切れています。施設の管理者に再登録を依頼してください");
       const facilityId = p.get("facilityId");
       const role = p.get("role");
-      if (!MEMBER_ROLES.includes(role) || role === ROLES.ADMIN) throw new RegistrationError("failed-precondition", INVALID_PENDING);
+      // 管理者の参加待ちは、施設の申請の承認で指定した最初の管理者(initialAdmin。facility-applications.js)だけ
+      if (!MEMBER_ROLES.includes(role) || (role === ROLES.ADMIN && p.get("initialAdmin") !== true)) throw new RegistrationError("failed-precondition", INVALID_PENDING);
       const [fac, mem, order] = await Promise.all([tx.get(db.doc(`facilities/${facilityId}`)), tx.get(db.doc(`facilities/${facilityId}/members/${user.uid}`)), tx.get(orderRef(facilityId))]);
       if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_PENDING);
 
@@ -238,7 +239,7 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       });
       tx.delete(ref);
       replaceInOrder(tx, order, `p:${data.pendingId}`, `m:${user.uid}`);   // 参加待ちの表示位置のまま、参加済みとして表示する
-      log(tx, facilityId, user, { action: "member.join", via: "preregistration", targetUid: user.uid, targetEmail: user.email, targetRole: role });
+      log(tx, facilityId, user, { action: "member.join", via: p.get("initialAdmin") === true ? "facility-approval" : "preregistration", targetUid: user.uid, targetEmail: user.email, targetRole: role });
       return { status: "joined", facilityId, role };
     });
   }
