@@ -2214,3 +2214,13 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .application-name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .application-delete { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: #9ca3af; cursor: pointer; }
 .application-delete:hover, .application-delete:focus-visible { color: #b91c1c; background: #fef2f2; outline: none; }
+
+/* 施設の事前登録(運営者のみ。facility-preregistrations.js) */
+.prereg-form { margin-bottom: 16px; }
+.prereg-form .form-label { display: grid; gap: 4px; margin-bottom: 10px; }
+.prereg-actions { justify-content: flex-end; }
+.prereg-edit { display: grid; gap: 6px; margin-top: 6px; }
+.prereg-edit[hidden], .prereg-view[hidden], .prereg-actions[hidden] { display: none; }
+.prereg-state.is-pending { background: #fffbeb; color: #92400e; }
+.prereg-state.is-expired, .prereg-state.is-declined, .prereg-state.is-missing { background: #f3f4f6; color: #4b5563; }
+.pending-invite-admin { margin: 6px 0 0; }

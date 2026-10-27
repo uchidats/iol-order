@@ -32,6 +32,17 @@ test("API: 送るのは施設名・要求ID・確認フラグのみ（権限や�
     ["listFacilityApplications", {}],
     ["decideFacilityApplication", { applicationId: "fac-1", decision: "approve", firstAdmin: { name: "責任者", email: "b@example.jp" } }],
     ["decideFacilityApplication", { applicationId: "fac-1", decision: "reject", reason: "重複" }]]);
+  // 施設の事前登録(運営者のみ。サーバーが確認する)。施設ID・権限・状態は画面から指定できない
+  calls.length = 0;
+  await api.preregisterFacility({ name: "事前", adminEmail: "b@example.jp", requestId: "r".repeat(20), status: "active" });
+  await api.listFacilityPreregistrations();
+  await api.updateFacilityPreregistration({ facilityId: "fac-1", name: "直す", adminEmail: "c@example.jp", role: "admin" });
+  await api.cancelFacilityPreregistration({ facilityId: "fac-1" });
+  assert.deepEqual(calls, [
+    ["preregisterFacility", { name: "事前", adminEmail: "b@example.jp", requestId: "r".repeat(20) }],
+    ["listFacilityPreregistrations", {}],
+    ["updateFacilityPreregistration", { facilityId: "fac-1", name: "直す", adminEmail: "c@example.jp", adminName: "" }],
+    ["cancelFacilityPreregistration", { facilityId: "fac-1" }]]);
   // 旧招待コード方式の呼び出し口はない
   assert.equal("createInvite" in api, false);
   assert.equal("acceptInvite" in api, false);

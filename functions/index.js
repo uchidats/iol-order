@@ -13,6 +13,7 @@ import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineString, defineBoolean, defineSecret } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
 import { createFacilityApplicationService, createApplicationNotifier } from "./src/facility-applications.js";
+import { createFacilityPreregistrationService } from "./src/facility-preregistrations.js";
 import { createOrderService } from "./src/orders.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
@@ -27,6 +28,8 @@ const REGION = "asia-northeast1";
 const service = createRegistrationService({ db: getFirestore(), FieldValue, Timestamp });
 // 新しい施設の登録は運営者の承認制(申請 → 承認・却下。docs/facility-applications.md)
 const applications = createFacilityApplicationService({ db: getFirestore(), FieldValue, Timestamp, registration: service });
+// 施設の事前登録(運営者のみ。初期管理者が参加を承諾したときに有効化。docs/facility-preregistration.md)
+const preregistrations = createFacilityPreregistrationService({ db: getFirestore(), FieldValue, Timestamp, registration: service });
 
 // 注文受付(第1段階: 検証して保存するまで。ディーラーへの通知はしない)。
 // 明示的に有効化するまで受け付けない(キルスイッチ)。functions/.env.<project> で ORDER_INTAKE_ENABLED=true にする。
@@ -83,6 +86,11 @@ export const listFacilityApplications = onCall(options, wrap(applications.listAp
 export const decideFacilityApplication = onCall(options, wrap(applications.decideApplication));
 // 申請の削除(運営者 = platformAdmin のみ。審査中・却下済みだけ。運営者の操作履歴 platformAuditLogs に記録)
 export const deleteFacilityApplication = onCall(options, wrap(applications.deleteApplication));
+// 施設の事前登録・一覧・編集・取り消し(運営者 = platformAdmin のみ。サーバーで確認する)
+export const preregisterFacility = onCall(options, wrap(preregistrations.preregisterFacility));
+export const listFacilityPreregistrations = onCall(options, wrap(preregistrations.listPreregistrations));
+export const updateFacilityPreregistration = onCall(options, wrap(preregistrations.updatePreregistration));
+export const cancelFacilityPreregistration = onCall(options, wrap(preregistrations.cancelPreregistration));
 export const deleteFacility = onCall(options, wrap(service.deleteFacility));   // 施設の削除(施設管理者のみ・注文履歴なし・自分以外の所属なし)
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)

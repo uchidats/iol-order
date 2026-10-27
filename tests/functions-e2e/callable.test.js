@@ -108,6 +108,23 @@ test("callable: メール確認済みのアカウントは施設の登録を申�
   assert.equal(fac.fields.createdBy.stringValue, verified.uid);
 });
 
+test("callable: 施設の事前登録 → 初期管理者の参加確認 → 承諾で施設が有効になり管理者になる(運営者以外は事前登録できない)", async () => {
+  const denied = await call("preregisterFacility", { name: "E2E事前登録眼科", adminEmail: "prereg-boss@example.jp", requestId: "prereg-e2e-request-0001" }, verified.idToken);
+  assert.equal(denied.body.error.status, "PERMISSION_DENIED");
+  const r = await call("preregisterFacility", { name: "E2E事前登録眼科", adminEmail: "prereg-boss@example.jp", requestId: "prereg-e2e-request-0001" }, operator.idToken);
+  assert.equal(r.body.result.status, "created");
+  const fid = r.body.result.facilityId;
+  assert.equal((await getDoc(`facilities/${fid}`)).fields.status.stringValue, "preregistered");
+  const bossUser = await createUser("prereg-boss@example.jp", { verified: true });
+  const mine = (await call("listMyPendingMemberships", {}, bossUser.idToken)).body.result.memberships;
+  assert.deepEqual(mine.map(m => [m.facilityId, m.role, m.initialAdmin]), [[fid, "admin", true]]);
+  assert.equal(await getDoc(`facilities/${fid}/members/${bossUser.uid}`), null, "承諾前は管理者ではない");
+  const joined = await call("respondMembership", { pendingId: mine[0].pendingId, accept: true }, bossUser.idToken);
+  assert.equal(joined.body.result.status, "joined");
+  assert.equal((await getDoc(`facilities/${fid}`)).fields.status.stringValue, "active");
+  assert.equal((await getDoc(`facilities/${fid}/members/${bossUser.uid}`)).fields.role.stringValue, "admin");
+});
+
 test("callable: 再送は同じ申請を返す(冪等)。権限の指定は INVALID_ARGUMENT", async () => {
   const again = await call("registerFacility", { name: "E2Eクリニック", requestId: "verified-request-0001" }, verified.idToken);
   assert.deepEqual([again.body.result.status, again.body.result.applicationStatus], ["submitted", "approved"], "同じ要求の再送は同じ申請(処理済み)");
