@@ -273,3 +273,79 @@ test("Rules: 申請はクライアントから読み書きできない(運営者
     await assertFails(setDoc(doc(c, "facilityApplications/fac-000000000000000000000000"), { name: "偽", status: "approved" }));
   }
 });
+
+// ================= 申請の削除(運営者のみ) =================
+const del = (auth, applicationId) => apps.deleteApplication({ auth, data: { applicationId } });
+
+test("削除: 運営者(platformAdmin)だけ。一般ユーザー・施設の管理者・申請者本人・未ログイン・メール未確認は不可", async () => {
+  await db.doc("facilities/f1").set({ name: "既存", status: "active" });
+  await db.doc("facilities/f1/members/adminX").set({ uid: "adminX", role: "admin" });
+  const r = await apply(user("userA"), "削除権限の医院");
+  for (const auth of [user("userB"), user("adminX"), user("userA"), user("x", { platformAdmin: "true" }), null, user("y", { platformAdmin: true, email_verified: false })]) {
+    await assert.rejects(del(auth, r.applicationId), (e) => ["permission-denied", "unauthenticated"].includes(e.code));
+  }
+  assert.equal((await appOf(r.applicationId)).status, "pending");
+  for (const bad of [{}, { applicationId: "x" }, { applicationId: r.applicationId, force: true }]) await rejects(apps.deleteApplication({ auth: ops(), data: bad }), "invalid-argument");
+});
+
+test("削除: 審査中・却下済みは削除でき、承認済みは削除できない(施設との整合性)。削除は運営者の操作履歴に残る", async () => {
+  const pend = await apply(user("userA"), "審査中の医院");
+  const rej = await apply(user("userB"), "却下された医院");
+  await decide(ops(), { applicationId: rej.applicationId, decision: "reject", reason: "確認できない" });
+  const appr = await apply(user("userC"), "承認された医院");
+  await decide(ops(), { applicationId: appr.applicationId, decision: "approve" });
+  await rejects(del(ops(), appr.applicationId), "failed-precondition");
+  assert.equal((await appOf(appr.applicationId)).status, "approved");
+  assert.equal((await db.doc(`facilities/${appr.applicationId}`).get()).get("status"), "active", "承認済みの施設はそのまま");
+  assert.deepEqual(await del(ops(), pend.applicationId), { status: "deleted", applicationId: pend.applicationId });
+  assert.deepEqual(await del(ops(), rej.applicationId), { status: "deleted", applicationId: rej.applicationId });
+  assert.equal((await db.doc(`facilityApplications/${pend.applicationId}`).get()).exists, false);
+  assert.equal((await db.doc(`facilityApplications/${rej.applicationId}`).get()).exists, false);
+  await rejects(del(ops(), pend.applicationId), "not-found");
+  const logs = (await db.collection("platformAuditLogs").get()).docs.map(d => d.data()).sort((a, b) => a.applicationStatus.localeCompare(b.applicationStatus));
+  assert.deepEqual(logs.map(l => [l.action, l.applicationStatus, l.facilityName, l.applicantUid, l.applicantEmailMasked, l.actorUid, l.historyCount]), [
+    ["facilityApplication.delete", "pending", "審査中の医院", "userA", "u***@example.jp", "ops1", 1],
+    ["facilityApplication.delete", "rejected", "却下された医院", "userB", "u***@example.jp", "ops1", 2]]);
+  assert.ok(logs.every(l => l.at));
+});
+
+test("削除: 申請者の申請枠を1件空け、重複判定(審査中の申請との照合・同じ人の同名の再申請)に数えない。施設・所属・注文には影響しない", async () => {
+  await db.doc("facilities/f1").set({ name: "既存の眼科", status: "active" });
+  await db.doc("facilities/f1/members/adminX").set({ uid: "adminX", role: "admin" });
+  await db.doc("facilities/f1/orders/o1").set({ orderNumber: "IOL-20261027-01", status: "notified" });
+  const before = JSON.stringify([(await db.doc("facilities/f1").get()).data(), (await db.doc("facilities/f1/members/adminX").get()).data(), (await db.doc("facilities/f1/orders/o1").get()).data()]);
+  const r = await apply(user("userA"), "架空の眼科クリニック");
+  assert.deepEqual([(await db.doc("registrationQuota/userA").get()).get("count"), (await db.doc("registrationQuota/userA").get()).get("keys").length], [1, 1]);
+  assert.equal((await apply(user("userB"), "架空の眼科クリニック")).status, "duplicate-candidate", "削除前は審査中の申請と重複");
+  await del(ops(), r.applicationId);
+  const q = (await db.doc("registrationQuota/userA").get()).data();
+  assert.deepEqual([q.count, q.keys], [0, []], "申請枠を空ける");
+  assert.equal((await apply(user("userB"), "架空の眼科クリニック")).status, "submitted", "削除後は重複に数えない");
+  assert.equal((await apply(user("userA"), "架空の眼科クリニック")).status, "duplicate-candidate", "(他の人の審査中の申請とは重複する)");
+  const after = JSON.stringify([(await db.doc("facilities/f1").get()).data(), (await db.doc("facilities/f1/members/adminX").get()).data(), (await db.doc("facilities/f1/orders/o1").get()).data()]);
+  assert.equal(after, before, "既存の施設・所属・注文は変わらない");
+});
+
+test("削除: 削除した申請の通知は送らない。同時の削除は1回だけ処理する", async () => {
+  const sent = [];
+  const notifier = createApplicationNotifier({ db, FieldValue, isEnabled: () => true, recipients: () => ["ops@medconf.example"], getSender: () => ({ send: async (m) => { sent.push(m); return { ok: true, id: "x" }; } }) });
+  const r = await apply(user("userA"), "通知前に削除する医院");
+  await del(ops(), r.applicationId);
+  assert.equal(await notifier.notify(db.doc(`facilityApplications/${r.applicationId}`)), "skipped");
+  assert.equal(sent.length, 0);
+  const r2 = await apply(user("userB"), "同時削除の医院");
+  const results = await Promise.allSettled(Array.from({ length: 4 }, (_, i) => del(ops(`ops${i}`), r2.applicationId)));
+  assert.equal(results.filter(x => x.status === "fulfilled").length, 1);
+  assert.equal((await db.collection("platformAuditLogs").get()).size, 2);
+});
+
+test("Rules: 運営者の操作履歴(platformAuditLogs)はクライアントから読み書きできない(運営者を含む)", async () => {
+  const r = await apply(user("userA"), "Rules削除の医院");
+  await del(ops(), r.applicationId);
+  const id = (await db.collection("platformAuditLogs").get()).docs[0].id;
+  for (const c of [env.authenticatedContext("userA", { email_verified: true }).firestore(), env.authenticatedContext("ops1", { email_verified: true, platformAdmin: true }).firestore(), env.unauthenticatedContext().firestore()]) {
+    await assertFails(getDoc(doc(c, `platformAuditLogs/${id}`)));
+    await assertFails(getDocs(collection(c, "platformAuditLogs")));
+    await assertFails(setDoc(doc(c, "platformAuditLogs/forged"), { action: "x" }));
+  }
+});

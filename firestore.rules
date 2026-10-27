@@ -313,6 +313,10 @@ service cloud.firestore {
     match /facilityApplications/{applicationId} {
       allow read, write: if false;
     }
+    // 運営者の操作履歴(申請の削除など)。Cloud Functions だけが書く。クライアントからは読み書きできない
+    match /platformAuditLogs/{logId} {
+      allow read, write: if false;
+    }
     match /rateLimits/{id} {
       allow read, write: if false;
     }

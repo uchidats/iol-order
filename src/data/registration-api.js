@@ -20,6 +20,8 @@ export function createRegistrationApi({ functions, httpsCallable }) {
       call("registerFacility", { name, requestId, ...(confirmDuplicate ? { confirmDuplicate: true } : {}), ...(applicantName ? { applicantName } : {}) }),
     /** 施設登録の申請の一覧(承認権限のある運営者のみ。サーバーが確認する) */
     listFacilityApplications: () => call("listFacilityApplications", {}),
+    /** 申請の削除(運営者のみ。審査中・却下済みだけ。承認済みは削除できない) */
+    deleteFacilityApplication: ({ applicationId }) => call("deleteFacilityApplication", { applicationId }),
     /** 申請の承認・却下(承認権限のある運営者のみ)。firstAdmin を指定すると、その人が参加を承諾したときに最初の管理者になる */
     decideFacilityApplication: ({ applicationId, decision, firstAdmin, reason, confirmDuplicate }) =>
       call("decideFacilityApplication", { applicationId, decision, ...(firstAdmin ? { firstAdmin } : {}), ...(reason ? { reason } : {}), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
