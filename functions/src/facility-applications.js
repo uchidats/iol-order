@@ -54,6 +54,18 @@ export function buildApplicationMail(app, createdAtMs) {
   };
 }
 
+/** 審査中の申請との重複(既存施設・事前登録の施設との重複は registration.findNameCandidates)。施設名だけを数える */
+export async function pendingApplicationMatches(db, key, excludeId = null) {
+  const snap = await db.collection("facilityApplications").where("status", "==", APPLICATION_STATUS.PENDING).select("nameKey").get();
+  let exact = false, similar = 0;
+  snap.forEach(d => {
+    if (d.id === excludeId) return;
+    const r = compareNames(key, d.get("nameKey"));
+    if (r) { similar++; if (r === "exact") exact = true; }
+  });
+  return { exact, similarCount: similar };
+}
+
 /**
  * @param {object} deps
  * @param {object} deps.registration createRegistrationService の戻り値(findNameCandidates・consumeRate を使う)
@@ -62,17 +74,7 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
   const appRef = (id) => db.doc(`facilityApplications/${id}`);
   const historyEntry = (action, user, extra = {}) => ({ action, at: Timestamp.fromMillis(now()), byUid: user.uid, ...(user.email ? { byEmail: user.email } : {}), ...extra });
 
-  /** 審査中の申請との重複(既存施設との重複は registration.findNameCandidates)。施設名だけを数える */
-  async function pendingNameMatches(key, excludeId) {
-    const snap = await db.collection("facilityApplications").where("status", "==", APPLICATION_STATUS.PENDING).select("nameKey").get();
-    let exact = false, similar = 0;
-    snap.forEach(d => {
-      if (d.id === excludeId) return;
-      const r = compareNames(key, d.get("nameKey"));
-      if (r) { similar++; if (r === "exact") exact = true; }
-    });
-    return { exact, similarCount: similar };
-  }
+  const pendingNameMatches = (key, excludeId) => pendingApplicationMatches(db, key, excludeId);
 
   // ---------- 申請 ----------
   async function applyFacility({ auth, data }) {

@@ -160,6 +160,7 @@ export function createAuthUi(handlers) {
       <li class="pending-invite" data-pending="${escapeHtml(p.pendingId)}">
         <div class="pending-invite-facility">${escapeHtml(p.facilityName || "（名称未設定）")}</div>
         <div class="pending-invite-meta">役割 <span class="member-role-badge">${escapeHtml(p.roleLabel || "")}</span>${p.invitedByName ? ` ・ 登録者 ${escapeHtml(p.invitedByName)}` : ""}</div>
+        ${p.initialAdmin ? '<p class="form-hint pending-invite-admin">参加すると、この施設の<strong>管理者</strong>になります(施設設定・利用者の管理ができます)。参加するまで、管理者の権限は付きません。</p>' : ""}
         <div class="onboarding-actions">
           <div class="onboarding-primary"><button type="button" class="btn btn-primary" data-act="accept" ${disabled}>参加する</button></div>
           <button type="button" class="btn btn-secondary" data-act="decline" ${disabled}>参加しない</button>

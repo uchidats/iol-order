@@ -47,6 +47,7 @@ export function createHeaderMenu(handlers) {
         ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
+        ${info.canPreregister ? '<button type="button" role="menuitem" class="header-menu-item" id="menuPreregistrations">施設を事前登録</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${share}
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
@@ -58,6 +59,8 @@ export function createHeaderMenu(handlers) {
       if (sw) sw.addEventListener("click", () => { setOpen(false); handlers.onSwitchFacility(); });
       const ap = panel.querySelector("#menuApplications");   // 施設登録の承認権限のある運営者だけ(表示のみ。権限はサーバーが確認する)
       if (ap) ap.addEventListener("click", () => { setOpen(false); handlers.onOpenApplications(); });
+      const pr = panel.querySelector("#menuPreregistrations");   // 運営者(platformAdmin)だけ(表示のみ。権限はサーバーが確認する)
+      if (pr) pr.addEventListener("click", () => { setOpen(false); handlers.onOpenPreregistrations(); });
       panel.querySelector("#menuRegisterFacility").addEventListener("click", () => { setOpen(false); handlers.onRegisterFacility(); });
       panel.querySelector("#menuSignOut").addEventListener("click", () => { setOpen(false); handlers.onSignOut(); });
     }

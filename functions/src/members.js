@@ -109,6 +109,9 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
     tx.update(orderSnap.ref, { order: list.map(k => (k === from ? to : k)).filter((k, i, a) => a.indexOf(k) === i), updatedAt: FieldValue.serverTimestamp() });
   }
   const iso = (ms) => new Date(ms).toISOString();
+  // 参加できる施設: 有効な施設。未有効(事前登録)の施設は、運営者が事前登録した初期管理者の参加待ちだけ(承諾で有効化する。facility-preregistrations.js)
+  const isPreregistrationAdmin = (p) => p.get("preregistration") === true && p.get("initialAdmin") === true && p.get("role") === ROLES.ADMIN;
+  const joinable = (fac, p) => fac.exists && (fac.get("status") === "active" || (fac.get("status") === "preregistered" && isPreregistrationAdmin(p)));
 
   // ---------- 事前登録(参加待ち) ----------
   /** 管理者・副管理者が、名前・メールアドレス・役割を事前登録する(管理者の事前登録は不可。参加後に役割を変更する) */
@@ -198,8 +201,9 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       if (p.get("status") !== "pending" || expired(p)) continue;
       const fid = p.get("facilityId");
       const [fac, mem] = await Promise.all([db.doc(`facilities/${fid}`).get(), db.doc(`facilities/${fid}/members/${user.uid}`).get()]);
-      if (!fac.exists || fac.get("status") !== "active" || mem.exists) continue;
-      out.push({ pendingId: p.id, facilityId: fid, facilityName: fac.get("name") || "", role: p.get("role"), roleLabel: ROLE_LABEL[p.get("role")] || "", invitedByName: (p.get("createdBy") || {}).name || null, expiresAt: iso(p.get("expiresAt").toMillis()) });
+      if (!joinable(fac, p) || mem.exists) continue;
+      out.push({ pendingId: p.id, facilityId: fid, facilityName: fac.get("name") || "", role: p.get("role"), roleLabel: ROLE_LABEL[p.get("role")] || "", invitedByName: (p.get("createdBy") || {}).name || null, expiresAt: iso(p.get("expiresAt").toMillis()),
+        ...(p.get("initialAdmin") === true ? { initialAdmin: true } : {}) });   // 施設の最初の管理者(参加確認で、管理者になることを明示する)
     }
     return { memberships: out };
   }
@@ -221,7 +225,8 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       // 管理者の参加待ちは、施設の申請の承認で指定した最初の管理者(initialAdmin。facility-applications.js)だけ
       if (!MEMBER_ROLES.includes(role) || (role === ROLES.ADMIN && p.get("initialAdmin") !== true)) throw new RegistrationError("failed-precondition", INVALID_PENDING);
       const [fac, mem, order] = await Promise.all([tx.get(db.doc(`facilities/${facilityId}`)), tx.get(db.doc(`facilities/${facilityId}/members/${user.uid}`)), tx.get(orderRef(facilityId))]);
-      if (!fac.exists || fac.get("status") !== "active") throw new RegistrationError("failed-precondition", INVALID_PENDING);
+      if (!joinable(fac, p)) throw new RegistrationError("failed-precondition", INVALID_PENDING);
+      const activate = fac.get("status") === "preregistered";   // 事前登録の施設: 承諾と同時に有効化する
 
       if (!data.accept) {
         tx.update(ref, { status: "declined", respondedAt: FieldValue.serverTimestamp(), respondedBy: user.uid, updatedAt: FieldValue.serverTimestamp() });
@@ -232,6 +237,10 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
         tx.delete(ref);
         return { status: "already-member", facilityId, role: mem.get("role") };
       }
+      if (activate) {
+        tx.update(fac.ref, { status: "active", activatedAt: FieldValue.serverTimestamp(), activatedBy: user.uid, updatedAt: FieldValue.serverTimestamp() });
+        log(tx, facilityId, user, { action: "facility.activate", via: "preregistration", targetUid: user.uid, targetEmail: user.email });
+      }
       tx.create(db.doc(`facilities/${facilityId}/members/${user.uid}`), {
         uid: user.uid, role,
         displayName: p.get("name") || user.displayName || null,
@@ -239,7 +248,7 @@ export function createMemberService({ db, FieldValue, Timestamp, now = Date.now,
       });
       tx.delete(ref);
       replaceInOrder(tx, order, `p:${data.pendingId}`, `m:${user.uid}`);   // 参加待ちの表示位置のまま、参加済みとして表示する
-      log(tx, facilityId, user, { action: "member.join", via: p.get("initialAdmin") === true ? "facility-approval" : "preregistration", targetUid: user.uid, targetEmail: user.email, targetRole: role });
+      log(tx, facilityId, user, { action: "member.join", via: isPreregistrationAdmin(p) ? "facility-preregistration" : p.get("initialAdmin") === true ? "facility-approval" : "preregistration", targetUid: user.uid, targetEmail: user.email, targetRole: role });
       return { status: "joined", facilityId, role };
     });
   }

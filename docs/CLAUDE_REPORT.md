@@ -3,24 +3,26 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-10-27
-- **作業**: (1) Firestore トリガーの呼び出し権限の修正(本番・実施済み) (2) 施設登録の申請の削除機能(ブランチ `feature/application-delete` の 369ecca。未デプロイ) (3) 注文メールの「署名」の説明をⓘに格納(本番)
-- 注文処理のコード・メール送信の設定・許可リストは変更なし。手動の再送・新規注文・追加の申請・本番の申請の削除はしていない。
+- **作業**: 運営者専用の「施設を事前登録」を本番にデプロイし、`main` に取り込み(`feature/facility-preregistration` の 50253a5)。詳細は `docs/facility-preregistration.md`。
+- 実際の施設の事前登録・参加承諾はしていない(利用者が画面から確認する)。注文処理・メール送信・本番の安全設定・受付の許可リストは変更なし。
+- 作業フォルダの `docs/manual/`・`docs/introduction/`(別ツールで作成された正式な成果物。次のオンラインマニュアル・紹介ページで使用)は、git に含めず、変更・移動せずに保持。
 
-## (1) トリガーの呼び出し権限
-- 原因: Eventarc トリガーの実行アカウント `iol-functions-dev` に Cloud Run の呼び出し権限がなく、Firestore のトリガー(申請の通知・注文メールの作成時の送信・設定の変更履歴)が 401 で失敗していた(注文メールは10分ごとの定期実行で送られていた)。
-- 対応: 6つのサービス(`sendordermail`・`notifyfacilityapplication`・`auditorderers`・`auditadoptediols`・`auditfacilitydealers`・`auditfacilitysettings`)だけに、`iol-functions-dev` の `roles/run.invoker` をサービス単位で付与。プロジェクト全体への付与・未認証の呼び出しの許可はしていない。
-- 確認: 付与後の 401 は反映前の1回だけ。審査中の申請の通知は保留イベントの再試行で自動送信され、通知の状態は「受付(運営者宛て)」。注文メールは1件のまま(送信1回・配信済み。二重送信なし)。設定の変更履歴は溜まっていた6件が記録され、重複なし。
+## デプロイ(medconf-iol-dev)
+- Functions: `preregisterFacility`・`listFacilityPreregistrations`・`updateFacilityPreregistration`・`cancelFacilityPreregistration`(新規)、`respondMembership`・`listMyPendingMemberships`(更新)。いずれも成功。Firestore Rules は変更なし(デプロイなし)。
+- 画面: `main` へ取り込み・push。公開サイトの反映を確認。
 
-## (2) 申請の削除(未デプロイ。承認待ち)
-- `deleteFacilityApplication`: 運営者(platformAdmin)のみ。審査中・却下済みだけ削除でき、承認済みは不可。1回のトランザクションで申請の削除・申請者の申請枠の返却・運営者の操作履歴(`platformAuditLogs`。メールは伏せ字)の記録。施設・所属・注文には触れない。削除後は重複判定に数えない。Rules で `platformAuditLogs` はクライアントから読み書き不可。画面は審査中・却下済みに控えめなゴミ箱(確認ダイアログつき)。
-- テスト: unit 241 / Rules 61 / Functions 163 / Functions E2E 10 / ブラウザ 115(WebKit の手術日テストの1回の失敗は単独の再実行で成功)。
-
-## (3) 注文メールの「署名」の説明
-- 常時表示の説明文を、「署名」の右のⓘ(既存の info-tip。タップで表示・外側のタップで閉じる)に格納。入力欄・内容・自動保存は変更なし。
-- テスト: unit 241 と関連するブラウザテスト(注文メール・折りたたみ・テーマカラー)。軽微なUI変更のため、その他は省略。
+## デプロイ後の確認(読み取りのみ)
+- 6つの関数は稼働中、安全設定(受付・テストモード・送信)の値と許可リスト(施設1件・利用者1件)は従来どおり。`createOrder`・`registerFacility` は今回デプロイしていない。
+- 未ログインでの事前登録・一覧の呼び出しは 401 で拒否。
+- 既存の施設は2件とも有効のまま、所属(役割)と注文履歴の件数も変更なし。
+- 運営者のメニュー「施設を事前登録」、既存の施設登録・注文画面の動作は、エミュレータのテスト(Functions・E2E・ブラウザ)で確認済み。本番の画面での操作確認は利用者が行う。
 
 ## commit ID
-- (3) は本ファイルを含む最新 commit(`main`)。(2) は 369ecca(`feature/application-delete`)。
+- 事前登録の本体: 50253a5。取り込み: 本ファイルを含む最新 commit(`git log -1 -- docs/CLAUDE_REPORT.md`)。
 
-## 判断待ち
-- (2) のデプロイ(Rules → `deleteFacilityApplication` → `main` へ取り込み)と、架空の申請の削除。
+## テスト結果
+- unit 241 / Rules 61 / Functions 172 / Functions E2E 11 / ブラウザ 121(WebKit の手術日テストの1件は変更前の `main` でも起きる既知の不安定。再実行で成功)。
+
+## 残課題
+- 前回の残り: 失敗した注文メールの画面からの再送、`actorRequired()=true` への切り替え、CLI が自動付与した権限の扱い、App Check、`firebase-functions` の更新、申請の通知の自動再送(なし)。
+- 次: オンラインマニュアル・紹介ページの実装(`docs/manual/`・`docs/introduction/` を利用)。

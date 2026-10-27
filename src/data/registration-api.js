@@ -20,6 +20,14 @@ export function createRegistrationApi({ functions, httpsCallable }) {
       call("registerFacility", { name, requestId, ...(confirmDuplicate ? { confirmDuplicate: true } : {}), ...(applicantName ? { applicantName } : {}) }),
     /** 施設登録の申請の一覧(承認権限のある運営者のみ。サーバーが確認する) */
     listFacilityApplications: () => call("listFacilityApplications", {}),
+    // ---- 施設の事前登録(運営者のみ。権限はサーバーが確認する) ----
+    /** @returns {Promise<{status:"created"|"exists", facilityId:string}|{status:"duplicate-candidate", exact:boolean, similarCount:number, candidates:string[]}>} */
+    preregisterFacility: ({ name, adminEmail, adminName, requestId, confirmDuplicate }) =>
+      call("preregisterFacility", { name, adminEmail, requestId, ...(adminName ? { adminName } : {}), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
+    listFacilityPreregistrations: () => call("listFacilityPreregistrations", {}),
+    updateFacilityPreregistration: ({ facilityId, name, adminEmail, adminName, confirmDuplicate }) =>
+      call("updateFacilityPreregistration", { facilityId, name, adminEmail, adminName: adminName || "", ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
+    cancelFacilityPreregistration: ({ facilityId }) => call("cancelFacilityPreregistration", { facilityId }),
     /** 申請の削除(運営者のみ。審査中・却下済みだけ。承認済みは削除できない) */
     deleteFacilityApplication: ({ applicationId }) => call("deleteFacilityApplication", { applicationId }),
     /** 申請の承認・却下(承認権限のある運営者のみ)。firstAdmin を指定すると、その人が参加を承諾したときに最初の管理者になる */

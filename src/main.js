@@ -82,6 +82,8 @@ async function bootstrapWithFirebase(config) {
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
   let orderHistory = null;  // 注文履歴（所属メンバー全員。閲覧のみ・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
+  let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
+  let isPlatformAdmin = false;   // メニューの表示だけに使う(ID トークンの platformAdmin)
   let canApproveFacilities = false;   // メニューの表示だけに使う(ID トークンの platformAdmin。サーバーでも必ず確認する)
 
   const ui = createAuthUi({
@@ -112,6 +114,7 @@ async function bootstrapWithFirebase(config) {
     onOpenHistory: () => openHistory(),
     onOpenSettings: () => openSettings(),
     onOpenApplications: () => openApplications(),
+    onOpenPreregistrations: () => openPreregistrations(),
     onRegisterFacility: () => openOnboarding("register"),
     onSignOut: () => signOut()
   });
@@ -124,6 +127,7 @@ async function bootstrapWithFirebase(config) {
     if (!canApproveFacilities || !ctx || !ctx.registrationApi) return;
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     if (!applications) {
       const { createFacilityApplications } = await import("./ui/facility-applications.js");
       applications = createFacilityApplications({ mount: document.querySelector("main.main-content"), api: ctx.registrationApi, onClose: () => setOrderViewHidden(false) });
@@ -132,12 +136,27 @@ async function bootstrapWithFirebase(config) {
     await applications.open();
   }
 
+  /** 施設の事前登録を開く(運営者のみ。事前登録・編集・取り消しの権限はサーバーが確認する) */
+  async function openPreregistrations() {
+    if (!isPlatformAdmin || !ctx || !ctx.registrationApi) return;
+    if (settings && settings.isOpen()) settings.close();
+    if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (applications && applications.isOpen()) applications.close();
+    if (!preregistrations) {
+      const { createFacilityPreregistrations } = await import("./ui/facility-preregistrations.js");
+      preregistrations = createFacilityPreregistrations({ mount: document.querySelector("main.main-content"), api: ctx.registrationApi, onClose: () => setOrderViewHidden(false) });
+    }
+    setOrderViewHidden(true);
+    await preregistrations.open();
+  }
+
   /** 注文履歴を開く(閲覧のみ)。表示するのは選択中の施設の注文だけ。権限は Firestore Rules でも検証される */
   async function openHistory() {
     const access = decideAccess(state);
     if (access.state !== ACCESS.GRANTED) return;
     if (settings && settings.isOpen()) settings.close();
     if (applications && applications.isOpen()) applications.close();
+    if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     if (!orderHistory) {
       const { createOrderHistory } = await import("./ui/order-history.js");
       orderHistory = createOrderHistory({
@@ -172,6 +191,7 @@ async function bootstrapWithFirebase(config) {
     }
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
     if (applications && applications.isOpen()) applications.close();
+    if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     setOrderViewHidden(true);
     await settings.open({ id: access.facilityId, name: facilityName(access.facilityId) });
   }
@@ -222,6 +242,7 @@ async function bootstrapWithFirebase(config) {
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
     if (applications && applications.isOpen()) { applications.close(); setOrderViewHidden(false); }
+    if (preregistrations && preregistrations.isOpen()) { preregistrations.close(); setOrderViewHidden(false); }
     registration.duplicate = null; error = ""; notice = "";
     registration.open = mode;
     render();
@@ -259,9 +280,9 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities
+        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin
       });
-      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
+      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       menu.update(null);
     }
@@ -517,7 +538,8 @@ async function bootstrapWithFirebase(config) {
         }
         state.pendingInvites = await loadPendingInvites();
         // 施設登録の申請を承認できるか(メニューの表示だけ。権限はサーバーが確認する)
-        try { canApproveFacilities = (await user.getIdTokenResult()).claims.platformAdmin === true; } catch { canApproveFacilities = false; }
+        try { isPlatformAdmin = (await user.getIdTokenResult()).claims.platformAdmin === true; } catch { isPlatformAdmin = false; }
+        canApproveFacilities = isPlatformAdmin;   // 施設登録の承認権限(現在は運営者のみ。将来の委任では別に判定する)
         state.membershipsLoaded = true;
         if (state.pendingInvites.length) { render(); return; } // 参加確認を先に表示する(答え終わったら respondPending から先へ進む)
         if (await autoSelectFacility()) return; // 現在地判定の中で描画・遷移済み
