@@ -1891,6 +1891,11 @@ input[type="date"].form-control {
 .iol-model-row { display: flex; align-items: center; gap: 8px; }
 .iol-model-row .settings-check { flex: 1; min-width: 0; }
 .iol-moves { display: inline-flex; gap: 4px; flex: none; }
+/* 採用IOLごとの既定の発注先(ディーラー2社以上・採用中のときだけ)。PC はモデル名の右、スマホ幅はモデル名の下に折り返す */
+.iol-model-row { flex-wrap: wrap; }
+.iol-model-row .iol-default-dealer { flex: 0 1 13rem; width: auto; min-width: 0; max-width: 13rem; padding: 6px 8px; font-size: 0.85rem; min-height: 34px; appearance: auto; -webkit-appearance: menulist; }   /* プルダウンと分かるよう標準の矢印を出す */
+.iol-model-row .iol-default-dealer[hidden] { display: none; }
+@media (max-width: 560px) { .iol-model-row .iol-default-dealer { order: 3; flex: 1 1 100%; max-width: none; margin: 0 0 6px 28px; } }
 .iol-maker-summary .iol-moves { margin-left: 8px; }
 .iol-move { min-width: 32px; }
 

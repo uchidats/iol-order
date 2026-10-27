@@ -94,16 +94,26 @@ export function validateAdoption(selectedIds, masters) {
  * 採用IOLの書き込み計画。ドキュメントIDはマスターID（重複採用を構造的に防ぐ）。
  * 採用解除は削除せず enabled=false にする。既存の dealerId は保持する。
  */
-export function planAdoptedWrites(masters, existing, selectedIds, facilityId) {
+/**
+ * 採用IOLの書き込み計画。採用の変更に加えて、既定ディーラー(dealerId)の設定・変更・解除も差分で書く。
+ * @param {Record<string,string>} [defaults] 系列IDごとの既定ディーラーID(画面で選んだ値。"" は既定なし)。含まれない系列は保存済みの値を維持
+ * @param {Set<string>} [validDealerIds] 施設の登録ディーラーのID。指定すると、ここに無い(削除済みの)ディーラーIDは保存しない(既存の値も外す)
+ * 省略時(どちらも指定なし)は、従来どおり採用の変更だけを書き、既存の dealerId は維持する。
+ */
+export function planAdoptedWrites(masters, existing, selectedIds, facilityId, defaults = null, validDealerIds = null) {
   const selected = new Set(selectedIds);
   const byId = new Map(existing.map(e => [e.id, e]));
   const writes = [];
   for (const m of masters) {
     const ex = byId.get(m.id);
     const want = selected.has(m.id);
-    if ((want && (!ex || !ex.enabled)) || (!want && ex && ex.enabled)) {
+    const current = ex && typeof ex.dealerId === "string" ? ex.dealerId : "";
+    let dealerId = defaults && Object.hasOwn(defaults, m.id) ? (defaults[m.id] || "") : current;
+    if (validDealerIds && dealerId && !validDealerIds.has(dealerId)) dealerId = "";
+    const adoptChanged = (want && (!ex || !ex.enabled)) || (!want && ex && ex.enabled);
+    if (adoptChanged || (ex && dealerId !== current) || (!ex && want && dealerId)) {
       const data = { facilityId, catalogIolId: m.id, enabled: want };
-      if (ex && ex.dealerId) data.dealerId = ex.dealerId;
+      if (dealerId) data.dealerId = dealerId;   // 既定なしはキーごと書かない(全体の上書きで消える)
       writes.push({ id: m.id, data });
     }
   }

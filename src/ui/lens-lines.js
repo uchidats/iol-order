@@ -2,7 +2,7 @@ import { GOOGLE_FORM_ALL_POWERS } from "../data/iol-models.js";
 import { filterPowersByModel, keepPowerIfAvailable } from "../domain/power-filter.js";
 import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES } from "../domain/order-lines.js";
-import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
+import { dealerMode, resolveLineDealer, defaultDealerIdOf } from "../domain/dealer-selection.js";
 import { enhanceSelect } from "./custom-select.js";
 import { toOrderLines } from "../domain/order-lines.js";
 import { summaryDateHead, summaryLineMain } from "./confirm-lines.js";
@@ -127,7 +127,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
 
     line.model.addEventListener("change", () => {
       line.model.title = line.model.value ? line.model.selectedOptions[0].title : ""; // メーカー込みの全文は、ホバーで確認できる
-      clearErr(line, "model"); onModelChange(line); onChange();
+      clearErr(line, "model"); onModelChange(line); applyDefaultDealer(line); onChange();
     });
     line.power.addEventListener("change", () => clearErr(line, "power"));
     line.date.addEventListener("change", () => clearErr(line, "date"));
@@ -227,6 +227,27 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     };
   }
 
+  /**
+   * IOLモデルを選んだときの発注先の自動選択(登録ディーラーが2社以上のときだけ。1社は従来どおり自動、0社は発注先なし)。
+   *  - 選んだモデルに既定ディーラー(採用IOLの設定)があれば、それを選ぶ(手動で選んでいた発注先より優先)。
+   *  - 別のモデル(別の系列)に変えて、新しいモデルに既定がなければ、発注先を未選択に戻す(前のモデルの発注先を残さない)。
+   *  - 初めてモデルを選ぶとき(「レンズを追加」で引き継いだ発注先など)に既定がなければ、今の発注先のまま。
+   *  - 同じ系列の型番を変えただけ・モデルを未選択に戻しただけ・度数や手術日などの変更では、発注先を変えない。
+   * 発注先はこのあと手動で変更できる。注文時はサーバーが登録ディーラーと照合する。
+   */
+  function applyDefaultDealer(line) {
+    if (dealerMode(getDealers()) !== "choose") return;
+    const lens = findLensOption(getOptions(), line.model.value);
+    if (!lens) return;
+    const series = lens.model.id;
+    if (series === line.dealerSeriesId) return;
+    const def = defaultDealerIdOf(lens, getDealers());
+    if (def) line.dealer.value = def;
+    else if (line.dealerSeriesId) line.dealer.value = "";
+    line.dealerSeriesId = series;
+    if (line.dealer.value) clearErr(line, "dealer");
+  }
+
   const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : k === "doctor" ? line.doctor : k === "dealer" ? line.dealer : null)?.classList.remove("is-invalid"); };
 
   /** 発注先の選択肢を作り直す。選択中のディーラーが登録に残っていれば維持し、無ければ未選択に戻す */
@@ -323,7 +344,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.qty.forEach(r => { r.checked = r.value === String(st.quantity === 2 ? 2 : 1); });
     line.date.value = st.date && st.date >= minDate() ? st.date : "";           // 過去の日付は復元しない
     fillDoctors(line, st.doctorId || "");
-    fillDealers(line, st.dealerId || "");
+    fillDealers(line, st.dealerId || "");          // 下書き・元に戻す: 保存された発注先(今も登録にあるもの)をそのまま使う(既定ディーラーで上書きしない)
+    line.dealerSeriesId = (findLensOption(getOptions(), line.model.value) || { model: { id: "" } }).model.id;
     syncDealerGroup(line);
     for (const k of ["model", "power", "quantity", "date", "doctor", "dealer"]) clearErr(line, k);
     expand(line);   // 復元・元に戻す・空に戻した明細は展開して表示(折りたたみの状態は保存しない)

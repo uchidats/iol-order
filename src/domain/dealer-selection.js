@@ -26,6 +26,15 @@ export function resolveLineDealer(dealers, requestedId) {
   return d ? { ok: true, dealer: d } : { ok: false, error: "not-found" };
 }
 
+/**
+ * IOLモデル(選択肢)の既定ディーラー(採用IOLの dealerId)。施設の登録ディーラーに今あるものだけ返す(未設定・削除済みは "")。
+ * 注文画面の初期選択だけに使う。注文時に手動で変更でき、注文の発注先はサーバーが登録ディーラーと照合する(resolveLineDealer)。
+ */
+export function defaultDealerIdOf(lens, dealers) {
+  const id = lens && lens.model && typeof lens.model.dealerId === "string" ? lens.model.dealerId : "";
+  return id && dealers.some(d => d.id === id) ? id : "";
+}
+
 /** 実メール送信の可否(ディーラーなし・発注用メールなしは送信不可) */
 export function dealerDispatch(dealer) {
   if (!dealer) return { allowed: false, reason: "dealer-unset" };

@@ -106,3 +106,54 @@ test("メールアドレスの判定: サーバー(発注用メールの送信�
     assert.equal(cleanEmails([v]).length === 1, ok, `mail preview ${JSON.stringify(v)}`);
   }
 });
+
+// ---------- 採用IOLごとの既定ディーラー ----------
+import { defaultDealerIdOf } from "../src/domain/dealer-selection.js";
+import { resolveAdoptedModels } from "../src/data/static-repository.js";
+import { planAdoptedWrites } from "../src/domain/facility-settings.js";
+
+test("既定ディーラー: 採用IOLの dealerId は系列に付き、ノントーリック・トーリックの各型番の選択肢から参照できる。登録に無い・未設定は \"\"", () => {
+  const adopted = [
+    { catalogIolId: "jj-dib00v", enabled: true, dealerId: "dA" },
+    { catalogIolId: "jj-diwxxx-toric", enabled: true, dealerId: "dB" },
+    { catalogIolId: "alcon-cna0t0", enabled: true },
+    { catalogIolId: "hoya-xy1", enabled: false, dealerId: "dA" }
+  ];
+  const models = resolveAdoptedModels(adopted);
+  assert.deepEqual(models.map(m => m.id), ["jj-dib00v", "jj-diwxxx-toric", "alcon-cna0t0"]);
+  assert.equal(IOL_MODELS.find(m => m.id === "jj-dib00v").dealerId, undefined, "マスター自体は変えない");
+  const opts = buildLensOptions(models);
+  const dealers = [{ id: "dA", name: "A" }, { id: "dB", name: "B" }];
+  assert.equal(defaultDealerIdOf(findLensOption(opts, "jj-dib00v"), dealers), "dA");
+  assert.equal(defaultDealerIdOf(findLensOption(opts, "jj-diwxxx-toric|DIW150"), dealers), "dB");
+  assert.equal(defaultDealerIdOf(findLensOption(opts, "jj-diwxxx-toric|DIW600"), dealers), "dB", "同じ系列のどの型番でも");
+  assert.equal(defaultDealerIdOf(findLensOption(opts, "alcon-cna0t0"), dealers), "", "未設定");
+  assert.equal(defaultDealerIdOf(findLensOption(opts, "jj-dib00v"), [{ id: "dB", name: "B" }]), "", "削除済みのディーラーは使わない");
+  assert.equal(defaultDealerIdOf(null, dealers), "");
+});
+
+test("既定ディーラー: 採用IOLの書き込み計画(設定・変更・既定なしへ戻す・削除済みの除去・未変更は書かない・従来の呼び出しは同じ結果)", () => {
+  const F = "fac1";
+  const existing = [
+    { id: "jj-dib00v", catalogIolId: "jj-dib00v", enabled: true },
+    { id: "alcon-cna0t0", catalogIolId: "alcon-cna0t0", enabled: true, dealerId: "dA" },
+    { id: "hoya-xy1", catalogIolId: "hoya-xy1", enabled: false, dealerId: "dGone" }
+  ];
+  const sel = ["jj-dib00v", "alcon-cna0t0"];
+  const valid = new Set(["dA", "dB"]);
+  // 従来の呼び出し(既定ディーラーの指定なし): 採用の変更だけ。既存の dealerId は維持
+  assert.deepEqual(planAdoptedWrites(IOL_MODELS, existing, sel, F), []);
+  assert.deepEqual(planAdoptedWrites(IOL_MODELS, existing, ["jj-dib00v"], F), [{ id: "alcon-cna0t0", data: { facilityId: F, catalogIolId: "alcon-cna0t0", enabled: false, dealerId: "dA" } }]);
+  // 設定・変更・既定なし
+  assert.deepEqual(planAdoptedWrites(IOL_MODELS, existing, sel, F, { "jj-dib00v": "dB", "alcon-cna0t0": "dA" }, valid),
+    [{ id: "jj-dib00v", data: { facilityId: F, catalogIolId: "jj-dib00v", enabled: true, dealerId: "dB" } },
+     { id: "hoya-xy1", data: { facilityId: F, catalogIolId: "hoya-xy1", enabled: false } }], "未変更(alcon)は書かない。削除済み(hoya の dGone)は外す");
+  const cleared = planAdoptedWrites(IOL_MODELS, existing, sel, F, { "jj-dib00v": "", "alcon-cna0t0": "" }, valid);
+  assert.deepEqual(cleared.find(w => w.id === "alcon-cna0t0").data, { facilityId: F, catalogIolId: "alcon-cna0t0", enabled: true }, "既定なしは dealerId を書かない");
+  assert.equal(cleared.some(w => w.id === "jj-dib00v"), false);
+  // 登録に無いディーラーを指定しても保存しない
+  assert.equal(planAdoptedWrites(IOL_MODELS, existing, sel, F, { "jj-dib00v": "dX" }, valid).some(w => w.id === "jj-dib00v"), false);
+  // 新しく採用したモデルに既定ディーラー
+  assert.deepEqual(planAdoptedWrites(IOL_MODELS, existing, [...sel, "hoya-py-60ad"], F, { "hoya-py-60ad": "dA" }, valid).find(w => w.id === "hoya-py-60ad").data,
+    { facilityId: F, catalogIolId: "hoya-py-60ad", enabled: true, dealerId: "dA" });
+});

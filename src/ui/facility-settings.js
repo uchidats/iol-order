@@ -415,7 +415,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 採用IOL ----------
   function iolSection() {
     const section = h("section", { class: "settings-section", "data-section": "iols" },
-      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。↑↓でメーカーとモデルの表示順を変更できます。変更は自動で保存されます。"),
+      createSectionHeading("採用IOL", "施設で使用するIOLを選択します。チェックしたモデルだけが注文フォームに表示されます。↑↓でメーカーとモデルの表示順を変更できます。ディーラーが2社以上登録されている場合は、モデルごとに既定の発注先を選べます(注文画面でそのモデルを選ぶと自動で選ばれ、注文時に変更できます)。変更は自動で保存されます。"),
       h("div", { "data-list": "" }),
       h("p", { class: "form-hint", "data-msg": "" }));
     iolSaver = createAutoSaver(section, runIolSave);   // 「採用IOLを保存」ボタンは廃止(チェック・並び替えで自動保存)
@@ -428,7 +428,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const selected = [...section.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value);
     const v = validateAdoption(selected, masters);
     if (!v.ok) throw new Error("マスターに存在しないIOLは登録できません");
-    const writes = planAdoptedWrites(masters, data.adopted, selected, facility.id);
+    // 既定ディーラー: 採用中で選択欄を表示しているモデルの選択値。登録に無い(削除済みの)ディーラーIDは保存しない(既存の値も外す)
+    const defaults = {};
+    section.querySelectorAll(".iol-model-row").forEach(row => {
+      const cb = row.querySelector('input[type="checkbox"]'), sel = row.querySelector('[data-f="defaultDealer"]');
+      if (cb && cb.checked && sel && !sel.hidden) defaults[cb.value] = sel.value;
+    });
+    const writes = planAdoptedWrites(masters, data.adopted, selected, facility.id, defaults, new Set(data.dealers.map(d => d.id)));
     // 表示順(メーカーの順番・モデルの順番)は、画面に並んでいる順番をそのまま保存する。並べ替えていなければ書かない
     const order = buildIolOrderSetting(masters,
       [...section.querySelectorAll("details.iol-maker")].map(d => d.getAttribute("data-maker")),
@@ -481,6 +487,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
                 h("input", { type: "checkbox", value: m.id, checked: enabled.has(m.id) }),
                 h("span", { class: "iol-name" }, baseModelName(m)),   // モデル名(「（トーリック）」などの括弧書きは取り除く)
                 lensBadgeElements(m)),                                 // 特徴は isToric / isMultifocal のバッジで1回だけ
+              defaultDealerSelect(m),
               moves);
             return row;
           })));
@@ -495,7 +502,41 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...nodes);
     updateIolMoves(list);
-    list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); iolSaver.request(); };   // チェックの変更で自動保存
+    syncIolDealerSelects(section, true);
+    // チェック・既定ディーラーの変更で自動保存。チェックを外したモデルは既定ディーラーの欄を隠す(保存済みの値は残す)
+    list.onchange = (e) => { const g = e.target.closest("details"); if (g && g._updateCount) g._updateCount(); syncIolDealerSelects(section); iolSaver.request(); };
+  }
+
+  /** 採用IOLの行の「既定の発注先」の選択欄(ディーラーが2社以上・採用中のときだけ表示。選択肢は syncIolDealerSelects で作る) */
+  function defaultDealerSelect(m) {
+    const a = data.adopted.find(x => x.catalogIolId === m.id || x.id === m.id);
+    return h("select", { class: "form-control iol-default-dealer", "data-f": "defaultDealer", "data-saved": a && typeof a.dealerId === "string" ? a.dealerId : "",
+      "aria-label": `${baseModelName(m)}の既定の発注先`, title: "既定の発注先" });
+  }
+
+  /**
+   * 既定の発注先の選択欄を、今の登録ディーラーに合わせる(選択肢・表示)。登録に無いディーラーは選べない(「既定なし」に戻る)。
+   * @param {boolean} [initial] 最初の表示(保存済みの値を選ぶ)。それ以外は画面で選んでいる値を保つ
+   */
+  function syncIolDealerSelects(section, initial = false) {
+    const dealers = data.dealers || [];
+    section.querySelectorAll(".iol-model-row").forEach(row => {
+      const sel = row.querySelector('[data-f="defaultDealer"]'), cb = row.querySelector('input[type="checkbox"]');
+      if (!sel) return;
+      const cur = initial ? sel.getAttribute("data-saved") || "" : sel.value;
+      sel.replaceChildren(h("option", { value: "" }, "既定なし（注文時に選択）"), ...dealers.map(d => h("option", { value: d.id }, d.name)));
+      sel.value = dealers.some(d => d.id === cur) ? cur : "";
+      sel.hidden = dealers.length < 2 || !cb.checked;
+    });
+  }
+
+  /** ディーラーの保存・削除の後: 採用IOLの既定の発注先の選択肢を合わせ、削除されたディーラーを既定にしていた採用IOLからは外して保存する */
+  function refreshIolDealers() {
+    const section = sections.iols;
+    if (!section || !iolSaver) return;
+    syncIolDealerSelects(section);
+    const valid = new Set(data.dealers.map(d => d.id));
+    if (data.adopted.some(a => a.dealerId && !valid.has(a.dealerId))) iolSaver.request();
   }
 
   // ---------- ディーラー(担当医と同じ操作: 通常は一覧表示、鉛筆を押した行だけ編集、↑↓で並び替え、ゴミ箱で削除) ----------
@@ -604,6 +645,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     if (!writes.length) return;
     await settingsApi.saveDealers(facility.id, writes);
     await load();   // 最新の保存内容を読み直す(新しいディーラーの ID もここで分かる。入力途中の行は壊さない)
+    refreshIolDealers();
     entries.forEach((r, i) => {
       if (r._state.id) return;
       const saved = data.dealers.find(d => d.name === v.cleaned[i].name);
@@ -631,6 +673,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         data.dealers = data.dealers.filter(x => x.id !== id);
         row.remove();
       });
+      refreshIolDealers();   // このディーラーを既定にしていた採用IOLは「既定なし」に戻して保存する
       await onSaved();
       message(section, `「${name}」を削除しました。`);
     } catch (e) {
