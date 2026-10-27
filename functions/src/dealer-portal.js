@@ -23,7 +23,7 @@ export const PORTAL_LIMITS = Object.freeze({
   nameMax: 100, staffNameMax: 50, assignmentsMax: 100, facilityFilterMax: 100,
   pageDefault: 50, pageMax: 100, scanBatch: 100, scanMax: 500, rangeDaysMax: 366,
   invitationTtlMs: 30 * 24 * 60 * 60 * 1000, cursorTtlMs: 60 * 60 * 1000, reindexMax: 2000,
-  affiliationsMax: 20, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
+  affiliationsMax: 500, affiliationsBatch: 20, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JST_MS = 9 * 60 * 60 * 1000;
@@ -54,6 +54,31 @@ export const receiptIdOf = (grantId, facilityId, orderId) => "rcp-" + hash(`${gr
 const newGrantId = () => "dgr-" + randomBytes(12).toString("hex");
 
 const millisOf = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : null);
+
+const normEmails = (v) => [...new Set((Array.isArray(v) ? v : []).map(normEmail).filter(Boolean))].sort();
+const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** 許可した時点の発注先の記録(名称と発注用メール)。注文時点の発注先との照合に使う */
+export function dealerSnapshotOf(snap) {
+  if (!snap || !snap.exists) return null;
+  const d = snap.data() || {};
+  return { name: String(d.name || ""), emails: normEmails(d.orderEmails) };
+}
+
+/**
+ * 注文時点の発注先が、許可した時点の発注先と同じか。注文に保存された発注先名(明細の dealer.name)と、
+ * 注文と同じトランザクションで作られた注文メールの宛先(mails/d_{発注先ID} の to。発注用メールが無ければメールは作られない)で確かめる。
+ * 現在の発注先の値ではなく注文時点の値を見るので、発注先を別の会社へ変えて戻しても、その間の注文は旧会社に公開しない。
+ */
+export function orderMatchesGrant(order, mailSnap, localDealerId, grant) {
+  const snap = grant && grant.dealerSnapshot;
+  if (!snap || typeof snap.name !== "string" || !Array.isArray(snap.emails)) return false;   // 記録のない許可は公開しない
+  const own = ownLinesOf(order, localDealerId);
+  if (!own || !own.length) return false;
+  if (own.some(l => !l.dealer || l.dealer.id !== localDealerId || l.dealer.name !== snap.name)) return false;
+  const to = mailSnap && mailSnap.exists ? normEmails(mailSnap.get("to")) : [];
+  return sameList(to, normEmails(snap.emails));
+}
 
 /**
  * 許可した施設別発注先の実体の指紋。作成時刻(削除・同じ ID での再作成を検知)と、名称・宛名・発注用メール・連携ID
@@ -225,8 +250,12 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   /** 本人の有効な所属(会社名の順)。所属の一覧に載っていても、無効化・停止・メール不一致の会社は含めない */
   async function validAffiliations(user) {
     const idx = await staffIndexRef(user.uid).get();
+    // 無効な旧所属が多く残っていても、有効な所属を見落とさない: 有効かどうかを確かめてから選ぶ(先に件数で切らない)。20件ずつ順に確認する
     const ids = [...new Set((idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : []).filter(isId))].slice(0, PORTAL_LIMITS.affiliationsMax);
-    const found = (await Promise.all(ids.map(cid => affiliationOf(user, cid)))).filter(Boolean);
+    const found = [];
+    for (let i = 0; i < ids.length; i += PORTAL_LIMITS.affiliationsBatch) {
+      found.push(...(await Promise.all(ids.slice(i, i + PORTAL_LIMITS.affiliationsBatch).map(cid => affiliationOf(user, cid)))).filter(Boolean));
+    }
     return found.sort((a, b) => String(a.company.name || "").localeCompare(String(b.company.name || ""), "ja") || a.companyId.localeCompare(b.companyId));
   }
 
@@ -258,7 +287,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const effectiveFromMs = millisOf(d.effectiveFrom);
       if (effectiveFromMs === null) return;
       if (out.has(d.facilityId)) { out.set(d.facilityId, null); return; }   // 同じ施設に有効な許可が複数ある(想定外): その施設は公開しない
-      out.set(d.facilityId, { facilityId: d.facilityId, facilityName: String(fac.get("name") || ""), grantId: g.id, localDealerId: d.localDealerId, effectiveFromMs });
+      out.set(d.facilityId, { facilityId: d.facilityId, facilityName: String(fac.get("name") || ""), grantId: g.id, localDealerId: d.localDealerId, effectiveFromMs, grant: d });
     }));
     for (const [k, v] of out) if (!v) out.delete(k);
     return out;
@@ -332,7 +361,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   }
 
   // 継続カーソル: 会社・UID・検索条件に結び付け、有効期限を付ける(位置は改ざんされても、各行を毎回認可するので範囲は広がらない)。
-  // 検索の基準時刻(as: 最初のページを読んだ時点)も持ち、それより後に作られた索引が読み終えた範囲へ入ったら、先頭からの再検索を求める
+  // 検索時点(as: 最初のページを読んだ時点)も持ち、続きのページを同じ時点の内容で読む(listOrders)
   const queryKey = (cid, uid, q) => hash(JSON.stringify([cid, uid, q.fromMs, q.toMs, q.facilities, q.orderNumber, q.mode]), 24);
   const encodeCursor = (c) => Buffer.from(JSON.stringify(c)).toString("base64url");
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
@@ -346,8 +375,6 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     }
     return c;
   }
-  /** Timestamp どうしの比較(a が b より後なら正) */
-  const cmpTs = (a, b) => (a.seconds - b.seconds) || (a.nanoseconds - b.nanoseconds);
 
   /** 受信一覧(自社宛て・許可済み施設・期間・施設の複数選択・注文番号)。新しい順。各行を毎回認可する */
   async function listOrders(auth, data) {
@@ -367,49 +394,50 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       return Boolean(s && selected.has(r.facilityId) && r.grantId === s.grantId && r.localDealerId === s.localDealerId
         && t !== null && t >= q.fromMs && t < q.toMs && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
     };
-    let asOf = cursor ? new Timestamp(cursor.as[0], cursor.as[1]) : null;
-    if (cursor) {
-      // 索引は注文とは別に(遅れて)作られる。基準時刻より後に作られ、すでに読み終えた位置(カーソルより新しい側)に入った索引があれば、
-      // 続きを読んでも出てこないため、先頭からの再検索を求める(欠落したまま「すべて表示」としない)
-      const pos = new Timestamp(cursor.s, cursor.n);
-      const late = await receipts.where("createdAt", ">", asOf).orderBy("createdAt").limit(PORTAL_LIMITS.lateCheckMax).get();
-      const passed = (d) => { const t = d.get("orderedAt"); return t && typeof t.seconds === "number" && (cmpTs(t, pos) > 0 || (cmpTs(t, pos) === 0 && d.id > cursor.id)); };
-      if (late.size >= PORTAL_LIMITS.lateCheckMax || late.docs.some(d => passed(d) && matches(d.data()))) {
-        return { items: [], nextCursor: null, complete: false, restart: true };
-      }
-    }
+    // 検索時点(最初のページを読んだ時点)を固定し、続きのページも同じ時点の内容を読む(読み取り専用トランザクションの readTime)。
+    // 検索中に索引が追加されても、ページの間で欠けたり重なったりしない。検索時点より後に反映された注文は、newSinceSearch で知らせる(再検索で表示)
+    const pinned = cursor ? new Timestamp(cursor.as[0], cursor.as[1]) : null;
     const base = receipts
       .where("orderedAt", ">=", Timestamp.fromMillis(q.fromMs)).where("orderedAt", "<", Timestamp.fromMillis(q.toMs))
       .orderBy("orderedAt", "desc").orderBy(FieldPath.documentId(), "desc");
-    let after = cursor ? [new Timestamp(cursor.s, cursor.n), cursor.id] : null;
-    // 走査: 新しい順に少しずつ読み、各行を認可・絞り込み。読み終えた位置をカーソルにする(走査の上限に達したら続きを返す)
-    let scanned = 0, last = null, exhausted = false;
-    scan: while (scanned < PORTAL_LIMITS.scanMax) {
-      const take = Math.min(PORTAL_LIMITS.scanBatch, PORTAL_LIMITS.scanMax - scanned);
-      let query = base.limit(take);
-      if (after) query = query.startAfter(...after);
-      const snap = await query.get();
-      if (!asOf) asOf = snap.readTime;   // 最初のページを読んだ時点(索引の createdAt と同じサーバーの時刻)
-      for (const d of snap.docs) {
-        scanned++;
-        last = d;
-        const r = d.data();
-        const s = scope.get(r.facilityId);
-        if (matches(r)) {
-          items.push({
-            receiptId: d.id, facilityId: r.facilityId, facilityName: s.facilityName,
-            orderNumber: String(r.orderNumber || ""), orderedAt: isoOf(r.orderedAt),
-            lineCount: Number(r.lineCount) || 0, totalQuantity: Number(r.totalQuantity) || 0
-          });
-          if (items.length >= q.limit) break scan;
+    const { asOf, last, exhausted } = await db.runTransaction(async (tx) => {
+      let after = cursor ? [new Timestamp(cursor.s, cursor.n), cursor.id] : null;
+      // 走査: 新しい順に少しずつ読み、各行を認可・絞り込み。読み終えた位置をカーソルにする(走査の上限に達したら続きを返す)
+      let scanned = 0, lastDoc = null, done = false, readAt = pinned;
+      items.length = 0;
+      scan: while (scanned < PORTAL_LIMITS.scanMax) {
+        const take = Math.min(PORTAL_LIMITS.scanBatch, PORTAL_LIMITS.scanMax - scanned);
+        let query = base.limit(take);
+        if (after) query = query.startAfter(...after);
+        const snap = await tx.get(query);
+        if (!readAt) readAt = snap.readTime;   // 最初のページを読んだ時点(索引の createdAt と同じサーバーの時刻)
+        for (const d of snap.docs) {
+          scanned++;
+          lastDoc = d;
+          const r = d.data();
+          if (matches(r)) {
+            items.push({
+              receiptId: d.id, facilityId: r.facilityId, facilityName: scope.get(r.facilityId).facilityName,
+              orderNumber: String(r.orderNumber || ""), orderedAt: isoOf(r.orderedAt),
+              lineCount: Number(r.lineCount) || 0, totalQuantity: Number(r.totalQuantity) || 0
+            });
+            if (items.length >= q.limit) break scan;
+          }
         }
+        if (snap.size < take) { done = true; break; }
+        after = [lastDoc.get("orderedAt"), lastDoc.id];
       }
-      if (snap.size < take) { exhausted = true; break; }
-      after = [last.get("orderedAt"), last.id];
+      return { asOf: readAt, last: lastDoc, exhausted: done };
+    }, pinned ? { readOnly: true, readTime: pinned } : { readOnly: true });
+    // 検索時点より後に反映された、この条件に合う注文があるか(あれば「再検索で最新を表示」と案内する)
+    let newSinceSearch = false;
+    if (asOf) {
+      const late = await receipts.where("createdAt", ">", asOf).orderBy("createdAt").limit(PORTAL_LIMITS.lateCheckMax).get();
+      newSinceSearch = late.size >= PORTAL_LIMITS.lateCheckMax || late.docs.some(d => matches(d.data()));
     }
     const more = !exhausted && last !== null;
     const nextCursor = more ? encodeCursor({ v: 2, k: key, s: last.get("orderedAt").seconds, n: last.get("orderedAt").nanoseconds, id: last.id, as: [asOf.seconds, asOf.nanoseconds], exp: now() + PORTAL_LIMITS.cursorTtlMs }) : null;
-    return { items, nextCursor, complete: !more };
+    return { items, nextCursor, complete: !more, asOf: asOf ? isoOf(asOf) : null, newSinceSearch };
   }
 
   /** 受信の詳細(自社宛ての明細だけ)。許可・関連付け・施設・元注文を毎回確認する */
@@ -428,6 +456,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const order = os.data();
     const orderedMs = millisOf(order.createdAt);
     if (order.testOrder === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) throw notVisible();
+    // 注文時点の発注先が、許可した時点と同じか(現在の発注先の値が同じでも、途中で別の会社宛てだった注文は返さない)
+    const mail = await db.doc(`facilities/${r.facilityId}/orders/${r.sourceOrderId}/mails/d_${s.localDealerId}`).get();
+    if (!orderMatchesGrant(order, mail, s.localDealerId, s.grant)) throw notVisible();
     const view = buildDealerOrderView(order, s.localDealerId, { receiptId: rs.id, facilityId: r.facilityId });
     if (!view) throw notVisible();
     view.facilityName = s.facilityName || view.facilityName;
@@ -489,7 +520,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         joinedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), invitationId: inv.id
       });
       const ids = idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : [];
-      tx.set(staffIndexRef(user.uid), { companyIds: [...new Set([...ids, cid])], updatedAt: FieldValue.serverTimestamp() });
+      tx.set(staffIndexRef(user.uid), { companyIds: [...new Set([cid, ...ids])].slice(0, PORTAL_LIMITS.affiliationsMax), updatedAt: FieldValue.serverTimestamp() });   // 新しい所属を先頭に(上限を超えたら最も古いものから外す)
       tx.update(inv.ref, { status: "accepted", respondedAt: FieldValue.serverTimestamp(), respondedUid: user.uid });
       audit(tx, { action: "staff.join", companyId: cid, actorUid: user.uid, invitationId: inv.id });
       return { ok: true, accepted: true, companyId: cid };
@@ -544,7 +575,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         if (l.status === "active" && isId(l.currentGrantId)) {
           const g = await grantRef(l.currentGrantId).get();
           // stale: 許可の後に発注先の名称・宛先が変わった・削除して作り直した(公開を止めている。取消して許可し直す)
-          if (g.exists && g.get("status") === "active") grant = { effectiveFrom: isoOf(g.get("effectiveFrom")), grantedByRole: g.get("grantedByRole") || null, stale: g.get("dealerFingerprint") !== dealerFingerprintOf(d) };
+          if (g.exists && g.get("status") === "active") grant = { effectiveFrom: isoOf(g.get("effectiveFrom")), grantedByRole: g.get("grantedByRole") || null, stale: g.get("dealerFingerprint") !== dealerFingerprintOf(d) || !g.get("dealerSnapshot") };
         }
         link = {
           companyName: c.exists ? String(c.get("name") || "") : "", companyActive: c.exists && policyOk(c.data()),
@@ -579,6 +610,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         tx.create(grantRef(gid), {
           companyId: cid, facilityId, localDealerId, status: "active", effectiveFrom: FieldValue.serverTimestamp(),
           dealerFingerprint: dealerFingerprintOf(fd),   // 許可した時点の発注先(名称・宛先・作成時刻)。変わったら公開を止める
+          dealerSnapshot: dealerSnapshotOf(fd),          // 許可した時点の名称・発注用メール。注文時点の発注先と照合する(変えて戻しても途中の注文は出さない)
           audienceMode: PORTAL_POLICY.accessMode, disclosure: { orderNotes: false, orderedBy: false },
           grantedBy: user.uid, grantedByRole: role, createdAt: FieldValue.serverTimestamp(), revision: 1
         });
@@ -830,12 +862,15 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!own || !own.length) { skipped++; continue; }   // 発注先の矛盾(推測で公開しない)
       // 1社の失敗で残りの会社を止めない。失敗は最後にまとめて投げ、トリガーの再試行に任せる(ID が冪等なので、作成済みの会社は重複しない)
       const ok = await db.runTransaction(async (tx) => {
-        const [link, fd] = await Promise.all([tx.get(linkRef(facilityId, lid)), tx.get(db.doc(`facilities/${facilityId}/facilityDealers/${lid}`))]);
+        const [link, fd, mail] = await Promise.all([tx.get(linkRef(facilityId, lid)), tx.get(db.doc(`facilities/${facilityId}/facilityDealers/${lid}`)),
+          tx.get(db.doc(`facilities/${facilityId}/orders/${orderId}/mails/d_${lid}`))]);
         if (!link.exists || link.get("status") !== "active" || !isId(link.get("currentGrantId"))) return false;
         const g = await tx.get(grantRef(link.get("currentGrantId")));
         if (!g.exists || g.get("status") !== "active" || g.get("facilityId") !== facilityId || g.get("localDealerId") !== lid || g.get("companyId") !== link.get("companyId")) return false;
         // 許可した時点と同じ発注先のときだけ(別の会社へ切り替えた・作り直した発注先宛ての注文を、旧会社に索引しない)
         if (typeof g.get("dealerFingerprint") !== "string" || g.get("dealerFingerprint") !== dealerFingerprintOf(fd)) return false;
+        // 注文時点の発注先(注文に保存された名称・注文メールの宛先)が、許可した時点と同じときだけ(変えて戻した場合の途中の注文を索引しない)
+        if (!orderMatchesGrant(order, mail, lid, g.data())) return false;
         const from = millisOf(g.get("effectiveFrom"));
         if (from === null || millisOf(order.createdAt) < from) return false;   // 許可の前の注文は対象外
         const cid = g.get("companyId");

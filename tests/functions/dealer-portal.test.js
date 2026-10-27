@@ -78,6 +78,13 @@ async function placeOrder(facilityId, uid, lines, { notes = "共通の備考(患
   return r;
 }
 const list = (uid, over = {}) => api(uid, "list", { ...range(), ...over });
+/** 続きを最後までたどる(同じ検索)。各ページの newSinceSearch もまとめる */
+async function rest(uid, first, over = {}, call = (c) => list(uid, { ...over, cursor: c })) {
+  const items = [], flags = [];
+  let r = first;
+  while (r.nextCursor) { r = await call(r.nextCursor); items.push(...r.items); flags.push(r.newSinceSearch); }
+  return { items, complete: r.complete, newSinceSearch: flags.some(Boolean) };
+}
 
 test("権限: 会社・支店・担当者・関連付けの管理は運営者だけ。招待は本人のメールでしか承諾できず、未招待・期限切れ・取り消しは参加できない", async () => {
   for (const a of [auth("adminA"), staffAuth("x1"), auth("z", { platformAdmin: "true" }), null]) {
@@ -354,42 +361,78 @@ test("索引: 同じ注文の重複処理は1件。作り直しは既定で確�
 
 // ======================= Codex レビュー(docs/reviews/dealer-portal-audit.md)の再現 =======================
 
-test("F-01: 許可した発注先を別の会社の名称・宛先へ変更・作り直したら、旧会社への公開を止める(取消・再許可まで)。並び順・使用報告用メールの変更では止めない", async () => {
+test("F-01: 閲覧を許可中の発注先は、識別項目(名称・宛名・発注用メール・連携ID)の変更と削除を Rules で拒否する(先に取消)。並び順・使用報告用メールは変更できる。指紋の不一致(サーバー側の書き換え)でも公開を止める", async () => {
   await grant("adminA", "fA", "dA1");
-  const r1 = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
   const rid1 = (await list("x1")).items[0].receiptId;
-  const receiptsX = async () => (await db.collection(`dealerCompanies/${C.X}/receipts`).get()).size;
-  // 並び順・使用報告用メールの変更は、発注先の実体の変更ではない
-  await db.doc("facilities/fA/facilityDealers/dA1").update({ sortOrder: 2000, usageReportEmails: ["usage@x.example.jp"] });
+  const { updateDoc, deleteDoc: del, setDoc: put, serverTimestamp } = await import("firebase/firestore");
+  const adminDb = env.authenticatedContext("adminA", { email: "adminA@example.jp", email_verified: true }).firestore();
+  const ref = doc(adminDb, "facilities/fA/facilityDealers/dA1");
+  const by = () => ({ updatedBy: "adminA", updatedAt: serverTimestamp() });
+  // 許可中: 名称・宛名・発注用メール・連携IDの変更、削除、(削除後の)作り直しは拒否
+  for (const patch of [{ name: "ワイ医療(切替)" }, { orderEmails: ["order-y@y.example.jp"] }, { mailName: "ワイ医療 御中" }, { dealerId: "global-y" }]) {
+    await assertFails(updateDoc(ref, { ...patch, ...by() }));
+  }
+  await assertFails(del(ref));
+  // 並び順・使用報告用メールは変更できる(公開も続く)
+  await updateDoc(ref, { sortOrder: 2000, usageReportEmails: ["usage@x.example.jp"], ...by() });
   assert.equal((await list("x1")).items.length, 1);
   assert.equal((await statusOf("adminA", "fA")).find(d => d.localDealerId === "dA1").link.grant.stale, false);
-  // 施設管理者が、通常の発注先設定(クライアントSDK・Rules を通る)で、同じ dA1 を会社Yの名称・宛先へ変更する
-  const adminDb = env.authenticatedContext("adminA", { email: "adminA@example.jp", email_verified: true }).firestore();
-  const { updateDoc, serverTimestamp } = await import("firebase/firestore");
-  await updateDoc(doc(adminDb, "facilities/fA/facilityDealers/dA1"), { name: "ワイ医療(切替)", orderEmails: ["order-y@y.example.jp"], updatedBy: "adminA", updatedAt: serverTimestamp() });
-  // 旧会社X: 一覧・詳細・施設の候補から外れ、新しい注文も索引されない
+  // 許可していない発注先(dA2 は案のみ)は従来どおり変更できる
+  await updateDoc(doc(adminDb, "facilities/fA/facilityDealers/dA2"), { name: "ワイ医療2", ...by() });
+  // サーバー側の書き換え(Rules を通らない)で別の会社に変わった場合も、指紋の不一致で公開を止め、施設の画面に「停止中」
+  await db.doc("facilities/fA/facilityDealers/dA1").update({ name: "ワイ医療(切替)", orderEmails: ["order-y@y.example.jp"] });
   assert.deepEqual((await list("x1")).items, []);
   await rejects(api("x1", "get", { receiptId: rid1 }), "not-found");
-  assert.deepEqual((await api("x1", "context")).facilities, []);
-  const before = await receiptsX();
-  const r2 = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
-  assert.equal(await receiptsX(), before, "切り替え後の注文は旧会社に索引しない");
-  // 施設の画面では「停止中」と分かる。取消 → 運営者が会社Yへ関連付け → 再許可で、会社Yに公開(旧会社Xには出ない)
   assert.equal((await statusOf("adminA", "fA")).find(d => d.localDealerId === "dA1").link.grant.stale, true);
+  // 取消の後は変更できる → 運営者が会社Yへ関連付け → 再許可で会社Yへ(許可の後の注文だけ)
   await revoke("adminA", "fA", "dA1");
+  await updateDoc(ref, { name: "ワイ医療(切替2)", ...by() });
   await op("proposeLink", { facilityId: "fA", localDealerId: "dA1", companyId: C.Y });
   await grant("adminA", "fA", "dA1");
   const r3 = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
-  assert.deepEqual((await list("y1")).items.map(i => i.orderNumber), [r3.orderNumber], "再許可の後の注文だけ。切り替え中の注文(r2)は出ない");
+  assert.deepEqual((await list("y1")).items.map(i => i.orderNumber), [r3.orderNumber]);
   assert.deepEqual((await list("x1")).items, []);
-  assert.ok(r1 && r2);
-  // 削除して同じ ID・同じ内容で作り直した場合も停止(作成時刻が違う)
-  await db.doc("facilities/fA/facilityDealers/dA1").delete();
-  await db.doc("facilities/fA/facilityDealers/dA1").set({ facilityId: "fA", name: "ワイ医療(切替)", orderEmails: ["order-y@y.example.jp"] });
-  assert.deepEqual((await list("y1")).items, []);
-  const before2 = (await db.collection(`dealerCompanies/${C.Y}/receipts`).get()).size;
-  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
-  assert.equal((await db.collection(`dealerCompanies/${C.Y}/receipts`).get()).size, before2);
+});
+
+test("F-01(再レビュー): 発注先を他社へ変えて元に戻しても、途中の他社宛て注文は旧会社に索引・返却しない(遅延イベント・再試行・作り直し・詳細とも)。戻した後の新しい注文と、変更前の注文は従来どおり", async () => {
+  await grant("adminA", "fA", "dA1");
+  const before = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+19.0D" })]);
+  const xDealer = (await db.doc("facilities/fA/facilityDealers/dA1").get()).data();
+  const receiptsX = async () => (await db.collection(`dealerCompanies/${C.X}/receipts`).get()).docs.map(d => d.get("sourceOrderId"));
+  // Rules を通らない経路(サーバー側の書き換え)で X → Y に変え、Y 宛ての注文を作る(注文メールの宛先も Y)。索引は遅れる
+  await db.doc("facilities/fA/facilityDealers/dA1").update({ name: "ワイ医療(切替)", orderEmails: ["order-y@y.example.jp"] });
+  const yPeriod = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1", power: "+23.5D" })] } });
+  const yOrder = (await db.doc(`facilities/fA/orders/${yPeriod.orderId}`).get()).data();
+  assert.equal(yOrder.lines[0].dealer.name, "ワイ医療(切替)", "注文には注文時点の発注先が保存される");
+  // メールだけ Y に変えた注文(名称は X のまま)
+  await db.doc("facilities/fA/facilityDealers/dA1").update({ name: xDealer.name });
+  const mailOnly = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1", power: "+24.5D" })] } });
+  // X の元の値へ戻す(取消・再許可はしない)。指紋は元に戻る
+  await db.doc("facilities/fA/facilityDealers/dA1").update({ name: xDealer.name, orderEmails: xDealer.orderEmails });
+  assert.equal((await statusOf("adminA", "fA")).find(d => d.localDealerId === "dA1").link.grant.stale, false);
+  // 遅れて届いた索引イベント・再試行・運営者の作り直し: 途中の注文は X に索引しない
+  for (const o of [yPeriod, mailOnly]) {
+    assert.equal((await portal.indexOrderEvent({ facilityId: "fA", orderId: o.orderId, eventTime: new Date().toISOString() })).created, 0);
+    assert.equal((await portal.indexOrder("fA", o.orderId)).created, 0);
+  }
+  await op("reindex", { facilityId: "fA", from: today(), to: today(), apply: true });
+  assert.deepEqual(await receiptsX(), [before.orderId]);
+  // 索引が何らかの理由で作られていても、詳細は返さない(注文時点の発注先を照合)
+  const g = (await db.doc("facilities/fA/dealerPortalLinks/dA1").get()).get("currentGrantId");
+  const forged = receiptIdOf(g, "fA", yPeriod.orderId);
+  await db.doc(`dealerCompanies/${C.X}/receipts/${forged}`).set({ grantId: g, facilityId: "fA", localDealerId: "dA1", sourceOrderId: yPeriod.orderId, orderNumber: yOrder.orderNumber, orderedAt: yOrder.createdAt, lineCount: 1, totalQuantity: 1 });
+  await rejects(api("x1", "get", { receiptId: forged }), "not-found");
+  await db.doc(`dealerCompanies/${C.X}/receipts/${forged}`).delete();
+  const json = JSON.stringify((await list("x1")).items);
+  assert.ok(!json.includes(yPeriod.orderNumber) && !json.includes(mailOnly.orderNumber));
+  // 変更前の注文と、戻した後の新しい注文は従来どおり X に公開
+  const after = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+25.5D" })]);
+  assert.deepEqual((await list("x1")).items.map(i => i.orderNumber).sort(), [before.orderNumber, after.orderNumber].sort());
+  const d = await api("x1", "get", { receiptId: (await list("x1")).items.find(i => i.orderNumber === after.orderNumber).receiptId });
+  assert.equal(d.lines[0].power, "+25.5D");
+  // 他社の明細は混ざらない・注文とメールは従来どおり(Y 期間の注文のメールは Y の宛先のまま)
+  assert.deepEqual((await db.doc(`facilities/fA/orders/${yPeriod.orderId}/mails/d_dA1`).get()).get("to"), ["order-y@y.example.jp"]);
 });
 
 test("F-02: 無効化の前に発行した参加待ちでは復帰できない(無効化で取り消す・発行時刻も照合)。無効化の後に発行した案内なら復帰できる", async () => {
@@ -456,7 +499,7 @@ test("F-03: 索引の一時的な失敗は例外で知らせて再試行に任�
   assert.equal((await db.collection(`facilities/fA/orders/${r.orderId}/mails`).get()).size, 2, "メールは増えない");
 });
 
-test("F-04: 検索の途中で、読み終えた範囲へ遅れて索引が入ったら、続きで欠けたまま終わらせず先頭からの再検索を求める。未読の範囲なら続きで読める", async () => {
+test("F-04: 続きのページも検索時点(最初のページを読んだ時点)の内容で読む。検索中に索引が追加されても、ページの間で欠けたり重なったりせず、追加は newSinceSearch で知らせる(再検索で表示)", async () => {
   await grant("adminA", "fA", "dA1");
   const make = () => orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1" })] } });
   const old = await make(); await portal.indexOrder("fA", old.orderId);
@@ -464,28 +507,52 @@ test("F-04: 検索の途中で、読み終えた範囲へ遅れて索引が入�
   const late = await make();   // 一番新しいが、索引が遅れている
   const p1 = await list("x1", { limit: 1 });
   assert.deepEqual(p1.items.map(i => i.orderNumber), [front.orderNumber]);
+  assert.equal(p1.newSinceSearch, false);
   await portal.indexOrder("fA", late.orderId);   // 読み終えた範囲(先頭側)に反映
-  const p2 = await list("x1", { limit: 1, cursor: p1.nextCursor });
-  assert.deepEqual([p2.restart, p2.items, p2.nextCursor], [true, [], null]);
-  const again = await list("x1");
-  assert.deepEqual(again.items.map(i => i.orderNumber), [late.orderNumber, front.orderNumber, old.orderNumber]);
-  // 未読の範囲(カーソルより古い側)に遅れて入った索引は、続きでそのまま読める
+  const p2 = await rest("x1", p1, { limit: 1 });
+  assert.deepEqual([p2.items.map(i => i.orderNumber), p2.complete, p2.newSinceSearch], [[old.orderNumber], true, true], "検索時点の内容は欠けずに最後まで。追加は知らせる");
+  assert.deepEqual((await list("x1")).items.map(i => i.orderNumber), [late.orderNumber, front.orderNumber, old.orderNumber], "再検索で表示");
+  // 未読の範囲(カーソルより古い側)に遅れて入った索引も、同じ検索の続きには混ぜない(重複・順序の乱れなし)。知らせて再検索で表示
   await db.recursiveDelete(db.collection(`dealerCompanies/${C.X}/receipts`));
   await portal.indexOrder("fA", late.orderId);
   await portal.indexOrder("fA", front.orderId);
   const q1 = await list("x1", { limit: 1 });
   await portal.indexOrder("fA", old.orderId);
-  const q2 = await list("x1", { limit: 1, cursor: q1.nextCursor });
-  const q3 = await list("x1", { limit: 1, cursor: q2.nextCursor });
-  assert.deepEqual([...q1.items, ...q2.items, ...q3.items].map(i => i.orderNumber), [late.orderNumber, front.orderNumber, old.orderNumber]);
-  assert.ok(!q2.restart && !q3.restart);
-  // 別の施設(検索条件の外)に遅れて入った索引では、再検索を求めない
+  const q2 = await rest("x1", q1, { limit: 1 });
+  assert.deepEqual([...q1.items, ...q2.items].map(i => i.orderNumber), [late.orderNumber, front.orderNumber]);
+  assert.deepEqual([q2.complete, q2.newSinceSearch], [true, true]);
+  // 別の施設(検索条件の外)に追加された索引では知らせない
   await grant("adminB", "fB", "dB1");
   const s1 = await list("x1", { limit: 1, facilityFilter: { mode: "selected", facilityIds: ["fA"] } });
   await placeOrder("fB", "ordB", [line({ dealerId: "dB1" })]);
   const s2 = await list("x1", { limit: 1, cursor: s1.nextCursor, facilityFilter: { mode: "selected", facilityIds: ["fA"] } });
-  assert.ok(!s2.restart);
+  assert.equal(s2.newSinceSearch, false);
   assert.equal(s2.items.length, 1);
+});
+
+test("F-04(再レビュー): 次ページの処理中(読み取りの直前)に索引が追加されても、そのページは検索時点の内容で、欠けたまま全件と判断しない(追加は知らせる)", async () => {
+  await grant("adminA", "fA", "dA1");
+  const make = () => orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1" })] } });
+  const o1 = await make(); await portal.indexOrder("fA", o1.orderId);
+  const o2 = await make(); await portal.indexOrder("fA", o2.orderId);
+  const o3 = await make();   // 最新。索引が遅れている
+  const p1 = await list("x1", { limit: 1 });
+  assert.deepEqual(p1.items.map(i => i.orderNumber), [o2.orderNumber]);
+  // 次ページの要求の途中(一覧の読み取りの直前)で、o3 の索引を実際の indexOrder で作る
+  let injected = false;
+  const racy = new Proxy(db, { get(t, p) {
+    if (p === "runTransaction") return async (fn, o) => {
+      if (!injected && o && o.readOnly) { injected = true; await portal.indexOrder("fA", o3.orderId); }
+      return t.runTransaction(fn, o);
+    };
+    const v = t[p]; return typeof v === "function" ? v.bind(t) : v;
+  } });
+  const racyPortal = createDealerPortalService({ db: racy, FieldValue, Timestamp, FieldPath, isEnabled: () => true });
+  const p2 = await rest("x1", p1, {}, (c) => racyPortal.portal({ auth: staffAuth("x1"), data: { action: "list", ...range(), limit: 1, cursor: c } }));
+  assert.ok(injected);
+  assert.deepEqual(p2.items.map(i => i.orderNumber), [o1.orderNumber]);
+  assert.deepEqual([p2.complete, p2.newSinceSearch], [true, true], "欠けたまま「新しい注文なし」としない");
+  assert.deepEqual((await list("x1")).items.map(i => i.orderNumber), [o3.orderNumber, o2.orderNumber, o1.orderNumber]);
 });
 
 test("F-06: 所属の変更後(旧会社で無効化)も、会社を指定せずに有効な会社を開ける。有効な所属が2社なら選択、すべて無効なら拒否。会社の候補は有効な所属だけ", async () => {
@@ -515,6 +582,28 @@ test("F-06: 所属の変更後(旧会社で無効化)も、会社を指定せず
   assert.deepEqual((await api("x1", "companies")).companies, []);
   assert.deepEqual((await api("stranger", "companies")).companies, []);
   await rejects(api("x1", "companies", { companyId: C.Y }), "invalid-argument");
+});
+
+test("F-06(再レビュー): 無効な旧所属が20件以上残っていても、有効な会社を会社の指定なしで開ける(有効かどうかを確かめてから選ぶ)", async () => {
+  const uid = "hopper";
+  const old = [];
+  for (let i = 0; i < 21; i++) {
+    const cid = `dco-old-${String(i).padStart(2, "0")}`;
+    old.push(cid);
+    await db.doc(`dealerCompanies/${cid}`).set({ name: `旧会社${i}`, status: i % 2 ? "suspended" : "active", accessMode: "companyWide", policyVersion: 1 });
+    await db.doc(`dealerCompanies/${cid}/staff/${uid}`).set({ uid, approvedEmail: `${uid}@corp.example.jp`, role: "reader", status: "disabled" });
+  }
+  // 有効な会社(X)は一覧の22件目
+  await db.doc(`dealerCompanies/${C.X}/staff/${uid}`).set({ uid, approvedEmail: `${uid}@corp.example.jp`, role: "reader", status: "active", facilityAssignments: [] });
+  await db.doc(`dealerStaffIndex/${uid}`).set({ companyIds: [...old, C.X] });
+  assert.deepEqual((await api(uid, "companies")).companies, [{ companyId: C.X, name: "エックス商事" }]);
+  assert.equal((await api(uid, "context")).company.id, C.X);
+  // 招待の承諾では、新しい所属を一覧の先頭に加える
+  const { invitationId } = await op("inviteStaff", { companyId: C.Y, email: `${uid}@corp.example.jp`, name: "", role: "reader" });
+  await api(uid, "respond", { invitationId, accept: true });
+  assert.equal((await db.doc(`dealerStaffIndex/${uid}`).get()).get("companyIds")[0], C.Y);
+  assert.deepEqual((await api(uid, "companies")).companies.map(c => c.companyId).sort(), [C.X, C.Y].sort());
+  await rejects(api(uid, "context"), "failed-precondition");   // 有効2社: 会社の選択が必要
 });
 
 test("Rules: 新しい領域(会社・担当者・索引・許可・関連付け・参加待ち)は、担当者・施設の管理者・運営者もクライアントから直接読めない。担当者は施設の注文を読めない", async () => {

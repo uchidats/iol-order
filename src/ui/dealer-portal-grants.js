@@ -18,6 +18,7 @@ export function createDealerPortalSection({ api }) {
   const section = h("section", { class: "settings-section dealer-portal-section", "data-section": "dealerPortal", hidden: true },
     createSectionHeading("ディーラー画面での閲覧", `ディーラーが専用画面で、この施設の注文のうち自社宛ての明細を閲覧できるようにします。運営者がディーラーの会社を登録した発注先だけが対象です。許可は管理者・副管理者が行えます。\n\n${DEALER_ACCESS_NOTICE}`),
     h("p", { class: "form-hint dealer-portal-notice" }, DEALER_ACCESS_NOTICE),
+    h("p", { class: "form-hint", "data-lock-note": "" }, "閲覧を許可している間は、その発注先の名称・宛名・発注用メールの変更と削除はできません。変更するときは、先に閲覧を取り消してください(改めて許可すると、その後の新しい注文から表示されます)。"),
     list, msg);
   let facilityId = null;
   let busy = false;
@@ -39,7 +40,7 @@ export function createDealerPortalSection({ api }) {
   async function act(d, action) {
     if (busy) return;
     const message = action === "grant"
-      ? `「${d.dealerName}」(会社: ${d.link.companyName})に、ディーラー画面での閲覧を許可しますか？\n\n${DEALER_ACCESS_NOTICE}\n\n許可より前の注文は表示されません。`
+      ? `「${d.dealerName}」(会社: ${d.link.companyName})に、ディーラー画面での閲覧を許可しますか？\n\n${DEALER_ACCESS_NOTICE}\n\n許可より前の注文は表示されません。許可している間は、この発注先の名称・宛名・発注用メールの変更と削除はできません。`
       : `「${d.dealerName}」(会社: ${d.link.companyName})の閲覧の許可を取り消しますか？\n取消後は、新しい取得ができなくなります(すでに表示・保存された内容や、従来の注文メールは取り消せません)。`;
     if (!(await confirmDialog({ message, okLabel: action === "grant" ? "許可する" : "取り消す", cancelLabel: "キャンセル" }))) return;
     busy = true; msg.textContent = "";

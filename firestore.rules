@@ -210,7 +210,26 @@ service cloud.firestore {
       // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
+        // ディーラー専用画面で閲覧を許可中(関連付けが active)の発注先は、識別項目(名称・宛名・発注用メール・連携ID)を変更・削除・作り直しできない。
+        // 変えるときは先に閲覧を取り消す(取消で許可の世代が終わり、再許可はその時点以降の新しい注文だけ)。並び順・使用報告用メールは変更できる
+        allow create: if dealerWriteOk(fid) && !portalActive(fid, id);
+        allow update: if dealerWriteOk(fid) && (!portalActive(fid, id) || dealerIdentityUnchanged());
+        // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
+        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'facilityDealers', id) && !portalActive(fid, id);
+      }
+
+      function portalActive(fid, id) {
+        return exists(/databases/$(database)/documents/facilities/$(fid)/dealerPortalLinks/$(id))
+          && get(/databases/$(database)/documents/facilities/$(fid)/dealerPortalLinks/$(id)).data.get('status', '') == 'active';
+      }
+      function dealerIdentityUnchanged() {
+        return request.resource.data.get('name', null) == resource.data.get('name', null)
+          && request.resource.data.get('mailName', null) == resource.data.get('mailName', null)
+          && request.resource.data.get('orderEmails', null) == resource.data.get('orderEmails', null)
+          && request.resource.data.get('dealerId', null) == resource.data.get('dealerId', null);
+      }
+      function dealerWriteOk(fid) {
+        return (isPlatformAdmin() || isFacilityManager(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'mailName', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
@@ -221,8 +240,6 @@ service cloud.firestore {
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
           && validSortOrder(request.resource.data)
           && actorOk(request.resource.data);
-        // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
-        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'facilityDealers', id);
       }
 
       // 削除の記録(担当医・ディーラーを削除する一括書き込みで、本人が書く)。ID = {コレクション}_{ドキュメントID}。

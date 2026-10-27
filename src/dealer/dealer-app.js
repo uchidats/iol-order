@@ -17,7 +17,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
-  let gen = 0;             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
+  let gen = 0;
+  let searchedAt = null;   // 検索時点(サーバーが最初のページを読んだ時点)             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
   let choices = [];        // 本人の有効な所属会社(2社以上なら会社を選ぶ)
 
   const panel = h("section", { class: "feature-card dealer-panel", id: "dealerPanel" });
@@ -165,7 +166,10 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
         renderList();
         listMsg.textContent = items.length ? `${items.length}件${cursor ? "(続きがあります)" : ""}`
           : cursor ? "ここまでに該当する注文は見つかりませんでした。「さらに表示」で続きを検索できます。" : "該当する注文はありません。";
-        fetched.textContent = `最終取得: ${formatJstDateTime(new Date().toISOString())}(注文メールとは別に反映されるため、表示まで少し時間がかかることがあります)`;
+        // 続きのページも、最初のページを読んだ時点(検索時点)の内容で表示する。その後に反映された注文は再検索で表示
+        if (!append) searchedAt = r.asOf || new Date().toISOString();
+        fetched.textContent = `検索時点: ${formatJstDateTime(searchedAt)}(注文メールとは別に反映されるため、表示まで少し時間がかかることがあります)`;
+        if (r.newSinceSearch) listMsg.textContent += " 検索の後に反映された注文があります。「検索」を押すと最新の内容を表示します。";
       } catch (e) {
         if (my !== gen) { listMsg.textContent = CHANGED; return; }
         items = []; cursor = null; renderList();
