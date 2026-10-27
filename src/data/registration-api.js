@@ -31,8 +31,9 @@ export function createRegistrationApi({ functions, httpsCallable }) {
     /** 申請の削除(運営者のみ。審査中・却下済みだけ。承認済みは削除できない) */
     deleteFacilityApplication: ({ applicationId }) => call("deleteFacilityApplication", { applicationId }),
     /** 申請の承認・却下(承認権限のある運営者のみ)。firstAdmin を指定すると、その人が参加を承諾したときに最初の管理者になる */
-    decideFacilityApplication: ({ applicationId, decision, firstAdmin, reason, confirmDuplicate }) =>
-      call("decideFacilityApplication", { applicationId, decision, ...(firstAdmin ? { firstAdmin } : {}), ...(reason ? { reason } : {}), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
+    decideFacilityApplication: ({ applicationId, decision, firstAdmin, reason, notifyReason, confirmDuplicate }) =>
+      call("decideFacilityApplication", { applicationId, decision, ...(firstAdmin ? { firstAdmin } : {}), ...(reason ? { reason } : {}),
+        ...(decision === "reject" && notifyReason === true ? { notifyReason: true } : {}), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) }),
     /** 施設名の変更(施設管理者のみ。重複候補があれば status:"duplicate-candidate" を返し、confirmDuplicate なしでは変更しない) */
     renameFacility: ({ facilityId, name, confirmDuplicate }) =>
       call("renameFacility", confirmDuplicate ? { facilityId, name, confirmDuplicate: true } : { facilityId, name }),

@@ -2224,3 +2224,4 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .prereg-state.is-pending { background: #fffbeb; color: #92400e; }
 .prereg-state.is-expired, .prereg-state.is-declined, .prereg-state.is-missing { background: #f3f4f6; color: #4b5563; }
 .pending-invite-admin { margin: 6px 0 0; }
+.application-notify-reason { display: flex; width: fit-content; margin: 6px 0 0; }

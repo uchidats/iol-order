@@ -10,7 +10,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { doc, getDoc, setDoc, getDocs, collection } from "firebase/firestore";
 import { createRegistrationService, deriveFacilityId } from "../../functions/src/registration.js";
-import { createFacilityApplicationService, createApplicationNotifier, buildApplicationMail } from "../../functions/src/facility-applications.js";
+import { createFacilityApplicationService, createApplicationNotifier, buildApplicationMail, createApplicationResultNotifier, buildApplicationResultMail, buildAdminInviteMail } from "../../functions/src/facility-applications.js";
 import { createMemberService, pendingIdOf } from "../../functions/src/members.js";
 import { createOrderService } from "../../functions/src/orders.js";
 import { canApproveFacilities } from "../../functions/src/roles.js";
@@ -348,4 +348,122 @@ test("Rules: 運営者の操作履歴(platformAuditLogs)はクライアントか
     await assertFails(getDocs(collection(c, "platformAuditLogs")));
     await assertFails(setDoc(doc(c, "platformAuditLogs/forged"), { action: "x" }));
   }
+});
+
+// ================= 審査結果の通知(申請者)・参加案内(指定した初期管理者) =================
+const resultNotifier = (over = {}) => {
+  const sent = [];
+  const n = createApplicationResultNotifier({ db, FieldValue, isEnabled: () => true, getSender: () => ({ send: async (m) => { sent.push(m); return { ok: true, id: `msg_${sent.length}` }; } }), ...over });
+  return { n, sent };
+};
+const ref = (id) => db.doc(`facilityApplications/${id}`);
+
+test("結果通知: 承認・却下で、申請者への通知を送信待ちとして記録する(申請の時点では記録しない)。別の責任者を指定したときは参加案内も", async () => {
+  const a = await apply(user("userA"), "結果通知の眼科");
+  assert.equal((await appOf(a.applicationId)).resultNotification, undefined, "申請の時点では結果通知はない");
+  await decide(ops(), { applicationId: a.applicationId, decision: "approve" });
+  let x = await appOf(a.applicationId);
+  assert.deepEqual([x.resultNotification.status, x.adminInviteNotification], ["pending", undefined]);
+  const b = await apply(user("userB"), "責任者指定の眼科");
+  await decide(ops(), { applicationId: b.applicationId, decision: "approve", firstAdmin: { name: "責任者", email: "boss@example.jp" } });
+  x = await appOf(b.applicationId);
+  assert.deepEqual([x.resultNotification.status, x.adminInviteNotification.status], ["pending", "pending"]);
+  const c = await apply(user("userC"), "却下の眼科");
+  await decide(ops(), { applicationId: c.applicationId, decision: "reject", reason: "確認できない", notifyReason: true });
+  x = await appOf(c.applicationId);
+  assert.deepEqual([x.resultNotification.status, x.reasonNotified], ["pending", true]);
+  // 却下理由の通知は却下のときだけ・真偽値
+  const d = await apply(user("userD"), "入力検証の医院");
+  await rejects(decide(ops(), { applicationId: d.applicationId, decision: "approve", notifyReason: true }), "invalid-argument");
+  await rejects(decide(ops(), { applicationId: d.applicationId, decision: "reject", notifyReason: "yes" }), "invalid-argument");
+  await decide(ops(), { applicationId: d.applicationId, decision: "reject", notifyReason: true });
+  assert.equal((await appOf(d.applicationId)).reasonNotified, false, "理由が空なら記載しない");
+});
+
+test("結果通知: 承認は申請者へ(申請者が管理者)。別の責任者を指定したときは、申請者への結果と、責任者への参加案内を別のメールで送る", async () => {
+  const { n, sent } = resultNotifier();
+  const a = await apply(user("userA"), "承認通知の眼科");
+  await decide(ops(), { applicationId: a.applicationId, decision: "approve" });
+  assert.deepEqual(await n.notify(ref(a.applicationId)), { resultNotification: "accepted", adminInviteNotification: "skipped" });
+  assert.deepEqual(sent[0].to, ["usera@example.jp"]);
+  assert.equal(sent[0].subject, "【IOL Order】施設登録の申請が承認されました: 承認通知の眼科");
+  assert.match(sent[0].text, /施設名: 承認通知の眼科\n結果: 承認[\s\S]*このメールアドレスでログインしてください。この施設の管理者として利用できます/);
+  assert.match(sent[0].idempotencyKey, /^iol-appres-[0-9a-f]{40}$/);
+  const b = await apply(user("userB"), "責任者指定の眼科");
+  await decide(ops(), { applicationId: b.applicationId, decision: "approve", firstAdmin: { name: "責任者", email: "Boss@Example.jp" } });
+  sent.length = 0;
+  assert.deepEqual(await n.notify(ref(b.applicationId)), { resultNotification: "accepted", adminInviteNotification: "accepted" });
+  assert.deepEqual(sent.map(m => m.to), [["userb@example.jp"], ["boss@example.jp"]]);
+  assert.match(sent[0].text, /最初の管理者には、申請者とは別の責任者が指定されました[\s\S]*申請者の方には、この施設の管理者の権限は付与されていません/);
+  assert.equal(sent[1].subject, "【IOL Order】施設の管理者としての参加のご案内: 責任者指定の眼科");
+  assert.match(sent[1].text, /このメールアドレス\(boss@example\.jp\)でログインし[\s\S]*参加するまで、管理者の権限は付与されません/);
+  assert.notEqual(sent[0].idempotencyKey, sent[1].idempotencyKey);
+  const x = await appOf(b.applicationId);
+  assert.deepEqual([x.resultNotification.status, x.resultNotification.providerMessageId, x.adminInviteNotification.status, x.status], ["accepted", "msg_1", "accepted", "approved"]);
+});
+
+test("結果通知: 却下理由は運営者が選んだときだけ記載する", async () => {
+  const { n, sent } = resultNotifier();
+  const a = await apply(user("userA"), "理由を記載する医院");
+  await decide(ops(), { applicationId: a.applicationId, decision: "reject", reason: "施設を確認できませんでした", notifyReason: true });
+  const b = await apply(user("userB"), "理由を記載しない医院");
+  await decide(ops(), { applicationId: b.applicationId, decision: "reject", reason: "社内のメモ" });
+  await n.notify(ref(a.applicationId));
+  await n.notify(ref(b.applicationId));
+  assert.equal(sent[0].subject, "【IOL Order】施設登録の申請の結果: 理由を記載する医院");
+  assert.match(sent[0].text, /結果: 却下\n理由: 施設を確認できませんでした/);
+  assert.ok(!sent[1].text.includes("社内のメモ") && !sent[1].text.includes("理由:"), "選ばなければ理由は載せない");
+  assert.match(sent[1].text, /必要に応じて改めて申請してください/);
+});
+
+test("結果通知: 二重送信しない(再実行・同時の実行でも1回)。送信の失敗は記録し、承認・却下の結果はそのまま。停止中は held、テスト用の宛先の設定に従う", async () => {
+  const { n, sent } = resultNotifier();
+  const a = await apply(user("userA"), "二重送信の医院");
+  await decide(ops(), { applicationId: a.applicationId, decision: "reject" });
+  await Promise.all(Array.from({ length: 4 }, () => n.notify(ref(a.applicationId))));
+  await n.notify(ref(a.applicationId));
+  assert.equal(sent.length, 1, "何度実行しても1回");
+  const fail = resultNotifier({ getSender: () => ({ send: async () => ({ ok: false, error: "HTTP 500" }) }) });
+  const b = await apply(user("userB"), "送信失敗の医院");
+  await decide(ops(), { applicationId: b.applicationId, decision: "approve" });
+  assert.equal((await fail.n.notify(ref(b.applicationId))).resultNotification, "failed");
+  let x = await appOf(b.applicationId);
+  assert.deepEqual([x.status, x.resultNotification.status, x.resultNotification.error], ["approved", "failed", "HTTP 500"]);
+  assert.equal((await db.doc(`facilities/${b.applicationId}`).get()).get("status"), "active", "承認の結果は維持");
+  assert.equal((await fail.n.notify(ref(b.applicationId))).resultNotification, "skipped", "失敗は自動では再送しない");
+  const held = resultNotifier({ isEnabled: () => false });
+  const c = await apply(user("userC"), "停止中の医院");
+  await decide(ops(), { applicationId: c.applicationId, decision: "reject" });
+  assert.equal((await held.n.notify(ref(c.applicationId))).resultNotification, "held");
+  assert.equal(held.sent.length, 0);
+  const t = resultNotifier({ testOnly: () => true, testRecipient: () => "dev@example.jp" });
+  const d = await apply(user("userD"), "テスト宛ての医院");
+  await decide(ops(), { applicationId: d.applicationId, decision: "approve", firstAdmin: { name: "責任者", email: "boss@example.jp" } });
+  await t.n.notify(ref(d.applicationId));
+  assert.deepEqual(t.sent.map(m => [m.to, m.subject.startsWith("【テスト】")]), [[["dev@example.jp"], true], [["dev@example.jp"], true]]);
+  x = await appOf(d.applicationId);
+  assert.deepEqual([x.resultNotification.sentTo, x.adminInviteNotification.sentTo], ["test", "test"]);
+});
+
+test("結果通知: この機能より前に処理した申請・審査中・削除した申請には送らない。運営者向けの申請通知とは別", async () => {
+  const { n, sent } = resultNotifier();
+  const a = await apply(user("userA"), "以前の申請の医院");
+  await db.doc(`facilityApplications/${a.applicationId}`).update({ status: "rejected" });   // 結果通知の記録がない(この機能より前の処理)
+  assert.deepEqual(await n.notify(ref(a.applicationId)), { resultNotification: "skipped", adminInviteNotification: "skipped" });
+  const b = await apply(user("userB"), "審査中の医院");
+  assert.deepEqual(await n.notify(ref(b.applicationId)), { resultNotification: "skipped", adminInviteNotification: "skipped" });
+  const c = await apply(user("userC"), "削除する医院");
+  await decide(ops(), { applicationId: c.applicationId, decision: "reject" });
+  await del(ops(), c.applicationId);
+  assert.deepEqual(await n.notify(ref(c.applicationId)), { resultNotification: "skipped", adminInviteNotification: "skipped" });
+  assert.equal(sent.length, 0);
+  assert.equal((await appOf(b.applicationId)).notification.status, "pending", "運営者向けの申請通知はそのまま");
+});
+
+test("結果通知のメール: 件名・項目は1行(改行を含む入力でも)", () => {
+  const m = buildApplicationResultMail({ name: "眼科\nBcc: x@evil.jp", status: "rejected", reason: "理由\r\n2行目", reasonNotified: true });
+  assert.ok(!/[\r\n]/.test(m.subject));
+  assert.ok(m.text.includes("施設名: 眼科 Bcc: x@evil.jp") && m.text.includes("理由: 理由 2行目"));
+  const i = buildAdminInviteMail({ name: "眼科", firstAdmin: { email: "a@example.jp\nBcc: x" } });
+  assert.ok(i.text.includes("(a@example.jp Bcc: x)"));
 });

@@ -21,6 +21,12 @@
    - 却下: 理由(任意・200文字まで)を残す。施設は作らない。
    - 履歴: 申請の `history`(申請・承認・却下、日時・処理した人)、`decidedAt`・`decidedBy`。承認は作成した施設の操作履歴(`auditLogs` の `facility.approve`)にも残す。
 
+4. **審査結果の通知**(トリガー `notifyApplicationResult`。申請の更新をきっかけに、送信待ちのものだけを1回送る)
+   - 申請者へ(`resultNotification`): 承認・却下のどちらも。施設名・結果・次の手順を書く。承認で申請者が最初の管理者なら「このメールアドレスでログインすると管理者として利用できる」、別の責任者を指定した場合は「責任者が参加を承諾すると利用できる。申請者に管理者の権限はない」。却下の理由は、運営者が「却下理由を申請者へのメールに記載する」を選んだときだけ載せる(既定は載せない。`reasonNotified`)。
+   - 指定した初期管理者へ(`adminInviteNotification`): 申請者への結果とは別のメールで、施設名・管理者になること・ログインして参加を承諾する手順・期限(30日)を案内する。
+   - 承認・却下のトランザクションで送信待ちを記録し、送信は別に行う(結果の保存と送信を分ける)。送信前にトランザクションで「送信中」にし、通知ごとに固定の冪等キーを付ける(再試行・同時の実行でも1回)。失敗しても承認・却下の結果はそのままで、送信の結果(受付・失敗・停止中など)だけを記録し、運営者の一覧の「最近の承認・却下」に表示する。自動の再送はしない。
+   - 送信の可否・宛先は注文メールと同じ設定に従う(`MAIL_SENDING_ENABLED=false` → 送らない、`MAIL_TEST_ONLY=true` → テスト用の宛先だけ)。この機能より前に処理した申請、削除した申請には送らない。返信先は付けない(送信専用)。
+
 ## 安全性
 - **承認権限はサーバーで確認する**(`functions/src/roles.js` の `canApproveFacilities`。現在は platformAdmin のカスタムクレームを持つ運営者だけ)。画面のメニューの表示は補助で、一覧・承認・却下の関数がすべて確認する。
 - **申請者は自分の申請を承認・却下できない**(同じアカウント・同じメールアドレス)。
@@ -38,3 +44,8 @@
 3. Functions: `registerFacility`(申請に変更)・`listFacilityApplications`・`decideFacilityApplication`・`notifyFacilityApplication`(新規)・`respondMembership`(最初の管理者の承諾)。
 4. 画面(push)。**Functions より先に画面を公開しない**(新しい画面は申請者名を送るため、古い `registerFacility` は拒否する)。
 - 運営者のアカウントに platformAdmin のカスタムクレームが必要(未設定ならメニューに出ず、承認もできない)。
+
+### 審査結果の通知の追加(承認後。この順で)
+1. Functions: `decideFacilityApplication`・`listFacilityApplications`(更新)、`notifyApplicationResult`(新規トリガー)。Rules は変更なし。
+2. 新しいトリガーの Cloud Run サービス `notifyapplicationresult` だけに、関数の実行アカウントの `roles/run.invoker` を付ける(既存の通知トリガーと同じ。付けないとトリガーが 401 で失敗する)。プロジェクト全体への付与・未認証呼び出しの許可はしない。
+3. 画面(push)。古い画面のまま却下しても、理由をメールに載せないだけで動作する。

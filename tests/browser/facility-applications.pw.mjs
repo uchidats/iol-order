@@ -35,7 +35,8 @@ const api = {
     if (req.decision === "approve" && a.duplicates.exact && !req.confirmDuplicate) return { status: "duplicate-candidate", exact: true, candidates: ["立川病院"] };
     pending = pending.filter(p => p !== a);
     recent.unshift({ ...a, status: req.decision === "approve" ? "approved" : "rejected", decidedAt: t0 + 3600000, decidedBy: { name: "運営者", email: "ops@example.jp" }, reason: req.reason || "",
-      firstAdmin: req.decision === "approve" ? (req.firstAdmin ? { type: "designated", ...req.firstAdmin } : { type: "applicant" }) : null });
+      firstAdmin: req.decision === "approve" ? (req.firstAdmin ? { type: "designated", ...req.firstAdmin } : { type: "applicant" }) : null,
+      resultNotification: { status: "pending" }, ...(req.firstAdmin ? { adminInviteNotification: { status: "pending" } } : {}), reasonNotified: req.notifyReason === true });
     return { status: req.decision === "approve" ? "approved" : "rejected" };
   },
   deleteFacilityApplication: async ({ applicationId }) => {
@@ -145,15 +146,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 却下(理由つき)
       await page.evaluate(() => { window.__fail = false; });
       await sh.locator('[data-f="reason"]').fill("施設を確認できませんでした");
+      await sh.locator('[data-f="notifyReason"]').check();   // 却下理由を申請者へのメールに記載する
       await sh.locator('[data-act="reject"]').click();
+      assert.match(await page.locator(".confirm-dialog-message").innerText(), /申請者に結果をメールで通知します\(却下理由は記載します\)/);
       await ok(page);
       await page.waitForFunction(() => document.querySelectorAll(".application-item").length === 0);
-      assert.deepEqual((await page.evaluate(() => window.__calls)).at(-1), { applicationId: "fac-cccccccccccccccccccccccc", decision: "reject", reason: "施設を確認できませんでした" });
+      assert.deepEqual((await page.evaluate(() => window.__calls)).at(-1), { applicationId: "fac-cccccccccccccccccccccccc", decision: "reject", reason: "施設を確認できませんでした", notifyReason: true });
 
       // 最近の承認・却下(新しい順)。処理した人・最初の管理者・理由
       const recent = await page.locator(".application-recent").allInnerTexts();
       assert.equal(recent.length, 3);
-      assert.match(recent[0], /却下[\s\S]*品川クリニック[\s\S]*運営者[\s\S]*理由: 施設を確認できませんでした/);
+      assert.match(recent[0], /却下[\s\S]*品川クリニック[\s\S]*運営者[\s\S]*理由: 施設を確認できませんでした[\s\S]*申請者への通知: 送信待ち\(理由のメール記載: あり\)/);
+      assert.match(recent[1], /申請者への通知: 送信待ち ・ 初期管理者への参加案内: 送信待ち/);
       assert.match(recent[1], /承認[\s\S]*目黒眼科[\s\S]*最初の管理者: 責任者 花子\(boss@example\.jp/);
       assert.match(recent[2], /承認[\s\S]*立川病院[\s\S]*最初の管理者: 申請者/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "スマートフォン幅ではみ出さない");

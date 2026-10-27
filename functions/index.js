@@ -12,12 +12,12 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineString, defineBoolean, defineSecret } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
-import { createFacilityApplicationService, createApplicationNotifier } from "./src/facility-applications.js";
+import { createFacilityApplicationService, createApplicationNotifier, createApplicationResultNotifier } from "./src/facility-applications.js";
 import { createFacilityPreregistrationService } from "./src/facility-preregistrations.js";
 import { createOrderService } from "./src/orders.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
-import { onDocumentWrittenWithAuthContext, onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentWrittenWithAuthContext, onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { createMailDispatchService, createResendSender, verifyWebhookSignature } from "./src/order-mail-outbox.js";
 import { createSettingsAuditService } from "./src/settings-audit.js";
@@ -160,6 +160,16 @@ const applicationNotifier = createApplicationNotifier({
 });
 export const notifyFacilityApplication = onDocumentCreated({ ...mailOptions, secrets: [...mailOptions.secrets, OPERATOR_NOTIFY_RECIPIENT], document: "facilityApplications/{applicationId}" },
   (event) => (event.data ? applicationNotifier.notify(event.data.ref) : null));
+// 施設登録の審査結果を申請者に通知し、別の責任者を初期管理者に指定した場合はその人に参加を案内する(承認・却下で記録した送信待ちだけを1回送る)
+const applicationResultNotifier = createApplicationResultNotifier({
+  db: getFirestore(), FieldValue,
+  isEnabled: () => MAIL_SENDING_ENABLED.value() && Boolean(MAIL_FROM.value()),
+  testOnly: () => MAIL_TEST_ONLY.value(),
+  testRecipient: () => String(MAIL_TEST_RECIPIENT.value() || "").trim(),
+  getSender: () => createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
+});
+export const notifyApplicationResult = onDocumentUpdated({ ...mailOptions, document: "facilityApplications/{applicationId}" },
+  (event) => (event.data && event.data.after.exists ? applicationResultNotifier.notify(event.data.after.ref) : null));
 // 再送待ち・送信中のまま止まったメール・送信できる注文控えの処理(10分ごと)
 export const retryOrderMails = onSchedule({ ...mailOptions, schedule: "every 10 minutes", timeZone: "Asia/Tokyo" }, () => mailDispatch.processDue());
 // 配信結果(Resend の Webhook。署名を検証する)。受付と配信の結果を区別して記録する

@@ -23,6 +23,8 @@ const formatJst = (ms) => {
   return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 };
 const NOTIFY_LABELS = { pending: "通知待ち", sending: "通知中", accepted: "運営者に通知済み", failed: "通知に失敗", held: "通知停止中(メール送信は停止中)", not_configured: "通知先が未設定" };
+// 申請者・初期管理者への通知(審査の結果)の表示名
+const RESULT_LABELS = { pending: "送信待ち", sending: "送信中", accepted: "送信済み", failed: "送信に失敗", held: "未送信(メール送信は停止中)", not_configured: "宛先なし" };
 const STATUS_LABELS = { approved: "承認", rejected: "却下" };
 
 /** ゴミ箱アイコン(装飾。ボタンの aria-label で意味を伝える) */
@@ -77,6 +79,9 @@ export function createFacilityApplications({ mount, api, onClose }) {
     const otherBox = h("div", { class: "application-other-admin", hidden: true }, nameIn, emailIn,
       h("p", { class: "form-hint" }, "指定した人が、このメールアドレス(確認済み)でログインして参加を承諾したときに、管理者になります。"));
     const reason = h("input", { class: "form-control", type: "text", maxlength: "200", "data-f": "reason", placeholder: "却下の理由(任意)", "aria-label": "却下の理由" });
+    // 却下の理由を申請者へのメールに書くか(既定は書かない。理由が空なら書かない)
+    const notifyReason = h("input", { type: "checkbox", "data-f": "notifyReason" });
+    const notifyReasonLabel = h("label", { class: "settings-check application-notify-reason" }, notifyReason, h("span", {}, "却下理由を申請者へのメールに記載する"));
     const approve = h("button", { type: "button", class: "btn btn-primary", "data-act": "approve" }, "承認");
     const reject = h("button", { type: "button", class: "btn btn-secondary", "data-act": "reject" }, "却下");
     const err = h("p", { class: "error-message", "data-err": "" });
@@ -87,10 +92,12 @@ export function createFacilityApplications({ mount, api, onClose }) {
       const req = { applicationId: a.id, decision };
       if (decision === "approve" && other.checked) req.firstAdmin = { name: nameIn.value.trim(), email: emailIn.value.trim() };
       if (decision === "reject" && reason.value.trim()) req.reason = reason.value.trim();
+      if (decision === "reject" && req.reason && notifyReason.checked) req.notifyReason = true;
       const ok = await confirmDialog({
         message: decision === "approve"
           ? `「${a.name}」を承認しますか？\n施設が有効になり、${other.checked ? "指定した人が参加を承諾すると" : "申請者が"}最初の管理者になります。`
-          : `「${a.name}」の申請を却下しますか？`,
+          : `「${a.name}」の申請を却下しますか？
+申請者に結果をメールで通知します(却下理由は${req.notifyReason ? "記載します" : "記載しません"})。`,
         okLabel: decision === "approve" ? "承認する" : "却下する", cancelLabel: "キャンセル"
       });
       if (!ok) return;
@@ -123,17 +130,20 @@ export function createFacilityApplications({ mount, api, onClose }) {
       h("div", { class: "application-admin" }, h("span", { class: "form-label" }, "最初の管理者"),
         h("label", { class: "settings-check" }, self, h("span", {}, "申請者")),
         h("label", { class: "settings-check" }, other, h("span", {}, "別の責任者を指定"))),
-      otherBox, reason,
+      otherBox, reason, notifyReasonLabel,
       h("div", { class: "form-row application-actions" }, reject, approve), err);
   }
 
   function recentRow(a) {
+    const sent = (n) => (n && n.status ? RESULT_LABELS[n.status] || n.status : null);
+    const notes = [sent(a.resultNotification) ? `申請者への通知: ${sent(a.resultNotification)}` : "", sent(a.adminInviteNotification) ? `初期管理者への参加案内: ${sent(a.adminInviteNotification)}` : ""].filter(Boolean).join(" ・ ");
     const admin = a.firstAdmin ? ` ・ 最初の管理者: ${a.firstAdmin.type === "designated" ? `${a.firstAdmin.name || ""}(${a.firstAdmin.email}・参加の承諾待ち/済み)` : "申請者"}` : "";
     return h("li", { class: "application-recent", "data-application": a.id },
       h("div", { class: "application-name-row" }, h("span", {}, h("span", { class: `application-status is-${a.status}` }, STATUS_LABELS[a.status] || a.status), " ",
         h("strong", {}, a.name)), a.status === "rejected" ? deleteButton(a, null) : null),
       h("div", { class: "form-hint" }, `${formatJst(a.decidedAt)} ・ ${a.decidedBy ? (a.decidedBy.name || a.decidedBy.email) : "—"}${admin}${a.reason ? ` ・ 理由: ${a.reason}` : ""}`),
-      h("div", { class: "form-hint" }, `申請者: ${a.applicant.name || "（未入力）"} ・ ${a.applicant.email}`));
+      h("div", { class: "form-hint" }, `申請者: ${a.applicant.name || "（未入力）"} ・ ${a.applicant.email}`),
+      notes ? h("div", { class: "form-hint application-result-notes" }, notes + (a.status === "rejected" && a.reason ? `(理由のメール記載: ${a.reasonNotified ? "あり" : "なし"})` : "")) : null);
   }
 
   async function load() {

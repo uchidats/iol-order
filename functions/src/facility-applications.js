@@ -146,7 +146,11 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
         createdAt: ms(a.createdAt), decidedAt: ms(a.decidedAt),
         decidedBy: a.decidedBy ? { name: a.decidedBy.name || null, email: a.decidedBy.email || "" } : null,
         firstAdmin: a.firstAdmin || null, reason: a.reason || "", duplicateConfirmed: a.duplicateConfirmed === true,
-        notification: { status: (a.notification || {}).status || null }
+        notification: { status: (a.notification || {}).status || null },
+        // 申請者への結果通知・指定した初期管理者への参加案内の送信状態(この機能より前に処理した申請は null)
+        resultNotification: a.resultNotification ? { status: a.resultNotification.status || null } : null,
+        adminInviteNotification: a.adminInviteNotification ? { status: a.adminInviteNotification.status || null } : null,
+        reasonNotified: a.reasonNotified === true
       };
     };
     const [pending, decided] = await Promise.all([
@@ -170,12 +174,15 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
   async function decideApplication({ auth, data }) {
     const user = assertApprover(auth);
     if (!data || typeof data !== "object" || Array.isArray(data)) throw badInput();
-    if (Object.keys(data).some(k => !["applicationId", "decision", "firstAdmin", "reason", "confirmDuplicate"].includes(k))) throw badInput();
+    if (Object.keys(data).some(k => !["applicationId", "decision", "firstAdmin", "reason", "confirmDuplicate", "notifyReason"].includes(k))) throw badInput();
     const { applicationId, decision } = data;
     if (typeof applicationId !== "string" || !APP_ID.test(applicationId) || !["approve", "reject"].includes(decision)) throw badInput();
     const reason = data.reason === undefined || data.reason === null ? "" : (typeof data.reason === "string" ? oneLine(data.reason) : null);
     if (reason === null || reason.length > REASON_MAX) throw new RegistrationError("invalid-argument", `理由は${REASON_MAX}文字以内で入力してください`);
     if (data.confirmDuplicate !== undefined && typeof data.confirmDuplicate !== "boolean") throw badInput();
+    // 却下の理由を申請者へのメールに書くか(運営者が選ぶ。既定は書かない)
+    if (data.notifyReason !== undefined && (typeof data.notifyReason !== "boolean" || decision !== "reject")) throw badInput();
+    const reasonNotified = data.notifyReason === true && reason !== "";
     let designated = null;
     if (data.firstAdmin !== undefined && data.firstAdmin !== null) {
       if (decision !== "approve" || typeof data.firstAdmin !== "object" || Array.isArray(data.firstAdmin)) throw badInput();
@@ -212,7 +219,8 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
       const history = [...(app.get("history") || []), historyEntry(decision === "approve" ? "approved" : "rejected", user, reason ? { reason } : {})];
 
       if (decision === "reject") {
-        tx.update(ref, { status: APPLICATION_STATUS.REJECTED, reason, decidedAt: FieldValue.serverTimestamp(), decidedBy: by, history, updatedAt: FieldValue.serverTimestamp() });
+        tx.update(ref, { status: APPLICATION_STATUS.REJECTED, reason, reasonNotified, decidedAt: FieldValue.serverTimestamp(), decidedBy: by, history, updatedAt: FieldValue.serverTimestamp(),
+          resultNotification: { status: NOTIFY_STATUS.PENDING } });   // 申請者への結果通知(送信は notifyApplicationResult。結果の保存とは別)
         return { status: APPLICATION_STATUS.REJECTED, applicationId };
       }
 
@@ -250,7 +258,10 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
         action: "facility.approve", applicationId, firstAdmin: { type: firstAdmin.type, email: firstAdmin.email },
         actorUid: user.uid, ...(user.displayName ? { actorName: String(user.displayName).slice(0, 100) } : {}), at: FieldValue.serverTimestamp()
       });
-      tx.update(ref, { status: APPLICATION_STATUS.APPROVED, facilityId, firstAdmin, decidedAt: FieldValue.serverTimestamp(), decidedBy: by, history, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(ref, { status: APPLICATION_STATUS.APPROVED, facilityId, firstAdmin, decidedAt: FieldValue.serverTimestamp(), decidedBy: by, history, updatedAt: FieldValue.serverTimestamp(),
+        // 申請者への結果通知と、別の責任者を指定した場合はその人への参加案内(送信は notifyApplicationResult。承認の結果とは別に記録する)
+        resultNotification: { status: NOTIFY_STATUS.PENDING },
+        ...(designated ? { adminInviteNotification: { status: NOTIFY_STATUS.PENDING } } : {}) });
       return { status: APPLICATION_STATUS.APPROVED, applicationId, facilityId, firstAdmin: { type: firstAdmin.type, status: firstAdmin.status } };
     });
   }
@@ -326,6 +337,108 @@ export function createApplicationNotifier({ db, FieldValue, getSender, isEnabled
       ? { status: NOTIFY_STATUS.ACCEPTED, at: FieldValue.serverTimestamp(), providerMessageId: r.id, sentTo: claim.test ? "test" : "operators" }
       : { status: NOTIFY_STATUS.FAILED, at: FieldValue.serverTimestamp(), error: String(r.error || "").slice(0, 300) } });
     return r.ok ? NOTIFY_STATUS.ACCEPTED : NOTIFY_STATUS.FAILED;
+  }
+  return { notify };
+}
+
+// ---------------- 審査結果の通知(申請者)・参加案内(指定した初期管理者) ----------------
+const SITE_URL = "https://iol.medconf.jp/";
+
+/**
+ * 申請者への審査結果の通知(件名・本文)。施設名・結果・次の手順を簡潔に書く。
+ * 却下の理由は、運営者が「メールに記載する」を選んだとき(reasonNotified)だけ載せる。
+ */
+export function buildApplicationResultMail(app) {
+  const name = oneLine(app.name);
+  if (app.status === APPLICATION_STATUS.APPROVED) {
+    const fa = app.firstAdmin || {};
+    const designated = fa.type === "designated";
+    return {
+      subject: oneLine(`【IOL Order】施設登録の申請が承認されました: ${name}`),
+      text: [
+        "IOL Order への施設登録の申請が承認されました。", "",
+        `施設名: ${name}`, "結果: 承認", "",
+        "■ 次の手順",
+        ...(designated
+          ? ["この施設の最初の管理者には、申請者とは別の責任者が指定されました。",
+             "責任者の方には、参加のご案内を別にお送りしています。責任者の方が参加を承諾すると、施設を利用できるようになります。",
+             "申請者の方には、この施設の管理者の権限は付与されていません。利用する場合は、管理者に利用者の登録を依頼してください。"]
+          : [`${SITE_URL} に、このメールアドレスでログインしてください。この施設の管理者として利用できます。`,
+             "最初に、施設設定(担当医・採用IOL・ディーラー・注文メール)を行ってください。"]),
+        "注文の受付の開始については、IOL Order 運営者からご連絡します。",
+        "", "このメールは送信専用です。"
+      ].join("\n")
+    };
+  }
+  return {
+    subject: oneLine(`【IOL Order】施設登録の申請の結果: ${name}`),
+    text: [
+      "IOL Order への施設登録の申請について、今回は承認を見送りました。", "",
+      `施設名: ${name}`, "結果: 却下",
+      ...(app.reasonNotified && app.reason ? [`理由: ${oneLine(app.reason)}`] : []), "",
+      "■ 次の手順",
+      "内容を確認のうえ、必要に応じて改めて申請してください。既存の施設に参加する場合は、その施設の管理者に利用者の登録を依頼してください。",
+      "", "このメールは送信専用です。"
+    ].join("\n")
+  };
+}
+
+/** 指定した初期管理者への参加案内。申請者への結果通知とは別のメール */
+export function buildAdminInviteMail(app) {
+  const name = oneLine(app.name);
+  return {
+    subject: oneLine(`【IOL Order】施設の管理者としての参加のご案内: ${name}`),
+    text: [
+      "IOL Order の施設の最初の管理者として、あなたが指定されました。", "",
+      `施設名: ${name}`, "役割: 管理者(施設設定・利用者の管理ができます)", "",
+      "■ 次の手順",
+      `${SITE_URL} に、このメールアドレス(${oneLine((app.firstAdmin || {}).email)})でログインし、表示される参加の確認で「参加する」を押してください。`,
+      "参加すると、この施設の管理者になります。参加するまで、管理者の権限は付与されません。参加の期限は、承認の日から30日です。",
+      "心当たりがない場合は、参加しないでください。",
+      "", "このメールは送信専用です。"
+    ].join("\n")
+  };
+}
+
+/**
+ * 審査結果の通知・参加案内の送信(申請の更新をきっかけに。送信待ち pending のものだけ)。送信の可否・宛先は送信の設定に従う
+ * (MAIL_SENDING_ENABLED=false → held、MAIL_TEST_ONLY=true → テスト用の宛先だけ)。二重送信の防止: 送信前にトランザクションで「送信中」にし、
+ * 通知ごとに固定の冪等キーを付ける。失敗しても承認・却下の結果はそのままで、送信の結果だけを記録する。自動の再送はしない。
+ */
+export function createApplicationResultNotifier({ db, FieldValue, getSender, isEnabled, testOnly = () => false, testRecipient = () => "" }) {
+  const KINDS = [
+    { field: "resultNotification", to: (a) => (a.applicant || {}).email, build: buildApplicationResultMail },
+    { field: "adminInviteNotification", to: (a) => (a.firstAdmin || {}).email, build: buildAdminInviteMail }
+  ];
+  async function sendOne(ref, kind) {
+    const claim = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists || ((snap.get(kind.field) || {}).status) !== NOTIFY_STATUS.PENDING) return null;
+      if (!isEnabled()) { tx.update(ref, { [kind.field]: { status: NOTIFY_STATUS.HELD, at: FieldValue.serverTimestamp() } }); return { done: NOTIFY_STATUS.HELD }; }
+      const test = testOnly() === true;
+      const to = [test ? testRecipient() : kind.to(snap.data())].map(e => String(e || "").trim().toLowerCase()).filter(e => isValidEmail(e));
+      if (!to.length) { tx.update(ref, { [kind.field]: { status: NOTIFY_STATUS.NOT_CONFIGURED, at: FieldValue.serverTimestamp() } }); return { done: NOTIFY_STATUS.NOT_CONFIGURED }; }
+      tx.update(ref, { [kind.field]: { status: NOTIFY_STATUS.SENDING, at: FieldValue.serverTimestamp() } });
+      return { to, app: snap.data(), test };
+    });
+    if (!claim) return "skipped";
+    if (claim.done) return claim.done;
+    const mail = kind.build(claim.app);
+    const key = "iol-appres-" + createHash("sha256").update(`${ref.path}/${kind.field}`).digest("hex").slice(0, 40);
+    let r;
+    try {
+      r = await getSender().send({ to: claim.to, subject: claim.test ? `【テスト】${mail.subject}` : mail.subject, text: mail.text, fromName: "IOL Order", replyTo: null, idempotencyKey: key });
+    } catch (e) { r = { ok: false, error: String((e && e.message) || e).slice(0, 300) }; }
+    await ref.update({ [kind.field]: r.ok
+      ? { status: NOTIFY_STATUS.ACCEPTED, at: FieldValue.serverTimestamp(), providerMessageId: r.id, sentTo: claim.test ? "test" : "recipient" }
+      : { status: NOTIFY_STATUS.FAILED, at: FieldValue.serverTimestamp(), error: String(r.error || "").slice(0, 300) } });
+    return r.ok ? NOTIFY_STATUS.ACCEPTED : NOTIFY_STATUS.FAILED;
+  }
+  /** @returns {Promise<{resultNotification:string, adminInviteNotification:string}>} 各通知の処理結果 */
+  async function notify(ref) {
+    const out = {};
+    for (const kind of KINDS) out[kind.field] = await sendOne(ref, kind);
+    return out;
   }
   return { notify };
 }
