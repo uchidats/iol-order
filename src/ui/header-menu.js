@@ -3,14 +3,14 @@ import { openShareDialog } from "./share-site.js";
 
 /**
  * ヘッダーのメニュー（ログイン中のユーザー・施設名・施設の切り替え・ログアウト）
- * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。「サイトを共有」は、ログインしていなくても(施設に入る前でも)使える。
- * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onSignOut:()=>void}} handlers
+ * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。「使い方・ヘルプ」「サイトを共有」は、ログインしていなくても(施設に入る前でも)使える。
+ * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onOpenHelp:()=>void, onSignOut:()=>void}} handlers
  */
 export function createHeaderMenu(handlers) {
   const inner = document.querySelector(".header-inner");
   const wrap = document.createElement("div");
   wrap.className = "header-menu";
-  wrap.hidden = false;   // 「サイトを共有」はログインの前から使えるので、常に表示する
+  wrap.hidden = false;   // 「使い方・ヘルプ」「サイトを共有」はログインの前から使えるので、常に表示する
   wrap.innerHTML = `
     <button type="button" class="header-menu-btn" id="btnHeaderMenu" aria-haspopup="true" aria-expanded="false" aria-label="メニュー">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -32,10 +32,14 @@ export function createHeaderMenu(handlers) {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
 
   const api = {
-    /** @param {{user:object, facilityName:string, canSwitch:boolean, canSettings:boolean}|null} info null(施設に入る前・未ログイン)は「サイトを共有」だけ（canSettings は施設管理者のみ true） */
+    /** @param {{user:object, facilityName:string, canSwitch:boolean, canSettings:boolean}|null} info null(施設に入る前・未ログイン)は「使い方・ヘルプ」「サイトを共有」だけ（canSettings は施設管理者のみ true） */
     update(info) {
-      const share = '<button type="button" role="menuitem" class="header-menu-item" id="menuShareSite">サイトを共有</button>';
-      const bindShare = () => panel.querySelector("#menuShareSite").addEventListener("click", () => { setOpen(false); openShareDialog(); });
+      const share = '<button type="button" role="menuitem" class="header-menu-item" id="menuHelp">使い方・ヘルプ</button>' +
+        '<button type="button" role="menuitem" class="header-menu-item" id="menuShareSite">サイトを共有</button>';
+      const bindShare = () => {
+        panel.querySelector("#menuHelp").addEventListener("click", () => { setOpen(false); handlers.onOpenHelp(); });
+        panel.querySelector("#menuShareSite").addEventListener("click", () => { setOpen(false); openShareDialog(); });
+      };
       if (!info) { setOpen(false); panel.innerHTML = share; bindShare(); return; }
       const who = escapeHtml(info.user.displayName || info.user.email || "ログイン中");
       panel.innerHTML = `

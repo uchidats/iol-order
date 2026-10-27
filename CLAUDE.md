@@ -25,7 +25,13 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - Firebase は `medconf-iol-dev`(本番運用中のプロジェクト)のみ。別の環境は作らない。過大なIAM権限・サービスアカウントの秘密鍵を作らない。
 - push・Firebase デプロイ・実データ変更は、指示があるときだけ行う。実データを変更するスクリプトは dry-run を既定とし、バックアップを取ってから実行する。
 - 実施したテストがすべて成功したときだけ commit/push する。テストの範囲は下の「テスト範囲」に従う。
-- `src/` や `styles.css` を変更したら `node scripts/stamp-assets.mjs` を実行する(index.html のバージョン付与。更新漏れはテストが検出する)。
+- `src/`・`styles.css`・`docs/manual/` を変更したら `node scripts/stamp-assets.mjs` を実行する(マニュアルの表示データの作成と index.html のバージョン付与。更新漏れはテストが検出する)。
+
+## オンラインマニュアル(画面の「使い方・ヘルプ」)
+- 原稿の正式な管理元は `docs/manual/` の Markdown(README.md = 目次、01〜04 = 各ページ)。画面はその内容を表示する(`src/manual/manual-pages.js` は `scripts/build-manual.mjs` の自動生成。直接編集しない。原稿との不一致は `tests/manual.test.js` が検出する)。
+- **機能・操作画面・表示の文言を変更したら、同じ作業で関連するマニュアルも更新する**(該当する役割のページ・目次)。更新後は `node scripts/stamp-assets.mjs` を実行し、`npm test` と `tests/browser/manual.pw.mjs` で表示・リンクを確認する。
+- 未実装・未公開の機能を利用できるものとして書かない。運営者(platformAdmin)専用の内部操作の手順は、通常利用者向けのマニュアルに詳しく載せない。
+- `docs/introduction/`(サービス紹介。Codex 作成)は別の成果物。マニュアルの作業では変更しない。
 - デプロイ・移行の手順は `docs/release-plan.md` に従う。
 
 ## テスト範囲(変更内容に応じて調整する)

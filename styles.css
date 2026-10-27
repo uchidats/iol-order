@@ -2225,3 +2225,92 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .prereg-state.is-expired, .prereg-state.is-declined, .prereg-state.is-missing { background: #f3f4f6; color: #4b5563; }
 .pending-invite-admin { margin: 6px 0 0; }
 .application-notify-reason { display: flex; width: fit-content; margin: 6px 0 0; }
+
+/* ==========================================================================
+   使い方・ヘルプ(オンラインマニュアル。原稿は docs/manual。表示中は main の他の画面を隠すだけで、状態は変えない)
+   ========================================================================== */
+.main-content.manual-open > :not(#manualView) { display: none !important; }
+.manual-view .settings-head h2 { margin: 0; }
+.manual-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.manual-nav-link {
+  padding: 5px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text-main);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.manual-nav-link:hover { border-color: var(--primary); color: var(--primary); }
+.manual-nav-link[aria-current="page"] {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
+}
+.manual-body {
+  min-width: 0;
+  padding: 20px 24px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  font-size: 0.95rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.manual-body:focus { outline: none; }
+.manual-body > :first-child { margin-top: 0; }
+.manual-body h1 { font-size: 1.3rem; line-height: 1.5; margin: 0 0 12px; }
+.manual-body h2 {
+  font-size: 1.1rem;
+  margin: 28px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+.manual-body h3 { font-size: 1rem; margin: 20px 0 8px; }
+.manual-body h4, .manual-body h5, .manual-body h6 { font-size: 0.95rem; margin: 16px 0 6px; }
+.manual-body p { margin: 8px 0; }
+.manual-body ul, .manual-body ol { margin: 6px 0; padding-left: 1.5em; }
+.manual-body li { margin: 3px 0; }
+.manual-body li > ul, .manual-body li > ol { margin: 2px 0; }
+.manual-body hr { border: none; border-top: 1px solid var(--border-light); margin: 20px 0; }
+.manual-body a { color: var(--primary); text-underline-offset: 2px; }
+.manual-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+.manual-body pre { padding: 10px 12px; border-radius: 6px; background: #f8fafc; overflow-x: auto; }
+.manual-body pre code { padding: 0; background: none; }
+.manual-body blockquote {
+  margin: 12px 0;
+  padding: 8px 14px;
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--primary-light);
+}
+.manual-body blockquote > :first-child { margin-top: 0; }
+.manual-body blockquote > :last-child { margin-bottom: 0; }
+.manual-table-wrap { margin: 10px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.manual-body table { border-collapse: collapse; font-size: 0.88rem; line-height: 1.6; min-width: 100%; }
+.manual-body th, .manual-body td { padding: 6px 10px; border: 1px solid var(--border-light); vertical-align: top; }
+.manual-body th { background: #f8fafc; font-weight: 600; white-space: nowrap; }
+.manual-body .align-center { text-align: center; }
+.manual-body .align-right { text-align: right; }
+.manual-pager { display: flex; justify-content: space-between; gap: 12px; font-size: 0.9rem; }
+.manual-pager-link { color: var(--primary); text-decoration: none; }
+.manual-pager-link:hover { text-decoration: underline; }
+.manual-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.manual-foot .manual-toc { text-decoration: none; }
+@media (max-width: 560px) {
+  .manual-body { padding: 14px 14px; font-size: 0.92rem; }
+  .manual-body h1 { font-size: 1.15rem; }
+  .manual-body table { min-width: 520px; }   /* 狭い画面では表だけを横にスクロールする(ページは横にはみ出さない) */
+}

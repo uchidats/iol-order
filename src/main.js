@@ -60,6 +60,9 @@ const GEO_MESSAGES = Object.freeze({
   [GEO_ERROR.TIMEOUT]: "現在地の取得がタイムアウトしました。"
 });
 
+/** #help で始まるか(マニュアルのモジュールを読み込む前の、軽い判定) */
+const pageIdFromHashLike = (hash) => /^#help(?:\/|$)/.test(String(hash || ""));
+
 async function bootstrapWithFirebase(config) {
   const [{ createAuthUi }, { createHeaderMenu }] = await Promise.all([
     import("./ui/auth-ui.js"), import("./ui/header-menu.js")
@@ -83,6 +86,7 @@ async function bootstrapWithFirebase(config) {
   let orderHistory = null;  // 注文履歴（所属メンバー全員。閲覧のみ・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
+  let manual = null;  // 使い方・ヘルプ(ログインの前後どちらでも。URL のハッシュ #help/… で開く)
   let isPlatformAdmin = false;   // メニューの表示だけに使う(ID トークンの platformAdmin)
   let canApproveFacilities = false;   // メニューの表示だけに使う(ID トークンの platformAdmin。サーバーでも必ず確認する)
 
@@ -104,6 +108,7 @@ async function bootstrapWithFirebase(config) {
 
   const menu = createHeaderMenu({
     onSwitchFacility: async () => {
+      leaveHelp();
       const dirty = isOrderFormDirty() || biometryState.userConfirmedValues.isConfirmed;
       // 入力中なら確認(既存のモーダルと同じ見た目。キャンセルなら入力内容・現在の施設はそのまま)
       if (dirty && !(await confirmDialog({ message: "入力中の内容は破棄されます。施設を切り替えますか？", okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
@@ -111,16 +116,59 @@ async function bootstrapWithFirebase(config) {
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
-    onOpenHistory: () => openHistory(),
-    onOpenSettings: () => openSettings(),
-    onOpenApplications: () => openApplications(),
-    onOpenPreregistrations: () => openPreregistrations(),
-    onRegisterFacility: () => openOnboarding("register"),
-    onSignOut: () => signOut()
+    onOpenHistory: () => { leaveHelp(); openHistory(); },
+    onOpenSettings: () => { leaveHelp(); openSettings(); },
+    onOpenApplications: () => { leaveHelp(); openApplications(); },
+    onOpenPreregistrations: () => { leaveHelp(); openPreregistrations(); },
+    onRegisterFacility: () => { leaveHelp(); openOnboarding("register"); },
+    onOpenHelp: () => openHelp(),
+    onSignOut: () => { leaveHelp(); signOut(); }
   });
 
   const ORDER_VIEW_IDS = ["iolOrderForm", "ocrFeatureCard"];
   const setOrderViewHidden = (hidden) => ORDER_VIEW_IDS.forEach(id => document.getElementById(id).classList.toggle("hidden", hidden));
+
+  /** 使い方・ヘルプの戻るボタンの文言(開いている間に、ログインの状態が変わったら更新する) */
+  const helpBackLabel = () => {
+    if (decideAccess(state).state === ACCESS.GRANTED) return "注文画面に戻る";
+    return state.user ? "元の画面に戻る" : "ログイン画面に戻る";
+  };
+
+  /** URL のハッシュに合わせて、使い方・ヘルプを開く・閉じる(ブラウザの戻る・進む、リンクの共有に対応) */
+  async function syncHelpFromHash() {
+    const { pageIdFromHash, createManualView } = await import("./ui/manual-view.js");
+    const pageId = pageIdFromHash(location.hash);
+    if (pageId === null) { if (manual && manual.isOpen()) manual.close(); return; }
+    if (!manual) {
+      manual = createManualView({ mount: document.querySelector("main.main-content"), backLabel: helpBackLabel, onBack: () => backFromHelp() });
+    }
+    manual.show(pageId);
+  }
+
+  /** メニューの「使い方・ヘルプ」: 目次を開く */
+  function openHelp() {
+    if (location.hash === "#help") syncHelpFromHash();
+    else location.hash = "#help";   // hashchange で開く
+  }
+
+  /** ハッシュを外して閉じる(他の画面へ移る・再読み込みの前。再読み込みでヘルプが開き直さないように) */
+  function leaveHelp() {
+    if (pageIdFromHashLike(location.hash)) history.pushState(null, "", location.pathname + location.search);
+    if (manual && manual.isOpen()) manual.close();
+  }
+
+  /** 戻るボタン: ヘルプを閉じ、施設に入っていれば注文画面を表示する(開いていた施設設定・注文履歴なども閉じる) */
+  function backFromHelp() {
+    leaveHelp();
+    if (decideAccess(state).state !== ACCESS.GRANTED) return;
+    for (const v of [settings, orderHistory, applications, preregistrations]) if (v && v.isOpen()) v.close();
+    if (registration.open) closeOnboarding();
+    setOrderViewHidden(false);
+    window.scrollTo(0, 0);
+  }
+
+  window.addEventListener("hashchange", () => { syncHelpFromHash(); });
+  if (pageIdFromHashLike(location.hash)) syncHelpFromHash();   // #help 付きの URL で開いたとき(ログインの前でも表示する)
 
   /** 施設登録の申請の一覧を開く(承認権限のある運営者のみ。一覧・承認・却下の権限はサーバーが確認する) */
   async function openApplications() {
@@ -286,6 +334,7 @@ async function bootstrapWithFirebase(config) {
     } else {
       menu.update(null);
     }
+    if (manual && manual.isOpen()) manual.updateBackLabel();
     return access;
   };
 

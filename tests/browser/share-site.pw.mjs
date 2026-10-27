@@ -65,9 +65,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         page.on("pageerror", e => errors.push(String(e)));
         await page.goto(base);
         await page.waitForFunction(() => window.__ready);
-        // ログインの前: メニューは「サイトを共有」だけ
+        // ログインの前: メニューは「使い方・ヘルプ」「サイトを共有」だけ
         await page.click("#btnHeaderMenu");
-        assert.deepEqual(await page.locator("#headerMenuPanel button").allInnerTexts(), ["サイトを共有"]);
+        assert.deepEqual(await page.locator("#headerMenuPanel button").allInnerTexts(), ["使い方・ヘルプ", "サイトを共有"]);
         await page.click("#menuShareSite");
         const dlg = page.locator(".share-dialog");
         await dlg.waitFor();
@@ -90,11 +90,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.click("#menuShareSite");
         await page.keyboard.press("Escape");
         assert.equal(await page.locator(".share-dialog").count(), 0);
-        // ログイン後のメニューにも「サイトを共有」(ログアウトの前)
+        // ログイン後のメニューにも「使い方・ヘルプ」「サイトを共有」(ログアウトの前)
         await page.evaluate(() => window.__menu.update({ user: { displayName: "テスト" }, facilityName: "テスト眼科", canSwitch: false, canSettings: true }));
         await page.click("#btnHeaderMenu");
         const items = await page.locator("#headerMenuPanel button").allInnerTexts();
-        assert.deepEqual(items.slice(-2), ["サイトを共有", "ログアウト"]);
+        assert.deepEqual(items.slice(-3), ["使い方・ヘルプ", "サイトを共有", "ログアウト"]);
         assert.deepEqual(errors, []);
         await context.close();
       }
