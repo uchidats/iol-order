@@ -253,7 +253,47 @@ export function createFacilityApplicationService({ db, FieldValue, Timestamp, re
     });
   }
 
-  return { applyFacility, listApplications, decideApplication };
+  /**
+   * 申請の削除(運営者 = platformAdmin のみ。施設登録の承認権限を委任しても、削除は運営者だけ)。審査中・却下済みだけを削除できる。
+   * 承認済みは施設と対応しているため削除しない。削除はトランザクションで1回だけ行い、申請者の申請枠(registrationQuota)を1件空け、
+   * 運営者の操作履歴(platformAuditLogs。クライアントから読み書き不可)に記録する。施設・所属・注文には触れない。
+   */
+  async function deleteApplication({ auth, data }) {
+    const user = assertVerifiedUser(auth);
+    if (user.isPlatformAdmin !== true) throw new RegistrationError("permission-denied", "申請の削除は運営者のみ操作できます");
+    if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).some(k => k !== "applicationId")) throw badInput();
+    const { applicationId } = data;
+    if (typeof applicationId !== "string" || !APP_ID.test(applicationId)) throw badInput();
+    const ref = appRef(applicationId);
+    return db.runTransaction(async (tx) => {
+      const app = await tx.get(ref);
+      if (!app.exists) throw new RegistrationError("not-found", "申請が見つかりません(既に削除された可能性があります)");
+      const status = app.get("status");
+      if (status === APPLICATION_STATUS.APPROVED) throw new RegistrationError("failed-precondition", "承認済みの申請は、施設と対応しているため削除できません");
+      if (status !== APPLICATION_STATUS.PENDING && status !== APPLICATION_STATUS.REJECTED) throw new RegistrationError("failed-precondition", "この申請は削除できません");
+      const applicant = app.get("applicant") || {};
+      const quotaRef = applicant.uid ? db.doc(`registrationQuota/${applicant.uid}`) : null;
+      const quota = quotaRef ? await tx.get(quotaRef) : null;
+      // 申請者の申請枠を1件空ける(同じ名前の再申請・上限の数え方を、申請がなかった状態に戻す)
+      if (quota && quota.exists) {
+        const keys = [...(quota.get("keys") || [])];
+        const i = keys.indexOf(app.get("nameKey"));
+        if (i >= 0) keys.splice(i, 1);
+        tx.update(quotaRef, { count: Math.max(0, (quota.get("count") || 0) - 1), keys, updatedAt: FieldValue.serverTimestamp() });
+      }
+      tx.delete(ref);
+      const email = String(applicant.email || "");
+      tx.create(db.collection("platformAuditLogs").doc(), {
+        action: "facilityApplication.delete", applicationId, applicationStatus: status, facilityName: app.get("name") || "",
+        applicantUid: applicant.uid || null, applicantEmailMasked: email ? email.replace(/^(.).*?@/, "$1***@") : null,
+        historyCount: (app.get("history") || []).length,
+        actorUid: user.uid, actorEmail: user.email, at: FieldValue.serverTimestamp()
+      });
+      return { status: "deleted", applicationId };
+    });
+  }
+
+  return { applyFacility, listApplications, decideApplication, deleteApplication };
 }
 
 /**

@@ -25,6 +25,15 @@ const formatJst = (ms) => {
 const NOTIFY_LABELS = { pending: "通知待ち", sending: "通知中", accepted: "運営者に通知済み", failed: "通知に失敗", held: "通知停止中(メール送信は停止中)", not_configured: "通知先が未設定" };
 const STATUS_LABELS = { approved: "承認", rejected: "却下" };
 
+/** ゴミ箱アイコン(装飾。ボタンの aria-label で意味を伝える) */
+function trashIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
+  for (const d of ["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6", "M14 11v6"]) { const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); svg.appendChild(p); }
+  return svg;
+}
+
 /**
  * @param {{mount:HTMLElement, api:{listFacilityApplications:Function, decideFacilityApplication:Function}, onClose:()=>void}} deps
  */
@@ -38,6 +47,26 @@ export function createFacilityApplications({ mount, api, onClose }) {
   let open = false, busy = false;
   closeBtn.addEventListener("click", () => { close(); onClose(); });
   function close() { open = false; root.hidden = true; }
+
+  /** 申請の削除(運営者のみ。審査中・却下済みだけ。承認済みには出さない。権限・状態はサーバーでも確認する) */
+  function deleteButton(a, errEl) {
+    const btn = h("button", { type: "button", class: "application-delete", "data-act": "delete", title: "申請を削除", "aria-label": `「${a.name}」の申請を削除` }, trashIcon());
+    btn.addEventListener("click", async () => {
+      if (busy) return;
+      const ok = await confirmDialog({ message: `「${a.name}」の申請を削除しますか？
+削除すると元に戻せません(削除の記録は残ります)。`, okLabel: "削除する", cancelLabel: "キャンセル" });
+      if (!ok) return;
+      busy = true; btn.disabled = true; if (errEl) errEl.textContent = "";
+      try {
+        await api.deleteFacilityApplication({ applicationId: a.id });
+        status.textContent = `「${a.name}」の申請を削除しました。`;
+        await load();
+      } catch (e) {
+        if (errEl) errEl.textContent = describeCallableError(e); else status.textContent = describeCallableError(e);
+      } finally { busy = false; btn.disabled = false; }
+    });
+    return btn;
+  }
 
   function pendingCard(a) {
     const dup = a.duplicates || {};
@@ -85,7 +114,7 @@ export function createFacilityApplications({ mount, api, onClose }) {
     reject.addEventListener("click", () => decide("reject"));
 
     return h("li", { class: "application-item", "data-application": a.id },
-      h("div", { class: "application-name" }, a.name),
+      h("div", { class: "application-name-row" }, h("div", { class: "application-name" }, a.name), deleteButton(a, err)),
       h("div", { class: "form-hint" }, `申請者: ${a.applicant.name || "（未入力）"} ・ ${a.applicant.email} ・ 申請日時 ${formatJst(a.createdAt)}`),
       h("div", { class: "form-hint" }, `通知: ${NOTIFY_LABELS[a.notification && a.notification.status] || "—"}`),
       dup.exact || dup.similarCount
@@ -100,9 +129,9 @@ export function createFacilityApplications({ mount, api, onClose }) {
 
   function recentRow(a) {
     const admin = a.firstAdmin ? ` ・ 最初の管理者: ${a.firstAdmin.type === "designated" ? `${a.firstAdmin.name || ""}(${a.firstAdmin.email}・参加の承諾待ち/済み)` : "申請者"}` : "";
-    return h("li", { class: "application-recent" },
-      h("span", { class: `application-status is-${a.status}` }, STATUS_LABELS[a.status] || a.status), " ",
-      h("strong", {}, a.name),
+    return h("li", { class: "application-recent", "data-application": a.id },
+      h("div", { class: "application-name-row" }, h("span", {}, h("span", { class: `application-status is-${a.status}` }, STATUS_LABELS[a.status] || a.status), " ",
+        h("strong", {}, a.name)), a.status === "rejected" ? deleteButton(a, null) : null),
       h("div", { class: "form-hint" }, `${formatJst(a.decidedAt)} ・ ${a.decidedBy ? (a.decidedBy.name || a.decidedBy.email) : "—"}${admin}${a.reason ? ` ・ 理由: ${a.reason}` : ""}`),
       h("div", { class: "form-hint" }, `申請者: ${a.applicant.name || "（未入力）"} ・ ${a.applicant.email}`));
   }

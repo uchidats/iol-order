@@ -37,6 +37,11 @@ const api = {
     recent.unshift({ ...a, status: req.decision === "approve" ? "approved" : "rejected", decidedAt: t0 + 3600000, decidedBy: { name: "運営者", email: "ops@example.jp" }, reason: req.reason || "",
       firstAdmin: req.decision === "approve" ? (req.firstAdmin ? { type: "designated", ...req.firstAdmin } : { type: "applicant" }) : null });
     return { status: req.decision === "approve" ? "approved" : "rejected" };
+  },
+  deleteFacilityApplication: async ({ applicationId }) => {
+    window.__deletes = [...(window.__deletes || []), applicationId];
+    pending = pending.filter(p => p.id !== applicationId); recent = recent.filter(r => r.id !== applicationId);
+    return { status: "deleted", applicationId };
   }
 };
 window.__view = createFacilityApplications({ mount: document.querySelector("main"), api, onClose: () => { window.__closed = true; } });
@@ -96,6 +101,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       // 一覧: 審査中は古い順。施設名・申請者名・メール・申請日時・通知・既存施設との重複
       assert.deepEqual(await page.locator(".application-item .application-name").allInnerTexts(), ["立川病院", "目黒眼科", "品川クリニック"]);
+      assert.equal(await page.locator('.application-item [data-act="delete"]').count(), 3, "審査中の申請には削除(ゴミ箱)");
       const first = item(page, "fac-aaaaaaaaaaaaaaaaaaaaaaaa");
       assert.match(await first.innerText(), /申請者: 申請 一郎 ・ ichiro@example\.jp ・ 申請日時 2026\/10\/27 10:00/);
       assert.match(await first.locator(".application-dup").innerText(), /同じ名前の施設あり: 立川病院/);
@@ -151,6 +157,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(recent[1], /承認[\s\S]*目黒眼科[\s\S]*最初の管理者: 責任者 花子\(boss@example\.jp/);
       assert.match(recent[2], /承認[\s\S]*立川病院[\s\S]*最初の管理者: 申請者/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "スマートフォン幅ではみ出さない");
+      // 申請の削除: ゴミ箱は審査中・却下済みだけ(承認済みには出さない)。確認ダイアログ → キャンセルでは削除しない
+      assert.deepEqual(await page.locator(".application-recent").evaluateAll(rs => rs.map(r => Boolean(r.querySelector('[data-act="delete"]')))), [true, false, false]);
+      const rejectedRow = page.locator('.application-recent[data-application="fac-cccccccccccccccccccccccc"]');
+      await rejectedRow.locator('[data-act="delete"]').click();
+      assert.match(await page.locator(".confirm-dialog-message").innerText(), /「品川クリニック」の申請を削除しますか？/);
+      await page.locator('.confirm-dialog [data-act="cancel"]').click();
+      assert.equal(await page.evaluate(() => window.__deletes), undefined);
+      await rejectedRow.locator('[data-act="delete"]').click();
+      await ok(page);
+      await page.waitForFunction(() => document.querySelectorAll(".application-recent").length === 2);
+      assert.deepEqual(await page.evaluate(() => window.__deletes), ["fac-cccccccccccccccccccccccc"]);
+      assert.match(await page.locator("#facilityApplications [role=status]").innerText(), /「品川クリニック」の申請を削除しました/);
       // 注文画面に戻る
       await page.click("#btnApplicationsClose");
       assert.equal(await page.evaluate(() => window.__closed), true);

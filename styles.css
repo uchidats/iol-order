@@ -2211,3 +2211,6 @@ input[type="date"], .lens-line select { color-scheme: light; }
 /* 注文メールの「署名」: 見出し「署名」の右にⓘ(説明はⓘで表示)。説明は見出しの行の幅に収める */
 .mail-signature-head { position: relative; gap: 2px; margin-bottom: 8px; }
 .mail-signature { margin-bottom: 8px; }
+.application-name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.application-delete { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: #9ca3af; cursor: pointer; }
+.application-delete:hover, .application-delete:focus-visible { color: #b91c1c; background: #fef2f2; outline: none; }

@@ -81,6 +81,8 @@ export const registerFacility = onCall(options, wrap(applications.applyFacility)
 // 申請の一覧・承認・却下(施設登録の承認権限をサーバーで確認する。現在は運営者のみ)
 export const listFacilityApplications = onCall(options, wrap(applications.listApplications));
 export const decideFacilityApplication = onCall(options, wrap(applications.decideApplication));
+// 申請の削除(運営者 = platformAdmin のみ。審査中・却下済みだけ。運営者の操作履歴 platformAuditLogs に記録)
+export const deleteFacilityApplication = onCall(options, wrap(applications.deleteApplication));
 export const deleteFacility = onCall(options, wrap(service.deleteFacility));   // 施設の削除(施設管理者のみ・注文履歴なし・自分以外の所属なし)
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)
