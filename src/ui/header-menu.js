@@ -1,15 +1,16 @@
 import { escapeHtml } from "./dom.js";
+import { openShareDialog } from "./share-site.js";
 
 /**
  * ヘッダーのメニュー（ログイン中のユーザー・施設名・施設の切り替え・ログアウト）
- * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。
+ * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。「サイトを共有」は、ログインしていなくても(施設に入る前でも)使える。
  * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onSignOut:()=>void}} handlers
  */
 export function createHeaderMenu(handlers) {
   const inner = document.querySelector(".header-inner");
   const wrap = document.createElement("div");
   wrap.className = "header-menu";
-  wrap.hidden = true;
+  wrap.hidden = false;   // 「サイトを共有」はログインの前から使えるので、常に表示する
   wrap.innerHTML = `
     <button type="button" class="header-menu-btn" id="btnHeaderMenu" aria-haspopup="true" aria-expanded="false" aria-label="メニュー">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -30,11 +31,12 @@ export function createHeaderMenu(handlers) {
   document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) setOpen(false); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
 
-  return {
-    /** @param {{user:object, facilityName:string, canSwitch:boolean, canSettings:boolean}|null} info nullで非表示（canSettings は施設管理者のみ true） */
+  const api = {
+    /** @param {{user:object, facilityName:string, canSwitch:boolean, canSettings:boolean}|null} info null(施設に入る前・未ログイン)は「サイトを共有」だけ（canSettings は施設管理者のみ true） */
     update(info) {
-      if (!info) { wrap.hidden = true; setOpen(false); return; }
-      wrap.hidden = false;
+      const share = '<button type="button" role="menuitem" class="header-menu-item" id="menuShareSite">サイトを共有</button>';
+      const bindShare = () => panel.querySelector("#menuShareSite").addEventListener("click", () => { setOpen(false); openShareDialog(); });
+      if (!info) { setOpen(false); panel.innerHTML = share; bindShare(); return; }
       const who = escapeHtml(info.user.displayName || info.user.email || "ログイン中");
       panel.innerHTML = `
         <div class="header-menu-info">
@@ -45,7 +47,9 @@ export function createHeaderMenu(handlers) {
         ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
+        ${share}
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
+      bindShare();
       panel.querySelector("#menuOrderHistory").addEventListener("click", () => { setOpen(false); handlers.onOpenHistory(); });
       const st = panel.querySelector("#menuFacilitySettings");
       if (st) st.addEventListener("click", () => { setOpen(false); handlers.onOpenSettings(); });
@@ -55,4 +59,6 @@ export function createHeaderMenu(handlers) {
       panel.querySelector("#menuSignOut").addEventListener("click", () => { setOpen(false); handlers.onSignOut(); });
     }
   };
+  api.update(null);   // ログイン状態が分かる前から「サイトを共有」を使える
+  return api;
 }

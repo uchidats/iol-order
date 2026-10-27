@@ -847,6 +847,14 @@ input[type="date"].form-control {
 .confirm-dialog .modal-card { max-width: 420px; background-color: #ffffff; color: #1f2937; }
 .confirm-dialog-message { margin: 0; font-size: 1rem; line-height: 1.6; color: #1f2937; white-space: pre-line; }
 
+/* サイトを共有(share-site.js): 白い背景・黒系の文字。QRコードは白い余白つきで中央に */
+.share-dialog { color-scheme: light; }
+.share-dialog .modal-card { max-width: 420px; background-color: #ffffff; color: #1f2937; }
+.share-qr-box { display: flex; justify-content: center; }
+.share-qr { display: block; width: 200px; height: 200px; background: #ffffff; }
+.share-url { margin: 12px 0 0; text-align: center; font-size: 0.95rem; color: #1f2937; overflow-wrap: anywhere; user-select: all; }
+.share-status { margin: 6px 0 0; text-align: center; min-height: 1.2em; }
+
 /* サマリーリスト */
 .summary-list {
   display: flex;
