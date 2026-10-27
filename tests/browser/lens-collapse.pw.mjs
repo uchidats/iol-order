@@ -196,3 +196,66 @@ test("レンズの折りたたみ: キーボードで折りたたみ・展開で
     assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.dataset.act), "toggle", "展開後は矢印にフォーカス");
   } finally { await browser.close(); }
 });
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`レンズの折りたたみ(簡潔な表示): 直前のレンズと手術日・担当医が同じなら見出し行を省く。先頭は必ず表示。追加・編集・削除・復元で判定し直す。スマートフォン/PC: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [390, 1100]) {
+        const page = await browser.newPage({ viewport: { width, height: 900 } });
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await page.goto(base);
+        await page.waitForFunction(() => window.__ready);
+        const heads = () => page.locator(".lens-line").evaluateAll(ls => ls.map(l => {
+          const h = l.querySelector(".lens-line-summary .summary-date-head");
+          return l.classList.contains("is-collapsed") ? (h && !h.hidden && getComputedStyle(h).display !== "none" ? "head" : "main-only") : "open";
+        }));
+        const add = () => page.click("#btnAddLine");
+        // レンズ1(10/29・内田) → レンズ2(同じ手術日・担当医) → レンズ3(担当医が違う) → レンズ4(レンズ3と同じ)
+        await fill(card(page, 0), { model: "alcon-cna0t0", power: "+7.5D" });
+        await add();
+        await fill(card(page, 1), { model: "alcon-cna0t0", power: "+8.0D" });
+        await add();
+        await fill(card(page, 2), { model: "alcon-cna0t0", power: "+9.0D", doctor: "o2" });
+        await add();
+        await fill(card(page, 3), { model: "alcon-cna0t0", power: "+10.0D", doctor: "o2" });
+        await card(page, 3).locator('[data-act="toggle"]').click();
+        assert.deepEqual(await heads(), ["head", "main-only", "head", "main-only"]);
+        // 省いたカードも、バッジ・矢印・IOL名・度数・枚数はそのまま
+        const c2 = card(page, 1);
+        assert.equal(await c2.locator(".lens-line-title").innerText(), "レンズ2");
+        assert.equal(await c2.locator('[data-act="toggle"]').isVisible(), true);
+        assert.deepEqual(await c2.locator(".summary-line-main > span").allInnerTexts(), ["ALCON", "CNA0T0", "+8.0D", "1枚"]);
+        assert.ok(!(await c2.locator(".lens-line-summary").innerText()).includes("手術日"));
+        // 編集: レンズ2の手術日を変えると、レンズ2は見出しを出す(レンズ1と違う)
+        await c2.locator(".lens-line-summary").click();
+        await card(page, 1).locator("[data-f=date]").fill("2026-10-30");
+        await card(page, 1).locator("[data-f=date]").evaluate(el => el.blur());
+        await card(page, 1).locator('[data-act="toggle"]').click();
+        assert.deepEqual(await heads(), ["head", "head", "head", "main-only"]);
+        // 展開中の直前のレンズを編集しても、次の折りたたみの表示を判定し直す(レンズ3の担当医をレンズ4と違うものに)
+        await card(page, 2).locator(".lens-line-summary").click();
+        await card(page, 2).locator("[data-f=doctor]").selectOption("o1");
+        assert.deepEqual(await heads(), ["head", "head", "open", "head"]);
+        await card(page, 2).locator('[data-act="toggle"]').click();
+        // 削除: レンズ1を削除すると、新しい先頭(元のレンズ2)は必ず見出しを出す
+        await card(page, 0).locator(".lens-line-summary").click();
+        await card(page, 0).locator('[data-act="remove"]').click();
+        assert.equal((await heads())[0], "head");
+        // 復元(すべて展開)→ 折りたたむと判定し直す
+        const snap = await page.evaluate(() => window.__lines.snapshot());
+        await page.evaluate((s) => window.__lines.restore(s), snap);
+        for (let i = 0; i < 3; i++) await card(page, i).locator('[data-act="toggle"]').click();
+        const h = await heads();
+        assert.equal(h[0], "head");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+        // 注文データ(値)は変わらない
+        assert.equal((await page.evaluate(() => window.__lines.values())).length, 3);
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
