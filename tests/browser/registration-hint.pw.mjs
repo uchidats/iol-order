@@ -66,9 +66,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 既存の施設への参加は、その施設の管理者に利用者管理への登録を依頼するよう案内する
       for (const gone of ["#joinToken", "#btnJoinSubmit", "#modeJoin", "#modeRegister", "#btnGoJoin"]) assert.equal(await page.locator(gone).count(), 0, gone);
       assert.equal(await page.locator("#regFacilityName").isVisible(), true);
-      const joinGuide = await page.locator("#joinGuide").innerText();
-      assert.match(joinGuide, /利用者管理への登録/);
-      assert.match(joinGuide, /参加の確認が表示されます/);
+      // 通常の表示は 見出し+ⓘ・施設名・ボタン だけ。説明(ログイン中の案内・参加の依頼方法・施設IDと最初の管理者)はⓘにまとめる
+      const panelText = await page.locator("#authPanel").innerText();
+      for (const hidden of ["でログインしています", "利用者管理への登録", "施設IDは自動で割り当てられます"]) assert.ok(!panelText.includes(hidden), `通常は表示しない: ${hidden}`);
+      assert.equal(await page.locator(".onboarding-title-row #onboardingInfo").isVisible(), true, "見出しの右にⓘ");
+      await page.click("#onboardingInfo");
+      const pop = page.locator(".onboarding-info-pop");
+      assert.equal(await pop.isVisible(), true);
+      const info = await pop.innerText();
+      assert.match(info, /でログインしています/);
+      assert.match(info, /利用者管理への登録/);
+      assert.match(info, /参加の確認が表示されます/);
+      assert.match(info, /施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。/);
+      const box = await pop.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= 390, "スマートフォンの画面内に収まる");
+      await page.mouse.click(10, 880);   // 外側(説明に隠れていない画面下部)のタップで閉じる
+      assert.equal(await pop.isHidden(), true);
       assert.ok(!/招待コード/.test(await page.locator("#authPanel").innerText()), "招待コードの表記はない");
       const input = page.locator("#regFacilityName"), hint = page.locator("#regNameHint");
       assert.equal(await hint.isHidden(), true);

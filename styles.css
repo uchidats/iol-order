@@ -205,6 +205,10 @@ body {
   margin-bottom: 4px;
 }
 
+/* 施設の登録: 見出しの右のⓘ。説明は見出しの行の幅(画面内)に収め、段落の区切りを残す */
+.onboarding-title-row { position: relative; gap: 2px; margin-bottom: 12px; }
+.onboarding-info-pop { width: min(360px, 100%); white-space: pre-line; }
+
 .feature-title {
   font-size: 0.95rem;
   font-weight: 700;

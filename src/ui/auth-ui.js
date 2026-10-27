@@ -2,6 +2,7 @@ import { ACCESS } from "../domain/access.js";
 import { facilityGeo } from "../domain/geo.js";
 import { normalizeFacilityName } from "../domain/registration-flow.js";
 import { $, escapeHtml } from "./dom.js";
+import { createInfoTip } from "./info-tip.js";
 
 // Firebase有効時に、所属確認と施設確定が済むまで隠す画面要素
 const GATED_ELEMENT_IDS = ["ocrFeatureCard", "iolOrderForm"];
@@ -78,7 +79,7 @@ export function createAuthUi(handlers) {
   }
 
   /** 所属なし・メニューの「施設を登録」: 新しい施設の登録。既存の施設への参加は、その施設の管理者による事前登録で行う(案内のみ) */
-  function renderOnboarding({ who, msg, user, registration, embedded = false }) {
+  function renderOnboarding({ msg, user, registration, embedded = false }) {
     const reg = registration || {};
     const unverified = Boolean(user) && user.emailVerified === false;
     const dupName = reg.duplicate ? reg.duplicate.forName : null;
@@ -89,7 +90,6 @@ export function createAuthUi(handlers) {
         <div class="form-group">
           <label class="form-label" for="regFacilityName">施設名</label>
           <input id="regFacilityName" class="form-control" type="text" maxlength="100" autocomplete="organization" value="${escapeHtml(draft.name)}">
-          <p class="form-hint">施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。</p>
           <p class="error-message" id="regNameHint" role="status" aria-live="polite" hidden></p>
           <ul class="candidate-list" id="regNameCandidates" aria-label="施設名の候補" hidden></ul>
           <p class="form-hint" id="regCandidateGuide" role="status" aria-live="polite" hidden></p>
@@ -106,12 +106,8 @@ export function createAuthUi(handlers) {
 
     panel.innerHTML = `
       <div class="feature-info">
-        <div class="feature-title-row"><span class="feature-title">${embedded ? "新しい施設の登録" : "施設への所属が確認できません"}</span></div>
-        <p class="feature-desc">${embedded
-          ? `${who} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録できます。`
-          : `${who} でログインしています。利用を始めるには、新しい施設を登録してください。`}</p>
+        <div class="feature-title-row onboarding-title-row"><span class="feature-title">${embedded ? "新しい施設の登録" : "施設への所属が確認できません"}</span></div>
         ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
-        <p class="form-hint onboarding-join-guide" id="joinGuide">${escapeHtml(JOIN_GUIDE)}</p>
         ${body}
         <div class="onboarding-actions">
           <div class="onboarding-primary">${primary}</div>
@@ -121,6 +117,16 @@ export function createAuthUi(handlers) {
         </div>
         ${msg}
       </div>`;
+
+    // 説明は見出し右のⓘにまとめる(通常の表示は 見出し+ⓘ・施設名・ボタン だけ)。外側のタップ・Esc で閉じる(info-tip.js。説明は文字列として表示)
+    const plainWho = user ? (user.displayName || user.email || "ログイン中") : "ログイン中";
+    const intro = embedded
+      ? `${plainWho} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録できます。`
+      : `${plainWho} でログインしています。利用を始めるには、新しい施設を登録してください。`;
+    const tip = createInfoTip([intro, JOIN_GUIDE, "施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。"].join("\n\n"), { label: "施設の登録についての説明" });
+    tip.button.id = "onboardingInfo";
+    tip.popup.classList.add("onboarding-info-pop");
+    panel.querySelector(".onboarding-title-row").append(tip.root);
 
     const rerender = () => lastArgs && render(lastArgs);
     const signOutBtn = $("btnAuthSignOut");
