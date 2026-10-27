@@ -7,6 +7,7 @@ import {
   pendingState, sortPending, formatExpiry, PENDING_STATE_LABELS
 } from "../domain/member-admin.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
+import { createDealerPortalSection } from "./dealer-portal-grants.js";
 import { baseModelName } from "../domain/lens-labels.js";
 import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -62,9 +63,10 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {"admin"|"subadmin"} [deps.actorRole] 操作者のこの施設での役割(画面の出し分け用。権限の最終判定はサーバー・Rules)
  * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
+ * @param {object|null} [deps.dealerPortalApi] ディーラー画面の閲覧の許可・取消(data/dealer-portal-api.js。null なら項目を出さない)
  * @param {{removeMember?:Function, addMember?:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 利用者管理・施設の操作（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, onDeleted = () => {} }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -1080,8 +1082,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null,
     theme: settingsApi.saveHeaderTheme && settingsApi.resetHeaderTheme ? themeSection() : null };
   if (canManageMembers) built.members = memberSection();
+  if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
   // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → テーマカラー(作成の順番・機能は変えない)
-  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.mail ? { mail: built.mail } : {}), ...(built.theme ? { theme: built.theme } : {}) };
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------
   // 開閉の状態は、施設ごとにこの端末(localStorage)に保存し、再読み込みしても戻す。ⓘと「追加」の操作では開閉しない。設定の内容・保存には影響しない
   const collapseKey = () => `iol_settings_collapsed:${facility ? facility.id : ""}`;
@@ -1209,6 +1212,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         if (sections.mail) renderMail(sections.mail);
         if (sections.theme) sections.theme._render();
         if (sections.members) renderMembers(sections.members);
+        if (sections.dealerPortal) sections.dealerPortal._render(fac.id);   // 待たない(失敗しても他の設定は使える)
         status.textContent = "";
         dirty = false;
       } catch (e) {

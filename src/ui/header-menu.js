@@ -52,6 +52,7 @@ export function createHeaderMenu(handlers) {
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
         ${info.canPreregister ? '<button type="button" role="menuitem" class="header-menu-item" id="menuPreregistrations">施設を事前登録</button>' : ""}
+        ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerOperator">ディーラー画面の管理</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${info.canAbout ? '<button type="button" role="menuitem" class="header-menu-item" id="menuAbout">IOL Orderについて</button>' : ""}
         ${share}
@@ -66,6 +67,8 @@ export function createHeaderMenu(handlers) {
       if (ap) ap.addEventListener("click", () => { setOpen(false); handlers.onOpenApplications(); });
       const pr = panel.querySelector("#menuPreregistrations");   // 運営者(platformAdmin)だけ(表示のみ。権限はサーバーが確認する)
       if (pr) pr.addEventListener("click", () => { setOpen(false); handlers.onOpenPreregistrations(); });
+      const dop = panel.querySelector("#menuDealerOperator");   // 運営者(platformAdmin)だけ(表示のみ。権限はサーバーが確認する)
+      if (dop) dop.addEventListener("click", () => { setOpen(false); handlers.onOpenDealerOperator(); });
       const ab = panel.querySelector("#menuAbout");   // サービス紹介(当面は運営者だけ。表示のみ。本文は Rules で platformAdmin だけが読める)
       if (ab) ab.addEventListener("click", () => { setOpen(false); handlers.onOpenAbout(); });
       panel.querySelector("#menuRegisterFacility").addEventListener("click", () => { setOpen(false); handlers.onRegisterFacility(); });

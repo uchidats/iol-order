@@ -2337,3 +2337,51 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .about-body h2 { scroll-margin-top: 12px; }
 /* マニュアルの「施設管理者のみ」の印(原稿の {*}) */
 .manual-body .manual-admin-mark { color: #dc2626; font-weight: 700; margin: 0 1px; }
+
+/* ==========================================================================
+   ディーラー専用画面(dealer.html)・施設設定の「ディーラー画面での閲覧」・運営者の「ディーラー画面の管理」
+   ========================================================================== */
+.dealer-panel { display: flex; flex-direction: column; gap: 10px; }
+.dealer-title-row { justify-content: space-between; align-items: center; gap: 8px; }
+.dealer-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: #ffffff; }
+.dealer-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.dealer-filter-row .form-label { margin: 0; min-width: 4.5em; }
+.dealer-filter-row .form-control { width: auto; flex: 1 1 140px; min-width: 0; }
+.dealer-select-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dealer-facility-list { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.dealer-facility span, .dealer-row-facility, .dealer-row-number { overflow-wrap: anywhere; min-width: 0; }
+.dealer-scope { margin: 0; font-weight: 600; color: var(--text-main); }
+.dealer-fetched { margin: 0; }
+.dealer-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+@media (max-width: 560px) {
+  .dealer-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .dealer-row-facility { grid-column: 1 / -1; }   /* 狭い画面: 日時 / 施設 / 注文番号・件数 */
+}
+.dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }
+.dealer-row-facility { font-weight: 600; }
+.dealer-row-number { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.dealer-detail { display: flex; flex-direction: column; gap: 10px; }
+.dealer-detail > .btn { align-self: flex-start; }
+.dealer-detail-meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.dealer-detail-meta dt { color: var(--text-muted); }
+.dealer-detail-meta dd { margin: 0; overflow-wrap: anywhere; }
+.dealer-lines { border-collapse: collapse; font-size: 0.88rem; min-width: 100%; }
+.dealer-lines th, .dealer-lines td { padding: 6px 8px; border: 1px solid var(--border-light); text-align: left; vertical-align: top; }
+.dealer-lines th { background: #f8fafc; white-space: nowrap; }
+@media (max-width: 560px) { .dealer-lines { min-width: 560px; } }
+.dealer-portal-notice { margin: 0 0 8px; }
+.dealer-portal-item { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 0; border-top: 1px solid var(--border-light); flex-wrap: wrap; }
+.dealer-portal-item:first-child { border-top: none; }
+.dealer-portal-main { min-width: 0; }
+.dealer-portal-name { font-weight: 600; }
+.dealer-portal-meta { font-size: 0.85rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.dealer-portal-state.is-active { color: #15803d; font-weight: 600; }
+.dealer-operator-body { display: flex; flex-direction: column; gap: 16px; }
+.dealer-operator-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dealer-operator-title h3 { margin: 0; }
+.dealer-operator-company h4 { margin: 14px 0 6px; font-size: 0.95rem; }
+.dealer-operator-list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
+.dealer-operator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 12px; }
+.dealer-operator-assign { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.member-role-badge.is-muted { opacity: 0.6; }

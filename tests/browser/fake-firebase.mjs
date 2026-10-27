@@ -9,7 +9,7 @@ export const FAKE_SDK = {
     export function onAuthStateChanged(auth, cb) { setTimeout(() => { window.__authAt = performance.now(); cb(window.__fakeUser || null); }, window.__fakeAuthDelay || 0); return () => {}; }
     export class GoogleAuthProvider {}
     export const signInWithPopup = async () => { throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); };
-    export const sendSignInLinkToEmail = async () => {};
+    export const sendSignInLinkToEmail = async (auth, email, settings) => { (window.__linkSent = window.__linkSent || []).push([email, settings && settings.url]); };
     export const isSignInWithEmailLink = () => false;
     export const signInWithEmailLink = async () => ({});
     export const signOut = async () => {};`,
@@ -46,7 +46,13 @@ export const FAKE_SDK = {
     }`,
   "firebase-functions.js": `
     export const getFunctions = () => ({});
-    export const httpsCallable = (fns, name) => async () => ({ data: name === "listMyPendingMemberships" ? { memberships: [] } : {} });`
+    // 呼び出しの記録(window.__calls)と、テストごとの応答(window.__fakeCallables[name](data)。例外の { code, message } はエラー)
+    export const httpsCallable = (fns, name) => async (data) => {
+      (window.__calls = window.__calls || []).push([name, data]);
+      const h = window.__fakeCallables && window.__fakeCallables[name];
+      if (h) return { data: await h(data) };
+      return { data: name === "listMyPendingMemberships" ? { memberships: [] } : {} };
+    };`
 };
 
 /**

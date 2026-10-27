@@ -327,3 +327,54 @@ test("注文メール: createOrder が送信待ちを保存し、トリガーが
   assert.equal(order.fields.status.stringValue, "accepted", "停止中は「受付済み(ディーラー未通知)」のまま");
   assert.deepEqual(order.fields.notifications.arrayValue.values.map(v => v.mapValue.fields.status.stringValue), ["held", "held"]);
 });
+
+test("ディーラー専用画面: 運営者の会社登録・招待 → 本人の参加 → 関連付け → 施設の管理者の許可 → 注文 → トリガーが索引を作り、自社宛ての明細だけを取得。所属のない人は拒否。注文メールは従来どおり", async () => {
+  const owner = await createUser("portal-owner@example.jp", { verified: true });
+  const staff = await createUser("staff@dealer-x.example.jp", { verified: true });
+  const outsider = await createUser("outsider@dealer-x.example.jp", { verified: true });
+  const reg = await registerApproved({ name: "E2Eディーラー閲覧医院", requestId: "portal-e2e-register-01" }, owner.idToken);
+  const fid = reg.body.result.facilityId;
+  await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
+  await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
+  const put = (p, fields) => fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${p}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" }, body: JSON.stringify({ fields })
+  });
+  for (const [id, n, e] of [["dX", "エックス商事", "order-x@example.jp"], ["dY", "ワイ医療", "order-y@example.jp"]]) {
+    assert.equal((await put(`facilities/${fid}/facilityDealers/${id}`, { facilityId: { stringValue: fid }, name: { stringValue: n }, orderEmails: { arrayValue: { values: [{ stringValue: e }] } } })).status, 200);
+  }
+  const op = (data) => call("dealerPortalOperator", data, operator.idToken);
+  // 運営者以外は会社を登録できない
+  assert.equal((await call("dealerPortalOperator", { action: "createCompany", name: "不正", requestId: "portal-e2e-company-0" }, owner.idToken)).body.error.status, "PERMISSION_DENIED");
+  const cid = (await op({ action: "createCompany", name: "エックス商事", requestId: "portal-e2e-company-1" })).body.result.companyId;
+  const inv = (await op({ action: "inviteStaff", companyId: cid, email: "staff@dealer-x.example.jp", name: "担当", role: "reader" })).body.result.invitationId;
+  assert.equal((await call("dealerPortalApi", { action: "respond", invitationId: inv, accept: true }, outsider.idToken)).body.error.status, "FAILED_PRECONDITION", "別のメールの人は参加できない");
+  assert.equal((await call("dealerPortalApi", { action: "respond", invitationId: inv, accept: true }, staff.idToken)).body.result.accepted, true);
+  assert.equal((await op({ action: "proposeLink", facilityId: fid, localDealerId: "dX", companyId: cid })).http, 200);
+  const st = (await call("facilityDealerPortal", { action: "status", facilityId: fid }, owner.idToken)).body.result.dealers.find(d => d.localDealerId === "dX");
+  assert.equal((await call("facilityDealerPortal", { action: "grant", facilityId: fid, localDealerId: "dX", revision: st.link.revision }, owner.idToken)).body.result.status, "active");
+  // 2社の明細を含む注文
+  const ok = await call("createOrder", { facilityId: fid, requestId: "portal-e2e-order-0001", notes: "共通の備考", lines: [
+    { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), doctorId: "o1", dealerId: "dY" },
+    { modelId: "jj-dib00v", power: "+21.0D", quantity: 2, surgeryDate: future(30), doctorId: "o1", dealerId: "dX" }] }, owner.idToken);
+  assert.equal(ok.http, 200);
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const list = () => call("dealerPortalApi", { action: "list", from: today, to: today, facilityFilter: { mode: "all" } }, staff.idToken);
+  let items = [];
+  for (let i = 0; i < 80; i++) { items = (await list()).body.result.items; if (items.length) break; await new Promise(r => setTimeout(r, 250)); }   // トリガーが索引を作るのを待つ(最大20秒)
+  assert.equal(items.length, 1);
+  assert.deepEqual([items[0].orderNumber, items[0].lineCount, items[0].totalQuantity], [ok.body.result.orderNumber, 1, 2]);
+  const detail = (await call("dealerPortalApi", { action: "get", receiptId: items[0].receiptId }, staff.idToken)).body.result;
+  assert.deepEqual(detail.lines.map(l => [l.no, l.power, l.quantity]), [[1, "+21.0D", 2]]);
+  assert.ok(!JSON.stringify(detail).includes("ワイ医療") && !JSON.stringify(detail).includes("共通の備考"));
+  assert.equal((await call("dealerPortalApi", { action: "context" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
+  assert.equal((await call("dealerPortalApi", { action: "context" }, null)).body.error.status, "UNAUTHENTICATED");
+  // 注文メールは従来どおり(発注先ごと。エミュレータでは送信停止中なので held)
+  const mailStatus = async (m) => ((await getDoc(`facilities/${fid}/orders/${ok.body.result.orderId}/mails/${m}`)) || { fields: {} }).fields.status?.stringValue;
+  let ms = [];
+  for (let i = 0; i < 80; i++) { ms = [await mailStatus("d_dX"), await mailStatus("d_dY")]; if (ms.every(s => s === "held")) break; await new Promise(r => setTimeout(r, 250)); }
+  assert.deepEqual(ms, ["held", "held"]);
+  // 取消の後は取得できない
+  const st2 = (await call("facilityDealerPortal", { action: "status", facilityId: fid }, owner.idToken)).body.result.dealers.find(d => d.localDealerId === "dX");
+  assert.equal((await call("facilityDealerPortal", { action: "revoke", facilityId: fid, localDealerId: "dX", revision: st2.link.revision }, owner.idToken)).body.result.status, "revoked");
+  assert.equal((await call("dealerPortalApi", { action: "get", receiptId: items[0].receiptId }, staff.idToken)).body.error.status, "NOT_FOUND");
+});
