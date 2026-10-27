@@ -13,7 +13,7 @@ const GATED_ELEMENT_IDS = ["ocrFeatureCard", "iolOrderForm"];
  *
  * @param {{onGoogle:()=>void, onEmailLink:(email:string)=>void,
  *          onSelectFacility:(facilityId:string)=>void, onLocate:()=>void, onSignOut:()=>void,
- *          onRegister:(a:{name:string, confirmDuplicate:boolean})=>void,
+ *          onRegister:(a:{name:string, applicantName:string, confirmDuplicate:boolean})=>void,
  *          onRegisterCancel:()=>void, onOnboardingClose:()=>void}} handlers
  */
 export function createAuthUi(handlers) {
@@ -32,7 +32,7 @@ export function createAuthUi(handlers) {
   }
 
   // 所属なしユーザーの入力途中の値（再描画で消えないよう保持）
-  const draft = { name: "" };
+  const draft = { name: "", applicantName: null };   // applicantName: 未入力(null)の間は、ログイン情報の表示名を初期値にする
   let lastArgs = null;
 
   // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。表示するのは候補の施設名のみ(最大5件)
@@ -95,14 +95,18 @@ export function createAuthUi(handlers) {
           <p class="form-hint" id="regCandidateGuide" role="status" aria-live="polite" hidden></p>
           ${showDup ? `
             <p class="error-message" role="alert">既に登録されている可能性があります(${reg.duplicate.exact ? "同じ名前の施設があります" : "名前の似た施設があります"})。
-            既存の施設に参加する場合は、その施設の管理者に利用者管理への登録を依頼してください。別の施設の場合のみ、このまま登録できます。</p>
+            既存の施設に参加する場合は、その施設の管理者に利用者管理への登録を依頼してください。別の施設の場合のみ、このまま申請できます。</p>
             ` : ""}
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="regApplicantName">申請者のお名前</label>
+          <input id="regApplicantName" class="form-control" type="text" maxlength="50" autocomplete="name" value="${escapeHtml(draft.applicantName ?? ((user && user.displayName) || ""))}">
         </div>`;
     // primary: 右側に並べる主なボタン(左側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
     const primary = showDup
-      ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
+      ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として申請する</button>
             <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
-      : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "登録しています…" : "登録する"}</button>`;
+      : `<button type="button" class="btn btn-primary" id="btnRegSubmit" ${disabled}>${reg.busy ? "申請しています…" : "申請する"}</button>`;
 
     panel.innerHTML = `
       <div class="feature-info">
@@ -121,9 +125,10 @@ export function createAuthUi(handlers) {
     // 説明は見出し右のⓘにまとめる(通常の表示は 見出し+ⓘ・施設名・ボタン だけ)。外側のタップ・Esc で閉じる(info-tip.js。説明は文字列として表示)
     const plainWho = user ? (user.displayName || user.email || "ログイン中") : "ログイン中";
     const intro = embedded
-      ? `${plainWho} でログインしています。所属中の施設はそのまま利用できます。新しい施設を登録できます。`
-      : `${plainWho} でログインしています。利用を始めるには、新しい施設を登録してください。`;
-    const tip = createInfoTip([intro, JOIN_GUIDE, "施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。"].join("\n\n"), { label: "施設の登録についての説明" });
+      ? `${plainWho} でログインしています。所属中の施設はそのまま利用できます。新しい施設の登録を申請できます。`
+      : `${plainWho} でログインしています。利用を始めるには、新しい施設の登録を申請してください。`;
+    const APPROVAL = "新しい施設の登録は、IOL Order 運営者の承認制です。運営者が申請の内容を確認して承認すると施設が有効になり、申請したあなたが最初の管理者になります(承認後にページを再読み込みすると利用できます)。承認されるまでは注文できません。施設IDは自動で割り当てられます。";
+    const tip = createInfoTip([intro, APPROVAL, JOIN_GUIDE].join("\n\n"), { label: "施設の登録についての説明" });
     tip.button.id = "onboardingInfo";
     tip.popup.classList.add("onboarding-info-pop");
     panel.querySelector(".onboarding-title-row").append(tip.root);
@@ -137,9 +142,12 @@ export function createAuthUi(handlers) {
     const nameEl = $("regFacilityName");
     if (nameEl) nameEl.addEventListener("input", () => { draft.name = nameEl.value; scheduleNameCheck(nameEl); });
     const submit = $("btnRegSubmit");
-    if (submit) submit.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: false }));
+    const applicantEl = $("regApplicantName");
+    if (applicantEl) applicantEl.addEventListener("input", () => { draft.applicantName = applicantEl.value; });
+    const applicantName = () => (applicantEl ? applicantEl.value.trim() : "");
+    if (submit) submit.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, applicantName: applicantName(), confirmDuplicate: false }));
     const confirmBtn = $("btnRegConfirm");
-    if (confirmBtn) confirmBtn.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, confirmDuplicate: true }));
+    if (confirmBtn) confirmBtn.addEventListener("click", () => handlers.onRegister({ name: nameEl.value, applicantName: applicantName(), confirmDuplicate: true }));
     const cancel = $("btnRegCancel");
     if (cancel) cancel.addEventListener("click", () => { handlers.onRegisterCancel(); rerender(); });
   }

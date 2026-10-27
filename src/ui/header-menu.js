@@ -46,6 +46,7 @@ export function createHeaderMenu(handlers) {
         <button type="button" role="menuitem" class="header-menu-item" id="menuOrderHistory">注文履歴</button>
         ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
+        ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${share}
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
@@ -55,6 +56,8 @@ export function createHeaderMenu(handlers) {
       if (st) st.addEventListener("click", () => { setOpen(false); handlers.onOpenSettings(); });
       const sw = panel.querySelector("#menuSwitchFacility");
       if (sw) sw.addEventListener("click", () => { setOpen(false); handlers.onSwitchFacility(); });
+      const ap = panel.querySelector("#menuApplications");   // 施設登録の承認権限のある運営者だけ(表示のみ。権限はサーバーが確認する)
+      if (ap) ap.addEventListener("click", () => { setOpen(false); handlers.onOpenApplications(); });
       panel.querySelector("#menuRegisterFacility").addEventListener("click", () => { setOpen(false); handlers.onRegisterFacility(); });
       panel.querySelector("#menuSignOut").addEventListener("click", () => { setOpen(false); handlers.onSignOut(); });
     }

@@ -22,6 +22,16 @@ test("API: 送るのは施設名・要求ID・確認フラグのみ（権限や�
   assert.deepEqual(calls[1], ["registerFacility", { name: "施設", requestId: "r".repeat(20), confirmDuplicate: true }]);
   assert.deepEqual(calls[2], ["addMember", { facilityId: "fac-1", name: "x", email: "a@example.jp", role: "orderer" }]);
   assert.deepEqual(calls[3], ["respondMembership", { pendingId: "p", accept: false }], "承認は true のときだけ");
+  // 施設の登録申請(申請者名つき)・申請の一覧・承認・却下。承認権限はサーバーが確認する(画面からは申請IDと判断だけを送る)
+  await api.registerFacility({ name: "施設", requestId: "r".repeat(20), applicantName: "申請 太郎" });
+  await api.listFacilityApplications();
+  await api.decideFacilityApplication({ applicationId: "fac-1", decision: "approve", firstAdmin: { name: "責任者", email: "b@example.jp" }, platformAdmin: true });
+  await api.decideFacilityApplication({ applicationId: "fac-1", decision: "reject", reason: "重複" });
+  assert.deepEqual(calls.slice(4), [
+    ["registerFacility", { name: "施設", requestId: "r".repeat(20), applicantName: "申請 太郎" }],
+    ["listFacilityApplications", {}],
+    ["decideFacilityApplication", { applicationId: "fac-1", decision: "approve", firstAdmin: { name: "責任者", email: "b@example.jp" } }],
+    ["decideFacilityApplication", { applicationId: "fac-1", decision: "reject", reason: "重複" }]]);
   // 旧招待コード方式の呼び出し口はない
   assert.equal("createInvite" in api, false);
   assert.equal("acceptInvite" in api, false);

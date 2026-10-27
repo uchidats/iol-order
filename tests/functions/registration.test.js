@@ -12,19 +12,21 @@ import { doc, getDoc, setDoc, getDocs, collection } from "firebase/firestore";
 import {
   createRegistrationService, deriveFacilityId, nameKey, compareNames, LIMITS
 } from "../../functions/src/registration.js";
+import { createFacilityApplicationService } from "../../functions/src/facility-applications.js";
 
 const PROJECT = "demo-iol-functions"; // demo- プロジェクトはエミュレータ専用
 const HOST_PORT = process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185";
 const [host, port] = HOST_PORT.split(":");
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
 
-let env, db, service, clock;
+let env, db, service, apps, clock;
 
 before(async () => {
   if (!getApps().length) initializeApp({ projectId: PROJECT });
   db = getFirestore();
   clock = { t: Date.parse("2026-10-24T00:00:00Z") };
   service = createRegistrationService({ db, FieldValue, Timestamp, now: () => clock.t });
+  apps = createFacilityApplicationService({ db, FieldValue, Timestamp, registration: service, now: () => clock.t });
   env = await initializeTestEnvironment({
     projectId: PROJECT,
     firestore: { rules: fs.readFileSync(rulesPath, "utf8"), host, port: Number(port) }
@@ -36,7 +38,23 @@ beforeEach(async () => { await env.clearFirestore(); clock.t = Date.parse("2026-
 // ---------- ヘルパー ----------
 const user = (uid, over = {}) => ({ uid, token: { email: `${uid}@example.jp`, email_verified: true, name: `名前-${uid}`, ...over } });
 const uuid = () => crypto.randomUUID();
-const reg = (auth, name, extra = {}) => service.registerFacility({ auth, data: { name, requestId: uuid(), ...extra } });
+// 新しい施設は「申請 → 運営者の承認」で作られる(facility-applications.js。申請そのものの検証は facility-applications.test.js)。
+// このファイルの登録の検証は、申請して運営者が(申請者を最初の管理者として)承認するまでをまとめて行い、従来どおりの結果を返す:
+// created = 申請して承認された / exists = 同じ要求の再送(処理済みの申請) / duplicate-candidate = 重複候補(申請しない)
+const OPERATOR = { uid: "ops-approver", token: { email: "ops@medconf.example", email_verified: true, name: "運営者", platformAdmin: true } };
+async function register({ auth, data }) {
+  const r = await apps.applyFacility({ auth, data });
+  if (r.status !== "submitted") return r;
+  if (r.applicationStatus !== "pending") return { status: "exists", facilityId: r.applicationId };
+  try {
+    const d = await apps.decideApplication({ auth: OPERATOR, data: { applicationId: r.applicationId, decision: "approve", confirmDuplicate: true } });
+    return { status: "created", facilityId: d.facilityId };
+  } catch (e) {
+    if (e.code === "failed-precondition" && (await db.doc(`facilityApplications/${r.applicationId}`).get()).get("status") === "approved") return { status: "exists", facilityId: r.applicationId };
+    throw e;
+  }
+}
+const reg = (auth, name, extra = {}) => register({ auth, data: { name, requestId: uuid(), ...extra } });
 const rejects = (promise, code) => assert.rejects(promise, (e) => e.code === code, `expected ${code}`);
 const count = async (p) => (await db.collection(p).get()).size;
 const seedFacility = (id, name, extra = {}) => db.doc(`facilities/${id}`).set({ name, status: "active", ...extra });
@@ -46,7 +64,7 @@ const seedMember = (fid, uid, role = "orderer") => db.doc(`facilities/${fid}/mem
 test("正常系: 施設・最初の管理者の所属・利用枠が作成され、IDはサーバーが生成する", async () => {
   const a = user("userA");
   const requestId = uuid();
-  const r = await service.registerFacility({ auth: a, data: { name: "  新しい　クリニック ", requestId } });
+  const r = await register({ auth: a, data: { name: "  新しい　クリニック ", requestId } });
   assert.equal(r.status, "created");
   assert.equal(r.facilityId, deriveFacilityId("userA", requestId));
   assert.match(r.facilityId, /^fac-[0-9a-f]{24}$/);
@@ -72,19 +90,19 @@ test("施設IDは要求ごとに異なり、クライアントの指定では決
   const r2 = await reg(a, "別の施設2");
   assert.notEqual(r1.facilityId, r2.facilityId);
   for (const bad of [{ facilityId: "tachikawa-hospital" }, { id: "x" }, { uid: "other" }]) {
-    await rejects(service.registerFacility({ auth: a, data: { name: "施設3", requestId: uuid(), ...bad } }), "invalid-argument");
+    await rejects(register({ auth: a, data: { name: "施設3", requestId: uuid(), ...bad } }), "invalid-argument");
   }
 });
 
 test("未ログイン・メール未確認・メールなしは拒否され、何も書き込まれない", async () => {
   const data = { name: "施設", requestId: uuid() };
-  await rejects(service.registerFacility({ auth: null, data }), "unauthenticated");
-  await rejects(service.registerFacility({ auth: undefined, data }), "unauthenticated");
-  await rejects(service.registerFacility({ auth: { uid: "" }, data }), "unauthenticated");
-  await rejects(service.registerFacility({ auth: user("u1", { email_verified: false }), data }), "permission-denied");
-  await rejects(service.registerFacility({ auth: user("u1", { email_verified: undefined }), data }), "permission-denied");
-  await rejects(service.registerFacility({ auth: user("u1", { email_verified: "true" }), data }), "permission-denied");
-  await rejects(service.registerFacility({ auth: user("u1", { email: undefined }), data }), "permission-denied");
+  await rejects(register({ auth: null, data }), "unauthenticated");
+  await rejects(register({ auth: undefined, data }), "unauthenticated");
+  await rejects(register({ auth: { uid: "" }, data }), "unauthenticated");
+  await rejects(register({ auth: user("u1", { email_verified: false }), data }), "permission-denied");
+  await rejects(register({ auth: user("u1", { email_verified: undefined }), data }), "permission-denied");
+  await rejects(register({ auth: user("u1", { email_verified: "true" }), data }), "permission-denied");
+  await rejects(register({ auth: user("u1", { email: undefined }), data }), "permission-denied");
   assert.equal(await count("facilities"), 0);
   assert.equal(await count("registrationQuota"), 0);
 });
@@ -98,26 +116,27 @@ test("入力検証: 空・長すぎる施設名、不正なリクエストID、�
     { ...ok, confirmDuplicate: "yes" },
     { ...ok, role: "admin" }, { ...ok, platformAdmin: true }, { ...ok, claims: { platformAdmin: true } }, { ...ok, status: "active" }
   ]) {
-    await rejects(service.registerFacility({ auth: a, data: bad }), "invalid-argument");
+    await rejects(register({ auth: a, data: bad }), "invalid-argument");
   }
   for (const bad of [null, undefined, "x", 1, []]) {
-    await rejects(service.registerFacility({ auth: a, data: bad }), "invalid-argument");
+    await rejects(register({ auth: a, data: bad }), "invalid-argument");
   }
   assert.equal(await count("facilities"), 0);
 });
 
-test("整合性: 途中で失敗したらロールバックされ(施設も利用枠も作られない)、同じ要求の再試行で成功する", async () => {
+test("整合性: 承認の途中で失敗したらロールバックされ(施設も管理者も作られず、申請は審査中のまま)、同じ要求の再試行で承認できる", async () => {
   const a = user("userA");
   const requestId = uuid();
   const fid = deriveFacilityId("userA", requestId);
   // 管理者所属の作成だけが失敗する状況を作る（所属ドキュメントが既に存在）
   await db.doc(`facilities/${fid}/members/userA`).set({ uid: "userA", role: "orderer" });
-  await assert.rejects(service.registerFacility({ auth: a, data: { name: "施設", requestId } }));
+  await assert.rejects(register({ auth: a, data: { name: "施設", requestId } }));
   assert.equal((await db.doc(`facilities/${fid}`).get()).exists, false, "施設だけが残ってはいけない");
-  assert.equal((await db.doc("registrationQuota/userA").get()).exists, false, "利用枠だけが消費されてはいけない");
+  assert.equal((await db.doc(`facilityApplications/${fid}`).get()).get("status"), "pending", "申請は審査中のまま");
+  assert.equal((await db.doc("registrationQuota/userA").get()).get("count"), 1, "利用枠は申請の時点で1件");
 
   await db.doc(`facilities/${fid}/members/userA`).delete(); // 障害が解消
-  const r = await service.registerFacility({ auth: a, data: { name: "施設", requestId } });
+  const r = await register({ auth: a, data: { name: "施設", requestId } });
   assert.equal(r.status, "created");
   assert.equal((await db.doc(`facilities/${fid}/members/userA`).get()).get("role"), "admin");
   assert.equal((await db.doc("registrationQuota/userA").get()).get("count"), 1);
@@ -126,21 +145,21 @@ test("整合性: 途中で失敗したらロールバックされ(施設も利�
 test("冪等性: 同じ要求の再送は同じ施設を返し、重複作成も利用枠の二重消費もしない", async () => {
   const a = user("userA");
   const data = { name: "施設", requestId: uuid() };
-  const r1 = await service.registerFacility({ auth: a, data });
-  const r2 = await service.registerFacility({ auth: a, data });
+  const r1 = await register({ auth: a, data });
+  const r2 = await register({ auth: a, data });
   assert.deepEqual([r1.status, r2.status], ["created", "exists"]);
   assert.equal(r1.facilityId, r2.facilityId);
   assert.equal(await count("facilities"), 1);
   assert.equal((await db.doc("registrationQuota/userA").get()).get("count"), 1);
   // 別ユーザーが同じ requestId を使っても別IDになり、他人の施設を奪えない
-  const rb = await service.registerFacility({ auth: user("userB"), data: { name: "別施設", requestId: data.requestId } });
+  const rb = await register({ auth: user("userB"), data: { name: "別施設", requestId: data.requestId } });
   assert.notEqual(rb.facilityId, r1.facilityId);
 });
 
 test("同時実行: 同じ要求の並列送信でも施設は1つだけ", async () => {
   const a = user("userA");
   const data = { name: "施設", requestId: uuid() };
-  const results = await Promise.all(Array.from({ length: 8 }, () => service.registerFacility({ auth: a, data })));
+  const results = await Promise.all(Array.from({ length: 8 }, () => register({ auth: a, data })));
   assert.equal(results.filter(r => r.status === "created").length, 1);
   assert.equal(new Set(results.map(r => r.facilityId)).size, 1);
   assert.equal(await count("facilities"), 1);
@@ -213,7 +232,7 @@ test("施設ID導出が衝突する他人の施設を上書き・奪取できな
   const requestId = uuid();
   const fid = deriveFacilityId("userA", requestId);
   await seedFacility(fid, "先に存在", { createdBy: "someoneElse" });
-  await rejects(service.registerFacility({ auth: user("userA"), data: { name: "新規", requestId } }), "already-exists");
+  await rejects(register({ auth: user("userA"), data: { name: "新規", requestId } }), "already-exists");
   assert.equal((await db.doc(`facilities/${fid}`).get()).get("name"), "先に存在");
   assert.equal((await db.doc(`facilities/${fid}/members/userA`).get()).exists, false);
 });
@@ -367,7 +386,7 @@ test("所属ドキュメントに確認済みメールが記録される(利用�
 // ================= レート制限・複数施設 =================
 test("レート制限: 同一ユーザーの連続呼び出しは上限で拒否され、時間経過で回復し、他ユーザーには影響しない", async () => {
   const a = user("userA");
-  const fire = () => service.registerFacility({ auth: a, data: { name: "重複確認クリニック", requestId: uuid() } });
+  const fire = () => register({ auth: a, data: { name: "重複確認クリニック", requestId: uuid() } });
   await fire(); // created
   for (let i = 1; i < LIMITS.rateMax.registerFacility; i++) await fire(); // 重複候補の確認も数える
   await rejects(fire(), "resource-exhausted");

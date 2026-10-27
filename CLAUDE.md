@@ -11,8 +11,11 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - Claude Codeの回答、進捗報告、作業完了報告は原則として日本語で行ってください。コード、API名、コマンド、識別子は英語のままで構いません。
 
 ## 守ること(常に)
-- 本番の Google Forms・GAS には触れない。実発注・メール送信は有効化しない(`ORDER_INTAKE_ENABLED=false` を維持)。公開サイトは dryrun のまま。
-- Firebase は開発プロジェクト `medconf-iol-dev` のみ。本番環境は作らない。過大なIAM権限・サービスアカウントの秘密鍵を作らない。
+- **本番運用中**(2026-10-26 開始): 公開サイト(https://iol.medconf.jp/、`SITE_ORDER_MODE=server`)から、許可した施設・利用者(`ORDER_TEST_FACILITY_IDS`・`ORDER_TEST_UIDS`、`ORDER_INTAKE_UNRESTRICTED=false`)だけが注文でき、注文メールは実際のディーラーへ送られる(`ORDER_INTAKE_ENABLED=true`・`ORDER_TEST_MODE=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=false`)。ほかの医師は従来の Google フォームを使う。
+- 注文受付・メール送信の安全設定(上記の値・許可リスト)は、指示があるときだけ変更する。実際の注文・メール送信・施設登録の申請と承認は、利用者の確認なしに行わない(テストは偽の配信サービス・エミュレータで行う)。
+- 本番の Google Forms・GAS には触れない。
+- 新しい施設の登録は運営者の承認制(`docs/facility-applications.md`)。承認権限は platformAdmin の運営者のみ。権限(カスタムクレーム)を勝手に付与しない。
+- Firebase は `medconf-iol-dev`(本番運用中のプロジェクト)のみ。別の環境は作らない。過大なIAM権限・サービスアカウントの秘密鍵を作らない。
 - push・Firebase デプロイ・実データ変更は、指示があるときだけ行う。実データを変更するスクリプトは dry-run を既定とし、バックアップを取ってから実行する。
 - 実施したテストがすべて成功したときだけ commit/push する。テストの範囲は下の「テスト範囲」に従う。
 - `src/` や `styles.css` を変更したら `node scripts/stamp-assets.mjs` を実行する(index.html のバージョン付与。更新漏れはテストが検出する)。

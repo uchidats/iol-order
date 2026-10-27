@@ -70,7 +70,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const panelText = await page.locator("#authPanel").innerText();
       for (const hidden of ["でログインしています", "利用者管理への登録", "施設IDは自動で割り当てられます"]) assert.ok(!panelText.includes(hidden), `通常は表示しない: ${hidden}`);
       assert.equal(await page.locator(".onboarding-title-row #onboardingInfo").isVisible(), true, "見出しの右にⓘ");
-      // ボタン: 左にグレーのボタン(ログアウト / 注文画面に戻る)、右に青の「登録する」(同じ行)
+      // 申請者のお名前: ログイン情報の表示名を初期値にする
+      assert.equal(await page.locator("#regApplicantName").inputValue(), "テスト");
+      // ボタン: 左にグレーのボタン(ログアウト / 注文画面に戻る)、右に青の「申請する」(同じ行。運営者の承認制)
+      assert.equal((await page.locator("#btnRegSubmit").innerText()).trim(), "申請する");
       const back = await page.locator("#btnAuthSignOut").boundingBox(), go = await page.locator("#btnRegSubmit").boundingBox();
       assert.ok(back.x + back.width <= go.x && Math.abs(back.y - go.y) < 8, "左: グレーのボタン、右: 登録する");
       assert.match(await page.locator("#btnRegSubmit").getAttribute("class"), /btn-primary/);
@@ -81,7 +84,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(info, /でログインしています/);
       assert.match(info, /利用者管理への登録/);
       assert.match(info, /参加の確認が表示されます/);
-      assert.match(info, /施設IDは自動で割り当てられます。登録したあなたが、この施設の最初の管理者になります。/);
+      assert.match(info, /新しい施設の登録は、IOL Order 運営者の承認制です。/);
+      assert.match(info, /承認されるまでは注文できません。施設IDは自動で割り当てられます。/);
       const box = await pop.boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= 390, "スマートフォンの画面内に収まる");
       await page.mouse.click(10, 880);   // 外側(説明に隠れていない画面下部)のタップで閉じる
@@ -126,7 +130,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 登録は止めない(別の施設の場合は、そのまま登録できる)。ボタンは有効で、押すと通常の登録の操作が行われる
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
       await page.click("#btnRegSubmit");
-      assert.deepEqual(await page.evaluate(() => window.__registers), [{ name: "医療法人社団 さくら眼科", confirmDuplicate: false }]);
+      assert.deepEqual(await page.evaluate(() => window.__registers), [{ name: "医療法人社団 さくら眼科", applicantName: "テスト", confirmDuplicate: false }]);
 
       // 候補がなくなれば、案内は消える
       await page.evaluate(() => { window.__resp = { exact: false, similarCount: 0 }; });
@@ -159,7 +163,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(Math.abs(p.y - s.y) < 6, `${width}: 同じ行`);
         assert.ok(s.x + s.width <= p.x, `${width}: 左にログアウト、右に登録する`);
         assert.ok(p.x + p.width > width - 60, `${width}: 登録するは右端に寄る`);
-        const lastHintBottom = await page.evaluate(() => document.querySelector("#regFacilityName").closest(".form-group").getBoundingClientRect().bottom);
+        const lastHintBottom = await page.evaluate(() => document.querySelector("#regApplicantName").closest(".form-group").getBoundingClientRect().bottom);
         const gap = p.y - lastHintBottom;
         assert.ok(gap >= 16 && gap <= 20, `${width}: 説明文とボタンの間 ${gap}px`);
       }

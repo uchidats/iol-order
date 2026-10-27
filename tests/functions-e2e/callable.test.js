@@ -46,10 +46,31 @@ const getDoc = async (p) => {
   return r.status === 200 ? r.json() : null;
 };
 
-let verified, unverified;
+let verified, unverified, operator;
+/** 運営者(カスタムクレーム platformAdmin。エミュレータの管理APIで設定) */
+async function createOperator(email) {
+  const u = await createUser(email, { verified: true });
+  await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ localId: u.uid, customAttributes: JSON.stringify({ platformAdmin: true }) })
+  });
+  const s = await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: "password-for-emulator", returnSecureToken: true })
+  });
+  return { uid: u.uid, idToken: (await s.json()).idToken };
+}
+/** 新しい施設は「申請 → 運営者の承認」で作られる(申請者が最初の管理者)。結果は従来の registerFacility と同じ形(status: created) */
+async function registerApproved(data, idToken) {
+  const a = await call("registerFacility", { ...data, confirmDuplicate: true }, idToken);
+  if (!a.body.result) return a;
+  const d = await call("decideFacilityApplication", { applicationId: a.body.result.applicationId, decision: "approve", confirmDuplicate: true }, operator.idToken);
+  return d.body.result ? { http: d.http, body: { result: { status: "created", facilityId: d.body.result.facilityId } } } : d;
+}
 before(async () => {
   verified = await createUser("owner@example.jp", { verified: true });
   unverified = await createUser("unverified@example.jp", { verified: false });
+  operator = await createOperator("operator@example.jp");
 });
 
 test("callable: 未ログインは unauthenticated で拒否", async () => {
@@ -64,12 +85,22 @@ test("callable: メール未確認のアカウントは PERMISSION_DENIED で拒
   assert.equal(await getDoc(`registrationQuota/${unverified.uid}`), null);
 });
 
-test("callable: メール確認済みのアカウントは施設を登録でき、最初の管理者になる", async () => {
-  const r = await call("registerFacility", { name: "E2Eクリニック", requestId: "verified-request-0001" }, verified.idToken);
+test("callable: メール確認済みのアカウントは施設の登録を申請でき、運営者の承認で施設が有効になり最初の管理者になる", async () => {
+  const r = await call("registerFacility", { name: "E2Eクリニック", requestId: "verified-request-0001", applicantName: "申請 太郎" }, verified.idToken);
   assert.equal(r.http, 200);
-  assert.equal(r.body.result.status, "created");
-  const fid = r.body.result.facilityId;
+  assert.deepEqual([r.body.result.status, r.body.result.applicationStatus], ["submitted", "pending"]);
+  const fid = r.body.result.applicationId;
   assert.match(fid, /^fac-[0-9a-f]{24}$/);
+  assert.equal(await getDoc(`facilities/${fid}`), null, "申請の時点では施設を作らない");
+  assert.equal(await getDoc(`facilities/${fid}/members/${verified.uid}`), null, "管理者の権限も付けない");
+  // 承認権限: 申請者本人・一般ユーザーは承認できない。運営者の一覧に出る
+  assert.equal((await call("decideFacilityApplication", { applicationId: fid, decision: "approve" }, verified.idToken)).body.error.status, "PERMISSION_DENIED");
+  assert.equal((await call("listFacilityApplications", {}, verified.idToken)).body.error.status, "PERMISSION_DENIED");
+  const list = await call("listFacilityApplications", {}, operator.idToken);
+  assert.deepEqual(list.body.result.pending.map(p => [p.id, p.name, p.applicant.name, p.applicant.email]), [[fid, "E2Eクリニック", "申請 太郎", "owner@example.jp"]]);
+  const d = await call("decideFacilityApplication", { applicationId: fid, decision: "approve" }, operator.idToken);
+  assert.equal(d.body.result.status, "approved");
+  assert.equal((await call("decideFacilityApplication", { applicationId: fid, decision: "approve" }, operator.idToken)).body.error.status, "FAILED_PRECONDITION", "二重承認はできない");
   const mem = await getDoc(`facilities/${fid}/members/${verified.uid}`);
   assert.equal(mem.fields.role.stringValue, "admin");
   assert.equal(mem.fields.status, undefined, "membership has no status");
@@ -77,15 +108,15 @@ test("callable: メール確認済みのアカウントは施設を登録でき�
   assert.equal(fac.fields.createdBy.stringValue, verified.uid);
 });
 
-test("callable: 再送は同じ施設を返す(冪等)。権限の指定は INVALID_ARGUMENT", async () => {
+test("callable: 再送は同じ申請を返す(冪等)。権限の指定は INVALID_ARGUMENT", async () => {
   const again = await call("registerFacility", { name: "E2Eクリニック", requestId: "verified-request-0001" }, verified.idToken);
-  assert.equal(again.body.result.status, "exists");
+  assert.deepEqual([again.body.result.status, again.body.result.applicationStatus], ["submitted", "approved"], "同じ要求の再送は同じ申請(処理済み)");
   const forged = await call("registerFacility", { name: "別施設", requestId: "verified-request-0002", role: "admin", platformAdmin: true }, verified.idToken);
   assert.equal(forged.body.error.status, "INVALID_ARGUMENT");
 });
 
 test("callable: 利用者管理の事前登録→本人のログインで参加確認→承認。別メールの人は参加できない。旧招待コードの関数はない", async () => {
-  const reg = await call("registerFacility", { name: "事前登録E2E医院", requestId: "verified-request-0003" }, verified.idToken);
+  const reg = await registerApproved({ name: "事前登録E2E医院", requestId: "verified-request-0003" }, verified.idToken);
   const facilityId = reg.body.result.facilityId;
 
   // 管理者以外(メール未確認)は登録できない
@@ -133,7 +164,7 @@ const putDoc = async (p, fields) => {
 const future = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
 test("callable: createOrder は検証して保存し(accepted)、再送は同じ注文番号、別内容は拒否。未認証・他人は拒否", async () => {
-  const reg = await call("registerFacility", { name: "注文E2E医院", requestId: "order-e2e-register-01" }, verified.idToken);
+  const reg = await registerApproved({ name: "注文E2E医院", requestId: "order-e2e-register-01" }, verified.idToken);
   const fid = reg.body.result.facilityId;
   await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
@@ -168,7 +199,7 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
 
 test("callable: createOrder は複数明細(まとめ発注)を受け付け、従来の単一IOL形式も同じ注文として扱う", async () => {
   const owner2 = await createUser("bulk-owner@example.jp", { verified: true });
-  const reg = await call("registerFacility", { name: "ネリマ眼科クリニック", requestId: "order-e2e-register-02" }, owner2.idToken);
+  const reg = await registerApproved({ name: "ネリマ眼科クリニック", requestId: "order-e2e-register-02" }, owner2.idToken);
   const fid = reg.body.result.facilityId;
   for (const id of ["jj-dib00v", "nidek-nsp-2"]) await putDoc(`facilities/${fid}/adoptedIols/${id}`, { facilityId: fid, catalogIolId: id, enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: false });
@@ -196,7 +227,7 @@ test("callable: createOrder は複数明細(まとめ発注)を受け付け、�
 
 test("callable: removeMember は管理者だけが一般注文者の所属を削除できる(履歴つき)。管理者の所属・他人は削除できない", async () => {
   const owner3 = await createUser("rm-owner@example.jp", { verified: true });
-  const reg = await call("registerFacility", { name: "サクラ眼科クリニック", requestId: "rm-e2e-register-0001" }, owner3.idToken);
+  const reg = await registerApproved({ name: "サクラ眼科クリニック", requestId: "rm-e2e-register-0001" }, owner3.idToken);
   const fid = reg.body.result.facilityId;
   const added = await call("addMember", { facilityId: fid, name: "看護師", email: "rm-nurse@example.jp", role: "orderer" }, owner3.idToken);
   const nurse = await createUser("rm-nurse@example.jp", { verified: true });
@@ -220,7 +251,7 @@ test("callable: removeMember は管理者だけが一般注文者の所属を削
 
 test("施設設定の変更履歴: 画面と同じ書き込み(Rules を通した updatedBy・削除の記録)から、トリガーが変更者・内容を auditLogs に記録する", async () => {
   const admin = await createUser("audit-admin@example.jp", { verified: true });   // 施設登録の回数制限に当たらないよう、別の利用者
-  const reg = await call("registerFacility", { name: "E2E履歴クリニック", requestId: "audit-request-0001" }, admin.idToken);
+  const reg = await registerApproved({ name: "E2E履歴クリニック", requestId: "audit-request-0001" }, admin.idToken);
   assert.equal(reg.http, 200);
   const fid = reg.body.result.facilityId;
   const base = `projects/${PROJECT}/databases/(default)/documents/facilities/${fid}`;
@@ -241,7 +272,7 @@ test("施設設定の変更履歴: 画面と同じ書き込み(Rules を通し�
     updateTransforms: [{ fieldPath: "deletedAt", setToServerValue: "REQUEST_TIME" }] }])).status, 200);
   const list = async () => {
     const r = await fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/facilities/${fid}/auditLogs`, { headers: { Authorization: "Bearer owner" } });
-    return ((await r.json()).documents || []).filter(d => d.fields.target.mapValue.fields.collection.stringValue === "facilityDealers");
+    return ((await r.json()).documents || []).filter(d => d.fields.target && d.fields.target.mapValue.fields.collection.stringValue === "facilityDealers");   // 施設の承認の記録(facility.approve)は対象外
   };
   let docs = [];
   for (let i = 0; i < 40 && docs.length < 3; i++) { docs = await list(); if (docs.length < 3) await new Promise(r => setTimeout(r, 250)); }
@@ -259,7 +290,7 @@ test("施設設定の変更履歴: 画面と同じ書き込み(Rules を通し�
 
 test("注文メール: createOrder が送信待ちを保存し、トリガーが処理する。送信機能が停止中(MAIL_SENDING_ENABLED=false)なので送らずに held(実際のメールは送らない)", async () => {
   const owner = await createUser("mail-owner@example.jp", { verified: true });
-  const reg = await call("registerFacility", { name: "E2Eメール医院", requestId: "mail-e2e-register-01" }, owner.idToken);
+  const reg = await registerApproved({ name: "E2Eメール医院", requestId: "mail-e2e-register-01" }, owner.idToken);
   const fid = reg.body.result.facilityId;
   await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
@@ -273,7 +304,7 @@ test("注文メール: createOrder が送信待ちを保存し、トリガーが
   const oid = ok.body.result.orderId;
   const status = async (m) => ((await getDoc(`facilities/${fid}/orders/${oid}/mails/${m}`)) || { fields: {} }).fields.status?.stringValue;
   let st = [];
-  for (let i = 0; i < 40; i++) { st = [await status("d_dA"), await status("copy")]; if (st.every(s => s === "held")) break; await new Promise(r => setTimeout(r, 250)); }
+  for (let i = 0; i < 80; i++) { st = [await status("d_dA"), await status("copy")]; if (st.every(s => s === "held")) break; await new Promise(r => setTimeout(r, 250)); }   // 最大20秒(トリガーの処理を待つ)
   assert.deepEqual(st, ["held", "held"], "ディーラー宛て・注文控えとも未送信(停止中)");
   const order = await getDoc(`facilities/${fid}/orders/${oid}`);
   assert.equal(order.fields.status.stringValue, "accepted", "停止中は「受付済み(ディーラー未通知)」のまま");
