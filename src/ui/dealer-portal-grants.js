@@ -24,13 +24,15 @@ export function createDealerPortalSection({ api }) {
 
   function row(d) {
     const l = d.link;
-    const state = l.status === "active" && l.grant ? `許可中(${formatJstDateTime(l.grant.effectiveFrom)} 以降の新規注文)` : (STATUS_LABEL[l.status] || "未許可");
+    const stale = l.status === "active" && l.grant && l.grant.stale === true;
+    const state = stale ? "停止中(許可の後に発注先の名称・宛先が変更されたため、表示を止めています。取り消してから、改めて許可してください)"
+      : l.status === "active" && l.grant ? `許可中(${formatJstDateTime(l.grant.effectiveFrom)} 以降の新規注文)` : (STATUS_LABEL[l.status] || "未許可");
     const btn = h("button", { type: "button", class: l.status === "active" ? "btn btn-outline-sm" : "btn btn-outline-sm btn-portal-grant", "data-act": l.status === "active" ? "revoke" : "grant", disabled: !l.companyActive && l.status !== "active" }, l.status === "active" ? "取り消す" : "許可する");
     btn.addEventListener("click", () => act(d, btn.dataset.act));
     return h("div", { class: "dealer-portal-item", "data-dealer": d.localDealerId },
       h("div", { class: "dealer-portal-main" },
         h("div", { class: "dealer-portal-name" }, d.dealerName),
-        h("div", { class: "dealer-portal-meta" }, `会社: ${l.companyName || "—"} ・ `, h("span", { class: l.status === "active" ? "dealer-portal-state is-active" : "dealer-portal-state" }, state))),
+        h("div", { class: "dealer-portal-meta" }, `会社: ${l.companyName || "—"} ・ `, h("span", { class: stale ? "dealer-portal-state is-stale" : l.status === "active" ? "dealer-portal-state is-active" : "dealer-portal-state", "data-state": stale ? "stale" : l.status }, state))),
       btn);
   }
 

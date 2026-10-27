@@ -17,6 +17,7 @@ export function createDealerPortalApi({ functions, httpsCallable }) {
   const operator = call("dealerPortalOperator");
   return {
     // ディーラーの担当者
+    companies: () => portal({ action: "companies" }),
     context: (a = {}) => portal({ action: "context", ...pick(a, ["companyId"]) }),
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),

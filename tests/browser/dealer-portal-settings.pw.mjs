@@ -30,7 +30,7 @@ const settingsApi = {
   saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {}
 };
 const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
-const state = { dA1: { status: "proposed", revision: 1, grant: null } };
+const state = { dA1: q.get("stale") ? { status: "active", revision: 3, grant: { effectiveFrom: "2026-10-27T03:00:00.000Z", grantedByRole: "admin", stale: true } } : { status: "proposed", revision: 1, grant: null } };
 window.__calls = [];
 const mode = q.get("portal") || "on";
 const dealerPortalApi = mode === "none" ? null : {
@@ -133,6 +133,23 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+test("施設設定: 許可の後に発注先の名称・宛先が変わったら「停止中」と表示し、取消・再許可を案内する(chromium)", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 1200 } });
+    await page.goto(`${base}?stale=1`);
+    await page.waitForFunction(() => window.__ready);
+    const st = section(page).locator(".dealer-portal-state");
+    await st.waitFor();
+    assert.equal(await st.getAttribute("data-state"), "stale");
+    assert.match(await st.innerText(), /停止中.*発注先の名称・宛先が変更された.*取り消してから、改めて許可してください/);
+    assert.equal(await section(page).locator('[data-act="revoke"]').count(), 1, "取消できる");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.close();
+  } finally { await browser.close(); }
+});
 
 test("施設設定: 機能が止まっている・未配備・API なしのときは項目を出さず、他の設定はそのまま(chromium)", async (t) => {
   const browser = await launch(chromium, "chromium");

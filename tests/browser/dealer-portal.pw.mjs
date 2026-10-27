@@ -54,9 +54,12 @@ function installFakeServer(page, scenario) {
       dealerPortalApi: async (d) => {
         if (d.action === "invitations") return { invitations: joined || scenario === "none" ? [] : [{ invitationId: "dinv-1", companyName: "エックス商事", role: "reader" }] };
         if (d.action === "respond") { joined = d.accept; return { ok: true, accepted: d.accept }; }
+        // 有効な所属だけ(所属なしは空。multi は2社)
+        if (d.action === "companies") return { companies: scenario === "none" || !joined ? [] : [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])] };
         if (scenario === "none" || !joined) throw deny("ディーラー画面の利用登録が確認できません。運営者にお問い合わせください");
+        if (d.action === "list" && window.__listOverride) return window.__listOverride(d);
         if (d.action === "context") return {
-          company: { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: "reader", branch: { id: "br-1", name: "東京支店" } },
+          company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: "reader", branch: { id: "br-1", name: "東京支店" } },
           facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
           defaultRange: { from: "2026-09-28", to: "2026-10-27" }, limits: { rangeDaysMax: 366, pageMax: 100 }
         };
@@ -140,6 +143,112 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面: 条件を変えたら続きを破棄(古い条件の「さらに表示」をしない・通信中の変更も)。走査途中の0件は「該当なし」としない。再検索の案内: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await newFakeContext(browser, base, 390, STAFF);
+      const page = await context.newPage();
+      await installFakeServer(page, "staff");
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await page.goto(`${base}dealer.html`);
+      await page.locator(".dealer-row").first().waitFor();
+      // 1ページ目: 選んだ施設の先頭の1件と続き。続き(cursor)では2件目
+      await page.evaluate(() => {
+        window.__listOverride = async (d) => {
+          const ids = d.facilityFilter.facilityIds || [];
+          const f = ids[0] || "none";
+          const row = (n) => ({ receiptId: `r-${f}-${n}`, facilityId: f, facilityName: f, orderNumber: `${f}-${n}`, orderedAt: "2026-10-27T01:00:00.000Z", lineCount: 1, totalQuantity: 1 });
+          if (window.__listDelay) await new Promise(r => setTimeout(r, window.__listDelay));
+          return d.cursor ? { items: [row(2)], nextCursor: null, complete: true } : { items: [row(1)], nextCursor: `cur-${ids.join(",")}`, complete: false };
+        };
+      });
+      const listCalls = () => calls(page, "list");
+      const rows = () => page.locator(".dealer-row-number").allInnerTexts();
+      // 施設Aだけで検索 → 続きあり
+      await page.click('[data-select="none"]');
+      await page.locator('[data-facility="fA"]').check();
+      await page.click("#btnDealerSearch");
+      await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 1 && !document.querySelector("#btnDealerMore").hidden);
+      // 施設を B に替える → 結果と続きを破棄。「さらに表示」は出ない(古い A の続きを読まない)
+      await page.locator('[data-facility="fA"]').uncheck();
+      await page.locator('[data-facility="fB"]').check();
+      assert.equal(await page.locator("#btnDealerMore").isHidden(), true);
+      assert.deepEqual(await rows(), []);
+      assert.match(await page.locator("#dealerListMsg").innerText(), /条件を変更しました/);
+      const n = (await listCalls()).length;
+      await page.click("#btnDealerSearch");
+      await page.waitForFunction((k) => (window.__calls || []).filter(([, d]) => d.action === "list").length === k + 1, n);
+      await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 1);
+      const last = (await listCalls()).at(-1);
+      assert.deepEqual([last.facilityFilter.facilityIds, "cursor" in last], [["fB"], false], "新しい条件で先頭から");
+      assert.deepEqual(await rows(), ["fB-1"]);
+      // 続き: 同じ条件のカーソルで
+      await page.click("#btnDealerMore");
+      await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 2);
+      assert.equal((await listCalls()).at(-1).cursor, "cur-fB");
+      // 期間・注文番号・選択ボタンの変更でも破棄
+      for (const change of [
+        () => page.fill("#dealerOrderNumber", "X-1"),
+        () => page.fill("#dealerFrom", "2026-10-01"),
+        () => page.click('[data-select="all"]')
+      ]) {
+        await page.click("#btnDealerSearch");
+        await page.waitForFunction(() => !document.querySelector("#btnDealerMore").hidden);
+        await change();
+        assert.equal(await page.locator("#btnDealerMore").isHidden(), true);
+        assert.deepEqual(await rows(), []);
+      }
+      // 通信中に条件を変えた: 古い応答を表示しない
+      await page.evaluate(() => { window.__listDelay = 400; });
+      await page.click("#btnDealerSearch");
+      await page.locator('[data-facility="fB"]').uncheck();
+      await page.waitForFunction(() => !document.querySelector("#btnDealerSearch").disabled);
+      assert.deepEqual(await rows(), []);
+      assert.equal(await page.locator("#btnDealerMore").isHidden(), true);
+      assert.match(await page.locator("#dealerListMsg").innerText(), /条件を変更しました/);
+      await page.evaluate(() => { window.__listDelay = 0; });
+      // 走査の途中で0件(続きあり): 「該当する注文はありません」としない
+      await page.evaluate(() => { window.__listOverride = async (d) => (d.cursor ? { items: [], nextCursor: null, complete: false, restart: true } : { items: [], nextCursor: "c1", complete: false }); });
+      await page.click("#btnDealerSearch");
+      await page.waitForFunction(() => /続きを検索できます/.test(document.querySelector("#dealerListMsg").textContent));
+      assert.ok(!/該当する注文はありません/.test(await page.locator("#dealerListMsg").innerText()));
+      assert.equal(await page.locator("#btnDealerMore").isHidden(), false);
+      // 検索の途中で索引が反映された: 先頭からの再検索を案内し、続きは出さない
+      await page.click("#btnDealerMore");
+      await page.waitForFunction(() => /先頭から検索し直してください/.test(document.querySelector("#dealerListMsg").textContent));
+      assert.equal(await page.locator("#btnDealerMore").isHidden(), true);
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+test("ディーラー画面: 有効な所属が2社なら会社を選ぶ。選んだ会社で開き、切り替えられる(chromium)", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const context = await newFakeContext(browser, base, 390, STAFF);
+    const page = await context.newPage();
+    await installFakeServer(page, "multi");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("会社の選択", { exact: true }).waitFor();
+    assert.deepEqual(await page.locator(".pending-invite-facility").allInnerTexts(), ["エックス商事", "ワイ医療"]);
+    assert.deepEqual(await calls(page, "context"), [], "選ぶまで会社の画面を開かない");
+    await page.click('[data-company="dco-y"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.equal(await page.locator("#dealerCompany").innerText(), "ワイ医療");
+    assert.deepEqual((await calls(page, "context"))[0], { action: "context", companyId: "dco-y" });
+    assert.equal((await calls(page, "list"))[0].companyId, "dco-y");
+    await page.click('[data-act="switchCompany"]');
+    await page.getByText("会社の選択", { exact: true }).waitFor();
+    assert.equal(await page.locator(".dealer-row").count(), 0, "切り替えでは前の会社の表示を残さない");
+    await context.close();
+  } finally { await browser.close(); }
+});
 
 test("ディーラー画面: 未ログインはメールリンクのログイン(戻り先は dealer.html)。所属のない人には会社名・施設名を出さない。参加の確認(chromium)", async (t) => {
   const browser = await launch(chromium, "chromium");

@@ -17,6 +17,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
+  let gen = 0;             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
+  let choices = [];        // 本人の有効な所属会社(2社以上なら会社を選ぶ)
 
   const panel = h("section", { class: "feature-card dealer-panel", id: "dealerPanel" });
   mount.replaceChildren(panel);
@@ -24,6 +26,11 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   const signOutBtn = () => {
     const b = h("button", { type: "button", class: "btn btn-secondary", "data-act": "signout" }, "ログアウト");
     b.addEventListener("click", () => onSignOut());
+    return b;
+  };
+  const switchBtn = () => {
+    const b = h("button", { type: "button", class: "btn btn-secondary", "data-act": "switchCompany" }, "会社を切り替える");
+    b.addEventListener("click", () => showCompanyChoice());
     return b;
   };
   /** 表示中のデータを破棄して案内だけを出す */
@@ -93,14 +100,14 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       checks.replaceChildren(...(ctx.facilities.length ? ctx.facilities.map(f => {
         const cb = h("input", { type: "checkbox", value: f.id, "data-facility": f.id });
         cb.checked = selected.has(f.id);
-        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; });
+        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; invalidate(); });
         return h("label", { class: "settings-check dealer-facility" }, cb, h("span", {}, f.name), f.assigned ? h("span", { class: "member-role-badge" }, "担当") : null);
       }) : [h("p", { class: "form-hint" }, "閲覧を許可している医療機関はまだありません。")]));
       scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`;
     };
     const selBtn = (kind, label) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-select": kind }, label);
-      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); });
+      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); invalidate(); });
       return b;
     };
     const saveAssigned = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "saveAssigned" }, "選択中の施設を担当施設として保存");
@@ -124,8 +131,21 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
 
+    /** 検索条件(施設・期間・注文番号)を変えたら、表示中の結果と続きを破棄する。「さらに表示」で古い条件の続きを読まない */
+    const CHANGED = "条件を変更しました。「検索」を押すと、新しい条件で検索します。";
+    function invalidate() {
+      gen++;
+      if (!lastQuery && !items.length && !cursor) return;
+      lastQuery = null; cursor = null; items = [];
+      renderList();
+      listMsg.textContent = CHANGED;
+    }
+    for (const el of [from, to, number]) { el.addEventListener("input", invalidate); el.addEventListener("change", invalidate); }
+
     const run = async (append) => {
       if (busy) return;
+      if (append && (!lastQuery || !cursor)) return;
+      const my = append ? gen : ++gen;
       busy = true; listMsg.textContent = "読み込み中…"; search.disabled = more.disabled = true;
       try {
         if (!append) {
@@ -133,12 +153,21 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
           cursor = null; items = [];
         }
         const r = await api.listOrders({ ...lastQuery, ...(append && cursor ? { cursor } : {}) });
+        if (my !== gen) { listMsg.textContent = CHANGED; return; }   // 通信中に条件が変わった: 古い条件の結果は表示しない
+        if (r.restart) {
+          // 検索の途中で、読み終えた範囲に新しい注文の索引が反映された。続きからでは欠けるため、先頭からの再検索を求める
+          cursor = null; renderList();
+          listMsg.textContent = "検索の途中で新しい注文が反映されました。「検索」を押して、先頭から検索し直してください。";
+          return;
+        }
         items = append ? [...items, ...r.items] : r.items;
         cursor = r.nextCursor || null;
         renderList();
-        listMsg.textContent = items.length ? `${items.length}件${cursor ? "(続きがあります)" : ""}` : "該当する注文はありません。";
+        listMsg.textContent = items.length ? `${items.length}件${cursor ? "(続きがあります)" : ""}`
+          : cursor ? "ここまでに該当する注文は見つかりませんでした。「さらに表示」で続きを検索できます。" : "該当する注文はありません。";
         fetched.textContent = `最終取得: ${formatJstDateTime(new Date().toISOString())}(注文メールとは別に反映されるため、表示まで少し時間がかかることがあります)`;
       } catch (e) {
+        if (my !== gen) { listMsg.textContent = CHANGED; return; }
         items = []; cursor = null; renderList();
         listMsg.textContent = describeCallableError(e);
         if (String((e && e.code) || "").endsWith("permission-denied")) showMessage("ディーラー画面", describeCallableError(e), { error: true });
@@ -200,12 +229,30 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       fetched, listMsg, listBox, more);
     const noAssigned = ctx.selection === "all-unassigned" ? h("p", { class: "form-hint" }, "担当施設が未設定のため、閲覧可能な全施設を選択しています。") : null;
     panel.replaceChildren(...[
-      h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), signOutBtn()),
+      h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
       h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
       h("p", { class: "form-hint" }, "医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。"),
       noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
     if (ctx.facilities.length) await run(false);
+  }
+
+  /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */
+  function showCompanyChoice() {
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    const msg = h("p", { class: "error-message", role: "alert" });
+    const list = h("ul", { class: "pending-invite-list" }, choices.map(c => {
+      const b = h("button", { type: "button", class: "btn btn-primary", "data-company": c.companyId }, "この会社で開く");
+      b.addEventListener("click", async () => {
+        b.disabled = true; msg.textContent = "";
+        try { await showPortal(await api.context({ companyId: c.companyId })); }
+        catch (e) { msg.textContent = describeCallableError(e); b.disabled = false; }
+      });
+      return h("li", { class: "pending-invite" }, h("div", { class: "pending-invite-facility" }, c.name), h("div", { class: "onboarding-actions" }, b));
+    }));
+    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "会社の選択")),
+      h("p", { class: "feature-desc" }, "複数の会社の担当者として登録されています。表示する会社を選んでください。"),
+      list, msg, h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
   /** ログイン後: 参加待ち → 担当者の画面。所属がない人には会社名・施設名を出さない */
@@ -214,7 +261,10 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     try {
       const inv = await api.myInvitations();
       if (inv.invitations && inv.invitations.length) { await showInvitations(inv.invitations, enter); return; }
-      await showPortal(await api.context());
+      // 有効な所属だけを候補にする(無効化された旧会社が残っていても、有効な1社ならそのまま開く。2社以上なら選ぶ)
+      choices = ((await api.companies()).companies || []);
+      if (choices.length > 1) { showCompanyChoice(); return; }
+      await showPortal(await api.context(choices.length === 1 ? { companyId: choices[0].companyId } : {}));
     } catch (e) {
       showMessage("ディーラー画面", describeCallableError(e), { error: true });   // 所属がない・会社の停止など(会社名・施設名は出さない)
     }

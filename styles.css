@@ -2342,6 +2342,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
    ディーラー専用画面(dealer.html)・施設設定の「ディーラー画面での閲覧」・運営者の「ディーラー画面の管理」
    ========================================================================== */
 .dealer-panel { display: flex; flex-direction: column; gap: 10px; }
+.dealer-panel [hidden] { display: none !important; }   /* .btn の display より優先(「さらに表示」などを隠す) */
 .dealer-title-row { justify-content: space-between; align-items: center; gap: 8px; }
 .dealer-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: #ffffff; }
 .dealer-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
@@ -2377,6 +2378,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-portal-name { font-weight: 600; }
 .dealer-portal-meta { font-size: 0.85rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .dealer-portal-state.is-active { color: #15803d; font-weight: 600; }
+.dealer-portal-state.is-stale { color: #b45309; font-weight: 600; }
 .dealer-operator-body { display: flex; flex-direction: column; gap: 16px; }
 .dealer-operator-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dealer-operator-title h3 { margin: 0; }
