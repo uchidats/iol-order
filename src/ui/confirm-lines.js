@@ -11,19 +11,32 @@ export function formatSurgeryDate(iso) {
 
 const span = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; };
 
+/** 見出し「手術日 2026年10月29日(木)　高橋Dr」(確認画面のグループ見出しと、入力欄の折りたたみ表示で共通) */
+export function summaryDateHead(surgeryDate, doctor) {
+  const head = document.createElement("div");
+  head.className = "summary-date-head";
+  // 手術日と担当医を同じ見出しに(幅が足りなければ、全角スペースの位置で自然に折り返す)
+  head.append(`手術日 ${formatSurgeryDate(surgeryDate)}`, "　", span("summary-doctor", `${doctor}Dr`));
+  return head;
+}
+
+/** 1行「メーカー モデル名 度数 枚数」(レンズ番号のバッジは含めない。確認画面と折りたたみ表示で共通) */
+export function summaryLineMain(l, badge = null) {
+  const main = document.createElement("div");
+  main.className = "summary-line-main";
+  main.append(...[badge,
+    span("summary-maker", l.manufacturer),
+    span("summary-model", l.modelName),
+    span("summary-power", l.power),
+    span("summary-qty", `${l.quantity}枚`)].filter(Boolean));
+  return main;
+}
+
 function lineItem(l) {
   const li = document.createElement("li");
   li.className = "summary-line";
   // 1行: [レンズN] メーカー モデル名 度数 枚数(収まらないときだけ折り返す)。手術日・担当医は、グループの見出しにまとめる
-  const main = document.createElement("div");
-  main.className = "summary-line-main";
-  main.append(
-    span("lens-no-badge", `レンズ${l.lineNo}`),                 // 元のレンズ番号(表示順で振り直さない)
-    span("summary-maker", l.manufacturer),
-    span("summary-model", l.modelName),
-    span("summary-power", l.power),
-    span("summary-qty", `${l.quantity}枚`));
-  li.append(main);
+  li.append(summaryLineMain(l, span("lens-no-badge", `レンズ${l.lineNo}`)));   // 元のレンズ番号(表示順で振り直さない)
   return li;
 }
 
@@ -38,10 +51,7 @@ export function renderConfirmLines(list, lines) {
   list.replaceChildren(...groupLinesByDateAndDoctor(lines).map(group => {
     const section = document.createElement("li");
     section.className = "summary-date-group";
-    const head = document.createElement("div");
-    head.className = "summary-date-head";
-    // 手術日と担当医を同じ見出しに(幅が足りなければ、全角スペースの位置で自然に折り返す)
-    head.append(`手術日 ${formatSurgeryDate(group.surgeryDate)}`, "　", span("summary-doctor", `${group.doctor}Dr`));
+    const head = summaryDateHead(group.surgeryDate, group.doctor);
     const items = document.createElement("ul");
     items.className = "summary-lines summary-date-lines";
     items.append(...group.lines.map(lineItem));

@@ -4,6 +4,8 @@ import { filterLensOptions, findLensOption } from "../domain/lens-options.js";
 import { MAX_LINES } from "../domain/order-lines.js";
 import { dealerMode, resolveLineDealer } from "../domain/dealer-selection.js";
 import { enhanceSelect } from "./custom-select.js";
+import { toOrderLines } from "../domain/order-lines.js";
+import { summaryDateHead, summaryLineMain } from "./confirm-lines.js";
 
 /** 要素生成の小さなヘルパー(表示文字列は textContent で扱い、HTMLとして解釈しない) */
 function h(tag, attrs = {}, ...children) {
@@ -25,6 +27,15 @@ function trashIcon() {
   for (const d of ["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6", "M14 11v6"]) {
     const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); svg.appendChild(p);
   }
+  return svg;
+}
+
+/** 折りたたみ・展開の小さな矢印(装飾。向きは CSS で aria-expanded に合わせて変える) */
+function chevronIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "18", height: "18", fill: "none", stroke: "currentColor", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
+  const p = document.createElementNS(NS, "path"); p.setAttribute("d", "M6 9l6 6 6-6"); svg.appendChild(p);
   return svg;
 }
 
@@ -74,6 +85,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.title = h("strong", { class: "lens-line-title" });
     // 各レンズカードの右上の、控えめなゴミ箱アイコン(確認ダイアログなし。削除すると「元に戻す」付きの通知が出る)
     line.removeBtn = h("button", { type: "button", class: "lens-line-trash", "data-act": "remove", title: "このレンズを削除", "aria-label": "このレンズを削除" }, trashIcon());
+    // 折りたたみ・展開(画面の表示だけ。注文データ・下書き・Firestore には保存しない)。入力が揃い、値が正しいレンズだけ折りたためる
+    line.collapsed = false;
+    line.toggleBtn = h("button", { type: "button", class: "lens-line-toggle", "data-act": "toggle", "aria-expanded": "true" }, chevronIcon());
+    line.summary = h("button", { type: "button", class: "lens-line-summary", "data-act": "expand", hidden: true });
 
     // 必須の印: 項目名の右に小さな赤い「*」(読み上げでは「必須」)
     const requiredMark = () => [h("span", { class: "required-mark", "aria-hidden": "true" }, "*"), h("span", { class: "sr-only" }, "（必須）")];
@@ -81,8 +96,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       h("label", { class: "form-label required", for: forId }, h("span", {}, labelText, ...requiredMark()), extra),
       control, err(errKey));
 
-    line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
-      h("div", { class: "lens-line-head" }, line.title, line.removeBtn),
+    // 最上部: [レンズN](展開・折りたたみで位置を変えない) …… 右端に [折りたたみ矢印][ゴミ箱]。折りたたみ中はゴミ箱を出さない
+    line.body = h("div", { class: "lens-line-body" },
       h("div", { class: "lens-filter", role: "group", "aria-label": "レンズの種類" },
         h("label", { class: "lens-filter-check" }, line.chkToric, " トーリック"),
         h("label", { class: "lens-filter-check" }, line.chkMf, " 多焦点")),   // メーカー別の Calculator のリンクは出さない(下部の「各社Calculator 関連リンク」を使う)
@@ -100,6 +115,9 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       group("担当医", h("div", { class: "select-wrapper" }, line.doctor), "doctor", id("lensDoctor")),
       // 発注先: 施設の登録ディーラーが2社以上のときだけ表示(選択必須)。1社は自動、0社は「発注先未設定」
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
+    line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
+      h("div", { class: "lens-line-head" }, line.title, h("div", { class: "lens-line-actions" }, line.toggleBtn, line.removeBtn)),
+      line.summary, line.body);
     // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
     enhanceSelect(line.power, { ariaLabel: "IOLパワー", matchWidth: true });
@@ -123,7 +141,90 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.chkMf.addEventListener("change", onFilter);
     line.chkToric.addEventListener("change", onFilter);
     line.removeBtn.addEventListener("click", () => removeLine(line));
+    // 矢印: 展開中は折りたたむ(入力に不備があれば折りたたまず、そのレンズの不備を表示)。折りたたみ中は展開
+    line.toggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (line.collapsed) { expand(line); return; }
+      if (!collapse(line)) showLineErrors(line);
+    });
+    // 折りたたみ中は、カード(要約)のどこをタップしても展開して再編集できる
+    line.root.addEventListener("click", () => {
+      if (!line.collapsed) return;
+      const fromSummary = document.activeElement === line.summary;
+      expand(line);
+      if (fromSummary) line.toggleBtn.focus({ preventScroll: true });   // 要約が隠れるので、操作の位置を矢印へ移す
+    });
     return line;
+  }
+
+  /** 1明細の入力の不備(validate と同じ規則)。[項目, メッセージ, 要素] の一覧。空なら入力が揃って正しい */
+  function lineProblems(l, v) {
+    const out = [];
+    if (!v.lens) out.push(["model", "IOLモデルを選択してください", l.model]);
+    if (!v.power) out.push(["power", "IOLパワー (ディオプター) を選択してください", l.power]);
+    if (!v.quantity) out.push(["quantity", "枚数を選択してください", l.qty[0]]);
+    // 範囲はサーバーと同じ(日本時間の本日以降・1年以内。minDate / maxDate)
+    if (!v.surgeryDate) out.push(["date", "手術日を選択してください", l.date]);
+    else if (v.surgeryDate < minDate()) out.push(["date", "手術日は本日以降を指定してください", l.date]);
+    else if (maxDate() && v.surgeryDate > maxDate()) out.push(["date", "手術日が先すぎます（1年以内で指定してください）", l.date]);
+    if (!v.doctor) out.push(["doctor", "担当医を選択してください", l.doctor]);
+    if (dealerMode(getDealers()) === "choose" && !v.dealer) out.push(["dealer", "発注先を選択してください", l.dealer]);
+    return out;
+  }
+  const ERR_KEYS = ["model", "power", "quantity", "date", "doctor", "dealer"];
+  /** 1明細の不備を表示し、その明細の不備のある項目を返す(最初の要素) */
+  function showLineErrors(l) {
+    const problems = lineProblems(l, valueOf(l));
+    const bad = new Set(problems.map(p => p[0]));
+    for (const k of ERR_KEYS) if (!bad.has(k)) clearErr(l, k);
+    for (const [k, msg, ctl] of problems) setErr(l, k, msg, ctl);
+    return problems.length ? problems[0][2] : null;
+  }
+
+  /** 折りたたむ(入力が揃って正しいときだけ)。要約は確認画面と同じ表示: 「手術日 … 担当医Dr」と「メーカー モデル 度数 枚数」 */
+  function collapse(l) {
+    const v = valueOf(l);
+    if (lineProblems(l, v).length) return false;
+    const [ol] = toOrderLines([v]);
+    l.summary.replaceChildren(summaryDateHead(ol.surgeryDate, ol.doctor), summaryLineMain(ol));
+    l.collapsed = true;
+    syncCollapsed(l);
+    return true;
+  }
+  function expand(l) {
+    if (!l.collapsed) return;
+    l.collapsed = false;
+    syncCollapsed(l);
+  }
+  function syncCollapsed(l) {
+    l.root.classList.toggle("is-collapsed", l.collapsed);
+    l.body.hidden = l.collapsed;
+    l.summary.hidden = !l.collapsed;
+    l.removeBtn.hidden = l.collapsed;          // 折りたたみ中はゴミ箱を出さない(展開してから削除する)
+    l.toggleBtn.setAttribute("aria-expanded", String(!l.collapsed));
+    const no = lines.indexOf(l) + 1;
+    l.toggleBtn.setAttribute("aria-label", `レンズ${no}を${l.collapsed ? "展開して編集" : "折りたたむ"}`);
+    l.toggleBtn.title = l.collapsed ? "展開して編集" : "折りたたむ";
+    l.summary.setAttribute("aria-label", `レンズ${no}を展開して編集`);
+  }
+  /** 選択肢の変更(マスター・担当医・発注先)の後: 折りたたみ中で入力が正しくなくなったら展開し、正しければ要約を作り直す */
+  function recheckCollapsed(l) {
+    if (!l.collapsed) return;
+    l.collapsed = false;
+    if (!collapse(l)) syncCollapsed(l);
+  }
+
+  /** 1明細の現在の入力値(確認前の生の値) */
+  function valueOf(l) {
+    return {
+      lens: findLensOption(getOptions(), l.model.value),
+      power: l.power.value,
+      quantity: parseInt((l.qty.find(r => r.checked) || {}).value || "0", 10),
+      surgeryDate: l.date.value,
+      doctor: getDoctors().find(d => d.id === l.doctor.value) || null,
+      // 発注先: 1社なら自動、2社以上は選んだもの(未選択は null)、0社は null。判定はサーバーと同じ規則
+      dealer: (() => { const r = resolveLineDealer(getDealers(), l.dealer.value); return r.ok ? r.dealer : null; })()
+    };
   }
 
   const clearErr = (line, k) => { line.errs[k].textContent = ""; (k === "model" ? line.model : k === "power" ? line.power : k === "date" ? line.date : k === "doctor" ? line.doctor : k === "dealer" ? line.dealer : null)?.classList.remove("is-invalid"); };
@@ -184,7 +285,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
 
   function renumber() {
-    lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.setAttribute("aria-label", `レンズ${i + 1}を削除`); l.removeBtn.title = `レンズ${i + 1}を削除`; });
+    lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.setAttribute("aria-label", `レンズ${i + 1}を削除`); l.removeBtn.title = `レンズ${i + 1}を削除`; syncCollapsed(l); });
     addButton.disabled = lines.length >= MAX_LINES;
   }
 
@@ -225,6 +326,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     fillDealers(line, st.dealerId || "");
     syncDealerGroup(line);
     for (const k of ["model", "power", "quantity", "date", "doctor", "dealer"]) clearErr(line, k);
+    expand(line);   // 復元・元に戻す・空に戻した明細は展開して表示(折りたたみの状態は保存しない)
   }
 
   /** 削除した明細を、元の位置に戻す */
@@ -260,6 +362,9 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
 
   addButton.addEventListener("click", () => {
+    if (lines.length >= MAX_LINES) return;
+    // 入力済み(揃って正しい)のレンズは自動で折りたたむ。未入力・不備のあるレンズは展開したまま(編集を続けられる)
+    lines.forEach(l => { if (!l.collapsed) collapse(l); });
     const last = lines[lines.length - 1];
     const added = addLine({ surgeryDate: last ? last.date.value : "", doctorId: last ? last.doctor.value : "", dealerId: last ? last.dealer.value : "" });
     if (added) added.model.focus();
@@ -270,38 +375,21 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   return {
     /** 現在の入力内容(確認前の生の値) */
     values() {
-      return lines.map(l => ({
-        lens: findLensOption(getOptions(), l.model.value),
-        power: l.power.value,
-        quantity: parseInt((l.qty.find(r => r.checked) || {}).value || "0", 10),
-        surgeryDate: l.date.value,
-        doctor: getDoctors().find(d => d.id === l.doctor.value) || null,
-        // 発注先: 1社なら自動、2社以上は選んだもの(未選択は null)、0社は null。判定はサーバーと同じ規則
-        dealer: (() => { const r = resolveLineDealer(getDealers(), l.dealer.value); return r.ok ? r.dealer : null; })()
-      }));
+      return lines.map(valueOf);
     },
-    /** 全明細の入力検証。最初の不備の要素を返す */
+    /** 全明細の入力検証。最初の不備の要素を返す。不備のある明細は、折りたたみ中でも展開して表示する */
     validate() {
       let first = null;
-      const vals = this.values();
-      lines.forEach((l, i) => {
-        const v = vals[i];
-        const fail = (k, msg, ctl) => { setErr(l, k, msg, ctl); if (!first && ctl) first = ctl; };
-        v.lens ? clearErr(l, "model") : fail("model", "IOLモデルを選択してください", l.model);
-        v.power ? clearErr(l, "power") : fail("power", "IOLパワー (ディオプター) を選択してください", l.power);
-        v.quantity ? clearErr(l, "quantity") : fail("quantity", "枚数を選択してください", l.qty[0]);
-        // 範囲はサーバーと同じ(日本時間の本日以降・1年以内。minDate / maxDate)
-        if (!v.surgeryDate) fail("date", "手術日を選択してください", l.date);
-        else if (v.surgeryDate < minDate()) fail("date", "手術日は本日以降を指定してください", l.date);
-        else if (maxDate() && v.surgeryDate > maxDate()) fail("date", "手術日が先すぎます（1年以内で指定してください）", l.date);
-        else clearErr(l, "date");
-        v.doctor ? clearErr(l, "doctor") : fail("doctor", "担当医を選択してください", l.doctor);
-        if (dealerMode(getDealers()) === "choose" && !v.dealer) fail("dealer", "発注先を選択してください", l.dealer); else clearErr(l, "dealer");
+      lines.forEach((l) => {
+        const bad = showLineErrors(l);
+        if (bad) { expand(l); if (!first) first = bad; }
       });
       // 同じ条件の明細の重複は、入力の誤りにしない(確認画面で「重複を確認しました」にチェックすれば注文できる。order-form.js)
       return { ok: !first, firstInvalid: first };
     },
-    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); }); },
+    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); recheckCollapsed(l); }); },
+    /** 折りたたみ中のレンズ番号(表示の確認・テスト用。注文データには含めない) */
+    collapsedLineNos: () => lines.map((l, i) => (l.collapsed ? i + 1 : 0)).filter(Boolean),
     /** 全明細の入力状態(下書きの保存用) */
     snapshot() { return lines.map(readState); },
     /** 下書きの復元: 保存された状態から明細を作り直す(選択肢にないモデル・度数・担当医・発注先は未選択になる) */

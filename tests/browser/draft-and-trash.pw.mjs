@@ -155,6 +155,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         if (i) await page.click("#btnAddLine");
         await fill(i, { model: ["jj-dib00v", "alcon-cna0t0", "hoya-xy1"][i], power: ["+20.0D", "+21.0D", "+22.0D"][i], date: `2099-02-0${i + 1}`, doctor: "o1" });
       }
+      // 「レンズを追加」で入力済みのレンズ1・2は折りたたまれる(折りたたみ中はゴミ箱を出さない)。展開してから削除を確認する
+      assert.equal(await page.locator(".lens-line.is-collapsed .lens-line-trash:visible").count(), 0);
+      while (await page.locator(".lens-line.is-collapsed").count()) await page.locator(".lens-line.is-collapsed .lens-line-summary").first().click();
+      assert.equal(await page.locator(".lens-line.is-collapsed").count(), 0);
       // 右上の控えめなゴミ箱アイコン(カードの中・右寄り・タップしやすい大きさ)
       for (const w of [390, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });

@@ -2065,6 +2065,31 @@ input[type="date"].form-control {
 .lens-line-trash:hover { color: #dc2626; background: #fef2f2; }
 .lens-line-trash:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; color: #dc2626; }
 
+/* レンズの折りたたみ: 最上部の [レンズN] は展開・折りたたみで位置を変えない。右端に矢印(折りたたみ中は矢印だけ)。
+   折りたたみ中はバッジの下に、確認画面と同じ表示の2行(手術日・担当医 / メーカー モデル 度数 枚数) */
+.lens-line-actions { display: flex; align-items: center; gap: 2px; }
+.lens-line-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; margin: -6px 0; padding: 0;
+  background: transparent; border: 0; border-radius: 10px; color: #64748b; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lens-line-toggle svg { transition: transform 0.15s ease; }
+.lens-line-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }   /* 展開中: 上向き(折りたたむ) / 折りたたみ中: 下向き(展開) */
+.lens-line-toggle:hover { color: var(--primary, #1d4ed8); background: #eef3fd; }
+.lens-line-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.lens-line.is-collapsed { padding-bottom: 10px; cursor: pointer; }
+.lens-line.is-collapsed .lens-line-head { margin-bottom: 4px; }
+.lens-line.is-collapsed .lens-line-toggle { margin-right: -6px; }   /* 折りたたみ中は矢印が右端(ゴミ箱と同じ位置) */
+.lens-line-summary {
+  display: block; width: 100%; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left;
+  background: transparent; border: 0; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lens-line-summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 6px; }
+.lens-line-summary .summary-line-main { margin-top: 4px; }
+
 /* 「元に戻す」付きの通知(画面の下) */
 .undo-toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1100;
