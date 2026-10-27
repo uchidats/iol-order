@@ -70,6 +70,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const panelText = await page.locator("#authPanel").innerText();
       for (const hidden of ["でログインしています", "利用者管理への登録", "施設IDは自動で割り当てられます"]) assert.ok(!panelText.includes(hidden), `通常は表示しない: ${hidden}`);
       assert.equal(await page.locator(".onboarding-title-row #onboardingInfo").isVisible(), true, "見出しの右にⓘ");
+      // ボタン: 左にグレーのボタン(ログアウト / 注文画面に戻る)、右に青の「登録する」(同じ行)
+      const back = await page.locator("#btnAuthSignOut").boundingBox(), go = await page.locator("#btnRegSubmit").boundingBox();
+      assert.ok(back.x + back.width <= go.x && Math.abs(back.y - go.y) < 8, "左: グレーのボタン、右: 登録する");
+      assert.match(await page.locator("#btnRegSubmit").getAttribute("class"), /btn-primary/);
       await page.click("#onboardingInfo");
       const pop = page.locator(".onboarding-info-pop");
       assert.equal(await pop.isVisible(), true);
@@ -148,13 +152,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await hint.isHidden(), true);
       assert.equal(await page.locator("#btnRegSubmit").isEnabled(), true);
 
-      // ボタン配置: 「登録する」は左、「ログアウト」(所属済みなら「注文画面に戻る」)は同じ行の右。説明文との間に16〜20px。PC・スマホで同じ
+      // ボタン配置: 「ログアウト」(所属済みなら「注文画面に戻る」。グレー)は左、「登録する」(青)は同じ行の右。説明文との間に16〜20px。PC・スマホで同じ
       for (const width of [390, 1100]) {
         await page.setViewportSize({ width, height: 900 });
         const p = await page.locator("#btnRegSubmit").boundingBox(), s = await page.locator("#btnAuthSignOut").boundingBox();
         assert.ok(Math.abs(p.y - s.y) < 6, `${width}: 同じ行`);
-        assert.ok(p.x + p.width <= s.x, `${width}: 左に登録する、右にログアウト`);
-        assert.ok(s.x + s.width > width - 60, `${width}: 右端に寄る`);
+        assert.ok(s.x + s.width <= p.x, `${width}: 左にログアウト、右に登録する`);
+        assert.ok(p.x + p.width > width - 60, `${width}: 登録するは右端に寄る`);
         const lastHintBottom = await page.evaluate(() => document.querySelector("#regFacilityName").closest(".form-group").getBoundingClientRect().bottom);
         const gap = p.y - lastHintBottom;
         assert.ok(gap >= 16 && gap <= 20, `${width}: 説明文とボタンの間 ${gap}px`);

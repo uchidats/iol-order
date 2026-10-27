@@ -98,7 +98,7 @@ export function createAuthUi(handlers) {
             既存の施設に参加する場合は、その施設の管理者に利用者管理への登録を依頼してください。別の施設の場合のみ、このまま登録できます。</p>
             ` : ""}
         </div>`;
-    // primary: 左側に並べる主なボタン(右側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
+    // primary: 右側に並べる主なボタン(左側に「注文画面に戻る」/「ログアウト」を同じ行で置く)
     const primary = showDup
       ? `<button type="button" class="btn btn-secondary" id="btnRegConfirm" ${disabled}>別の施設として登録する</button>
             <button type="button" class="btn btn-outline-sm" id="btnRegCancel">やめる</button>`
@@ -110,10 +110,10 @@ export function createAuthUi(handlers) {
         ${unverified ? '<p class="error-message" role="alert">メールアドレスの確認が済んでいないため、施設の登録・参加はできません。</p>' : ""}
         ${body}
         <div class="onboarding-actions">
-          <div class="onboarding-primary">${primary}</div>
           ${embedded
             ? '<button type="button" class="btn btn-outline-sm" id="btnOnboardingClose">注文画面に戻る</button>'
             : '<button type="button" class="btn btn-outline-sm" id="btnAuthSignOut">ログアウト</button>'}
+          <div class="onboarding-primary">${primary}</div>
         </div>
         ${msg}
       </div>`;
