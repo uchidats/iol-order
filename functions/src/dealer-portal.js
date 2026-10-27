@@ -23,7 +23,10 @@ export const PORTAL_LIMITS = Object.freeze({
   nameMax: 100, staffNameMax: 50, assignmentsMax: 100, facilityFilterMax: 100,
   pageDefault: 50, pageMax: 100, scanBatch: 100, scanMax: 500, rangeDaysMax: 366,
   invitationTtlMs: 30 * 24 * 60 * 60 * 1000, cursorTtlMs: 60 * 60 * 1000, reindexMax: 2000,
-  affiliationsMax: 500, affiliationsBatch: 20, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
+  // 所属の一覧(dealerStaffIndex.companyIds)の上限。参加の時点で超えるなら理由を示して止める(黙って古い所属を削らない)。確認は20件ずつ全件
+  affiliationsMax: 2000, affiliationsBatch: 20,
+  // 検索時点に固定した読み取り(readTime)ができる時間(Firestore は過去1時間以内)。時刻差の余裕を引く。続きのカーソルはこれを超えて使えない
+  pinnedReadWindowMs: 59.5 * 60 * 1000, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JST_MS = 9 * 60 * 60 * 1000;
@@ -250,8 +253,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   /** 本人の有効な所属(会社名の順)。所属の一覧に載っていても、無効化・停止・メール不一致の会社は含めない */
   async function validAffiliations(user) {
     const idx = await staffIndexRef(user.uid).get();
-    // 無効な旧所属が多く残っていても、有効な所属を見落とさない: 有効かどうかを確かめてから選ぶ(先に件数で切らない)。20件ずつ順に確認する
-    const ids = [...new Set((idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : []).filter(isId))].slice(0, PORTAL_LIMITS.affiliationsMax);
+    // 無効な旧所属が多く残っていても、有効な所属を見落とさない: 一覧をすべて、20件ずつ順に確かめてから選ぶ(件数で切らない)
+    const ids = [...new Set((idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : []).filter(isId))];
     const found = [];
     for (let i = 0; i < ids.length; i += PORTAL_LIMITS.affiliationsBatch) {
       found.push(...(await Promise.all(ids.slice(i, i + PORTAL_LIMITS.affiliationsBatch).map(cid => affiliationOf(user, cid)))).filter(Boolean));
@@ -365,14 +368,17 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   const queryKey = (cid, uid, q) => hash(JSON.stringify([cid, uid, q.fromMs, q.toMs, q.facilities, q.orderNumber, q.mode]), 24);
   const encodeCursor = (c) => Buffer.from(JSON.stringify(c)).toString("base64url");
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  const pinnedMs = (as) => as[0] * 1000 + Math.floor(as[1] / 1e6);
   function decodeCursor(s, expect) {
     if (s === undefined || s === null) return null;
     let c;
     try { c = JSON.parse(Buffer.from(String(s), "base64url").toString("utf8")); } catch { throw badInput("検索をやり直してください"); }
-    if (!c || c.v !== 2 || c.k !== expect || !isNum(c.s) || !isNum(c.n) || !isId(c.id) || !isNum(c.exp) || c.exp < now()
+    if (!c || c.v !== 2 || c.k !== expect || !isNum(c.s) || !isNum(c.n) || !isId(c.id) || !isNum(c.exp)
       || !Array.isArray(c.as) || c.as.length !== 2 || !isNum(c.as[0]) || !isNum(c.as[1])) {
       throw badInput("検索をやり直してください");
     }
+    // 検索時点から読み取り可能な時間を過ぎた続きは使えない(カーソルの期限を延ばしても、固定した時点の読み取りはできない)
+    if (c.exp < now() || now() - pinnedMs(c.as) > PORTAL_LIMITS.pinnedReadWindowMs) throw badInput("検索から時間が経ったため、続きを表示できません。先頭から検索し直してください");
     return c;
   }
 
@@ -436,7 +442,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       newSinceSearch = late.size >= PORTAL_LIMITS.lateCheckMax || late.docs.some(d => matches(d.data()));
     }
     const more = !exhausted && last !== null;
-    const nextCursor = more ? encodeCursor({ v: 2, k: key, s: last.get("orderedAt").seconds, n: last.get("orderedAt").nanoseconds, id: last.id, as: [asOf.seconds, asOf.nanoseconds], exp: now() + PORTAL_LIMITS.cursorTtlMs }) : null;
+    const nextCursor = more ? encodeCursor({ v: 2, k: key, s: last.get("orderedAt").seconds, n: last.get("orderedAt").nanoseconds, id: last.id, as: [asOf.seconds, asOf.nanoseconds],
+      exp: Math.min(now() + PORTAL_LIMITS.cursorTtlMs, pinnedMs([asOf.seconds, asOf.nanoseconds]) + PORTAL_LIMITS.pinnedReadWindowMs) }) : null;   // 期限は検索時点の読み取り可能時間まで
     return { items, nextCursor, complete: !more, asOf: asOf ? isoOf(asOf) : null, newSinceSearch };
   }
 
@@ -520,7 +527,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         joinedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), invitationId: inv.id
       });
       const ids = idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : [];
-      tx.set(staffIndexRef(user.uid), { companyIds: [...new Set([cid, ...ids])].slice(0, PORTAL_LIMITS.affiliationsMax), updatedAt: FieldValue.serverTimestamp() });   // 新しい所属を先頭に(上限を超えたら最も古いものから外す)
+      const next = [...new Set([cid, ...ids])];   // 新しい所属を先頭に。古い所属は(有効かどうかにかかわらず)削らない
+      if (next.length > PORTAL_LIMITS.affiliationsMax) throw new RegistrationError("failed-precondition", "所属の記録が上限を超えています。運営者にお問い合わせください");
+      tx.set(staffIndexRef(user.uid), { companyIds: next, updatedAt: FieldValue.serverTimestamp() });
       tx.update(inv.ref, { status: "accepted", respondedAt: FieldValue.serverTimestamp(), respondedUid: user.uid });
       audit(tx, { action: "staff.join", companyId: cid, actorUid: user.uid, invitationId: inv.id });
       return { ok: true, accepted: true, companyId: cid };
@@ -631,14 +640,18 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   }
 
   /** 施設側の呼び出し */
+  /**
+   * 施設側の呼び出し。機能の停止中も、状態の確認と閲覧の取消だけは受け付ける(許可中の発注先は Rules で名称・メールの変更を止めているため、
+   * 停止中でも施設が取消してから発注先を変更できるようにする)。許可・担当者の閲覧・索引の作成は停止中は行わない。
+   */
   async function facility({ auth, data }) {
-    assertOn();
     const user = assertVerifiedUser(auth);
     const d = data && typeof data === "object" && !Array.isArray(data) ? data : null;
     if (!d || typeof d.action !== "string") throw badInput();
     const { action, ...rest } = d;
-    if (action === "status") return facilityStatus(user, rest);
-    if (action === "grant" || action === "revoke") return setGrant(user, rest, action);
+    if (action === "status") return { ...(await facilityStatus(user, rest)), portalEnabled: isEnabled() };
+    if (action === "revoke") return setGrant(user, rest, action);
+    if (action === "grant") { assertOn(); return setGrant(user, rest, action); }
     throw badInput();
   }
 

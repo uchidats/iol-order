@@ -352,7 +352,8 @@ test("索引: 同じ注文の重複処理は1件。作り直しは既定で確�
   // 機能スイッチ
   enabled.v = false;
   await rejects(list("x1"), "failed-precondition");
-  await rejects(fac("adminA", "status", { facilityId: "fA" }), "failed-precondition");
+  assert.equal((await fac("adminA", "status", { facilityId: "fA" })).portalEnabled, false, "停止中も状態の確認はできる(取消のため。N-01)");
+  await rejects(grant("adminA", "fA", "dA2"), "failed-precondition");
   const r2 = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1" })] } });
   assert.equal((await portal.indexOrder("fA", r2.orderId)).disabled, true);
   assert.ok((await db.doc(`facilities/fA/orders/${r2.orderId}`).get()).exists, "ポータルを止めても注文は受け付ける");
@@ -604,6 +605,97 @@ test("F-06(再レビュー): 無効な旧所属が20件以上残っていても�
   assert.equal((await db.doc(`dealerStaffIndex/${uid}`).get()).get("companyIds")[0], C.Y);
   assert.deepEqual((await api(uid, "companies")).companies.map(c => c.companyId).sort(), [C.X, C.Y].sort());
   await rejects(api(uid, "context"), "failed-precondition");   // 有効2社: 会社の選択が必要
+});
+
+// ======================= Codex 再々レビュー(docs/reviews/dealer-portal-final-audit.md)の再現 =======================
+
+test("F-06(再々レビュー): 無効な旧所属が500件を超えて残っていても、501件目の有効な会社を選べる。承諾で有効な古い所属を削らない。一覧が上限を超えるなら参加の時点で理由を示して止める", async () => {
+  const uid = "longhist";
+  const email = `${uid}@corp.example.jp`;
+  const old = [];
+  for (let start = 0; start < 500; start += 250) {
+    const batch = db.batch();
+    for (let i = start; i < start + 250; i++) {
+      const cid = `dco-h-${String(i).padStart(3, "0")}`;
+      old.push(cid);
+      batch.set(db.doc(`dealerCompanies/${cid}`), { name: `旧${i}`, status: i % 2 ? "suspended" : "active", accessMode: "companyWide", policyVersion: 1 });
+      batch.set(db.doc(`dealerCompanies/${cid}/staff/${uid}`), { uid, approvedEmail: email, role: "reader", status: "disabled" });
+    }
+    await batch.commit();
+  }
+  await db.doc(`dealerCompanies/${C.X}/staff/${uid}`).set({ uid, approvedEmail: email, role: "reader", status: "active", facilityAssignments: [] });
+  await db.doc(`dealerStaffIndex/${uid}`).set({ companyIds: [...old, C.X] });   // 有効な会社 X は 501 件目
+  assert.deepEqual((await api(uid, "companies")).companies, [{ companyId: C.X, name: "エックス商事" }]);
+  assert.equal((await api(uid, "context")).company.id, C.X);
+  // 承諾: 新しい所属を先頭に加え、末尾の有効な所属(X)も残す
+  const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "", role: "reader" });
+  await api(uid, "respond", { invitationId, accept: true });
+  const ids = (await db.doc(`dealerStaffIndex/${uid}`).get()).get("companyIds");
+  assert.deepEqual([ids.length, ids[0], ids.at(-1)], [502, C.Y, C.X]);
+  assert.deepEqual((await api(uid, "companies")).companies.map(c => c.companyId).sort(), [C.X, C.Y].sort());
+  // 一覧が上限(2000件)を超えるなら、参加の時点で止める(黙って古い所属を削らない)
+  const full = Array.from({ length: 2000 }, (_, i) => `dco-full-${i}`);
+  await db.doc("dealerStaffIndex/y1").set({ companyIds: full });
+  const inv = await op("inviteStaff", { companyId: C.X, email: "y1@corp.example.jp", name: "", role: "reader" });
+  await assert.rejects(api("y1", "respond", { invitationId: inv.invitationId, accept: true }), (e) => e.code === "failed-precondition" && /上限/.test(e.message));
+  assert.equal((await db.doc("dealerStaffIndex/y1").get()).get("companyIds").length, 2000, "削らない");
+});
+
+test("N-01: 機能の停止中も、施設の管理者・副管理者は許可中の発注先を取り消せる(状態の確認も可)。取消の後は発注先を変更でき、再開後の新しい許可は取消前・停止中の注文を公開しない。停止中は許可・閲覧・索引は止まる", async () => {
+  await grant("adminA", "fA", "dA1");
+  const before = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+19.0D" })]);
+  const { updateDoc, serverTimestamp } = await import("firebase/firestore");
+  const adminDb = env.authenticatedContext("adminA", { email: "adminA@example.jp", email_verified: true }).firestore();
+  const ref = doc(adminDb, "facilities/fA/facilityDealers/dA1");
+  const by = () => ({ updatedBy: "adminA", updatedAt: serverTimestamp() });
+  enabled.v = false;   // 運用中に機能を停止
+  // 停止中: 担当者の閲覧・施設の許可は止まり、発注先は許可中のためロックされている
+  await rejects(list("x1"), "failed-precondition");
+  await rejects(grant("adminA", "fA", "dA2"), "failed-precondition");
+  await assertFails(updateDoc(ref, { orderEmails: ["new-x@x.example.jp"], ...by() }));
+  // 状態の確認と取消はできる(停止中であることも返す)。注文者・他施設の管理者は取り消せない
+  const st = await fac("subA", "status", { facilityId: "fA" });
+  assert.equal(st.portalEnabled, false);
+  assert.equal(st.dealers.find(d => d.localDealerId === "dA1").link.status, "active");
+  await rejects(revoke("ordA", "fA", "dA1"), "permission-denied");
+  await rejects(revoke("adminB", "fA", "dA1"), "permission-denied");
+  await revoke("subA", "fA", "dA1");
+  assert.equal((await db.doc("facilities/fA/dealerPortalLinks/dA1").get()).get("status"), "revoked");
+  // 取消の後は、発注先の宛先を通常の操作で変更できる
+  await updateDoc(ref, { orderEmails: ["new-x@x.example.jp"], ...by() });
+  const during = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+20.5D" })]);   // 停止中の注文(索引は作らない)
+  assert.equal((await portal.indexOrder("fA", during.orderId)).disabled, true);
+  // 再開 → 新しい許可: 許可の後の注文だけ(取消前・停止中の注文は出ない)
+  enabled.v = true;
+  assert.equal((await fac("adminA", "status", { facilityId: "fA" })).portalEnabled, true);
+  await grant("adminA", "fA", "dA1");
+  await portal.indexOrder("fA", during.orderId);
+  await portal.indexOrder("fA", before.orderId);
+  const after = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+21.5D" })]);
+  assert.deepEqual((await list("x1")).items.map(i => i.orderNumber), [after.orderNumber]);
+  // 他社(Y)には出ない
+  assert.ok(!JSON.stringify((await list("y1")).items).includes(after.orderNumber));
+});
+
+test("N-02: 続きのカーソルは、検索時点から読み取り可能な時間(59.5分)まで。59分後の続きは読め、それを超えると先頭からの再検索を求める。返すカーソルの期限も延ばさない", async () => {
+  await grant("adminA", "fA", "dA1");
+  for (let i = 0; i < 3; i++) await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: `+${18 + i}.0D` })]);
+  const t0 = Date.now();
+  const p1 = await list("x1", { limit: 1 });
+  const decode = (c) => JSON.parse(Buffer.from(c, "base64url").toString("utf8"));
+  const c1 = decode(p1.nextCursor);
+  const asMs = c1.as[0] * 1000 + Math.floor(c1.as[1] / 1e6);
+  assert.ok(c1.exp <= asMs + 59.5 * 60 * 1000 + 1);
+  clock.t = t0 + 59 * 60 * 1000;   // 59分後
+  const p2 = await list("x1", { limit: 1, cursor: p1.nextCursor });
+  assert.equal(p2.items.length, 1);
+  const c2 = decode(p2.nextCursor);
+  assert.deepEqual(c2.as, c1.as, "検索時点は同じ");
+  assert.ok(c2.exp <= asMs + 59.5 * 60 * 1000 + 1, "続きのたびに期限を延ばさない");
+  clock.t = t0 + 61 * 60 * 1000;   // 検索時点から1時間超
+  await assert.rejects(list("x1", { limit: 1, cursor: p2.nextCursor }), (e) => e.code === "invalid-argument" && /先頭から検索し直してください/.test(e.message));
+  clock.t = null;
+  assert.equal((await list("x1")).items.length, 3, "再検索は読める");
 });
 
 test("Rules: 新しい領域(会社・担当者・索引・許可・関連付け・参加待ち)は、担当者・施設の管理者・運営者もクライアントから直接読めない。担当者は施設の注文を読めない", async () => {

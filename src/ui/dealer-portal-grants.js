@@ -15,11 +15,12 @@ const STATUS_LABEL = { proposed: "未許可", revoked: "取消済み(未許可)"
 export function createDealerPortalSection({ api }) {
   const list = h("div", { "data-list": "" });
   const msg = h("p", { class: "form-hint", "data-msg": "", role: "status" });
+  const stopNote = h("p", { class: "form-hint", "data-stop-note": "", hidden: true }, "ディーラー画面は現在停止しています。許可中の発注先の取消だけができます(取り消すと、その発注先の名称・発注用メールを変更できます)。");
   const section = h("section", { class: "settings-section dealer-portal-section", "data-section": "dealerPortal", hidden: true },
     createSectionHeading("ディーラー画面での閲覧", `ディーラーが専用画面で、この施設の注文のうち自社宛ての明細を閲覧できるようにします。運営者がディーラーの会社を登録した発注先だけが対象です。許可は管理者・副管理者が行えます。\n\n${DEALER_ACCESS_NOTICE}`),
     h("p", { class: "form-hint dealer-portal-notice" }, DEALER_ACCESS_NOTICE),
     h("p", { class: "form-hint", "data-lock-note": "" }, "閲覧を許可している間は、その発注先の名称・宛名・発注用メールの変更と削除はできません。変更するときは、先に閲覧を取り消してください(改めて許可すると、その後の新しい注文から表示されます)。"),
-    list, msg);
+    stopNote, list, msg);
   let facilityId = null;
   let busy = false;
 
@@ -61,8 +62,12 @@ export function createDealerPortalSection({ api }) {
     try {
       const r = await api.facilityStatus({ facilityId: fid });
       if (fid !== facilityId) return;
-      const linked = (r.dealers || []).filter(d => d.link);
+      // 機能の停止中: 許可中の発注先の取消だけができる(発注先の名称・メールを変更するために取り消せるように)。許可中がなければ項目を出さない
+      const stopped = r.portalEnabled === false;
+      const linked = (r.dealers || []).filter(d => d.link && (!stopped || d.link.status === "active"));
+      if (stopped && !linked.length) { section.hidden = true; return; }
       section.hidden = false;
+      stopNote.hidden = !stopped;
       list.replaceChildren(...(linked.length ? linked.map(row) : [h("p", { class: "form-hint" }, "ディーラー画面を利用する発注先は、まだ登録されていません(運営者がディーラーの会社を登録すると、ここに表示されます)。")]));
     } catch (e) {
       if (isPortalUnavailable(e)) { section.hidden = true; return; }

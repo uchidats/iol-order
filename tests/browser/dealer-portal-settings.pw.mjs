@@ -30,15 +30,16 @@ const settingsApi = {
   saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {}
 };
 const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
-const state = { dA1: q.get("stale") ? { status: "active", revision: 3, grant: { effectiveFrom: "2026-10-27T03:00:00.000Z", grantedByRole: "admin", stale: true } } : { status: "proposed", revision: 1, grant: null } };
-window.__calls = [];
+const state = { dA1: q.get("portal") === "stopped" ? { status: "active", revision: 3, grant: { effectiveFrom: "2026-10-27T03:00:00.000Z", grantedByRole: "admin" } } : q.get("stale") ? { status: "active", revision: 3, grant: { effectiveFrom: "2026-10-27T03:00:00.000Z", grantedByRole: "admin", stale: true } } : { status: "proposed", revision: 1, grant: null } };
 const mode = q.get("portal") || "on";
+window.__calls = [];
 const dealerPortalApi = mode === "none" ? null : {
   facilityStatus: async (a) => {
     window.__calls.push(["status", a]);
     if (mode === "off") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });
-    return { dealers: [
+    return { portalEnabled: mode !== "stopped", dealers: [
       { localDealerId: "dA1", dealerName: "エックス商事A窓口", link: { companyName: "エックス商事", companyActive: true, ...state.dA1 } },
+      ...(mode === "stopped" ? [{ localDealerId: "dA3", dealerName: "ゼット商会", link: { companyName: "ゼット", companyActive: true, status: "proposed", revision: 1, grant: null } }] : []),
       { localDealerId: "dA2", dealerName: "ワイ医療", link: null }] };
   },
   grant: async (a) => { window.__calls.push(["grant", a]); state.dA1 = { status: "active", revision: a.revision + 1, grant: { effectiveFrom: "2026-10-27T03:00:00.000Z", grantedByRole: "admin" } }; return { ok: true }; },
@@ -147,6 +148,25 @@ test("施設設定: 許可の後に発注先の名称・宛先が変わったら
     assert.match(await st.innerText(), /停止中.*発注先の名称・宛先が変更された.*取り消してから、改めて許可してください/);
     assert.equal(await section(page).locator('[data-act="revoke"]').count(), 1, "取消できる");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("施設設定: 機能の停止中は、許可中の発注先の取消だけを表示する(許可は出さない)。取り消すと項目を出さない(chromium)", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 1200 } });
+    await page.goto(`${base}?portal=stopped`);
+    await page.waitForFunction(() => window.__ready);
+    await section(page).locator(".dealer-portal-item").first().waitFor();
+    assert.equal(await section(page).locator("[data-stop-note]").isVisible(), true);
+    assert.deepEqual(await section(page).locator(".dealer-portal-name").allInnerTexts(), ["エックス商事A窓口"], "許可中だけ(未許可の発注先は出さない)");
+    assert.equal(await section(page).locator('[data-act="grant"]').count(), 0);
+    await section(page).locator('[data-act="revoke"]').click();
+    await page.locator('.confirm-dialog [data-act="ok"]').click();
+    await page.waitForFunction(() => window.__calls.some(c => c[0] === "revoke"));
+    await page.waitForFunction(() => document.querySelector('[data-section="dealerPortal"]').hidden);
     await page.close();
   } finally { await browser.close(); }
 });
