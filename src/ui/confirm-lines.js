@@ -89,3 +89,55 @@ export function renderDealersCard(box, lines) {
     return item;
   }));
 }
+
+/**
+ * 発注先が2社以上のときの確認内容: ディーラーごとに、通常の確認内容(template の dl)と同じ構成のまとまりを作り、縦に並べる(表示のみ)。
+ * まとまりの順は、注文の中で最初に登場した順(summarizeDealers)。レンズ番号は入力時のまま(振り直さない)。
+ * 各まとまり: 手術日・担当医とそのディーラー宛てのレンズ / 件数・合計枚数 / 備考(注文全体の共通備考を同じ内容で表示) / 発注元・発注先(警告はその中)。
+ * 最後に注文全体の件数・合計枚数を1回だけ。注文データ・発注先の判定・宛先・送信内容は変えない。
+ * @param {HTMLElement} box 表示先(summaryByDealer)
+ * @param {HTMLElement} template 通常の確認内容の dl(data-part で差し込み先を示す。複製して ID を外す)
+ * @param {{lines:Array<object>, notes?:string, facilityName?:string}} data
+ * @returns {number} ディーラーのまとまりの数
+ */
+export function renderConfirmByDealer(box, template, { lines, notes = "", facilityName = "" }) {
+  const { groups } = summarizeDealers(lines);
+  const blocks = groups.map(g => {
+    const own = lines.filter(l => (l.dealerId || "") === g.dealerId);
+    const dl = template.cloneNode(true);
+    dl.removeAttribute("id");
+    dl.querySelectorAll("[id]").forEach(e => e.removeAttribute("id"));   // ID の重複を避ける(中身は data-part で差し込む)
+    dl.hidden = false;
+    dl.classList.add("summary-dealer-block");
+    dl.dataset.dealer = g.dealerId;
+    dl.setAttribute("role", "group");
+    dl.setAttribute("aria-label", `${g.name || "発注先未設定"} 宛ての注文`);
+    const part = (k) => dl.querySelector(`[data-part="${k}"]`);
+    renderConfirmLines(part("lines"), own);
+    part("total").textContent = `${own.length}件・合計${own.reduce((s, l) => s + (Number(l.quantity) || 0), 0)}枚`;
+    part("notes").textContent = notes || "（なし）";
+    part("facilityBox").hidden = !facilityName;
+    part("facility").textContent = facilityName || "";
+    part("parties").classList.toggle("is-dealer-only", !facilityName);
+    renderDealersCard(part("dealers"), own);   // 1社分: ディーラー名と警告だけ(レンズ番号の対応表は出さない)
+    return dl;
+  });
+  const grand = document.createElement("div");
+  grand.className = "summary-grand-total";
+  grand.append(span("summary-grand-label", "注文全体"), span("highlight-value", `${lines.length}件・合計${lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)}枚`));
+  box.replaceChildren(...blocks, grand);
+  return blocks.length;
+}
+
+/**
+ * 確認画面の表示の切り替え: 発注先が1社(または発注先なし)なら通常の確認内容(single)をそのまま表示、2社以上ならディーラーごとのまとまり(byDealer)を表示する。
+ * single の中身(明細・合計・備考・発注元・発注先)は、呼び出し側が先に埋めておく(2社以上のときは、それをひな形に複製する)。
+ * @returns {boolean} 2社以上か
+ */
+export function renderDealerSections(single, byDealer, data) {
+  const multi = summarizeDealers(data.lines).groups.length > 1;
+  if (multi) renderConfirmByDealer(byDealer, single, data); else byDealer.replaceChildren();
+  single.hidden = multi;
+  byDealer.hidden = !multi;
+  return multi;
+}

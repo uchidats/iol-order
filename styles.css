@@ -2019,6 +2019,15 @@ input[type="date"].form-control {
 .summary-parties .summary-dealer-warning { font-size: 0.78rem; font-weight: 400; color: #6b7280; margin-top: 1px; }   /* 警告は、さらに小さめ */
 #summaryPartiesRow.is-dealer-only .summary-party + .summary-party { border-left: 0; padding-left: 0; }
 #summaryPartiesRow.is-dealer-only .summary-parties { grid-template-columns: minmax(0, 1fr); }
+.summary-parties-row.is-dealer-only .summary-party + .summary-party { border-left: 0; padding-left: 0; }   /* ディーラーごとのまとまり(ID なしの複製)にも同じ表示 */
+.summary-parties-row.is-dealer-only .summary-parties { grid-template-columns: minmax(0, 1fr); }
+
+/* 発注先が2社以上: ディーラーごとに、通常の確認内容と同じ構成のまとまりを縦に並べる(スマホは縦スクロールだけで確認できる)。最後に注文全体の合計を1回 */
+.summary-list[hidden], .summary-by-dealer[hidden] { display: none; }
+.summary-by-dealer { display: flex; flex-direction: column; gap: 16px; }
+.summary-dealer-block { padding: 10px; border: 1px solid #c9d8f6; border-radius: var(--radius-md); background: #fff; }
+.summary-grand-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; background-color: #f8fafc; border: 1px solid var(--border-light); border-radius: var(--radius-sm); font-weight: 700; }
+.summary-grand-label { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
 
 /* ===== スマホ幅のカスタムドロップダウン(レンズのモデル・度数)。PC幅は従来のネイティブ select。src/ui/custom-select.js ===== */
 .cs-trigger { display: none; }

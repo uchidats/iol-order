@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="description" content="眼内レンズ（IOL）専用発注・注文Webフォーム">
   <title>IOL 注文フォーム</title>
-  <link rel="stylesheet" href="styles.css?v=a99f492e84">
+  <link rel="stylesheet" href="styles.css?v=92497b5af8">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -55,12 +55,12 @@
       "./src/firebase/firebase-config.js": "./src/firebase/firebase-config.js?v=491da30194",
       "./src/firebase/sdk.js": "./src/firebase/sdk.js?v=82975b38ab",
       "./src/main.js": "./src/main.js?v=370b0b2314",
-      "./src/manual/manual-pages.js": "./src/manual/manual-pages.js?v=c7e370bf53",
+      "./src/manual/manual-pages.js": "./src/manual/manual-pages.js?v=fdb435f4e2",
       "./src/manual/markdown.js": "./src/manual/markdown.js?v=47a476164f",
       "./src/ui/about-view.js": "./src/ui/about-view.js?v=1d9edf48d6",
       "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=4ff6784017",
       "./src/ui/confirm-dialog.js": "./src/ui/confirm-dialog.js?v=fb2cac1420",
-      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=9cc896dc93",
+      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=de910acea5",
       "./src/ui/custom-select.js": "./src/ui/custom-select.js?v=f9a0120a62",
       "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
       "./src/ui/draft-store.js": "./src/ui/draft-store.js?v=73d3fd5df9",
@@ -76,7 +76,7 @@
       "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=92cc7890a5",
       "./src/ui/manual-view.js": "./src/ui/manual-view.js?v=13b4869601",
       "./src/ui/markdown-view.js": "./src/ui/markdown-view.js?v=84a3505cc4",
-      "./src/ui/order-form.js": "./src/ui/order-form.js?v=fc76d1f0c8",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=6349671eaf",
       "./src/ui/order-history.js": "./src/ui/order-history.js?v=f173f63a43",
       "./src/ui/share-site.js": "./src/ui/share-site.js?v=011e48d9e9",
       "./src/ui/undo-toast.js": "./src/ui/undo-toast.js?v=a5922dc06d"
@@ -213,40 +213,42 @@
       </div>
 
       <div class="modal-body">
-        <dl class="summary-list">
+        <!-- 発注先が2社以上のときは、この確認内容(dl)をひな形にディーラーごとのまとまりを作る(summaryByDealer。data-part で中身を差し込む) -->
+        <dl class="summary-list" id="summarySingle">
           <div class="summary-item summary-item-lines">
             <dt class="summary-label sr-only">発注するレンズ</dt>
             <dd class="summary-value">
-              <ol class="summary-lines" id="summaryLines"></ol>
+              <ol class="summary-lines" id="summaryLines" data-part="lines"></ol>
             </dd>
           </div>
 
           <div class="summary-item">
             <dt class="summary-label sr-only">合計</dt>
-            <dd class="summary-value highlight-value" id="summaryTotal">-</dd>
+            <dd class="summary-value highlight-value" id="summaryTotal" data-part="total">-</dd>
           </div>
 
           <div class="summary-item">
             <dt class="summary-label">備考（フリーコメント）</dt>
-            <dd class="summary-value text-break" id="summaryNotes">（なし）</dd>
+            <dd class="summary-value text-break" id="summaryNotes" data-part="notes">（なし）</dd>
           </div>
 
           <!-- 発注元(施設)と発注先(ディーラー): 確認内容の一番下。左右2列・中央に細い縦の区切り線。備考と同じ控えめなデザイン -->
-          <div class="summary-item" id="summaryPartiesRow">
+          <div class="summary-item summary-parties-row" id="summaryPartiesRow" data-part="parties">
             <dt class="summary-label sr-only">発注元・発注先</dt>
             <dd class="summary-value summary-parties">
-              <div class="summary-party" id="summaryFacilityBox">
+              <div class="summary-party" id="summaryFacilityBox" data-part="facilityBox">
                 <span class="summary-party-label">発注元</span>
-                <span class="summary-party-body" id="summaryFacility">-</span>
+                <span class="summary-party-body" id="summaryFacility" data-part="facility">-</span>
               </div>
               <div class="summary-party summary-party-dealers">
                 <span class="summary-party-label">発注先</span>
-                <div class="summary-party-body" id="summaryDealers"></div>
+                <div class="summary-party-body" id="summaryDealers" data-part="dealers"></div>
               </div>
             </dd>
           </div>
 
         </dl>
+        <div class="summary-by-dealer" id="summaryByDealer" hidden></div>
 
         <!-- 同じ注文の中の重複(同じ手術日・担当医・IOLモデル・度数)。重複があるときだけ表示し、確認のチェックがないと送信できない -->
         <div class="dup-ack" id="dupAckBox" hidden>

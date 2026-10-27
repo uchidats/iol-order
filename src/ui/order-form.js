@@ -1,7 +1,7 @@
 import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
-import { renderConfirmLines, renderDealersCard } from "./confirm-lines.js";
+import { renderConfirmLines, renderDealersCard, renderDealerSections } from "./confirm-lines.js";
 import { findSelfDoctor } from "../domain/self-doctor.js";
 import { draftKey } from "../domain/order-draft.js";
 import { createDraftStore } from "./draft-store.js";
@@ -312,6 +312,9 @@ function showConfirmModal(data) {
 
   $("summaryNotes").textContent = data.notes || "（なし）";
   renderDealersCard($("summaryDealers"), data.lines);
+
+  // 発注先が2社以上: 上の確認内容をひな形に、ディーラーごとのまとまりを縦に並べる(表示のみ。1社なら従来の表示のまま)
+  renderDealerSections($("summarySingle"), $("summaryByDealer"), data);
 
   el.modalSubmitError.classList.add("hidden");
 
