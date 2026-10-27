@@ -113,7 +113,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator(".lens-line").nth(1).locator("[data-f=date]").fill("2099-02-01");
       assert.equal(await page.evaluate(() => window.__lines.validate().ok), true);
       await page.locator(".lens-line").nth(1).locator("[data-f=dealer]").selectOption("dB");
-      assert.equal(await page.evaluate(() => window.__lines.validate().ok), false, "同じ発注先なら重複");
+      assert.equal(await page.evaluate(() => window.__lines.validate().ok), true, "同じ発注先の重複も入力の誤りにしない(確認画面で「重複を確認しました」にチェックする)");
       // 発注先の登録が増減したとき(refresh): 残っていなければ未選択に戻る
       await page.evaluate(() => { window.__dealers = window.__dealers.filter(d => d.id === "dA"); window.__lines.refresh(); });
       assert.equal(await page.locator('[data-group="dealer"]').first().isHidden(), true, "1社になれば欄は隠れる");

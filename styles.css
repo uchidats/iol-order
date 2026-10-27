@@ -1615,6 +1615,16 @@ input[type="date"].form-control {
   font-size: 1rem;
 }
 
+/* 施設設定の折りたたみ: 見出しをタップして開閉。見出しの右に小さな矢印(閉じると右向き)。閉じたときは見出しだけ(「追加」も隠す) */
+.settings-heading.is-collapsible { cursor: pointer; }
+.settings-collapse-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; margin-left: 2px; border: 0; border-radius: 4px; background: none; color: #6b7280; cursor: pointer; flex: none; }
+.settings-collapse-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.settings-collapse-btn svg { transition: transform 0.15s ease; }
+.settings-section.is-collapsed .settings-collapse-btn svg { transform: rotate(-90deg); }
+.settings-section.is-collapsed > :not(.settings-heading) { display: none !important; }
+.settings-section.is-collapsed > .settings-heading { margin-bottom: 0; }
+.settings-section.is-collapsed > .settings-heading > .settings-actions { display: none; }
+
 .settings-row {
   display: grid;
   grid-template-columns: 1fr 1fr auto auto;

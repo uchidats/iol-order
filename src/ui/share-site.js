@@ -9,7 +9,13 @@ const QR_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"share-qr\" rol
 
 /** URL をクリップボードへ。使えない環境では、選択してコピーする方法に切り替える */
 async function copyText(text) {
-  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch { /* 下の方法を試す */ }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      // 許可の確認などで応答がない環境もあるため、2秒で下の方法に切り替える
+      const ok = await Promise.race([navigator.clipboard.writeText(text).then(() => true), new Promise(r => setTimeout(() => r(false), 2000))]);
+      if (ok) return true;
+    }
+  } catch { /* 下の方法を試す */ }
   const ta = document.createElement("textarea");
   ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
   document.body.appendChild(ta); ta.select();

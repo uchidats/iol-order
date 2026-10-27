@@ -1078,6 +1078,38 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   if (canManageMembers) built.members = memberSection();
   // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → テーマカラー(作成の順番・機能は変えない)
   const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.mail ? { mail: built.mail } : {}), ...(built.theme ? { theme: built.theme } : {}) };
+  // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------
+  // 開閉の状態は、施設ごとにこの端末(localStorage)に保存し、再読み込みしても戻す。ⓘと「追加」の操作では開閉しない。設定の内容・保存には影響しない
+  const collapseKey = () => `iol_settings_collapsed:${facility ? facility.id : ""}`;
+  const readCollapsed = () => {
+    try { const v = JSON.parse(window.localStorage.getItem(collapseKey()) || "[]"); return new Set(Array.isArray(v) ? v : []); } catch { return new Set(); }
+  };
+  const saveCollapsed = () => {
+    try { window.localStorage.setItem(collapseKey(), JSON.stringify(Object.keys(sections).filter(k => sections[k].classList.contains("is-collapsed")))); } catch { /* 保存できなくても開閉はできる */ }
+  };
+  const setCollapsed = (section, collapsed) => {
+    section.classList.toggle("is-collapsed", collapsed);
+    section._collapseBtn.setAttribute("aria-expanded", String(!collapsed));
+  };
+  for (const section of Object.values(sections)) {
+    const heading = section.querySelector(":scope > .settings-heading");
+    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "2.5", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) chevron.setAttribute(k, v);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    path.setAttribute("points", "6 9 12 15 18 9");
+    chevron.appendChild(path);
+    const btn = h("button", { type: "button", class: "settings-collapse-btn", "aria-expanded": "true", "aria-label": `${heading.querySelector("h3").textContent}を開閉` }, chevron);
+    heading.insertBefore(btn, heading.querySelector(":scope > .settings-actions"));   // 見出し(とⓘ)の右。「追加」はさらに右端
+    heading.classList.add("is-collapsible");
+    section._collapseBtn = btn;
+    heading.addEventListener("click", (e) => {
+      if (e.target.closest(".info-tip, .settings-actions")) return;   // ⓘ・「追加」は開閉しない
+      setCollapsed(section, !section.classList.contains("is-collapsed"));
+      saveCollapsed();
+    });
+  }
+  const applyCollapsed = () => { const c = readCollapsed(); for (const [k, s] of Object.entries(sections)) setCollapsed(s, c.has(k)); };
+
   const isAdmin = actorRole === "admin";   // 施設名の編集・施設削除は管理者のみ表示(サーバーでも管理者のみ)
   const del = isAdmin && inviteApi && inviteApi.deleteFacility ? deleteMenu() : null;
   const title = h("span", { class: "settings-facility" });
@@ -1158,6 +1190,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     isOpen: () => open,
     async open(fac) {
       facility = fac;
+      applyCollapsed();   // この施設で前回の開閉の状態(初回はすべて開く)
       title.textContent = fac.name;
       nameBox.hidden = true;
       if (del) del.reset();

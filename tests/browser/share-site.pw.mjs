@@ -81,6 +81,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(look, { bg: "rgb(255, 255, 255)", scheme: "light" }, "ダークモードでも白い背景");
         // URLをコピー(結果を表示する。コピーできない環境では選択してコピーする案内)
         await dlg.locator('[data-act="copy"]').click();
+        await page.waitForFunction(() => document.querySelector(".share-status").textContent !== "", null, { timeout: 5000 });
         assert.match(await dlg.locator(".share-status").innerText(), /URLをコピーしました|コピーできませんでした/);
         // 閉じる・Escape
         await dlg.locator('[data-act="close"]').click();
