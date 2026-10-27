@@ -75,6 +75,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const sec = page.locator('[data-section="mail"]');
       assert.deepEqual(await page.locator("[data-section]").evaluateAll(es => es.map(e => e.getAttribute("data-section"))).then(xs => xs.filter(x => ["orderers", "iols", "dealers", "mail"].includes(x))), ["orderers", "iols", "dealers", "mail"], "注文メールはディーラーの後");
       const chk = sec.locator('[data-f="copyEnabled"]'), email = sec.locator('[data-f="copyEmail"]'), sig = sec.locator('[data-f="signature"]');
+      // 署名の説明は「署名」の右のⓘ(通常は表示しない。タップで表示し、外側のタップで閉じる)
+      const sigHead = sec.locator(".mail-signature-head");
+      assert.equal((await sigHead.innerText()).trim().startsWith("署名"), true);
+      assert.ok(!(await sec.innerText()).includes("電話番号など自由に記載"), "説明は通常は表示しない");
+      await sigHead.locator(".info-tip-btn").click();
+      assert.match(await sigHead.locator(".info-tip-pop").innerText(), /施設名・住所・電話番号など自由に記載。改行はそのままメールの最後に入ります。任意・10行・500文字まで。/);
+      const tipBox = await sigHead.locator(".info-tip-pop").boundingBox();
+      assert.ok(tipBox.x >= 0 && tipBox.x + tipBox.width <= page.viewportSize().width, "画面内に収まる");
+      await page.mouse.click(5, 5);
+      assert.equal(await sigHead.locator(".info-tip-pop").isHidden(), true);
       assert.equal(await chk.isChecked(), false, "初期はOFF");
       assert.equal(await email.isVisible(), false, "OFFのときは送信先を出さない");
 

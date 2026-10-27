@@ -2207,3 +2207,7 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .application-status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: #f3f4f6; color: #374151; }
 .application-status.is-approved { background: #dcfce7; color: #166534; }
 .application-status.is-rejected { background: #fee2e2; color: #991b1b; }
+
+/* 注文メールの「署名」: 見出し「署名」の右にⓘ(説明はⓘで表示)。説明は見出しの行の幅に収める */
+.mail-signature-head { position: relative; gap: 2px; margin-bottom: 8px; }
+.mail-signature { margin-bottom: 8px; }

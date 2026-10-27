@@ -675,7 +675,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       createSectionHeading("注文メール", "注文時にディーラーへ送るメールの設定です。宛先は各ディーラーの発注用メールアドレスです。「注文控えメールを送信する」をONにすると、ディーラーへの送信結果(受付・失敗・未送信)を書いた控えを、指定したアドレスに送ります。署名はディーラーへのメールの最後に入ります。変更は自動で保存されます。"),
       h("label", { class: "settings-check" }, chk, h("span", {}, "注文控えメールを送信する")),
       emailBox,
-      h("label", { class: "form-label" }, "署名", h("span", { class: "field-note" }, "（施設名・住所・電話番号など自由に記載。改行はそのままメールの最後に入ります。任意・10行・500文字まで）"), sig),
+      // 署名: 説明は「署名」の右のⓘ(既存の info-tip)。入力欄・内容・自動保存は従来どおり
+      h("div", { class: "mail-signature" },
+        h("div", { class: "form-label mail-signature-head" }, h("span", {}, "署名"),
+          createInfoTip("施設名・住所・電話番号など自由に記載。改行はそのままメールの最後に入ります。任意・10行・500文字まで。", { label: "署名の説明" }).root),
+        sig),
       h("p", { class: "form-hint", "data-msg": "" }));
     chk.addEventListener("change", () => {
       emailBox.hidden = !chk.checked;
