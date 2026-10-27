@@ -838,6 +838,11 @@ input[type="date"].form-control {
   flex: 1;
 }
 
+/* 確認ダイアログ(confirm-dialog.js。ブラウザ標準の confirm の代わり): 端末のダークモードに関係なく白い背景・黒系の文字 */
+.confirm-dialog { color-scheme: light; }
+.confirm-dialog .modal-card { max-width: 420px; background-color: #ffffff; color: #1f2937; }
+.confirm-dialog-message { margin: 0; font-size: 1rem; line-height: 1.6; color: #1f2937; white-space: pre-line; }
+
 /* サマリーリスト */
 .summary-list {
   display: flex;

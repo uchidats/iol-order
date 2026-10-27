@@ -11,6 +11,7 @@ import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
+import { confirmDialog } from "./ui/confirm-dialog.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
 import { getGeoPermissionState, getCurrentPositionOnce, GEO_ERROR } from "./ui/geolocation.js";
@@ -98,9 +99,10 @@ async function bootstrapWithFirebase(config) {
   });
 
   const menu = createHeaderMenu({
-    onSwitchFacility: () => {
+    onSwitchFacility: async () => {
       const dirty = isOrderFormDirty() || biometryState.userConfirmedValues.isConfirmed;
-      if (dirty && !window.confirm("入力中の内容は破棄されます。施設を切り替えますか？")) return;
+      // 入力中なら確認(既存のモーダルと同じ見た目。キャンセルなら入力内容・現在の施設はそのまま)
+      if (dirty && !(await confirmDialog({ message: "入力中の内容は破棄されます。施設を切り替えますか？", okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
       selection.clearRemembered(window.localStorage);
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
