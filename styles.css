@@ -409,19 +409,6 @@ body {
   border: 1.5px dashed #93c5fd;
 }
 
-/* Alcon Toric Calculator: 小さなテキストリンク + 外部リンクアイコン(テキストとアイコン全体がリンク。幅が足りなければ折り返す) */
-.alcon-calc-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 32px;
-  font-size: 0.85rem;
-  color: var(--primary);
-  text-decoration: none;
-}
-.alcon-calc-link:hover { text-decoration: underline; }
-.alcon-calc-link[hidden] { display: none; }
-.alcon-calc-link svg { flex: none; }
 
 /* レンズ選択: 左揃え・縦並び。各項目は必要な幅に制限する(狭い画面では画面幅まで) */
 .lens-filter {
@@ -661,10 +648,11 @@ input[type="date"].form-control {
   color: var(--primary);
   text-decoration: none;
   overflow-wrap: anywhere;
+  font-size: 0.875rem;   /* 各Calculator名は14px(見出し「各社Calculator 関連リンク」は 0.8rem のまま) */
 }
 .ref-links-list a .ext-icon { display: inline; margin-left: 4px; vertical-align: -1px; }   /* 折り返しても、アイコンは最後の行のテキストの右に付く */
 .ref-links-list a:hover { text-decoration: underline; }
-.ref-links-list a:focus-visible, .alcon-calc-link:focus-visible { text-decoration: underline; outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
+.ref-links-list a:focus-visible { text-decoration: underline; outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
 
 /* ガイド・エラーメッセージ */
 .form-hint {

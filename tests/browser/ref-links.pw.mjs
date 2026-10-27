@@ -75,6 +75,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const links = page.locator(".ref-links-list a");
       assert.equal(await links.count(), 5);
       assert.deepEqual(await links.evaluateAll(as => as.map(a => [a.textContent.trim(), a.href])), EXPECTED.map(([n, u]) => [n, new URL(u).href]));
+      // 文字サイズ: 各Calculator名は14px。見出し「各社Calculator 関連リンク」は従来どおり(0.8rem = 12.8px)
+      assert.deepEqual(await links.evaluateAll(as => [...new Set(as.map(a => getComputedStyle(a).fontSize))]), ["14px"]);
+      assert.ok(Math.abs(await page.locator(".ref-links-summary").evaluate(e => parseFloat(getComputedStyle(e).fontSize)) - 12.8) < 0.05, "見出しは 12.8px のまま");
 
       const primary = await page.evaluate(() => { const d = document.createElement("span"); d.style.color = "var(--primary)"; document.body.appendChild(d); return getComputedStyle(d).color; });
       for (let i = 0; i < 5; i++) {

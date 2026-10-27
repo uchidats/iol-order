@@ -17,17 +17,6 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** 外部リンクのアイコン(external-link)。装飾なので aria-hidden */
-function externalLinkIcon() {
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(NS, "svg");
-  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "13", height: "13", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
-  for (const d of ["M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", "M15 3h6v6", "M10 14L21 3"]) {
-    const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); svg.appendChild(p);
-  }
-  return svg;
-}
-
 /** ゴミ箱アイコン(装飾。ボタンの aria-label で意味を伝える) */
 function trashIcon() {
   const NS = "http://www.w3.org/2000/svg";
@@ -39,7 +28,6 @@ function trashIcon() {
   return svg;
 }
 
-const ALCON_CALCULATOR_FALLBACK_URL = "https://www.myalcon-toriccalc.com"; // 従来と同じリンク先
 
 let seq = 0; // ラベルの for / radio の name を明細ごとに一意にする
 
@@ -87,8 +75,6 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     // 各レンズカードの右上の、控えめなゴミ箱アイコン(確認ダイアログなし。削除すると「元に戻す」付きの通知が出る)
     line.removeBtn = h("button", { type: "button", class: "lens-line-trash", "data-act": "remove", title: "このレンズを削除", "aria-label": "このレンズを削除" }, trashIcon());
 
-    // ALCON製トーリックIOLを選んだ明細だけ、チェックボックスの右に小さなリンクを出す(別タブで開く。テキストとアイコン全体がリンク)
-    line.alconLink = h("a", { class: "alcon-calc-link", href: ALCON_CALCULATOR_FALLBACK_URL, target: "_blank", rel: "noopener noreferrer", hidden: true }, "Alcon Online Toric IOL Calculator", externalLinkIcon());
     // 必須の印: 項目名の右に小さな赤い「*」(読み上げでは「必須」)
     const requiredMark = () => [h("span", { class: "required-mark", "aria-hidden": "true" }, "*"), h("span", { class: "sr-only" }, "（必須）")];
     const group = (labelText, control, errKey, forId, extra = null) => h("div", { class: "form-group", "data-group": errKey },
@@ -99,8 +85,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       h("div", { class: "lens-line-head" }, line.title, line.removeBtn),
       h("div", { class: "lens-filter", role: "group", "aria-label": "レンズの種類" },
         h("label", { class: "lens-filter-check" }, line.chkToric, " トーリック"),
-        h("label", { class: "lens-filter-check" }, line.chkMf, " 多焦点"),
-        line.alconLink),
+        h("label", { class: "lens-filter-check" }, line.chkMf, " 多焦点")),   // メーカー別の Calculator のリンクは出さない(下部の「各社Calculator 関連リンク」を使う)
       // 2行: [IOLモデル | IOLパワー] [枚数 | 手術日]。横幅が足りない画面では自然に縦に折り返す(CSS の flex-wrap)
       h("div", { class: "lens-row" },
         group("IOLモデル", h("div", { class: "select-wrapper" }, line.model), "model", id("lensModel")),   // 多焦点・トーリックのバッジは表示しない(絞り込みは上のチェックボックス)
@@ -189,9 +174,6 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
    */
   function onModelChange(line) {
     const lens = findLensOption(getOptions(), line.model.value);
-    const alcon = Boolean(lens && lens.manufacturer === "ALCON" && lens.isToric);   // 表示条件は従来どおり(ALCONのトーリックを選択したときだけ)
-    line.alconLink.hidden = !alcon;
-    if (alcon) line.alconLink.href = lens.model.calculatorUrl || ALCON_CALCULATOR_FALLBACK_URL;
     const powers = lens ? filterPowersByModel(lens.model) : GOOGLE_FORM_ALL_POWERS;
     const prev = line.power.value;
     while (line.power.children.length > 1) line.power.removeChild(line.power.lastChild);
