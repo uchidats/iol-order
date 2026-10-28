@@ -3,21 +3,13 @@
 // Firestore の Rules のうち、紹介の本文(platformContent)だけは同じ制限(platformAdmin のみ)をまねる。
 
 export const FAKE_SDK = {
-  "firebase-app.js": "export const initializeApp = (c) => ({ c });",
+  // アプリの名前を記録する(ディーラー画面は医療機関の画面と別の名前でログイン状態を分ける)
+  "firebase-app.js": "export const initializeApp = (c, name) => { (window.__appNames = window.__appNames || []).push(name || '[DEFAULT]'); return { c, name }; };",
   "firebase-auth.js": `
     export const getAuth = () => ({ get currentUser() { return window.__fakeUser ? { ...window.__fakeUser, getIdToken: async () => "fake-token" } : null; } });
     export function onAuthStateChanged(auth, cb) { setTimeout(() => { window.__authAt = performance.now(); cb(window.__fakeUser || null); }, window.__fakeAuthDelay || 0); return () => {}; }
     export class GoogleAuthProvider { constructor() { this.providerId = "google.com"; } setCustomParameters(p) { this.params = p; } }
     export class OAuthProvider { constructor(id) { this.providerId = id; } setCustomParameters(p) { this.params = p; } }
-    // Microsoft の連携: 呼び出しを記録。window.__fakeLink があればその結果
-    // 成功したら連携済み(providerData に追加)にする。連携済みのまま登録が終わらない場合の再開を試せる
-    export const unlink = async (user, providerId) => { (window.__unlinkCalls = window.__unlinkCalls || []).push(providerId); if (window.__fakeUser) window.__fakeUser.providerData = (window.__fakeUser.providerData || []).filter(p => p.providerId !== providerId); return {}; };
-    export const linkWithPopup = async (user, provider) => {
-      (window.__linkCalls = window.__linkCalls || []).push([provider.providerId, provider.params || null]);
-      const r = window.__fakeLink ? await window.__fakeLink() : {};
-      if (window.__fakeUser) window.__fakeUser.providerData = [...(window.__fakeUser.providerData || []), { providerId: provider.providerId }];
-      return r;
-    };
     // Googleログイン: 呼び出し(指定したパラメーター)を記録。window.__fakeGoogle があればその結果(既定は「閉じられた」)
     export const signInWithPopup = async (auth, provider) => {
       if (provider.providerId === "microsoft.com") { (window.__microsoftCalls = window.__microsoftCalls || []).push(provider.params || null); if (window.__fakeMicrosoft) return window.__fakeMicrosoft(); throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); }

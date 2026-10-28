@@ -6,8 +6,8 @@ import { createDealerApp } from "./dealer-app.js";
 
 /**
  * ディーラー専用画面(dealer.html)の起動。医療機関の画面(index.html)とは別の入口。
- * Firebase のプロジェクトと認証(Googleログイン・メールリンク)は医療機関の画面と共用するが、施設の所属・施設登録の画面には進まない。
- * ログインの方法にかかわらず、招待先のメールとの一致・会社の所属・施設の許可はサーバーが毎回確認する(確認済みのメールと UID で判定)。
+ * Firebase のプロジェクトは医療機関の画面と共用するが、ログイン状態は別の名前のアプリで分ける。施設の所属・施設登録の画面には進まない。
+ * ログイン(Google・Microsoft・メールリンク)の後は、確認コードで担当者に紐付けた認証主体だけをサーバーが通す(UID・メールの一致だけでは通さない)。
  * メールリンクの戻り先は同じドメインの dealer.html に固定する(任意の URL へは戻さない)。
  */
 async function bootstrap() {
@@ -19,10 +19,13 @@ async function bootstrap() {
 
   const [{ loadFirebaseSdk }, { createAuthService }] = await Promise.all([import("../firebase/sdk.js"), import("../firebase/auth-service.js")]);
   const sdk = await loadFirebaseSdk();
-  const app = sdk.app.initializeApp(FIREBASE_CONFIG);
+  // 医療機関の画面と別の名前の Firebase アプリにする: ログイン状態の保存先が分かれ、ディーラー画面のログイン・ログアウトが
+  // 同じブラウザの医療機関の画面のログインを切り替えない(同じオリジン・同じプロジェクトでも別のセッション)
+  const app = sdk.app.initializeApp(FIREBASE_CONFIG, "dealer-portal");
   await setupAppCheck({ app });
   const auth = sdk.auth.getAuth(app);
-  const service = createAuthService({ auth, fns: sdk.auth, currentUrl: () => dealerEntryUrl(location.origin), storage: window.localStorage });
+  const service = createAuthService({ auth, fns: sdk.auth, currentUrl: () => dealerEntryUrl(location.origin), storage: window.localStorage,
+    emailStorageKey: "iol_dealer_emaillink_pending" });   // メールリンクの保存も医療機関の画面と分ける
   let uid = null;
   // 確認済みの端末の値(ログインした利用者ごと。サーバーが確認コードを確かめた後に返す)。ログアウトでは消さない(同じ端末で次も使う)。
   // 保存できない環境(プライベートブラウズなど)では、ログインのたびに確認コードで確認する
@@ -34,11 +37,7 @@ async function bootstrap() {
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
   const ui = createDealerApp({
     mount, api, setSubtitle,
-    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
-    // Microsoft アカウントの連携(連携済みなら省略)。登録は画面がメールの確認コードで行う(サーバーが条件を確認する)
-    onLinkMicrosoft: () => service.linkMicrosoft(),
-    // 心当たりのない Microsoft の連携を外す(登録せずに済ませる。外しても、閲覧には確認済みの端末が要る)
-    onUnlinkMicrosoft: () => service.unlinkMicrosoft()
+    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } }   // 表示中のデータもメモリごと破棄する
   });
 
   let error = "";
@@ -60,7 +59,6 @@ async function bootstrap() {
       return;
     }
     uid = user.uid;
-    if (user.emailVerified === false) { ui.showMessage("ディーラー画面", "メールアドレスの確認が済んだアカウントのみ利用できます。Microsoft などでメールが確認済みでない場合は、ログアウトして、メールアドレスでログインしてください。", { error: true }); return; }
     await ui.enter();
   });
 }

@@ -193,13 +193,13 @@ export const resendWebhook = onRequest({ region: REGION, maxInstances: 5, servic
 // ディーラー専用画面(第1段階: 閲覧。docs/dealer-portal.md)。注文受付・メール送信とは別の機能スイッチで止められる(既定は停止)。
 // 受信の索引は注文の作成をきっかけに別の処理で作るため、ここが失敗・停止しても注文の受付とメール送信は止まらない
 const DEALER_PORTAL_ENABLED = defineBoolean("DEALER_PORTAL_ENABLED", { default: false });
-// 参加の確認コード: 招待されたメールに送る(注文メールと同じ送信の設定。送信停止中は送れないので参加できない。テスト用の宛先への送信中は本人に届かない)。
+// 本人確認の確認コード: 承認済みのメールに送る(注文メールと同じ送信の設定。送信停止中は送れないので確認できない。テスト用の宛先への送信中は本人に届かない)。
 // エミュレータのテストだけは、demo- のプロジェクトで DEALER_JOIN_CODE_TEST_SINK=true のときに限り、コードをテスト用の文書に書く(本番では使わない)
 const DEALER_JOIN_CODE_TEST_SINK = defineBoolean("DEALER_JOIN_CODE_TEST_SINK", { default: false });
 const isDemoProject = () => String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").startsWith("demo-");
-// purpose: "join"(参加。key は招待 ID)/ "microsoft"(Microsoft アカウントの登録。key は ms-{uid})/ "device"(端末の確認。key は dev-{uid})
-async function sendDealerJoinCode({ purpose = "join", key, to, code, companyName, invitationId, expiresAtMs }) {
-  const id = String(key || invitationId);
+// 確認コード(参加・ログイン方法の紐付け・端末の確認を1つにまとめたもの)。key は v-{uid}(テスト用の文書の ID と重複送信の防止に使う)
+async function sendDealerJoinCode({ purpose = "verify", key, to, code, companyName, expiresAtMs }) {
+  const id = String(key);
   if (isDemoProject() && DEALER_JOIN_CODE_TEST_SINK.value()) {
     await getFirestore().doc(`dealerJoinCodeTestSink/${id}`).set({ to, code, purpose, at: FieldValue.serverTimestamp() });
     return { ok: true };
@@ -208,7 +208,7 @@ async function sendDealerJoinCode({ purpose = "join", key, to, code, companyName
   const recipient = MAIL_TEST_ONLY.value() ? String(MAIL_TEST_RECIPIENT.value() || "").trim() : to;
   if (!recipient) return { ok: false, error: "no-recipient" };
   const minutes = Math.max(1, Math.round((expiresAtMs - Date.now()) / 60000));
-  const what = purpose === "microsoft" ? "ディーラー専用画面での Microsoft アカウントの登録" : purpose === "device" ? "ディーラー専用画面の端末の確認" : "ディーラー専用画面への参加";
+  const what = "ディーラー専用画面の本人確認";
   const text = `${companyName} の${what}の確認コードです。\n\n確認コード: ${code}\n\nこのコードは ${minutes} 分間、1回だけ有効です。画面の「確認コード」に入力してください。\nお心当たりがない場合は、このメールを破棄してください(コードを他の人に伝えないでください)。\n`;
   return createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
     .send({ to: [recipient], subject: `【確認コード】${what}`, text, idempotencyKey: `dealer-${purpose}-${id}-${expiresAtMs}` });

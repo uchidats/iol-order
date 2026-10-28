@@ -5,6 +5,7 @@ import { formatJstDateTime } from "../domain/dealer-portal.js";
 
 const ROLE_LABELS = { reader: "閲覧者", companyAdmin: "会社管理者" };
 const STAFF_STATUS = { active: "有効", disabled: "無効(退職など)" };
+const LOGIN_LABELS = { google: "Google", microsoft: "Microsoft", device: "メール(確認済みの端末)" };
 const LINK_LABELS = { proposed: "関連付け済み(施設の許可待ち)", active: "施設が閲覧を許可中", revoked: "施設が取消済み" };
 const newRequestId = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
 const field = (label, input) => h("label", { class: "form-label" }, h("span", {}, label), input);
@@ -60,16 +61,16 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     const facs = (data.grantsByCompany.get(c.companyId) || []);
     const checks = facs.map(f => { const cb = h("input", { type: "checkbox", value: f.facilityId }); cb.checked = s.facilityIds.includes(f.facilityId); return h("label", { class: "settings-check" }, cb, h("span", {}, f.name)); });
     const save = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "saveStaff" }, "支店・担当施設を保存");
-    save.addEventListener("click", () => run(() => api.updateStaff({ companyId: c.companyId, uid: s.uid, branchId: branchSel.value || null, facilityIds: checks.map(l => l.querySelector("input")).filter(i => i.checked).map(i => i.value) }), "担当者の設定を保存しました。", err));
+    save.addEventListener("click", () => run(() => api.updateStaff({ companyId: c.companyId, staffId: s.staffId, branchId: branchSel.value || null, facilityIds: checks.map(l => l.querySelector("input")).filter(i => i.checked).map(i => i.value) }), "担当者の設定を保存しました。", err));
     const toggle = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "toggleStaff" }, s.status === "active" ? "無効にする" : "有効に戻す");
     toggle.addEventListener("click", async () => {
       if (s.status === "active" && !(await confirmDialog({ message: `${s.name || s.email} を無効にしますか？\n次の操作から、ディーラー画面を利用できなくなります。`, okLabel: "無効にする" }))) return;
-      run(() => api.updateStaff({ companyId: c.companyId, uid: s.uid, status: s.status === "active" ? "disabled" : "active" }), "担当者の状態を変更しました。", err);
+      run(() => api.updateStaff({ companyId: c.companyId, staffId: s.staffId, status: s.status === "active" ? "disabled" : "active" }), "担当者の状態を変更しました。", err);
     });
-    return h("li", { class: "dealer-operator-staff", "data-uid": s.uid },
-      h("div", {}, h("strong", {}, s.name || "(氏名未登録)"), ` ${s.email} ・ ${ROLE_LABELS[s.role] || s.role} ・ ${STAFF_STATUS[s.status] || s.status} ・ アカウント ${String(s.uid).slice(0, 8)}…`),
-      // 同じメールの別アカウント(UID)がある: 移行・退職では、すべてのアカウントの状態を確認する(メールの一致だけで権限を移さない)
-      s.sameEmailAccounts ? h("p", { class: "error-message", "data-dup": "" }, `同じメールアドレスの別のアカウントが ${s.sameEmailAccounts} 件あります。移行・退職のときは、すべてのアカウントの状態を確認してください。`) : null,
+    // 確認コードで紐付け済みのログイン方法(無効化すると、すべての方式が一度に使えなくなる)
+    const logins = (s.logins || []).map(p => LOGIN_LABELS[p] || p).join("・") || "未確認";
+    return h("li", { class: "dealer-operator-staff", "data-staff": s.staffId },
+      h("div", {}, h("strong", {}, s.name || "(氏名未登録)"), ` ${s.email} ・ ${ROLE_LABELS[s.role] || s.role} ・ ${STAFF_STATUS[s.status] || s.status} ・ ログイン方法 ${logins}`),
       h("div", { class: "form-row" }, field("支店", branchSel)),
       facs.length ? h("div", { class: "dealer-operator-assign" }, h("span", { class: "form-hint" }, "担当施設(表示用。閲覧の権限は変わりません)"), ...checks) : h("p", { class: "form-hint" }, "閲覧を許可した施設はまだありません(担当施設は許可済みの施設から選びます)。"),
       h("div", { class: "form-row" }, save, toggle), err);
@@ -83,7 +84,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     const branch = select({ "data-f": "staffBranch" }, [["", "支店なし"], ...c.branches.filter(b => b.status === "active").map(b => [b.branchId, b.name])]);
     const invite = h("button", { type: "button", class: "btn btn-primary", "data-act": "invite" }, "担当者を招待");
     invite.addEventListener("click", () => run(() => api.inviteStaff({ companyId: c.companyId, email: email.value, name: name.value, role: role.value, ...(branch.value ? { branchId: branch.value } : {}) }),
-      "担当者を招待しました。本人がそのメールアドレスでディーラー画面にログインし、参加を承諾すると利用できます。", err));
+      "担当者を招待しました。本人がそのメールアドレスでディーラー画面にログインし、メールに届く確認コードで本人確認すると利用できます。", err));
     const branchName = h("input", { class: "form-control", type: "text", maxlength: "100", "data-f": "branchName", autocomplete: "off" });
     const addBranch = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "addBranch" }, "支店を追加");
     addBranch.addEventListener("click", () => run(() => api.upsertBranch({ companyId: c.companyId, name: branchName.value }), "支店を追加しました。", err));
@@ -94,7 +95,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     });
     const invitations = c.invitations.map(i => {
       const cancel = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "cancelInvite" }, "取り消す");
-      cancel.addEventListener("click", () => run(() => api.cancelInvitation({ invitationId: i.invitationId }), "参加待ちを取り消しました。", err));
+      cancel.addEventListener("click", () => run(() => api.cancelInvitation({ companyId: c.companyId, staffId: i.staffId }), "参加待ちを取り消しました。", err));
       return h("li", {}, `${i.name || "(氏名なし)"} ${i.email} ・ ${ROLE_LABELS[i.role] || i.role} ・ 期限 ${formatJstDateTime(i.expiresAt)} `, cancel);
     });
     const grants = (data.grantsByCompany.get(c.companyId) || []).map(g => h("li", {}, `${g.name}(${formatJstDateTime(g.effectiveFrom)} 以降)`));

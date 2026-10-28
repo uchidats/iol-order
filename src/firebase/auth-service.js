@@ -10,7 +10,7 @@ const EMAIL_STORAGE_KEY = "iol_order_emaillink_pending";
  * @param {() => string} deps.currentUrl  メールリンクの戻り先（クエリ/ハッシュ除去済み）
  * @param {Storage} [deps.storage]
  */
-export function createAuthService({ auth, fns, currentUrl, storage }) {
+export function createAuthService({ auth, fns, currentUrl, storage, emailStorageKey = EMAIL_STORAGE_KEY }) {
   const store = storage || { getItem() { return null; }, setItem() {}, removeItem() {} };
 
   const safe = (fn) => { try { return fn(); } catch (e) { return null; } };
@@ -44,27 +44,6 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
       return fns.signInWithPopup(auth, microsoftProvider(selectAccount));
     },
 
-    /**
-     * ログイン中のアカウントに Microsoft アカウントを連携し、連携を反映した ID トークンに更新する(本人の操作でだけ呼ぶ)。
-     * すでに連携済み(連携の後に登録が終わらなかった場合など)は連携を省略し、トークンの更新だけ行う(登録を再開できるように)。
-     */
-    async linkMicrosoft() {
-      const user = auth.currentUser;
-      if (!user) throw Object.assign(new Error("ログインが必要です"), { code: "auth/no-current-user" });
-      const linked = Array.isArray(user.providerData) && user.providerData.some(p => p && p.providerId === "microsoft.com");
-      const r = linked ? null : await fns.linkWithPopup(user, microsoftProvider(true));
-      await user.getIdToken(true);
-      return r;
-    },
-
-    /** ログイン中のアカウントから Microsoft の連携を外し、トークンを更新する(本人の操作でだけ呼ぶ) */
-    async unlinkMicrosoft() {
-      const user = auth.currentUser;
-      if (!user) throw Object.assign(new Error("ログインが必要です"), { code: "auth/no-current-user" });
-      await fns.unlink(user, "microsoft.com");
-      await user.getIdToken(true);
-    },
-
     /** パスワード不要のメールリンクを送る */
     async sendEmailLink(email) {
       const trimmed = String(email || "").trim();
@@ -73,7 +52,7 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
         url: currentUrl(),
         handleCodeInApp: true
       });
-      safe(() => store.setItem(EMAIL_STORAGE_KEY, trimmed));
+      safe(() => store.setItem(emailStorageKey, trimmed));
     },
 
     /** 現在のURLがメールリンクか */
@@ -87,11 +66,11 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
      */
     async completeEmailLink(href, askEmail) {
       if (!fns.isSignInWithEmailLink(auth, href)) return null;
-      let email = safe(() => store.getItem(EMAIL_STORAGE_KEY));
+      let email = safe(() => store.getItem(emailStorageKey));
       if (!email) email = askEmail ? askEmail() : null;
       if (!email) throw new Error("メールアドレスの確認が必要です");
       const cred = await fns.signInWithEmailLink(auth, email.trim(), href);
-      safe(() => store.removeItem(EMAIL_STORAGE_KEY));
+      safe(() => store.removeItem(emailStorageKey));
       return cred;
     },
 

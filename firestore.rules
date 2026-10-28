@@ -347,7 +347,8 @@ service cloud.firestore {
     match /dealerCompanies/{document=**} {
       allow read, write: if false;
     }
-    match /dealerCompanyInvitations/{id} {
+    // 担当者(招待中・有効・無効)。ID は会社×承認済みのメールで決まる(Firebase の UID ではない)
+    match /dealerStaff/{staffId} {
       allow read, write: if false;
     }
     match /dealerPortalGrants/{id} {
@@ -356,10 +357,12 @@ service cloud.firestore {
     match /dealerPortalAuditLogs/{id} {
       allow read, write: if false;
     }
-    match /dealerStaffIndex/{uid} {
+    // 確認コードで担当者に紐付けた認証主体(Google・Microsoft の固有ID、メールリンクの端末の値のハッシュ)
+    match /dealerAuthBindings/{id} {
       allow read, write: if false;
     }
-    match /dealerStaffDevices/{id} {   // 確認済みの端末(ハッシュのみ。サーバーだけが扱う)
+    // 確認コード(ハッシュ)と送信回数
+    match /dealerAuthChallenges/{id} {
       allow read, write: if false;
     }
 

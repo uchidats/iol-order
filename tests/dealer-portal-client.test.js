@@ -11,14 +11,20 @@ test("ディーラー画面 API: 送るのは各操作の選択値だけ(役割�
   await api.listOrders({ companyId: "c", from: "2026-10-01", to: "2026-10-27", facilityFilter: { mode: "all" }, role: "companyAdmin", uid: "x", limit: 50 });
   await api.getOrder({ companyId: "c", receiptId: "rcp-1", facilityId: "fB" });
   await api.setMyAssignments({ companyId: "c", facilityIds: ["fA"], staffUid: "other" });
-  await api.respondInvitation({ invitationId: "dinv-1", accept: "yes" });
+  await api.sendCode({ to: "other@example.jp" });
+  await api.verifyCode({ code: "12345678", staffId: "dstf_x" });
+  await api.cancelInvitation({ companyId: "c", staffId: "dstf_1", invitationId: "x" });
+  await api.updateStaff({ companyId: "c", staffId: "dstf_1", status: "disabled", uid: "u" });
   await api.grant({ facilityId: "fA", localDealerId: "d1", revision: 2, role: "admin" });
   await api.inviteStaff({ companyId: "c", email: "a@b.jp", name: "n", role: "reader", platformAdmin: true });
   assert.deepEqual(calls, [
     ["dealerPortalApi", { action: "list", companyId: "c", from: "2026-10-01", to: "2026-10-27", facilityFilter: { mode: "all" }, limit: 50 }],
     ["dealerPortalApi", { action: "get", companyId: "c", receiptId: "rcp-1" }],
     ["dealerPortalApi", { action: "setAssignments", companyId: "c", facilityIds: ["fA"] }],
-    ["dealerPortalApi", { action: "respond", invitationId: "dinv-1", accept: false }],
+    ["dealerPortalApi", { action: "sendCode" }],
+    ["dealerPortalApi", { action: "verifyCode", code: "12345678" }],
+    ["dealerPortalOperator", { action: "cancelInvitation", companyId: "c", staffId: "dstf_1" }],
+    ["dealerPortalOperator", { action: "updateStaff", companyId: "c", staffId: "dstf_1", status: "disabled" }],
     ["facilityDealerPortal", { action: "grant", facilityId: "fA", localDealerId: "d1", revision: 2 }],
     ["dealerPortalOperator", { action: "inviteStaff", companyId: "c", email: "a@b.jp", name: "n", role: "reader" }]]);
 });
@@ -71,7 +77,7 @@ test("サーバーの抽出(純粋関数): 自社宛ての明細だけ・番号�
 
 test("Firestore Rules: ディーラー専用画面の新しい領域は明示的にすべて拒否(読み書き)", () => {
   const rules = fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
-  for (const m of ["match /dealerCompanies/{document=**}", "match /dealerCompanyInvitations/{id}", "match /dealerPortalGrants/{id}", "match /dealerPortalAuditLogs/{id}", "match /dealerStaffIndex/{uid}", "match /dealerPortalLinks/{localDealerId}"]) {
+  for (const m of ["match /dealerCompanies/{document=**}", "match /dealerStaff/{staffId}", "match /dealerPortalGrants/{id}", "match /dealerPortalAuditLogs/{id}", "match /dealerAuthBindings/{id}", "match /dealerAuthChallenges/{id}", "match /dealerPortalLinks/{localDealerId}"]) {
     const i = rules.indexOf(m);
     assert.ok(i > 0, m);
     assert.match(rules.slice(i, i + 120), /allow read, write: if false;/, m);
@@ -84,17 +90,17 @@ test("ディーラー画面 API: 確認済みの端末の値を担当者の呼�
   const device = { get: () => saved, set: (t) => { saved = t; } };
   const api = createDealerPortalApi({ functions: {}, device, httpsCallable: (f, name) => async (payload) => {
     calls.push([name, payload]);
-    return { data: payload.action === "verifyDevice" ? { ok: true, deviceToken: "tok-2" } : { ok: true } };
+    return { data: payload.action === "verifyCode" ? { ok: true, deviceToken: "tok-2" } : { ok: true } };
   } });
   await api.context({ companyId: "c" });
-  assert.deepEqual(await api.verifyDevice({ code: "12345678" }), { ok: true }, "値は画面に渡さない");
+  assert.deepEqual(await api.verifyCode({ code: "12345678" }), { ok: true }, "値は画面に渡さない");
   assert.equal(saved, "tok-2");
-  await api.sendDeviceCode();
+  await api.sendCode();
   await api.facilityStatus({ facilityId: "fA" });
   assert.deepEqual(calls, [
     ["dealerPortalApi", { action: "context", companyId: "c", deviceToken: "tok-1" }],
-    ["dealerPortalApi", { action: "verifyDevice", code: "12345678", deviceToken: "tok-1" }],
-    ["dealerPortalApi", { action: "sendDeviceCode", deviceToken: "tok-2" }],
+    ["dealerPortalApi", { action: "verifyCode", code: "12345678", deviceToken: "tok-1" }],
+    ["dealerPortalApi", { action: "sendCode", deviceToken: "tok-2" }],
     ["facilityDealerPortal", { action: "status", facilityId: "fA" }]
   ]);
   // 保存がない(未確認の端末)なら付けない

@@ -30,17 +30,13 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
   return {
     // ディーラーの担当者
     companies: () => portal({ action: "companies" }),
-    sendMicrosoftCode: () => portal({ action: "sendMicrosoftCode" }),
-    trustMicrosoft: (a) => portal({ action: "trustMicrosoft", code: String((a && a.code) || "") }),
-    sendDeviceCode: () => portal({ action: "sendDeviceCode" }),
-    verifyDevice: (a) => portal({ action: "verifyDevice", code: String((a && a.code) || "") }),
+    // 本人確認(参加・ログイン方法の紐付け・メールリンクの端末の確認)。送り先はサーバーが確定する(画面からは送らない)
+    sendCode: () => portal({ action: "sendCode" }),
+    verifyCode: (a) => portal({ action: "verifyCode", code: String((a && a.code) || "") }),
     context: (a = {}) => portal({ action: "context", ...pick(a, ["companyId"]) }),
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),
     getOrder: (a) => portal({ action: "get", ...pick(a, ["companyId", "receiptId"]) }),
-    myInvitations: () => portal({ action: "invitations" }),
-    sendJoinCode: (a) => portal({ action: "sendCode", invitationId: a.invitationId }),
-    respondInvitation: (a) => portal({ action: "respond", invitationId: a.invitationId, accept: a.accept === true, ...(a.accept === true && a.code ? { code: String(a.code) } : {}) }),
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),
     grant: (a) => facility({ action: "grant", ...pick(a, ["facilityId", "localDealerId", "revision"]) }),
@@ -51,8 +47,8 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     updateCompany: (a) => operator({ action: "updateCompany", ...pick(a, ["companyId", "name", "status"]) }),
     upsertBranch: (a) => operator({ action: "upsertBranch", ...pick(a, ["companyId", "branchId", "name", "status"]) }),
     inviteStaff: (a) => operator({ action: "inviteStaff", ...pick(a, ["companyId", "email", "name", "role", "branchId"]) }),
-    cancelInvitation: (a) => operator({ action: "cancelInvitation", ...pick(a, ["invitationId"]) }),
-    updateStaff: (a) => operator({ action: "updateStaff", ...pick(a, ["companyId", "uid", "status", "role", "branchId", "name", "facilityIds"]) }),
+    cancelInvitation: (a) => operator({ action: "cancelInvitation", ...pick(a, ["companyId", "staffId"]) }),
+    updateStaff: (a) => operator({ action: "updateStaff", ...pick(a, ["companyId", "staffId", "status", "role", "branchId", "name", "facilityIds"]) }),
     proposeLink: (a) => operator({ action: "proposeLink", ...pick(a, ["facilityId", "localDealerId", "companyId"]) })
   };
 }

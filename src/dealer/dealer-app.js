@@ -13,7 +13,7 @@ import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDa
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
  */
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, onLinkMicrosoft = null, onUnlinkMicrosoft = null }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -50,8 +50,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     if (code === "auth/popup-blocked") return "ポップアップがブロックされました。ブラウザでポップアップを許可するか、下のメールアドレスでのログインをお使いください。";
     if (code === "auth/account-exists-with-different-credential") return "このメールアドレスは別のログイン方法で登録されています。メールアドレスでのログインをお試しください。";
     if (code === "auth/network-request-failed") return "通信に失敗しました。通信状況を確認して、もう一度お試しください。";
-    if (code === "auth/credential-already-in-use") return "この Microsoft アカウントは、別のアカウントにすでに連携されています。運営者にお問い合わせください。";
-    if (code === "auth/provider-already-linked") return "Microsoft アカウントはすでに連携されています。";
     if (code === "auth/operation-not-allowed") return "このログイン方法は現在利用できません。メールアドレスでログインしてください。";
     const PROVIDER = { google: "Google", microsoft: "Microsoft" };
     if (code.startsWith("auth/")) return PROVIDER[mode] ? `${PROVIDER[mode]}でのログインに失敗しました。もう一度お試しいただくか、メールアドレスでログインしてください。` : "ログインリンクを送信できませんでした。メールアドレスを確認してください。";
@@ -62,7 +60,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   /**
    * ログイン画面。上段に「Googleでログイン」「Microsoftでログイン」(横に並べる。スマホ幅では縦)、下段にメールリンク(パスワード不要)。
    * どれでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
-   * 会社への参加(初回)と Microsoft アカウントの登録は、どのログインでも、メールに届く確認コードで行う。
+   * 初めて使うログイン方法(参加を含む)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
    */
   function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
@@ -91,7 +89,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
       providers ? h("div", { class: "dealer-login-block", "data-login": "accounts" },
         h("div", { class: "form-label" }, "会社のアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。初めて参加するときは、招待されたメールアドレスに届く確認コードで本人の確認をします。Microsoft アカウントは、初めて使うときにメールに届く確認コードで登録します。"),
+        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときは、招待されたメールアドレスに届く確認コードで本人確認をします。"),
         h("div", { class: "dealer-login-providers" }, google, microsoft)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
         h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "企業メールアドレス"),
@@ -101,46 +99,46 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       msg].filter(Boolean));
   }
 
-  // ---------- 参加の確認 ----------
+  // ---------- 本人確認 ----------
   /**
-   * 参加の確認: 招待されたメールアドレスに確認コードを送り、届いた8桁のコードを入力して参加する(ログイン方法にかかわらず必要)。
-   * 会社名は確認コードのメールに書く(画面には出さない。メールを受け取れることを確かめるまで、会社の情報を出さない)。辞退はコードなしでできる。
+   * 本人確認(参加・初めてのログイン方法・メールリンクの新しい端末で共通): ログインのメールアドレス(=承認済みのメール。サーバーが確定する)に
+   * 確認コードを送り、届いた8桁のコードで確認する。確認できると、参加の案内を承諾し、今回のログイン方法を担当者に紐付ける。
+   * 会社名は確認コードのメールに書く(画面には出さない。メールを受け取れることを確かめるまで、会社の情報を出さない)。
+   * @param {{onLater?: () => void}} [opts] onLater: すでに使える会社があるとき、新しい参加の案内を後回しにする
    */
-  async function showInvitations(invitations, onDone) {
-    const ROLE = { reader: "閲覧者", companyAdmin: "会社管理者" };
-    const msg = h("p", { class: "error-message", role: "alert" });
-    const list = h("ul", { class: "pending-invite-list" }, invitations.map(inv => {
-      const sendCode = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendCode" }, "確認コードを送る");
-      const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "joinCode" });
-      const accept = h("button", { type: "button", class: "btn btn-primary", "data-act": "accept" }, "参加する");
-      const decline = h("button", { type: "button", class: "btn btn-secondary", "data-act": "decline" }, "参加しない");
-      const note = h("p", { class: "form-hint", role: "status" });
-      const lock = (v) => { sendCode.disabled = accept.disabled = decline.disabled = v; };
-      sendCode.addEventListener("click", async () => {
-        lock(true); msg.textContent = ""; note.textContent = "";
-        try { const r = await api.sendJoinCode({ invitationId: inv.invitationId }); note.textContent = `招待されたメールアドレスに確認コードを送りました(${r.expiresInMinutes || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。`; code.focus(); }
-        catch (e) { msg.textContent = describeCallableError(e); }
-        finally { lock(false); }
-      });
-      const respond = async (yes) => {
-        const value = code.value.replace(/\s/g, "");
-        if (yes && !/^\d{8}$/.test(value)) { msg.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
-        lock(true); msg.textContent = "";
-        try { await api.respondInvitation({ invitationId: inv.invitationId, accept: yes, ...(yes ? { code: value } : {}) }); await onDone(); }
-        catch (e) { msg.textContent = describeCallableError(e); lock(false); }
-      };
-      accept.addEventListener("click", () => respond(true));
-      decline.addEventListener("click", () => respond(false));
-      return h("li", { class: "pending-invite" },
-        h("div", { class: "pending-invite-facility" }, "ディーラー画面への参加の案内"),
-        h("div", { class: "pending-invite-meta" }, "役割 ", h("span", { class: "member-role-badge" }, ROLE[inv.role] || inv.role)),
-        h("div", { class: "onboarding-actions" }, sendCode), note,
-        h("div", { class: "form-row dealer-join-row" }, code, accept),
-        h("div", { class: "onboarding-actions" }, decline));
-    }));
-    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー画面への参加の確認")),
-      h("p", { class: "feature-desc" }, "ディーラーの担当者として招待されています。本人の確認のため、招待されたメールアドレスに確認コードを送ります。メールに書かれた会社名を確かめてから、コードを入力して参加してください。参加すると、その会社に許可された医療機関の、自社宛ての注文を閲覧できます。"),
-      list, msg, h("div", { class: "onboarding-actions" }, signOutBtn()));
+  function showVerify({ onLater = null } = {}) {
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    const send = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendCode" }, "確認コードを送る");
+    const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "code" });
+    const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyCode" }, "確認する");
+    const note = h("p", { class: "form-hint", role: "status" });
+    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify);
+    const lock = (v) => { send.disabled = verify.disabled = v; };
+    send.addEventListener("click", async () => {
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try {
+        const r = await api.sendCode();
+        codeRow.hidden = false;
+        note.textContent = `ログインしたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。`;
+        code.focus();
+      } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
+      finally { lock(false); }
+    });
+    verify.addEventListener("click", async () => {
+      const value = code.value.replace(/\s/g, "");
+      if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try { await api.verifyCode({ code: value }); await enter(); }
+      catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); lock(false); }
+    });
+    const later = onLater ? h("button", { type: "button", class: "btn btn-secondary", "data-act": "later" }, "あとで(受注一覧へ)") : null;
+    if (later) later.addEventListener("click", onLater);
+    panel.replaceChildren(...[h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, onLater ? "参加の確認" : "本人確認")),
+      h("p", { class: "feature-desc" }, onLater
+        ? "新しい会社から、ディーラー画面への参加の案内が届いています。本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると参加できます。"
+        : "本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると、受注一覧を表示できます(初めて使うログイン方法・メールのリンクでの新しい端末で必要です)。招待されたメールアドレス以外のアカウントでは使えません。"),
+      h("div", { class: "form-row" }, send), codeRow, note,
+      h("div", { class: "onboarding-actions" }, ...[later, signOutBtn()].filter(Boolean))].filter(Boolean));
   }
 
   // ---------- 受注一覧 ----------
@@ -292,113 +290,9 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
       h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
       h("p", { class: "form-hint" }, "医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。"),
-      onLinkMicrosoft ? msLinkSection() : null,
       noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
     if (ctx.facilities.length) await run(false);
-  }
-
-  /**
-   * Microsoft アカウントの連携と登録: 連携(連携済みなら省略)→ 承認済みのメールに確認コードを送る → コードを入力して登録。
-   * 登録した Microsoft アカウントだけが使える(サーバーが確認する)。連携の後に登録が終わらなくても、次のログインでここから再開できる。
-   * @param {() => void} onRegistered 登録できたとき
-   */
-  function msRegisterControls(onRegistered, startLabel) {
-    const start = h("button", { type: "button", class: "btn btn-secondary", "data-act": "linkMicrosoft" }, startLabel);
-    const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "msCode" });
-    const register = h("button", { type: "button", class: "btn btn-primary", "data-act": "trustMicrosoft" }, "登録する");
-    const note = h("p", { class: "form-hint", role: "status" });
-    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, register);
-    const lock = (v) => { start.disabled = register.disabled = v; };
-    const fail = (e, login) => { note.className = "error-message"; note.textContent = login ? describeLoginError(e, "microsoft") : describeCallableError(e); };
-    start.addEventListener("click", async () => {
-      lock(true); note.className = "form-hint"; note.textContent = "";
-      try { await onLinkMicrosoft(); } catch (e) { fail(e, true); lock(false); return; }   // 連携(済みなら省略)。失敗したら登録しない
-      try {
-        const r = await api.sendMicrosoftCode();
-        if (r && r.alreadyRegistered) { note.textContent = "この Microsoft アカウントは登録済みです。"; onRegistered(); return; }
-        codeRow.hidden = false;
-        note.textContent = `登録されたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールのコードを入力して「登録する」を押してください。`;
-        code.focus();
-      } catch (e) { fail(e, false); }
-      finally { lock(false); }
-    });
-    register.addEventListener("click", async () => {
-      const value = code.value.replace(/\s/g, "");
-      if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
-      lock(true); note.className = "form-hint"; note.textContent = "";
-      try { await api.trustMicrosoft({ code: value }); note.textContent = "Microsoft アカウントを登録しました。次回から「Microsoftでログイン」を使えます。"; codeRow.hidden = true; onRegistered(); }
-      catch (e) { fail(e, false); }
-      finally { lock(false); }
-    });
-    return [h("div", { class: "form-row" }, start), codeRow, note];
-  }
-
-  /** 受注一覧の「Microsoftアカウントでもログインする」 */
-  function msLinkSection() {
-    return h("details", { class: "dealer-ms-link" },
-      h("summary", {}, "Microsoftアカウントでもログインする"),
-      h("p", { class: "form-hint" }, "招待されたメールアドレスの Microsoft アカウントを選んで連携し、登録されたメールアドレスに届く確認コードで登録してください。登録した Microsoft アカウントだけが使えます。"),
-      ...msRegisterControls(() => {}, "Microsoftアカウントを連携"));
-  }
-
-  /** 連携済みで登録が終わっていない Microsoft アカウント(MS-03 の再開)。会社・施設の情報は出さない */
-  function showMicrosoftRegister() {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
-    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "Microsoftアカウントの登録")),
-      h("p", { class: "feature-desc" }, "このアカウントには、まだ登録が終わっていない Microsoft アカウントが連携されています。登録が終わるまでは、どのログイン方法でも受注一覧を表示できません。登録されたメールアドレスに確認コードを送り、コードを入力して登録してください。"),
-      ...msRegisterControls(() => { enter(); }, "確認コードを送る"),
-      onUnlinkMicrosoft ? msUnlinkBlock() : null,
-      h("div", { class: "onboarding-actions" }, signOutBtn()));
-  }
-
-  /** 心当たりのない Microsoft アカウントは、登録せずに連携を外す(外した後も、閲覧には確認済みの端末が要る) */
-  function msUnlinkBlock() {
-    const btn = h("button", { type: "button", class: "btn btn-secondary", "data-act": "unlinkMicrosoft" }, "連携を解除する");
-    const note = h("p", { class: "form-hint", role: "status" });
-    btn.addEventListener("click", async () => {
-      btn.disabled = true; note.className = "form-hint"; note.textContent = "";
-      try { await onUnlinkMicrosoft(); await enter(); }
-      catch (e) { note.className = "error-message"; note.textContent = describeLoginError(e, "microsoft"); btn.disabled = false; }
-    });
-    return h("div", { class: "dealer-login-block" },
-      h("p", { class: "form-hint" }, "心当たりのない Microsoft アカウントの場合は、登録せずに連携を解除し、運営者にお知らせください。"),
-      h("div", { class: "onboarding-actions" }, btn), note);
-  }
-
-  /**
-   * この端末の確認(MS-01): 閲覧は、メールの確認コードで確認した端末からだけ(ログイン方法・連携の状態では判断しない)。
-   * 参加・Microsoft の登録をした端末は確認済み。新しい端末・保存を消した端末では、ここで確認する。会社・施設の情報は出さない
-   */
-  function showDeviceVerify() {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
-    const send = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendDeviceCode" }, "確認コードを送る");
-    const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "deviceCode" });
-    const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyDevice" }, "確認する");
-    const note = h("p", { class: "form-hint", role: "status" });
-    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify);
-    const lock = (v) => { send.disabled = verify.disabled = v; };
-    send.addEventListener("click", async () => {
-      lock(true); note.className = "form-hint"; note.textContent = "";
-      try {
-        const r = await api.sendDeviceCode();
-        codeRow.hidden = false;
-        note.textContent = `登録されたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールのコードを入力して「確認する」を押してください。`;
-        code.focus();
-      } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
-      finally { lock(false); }
-    });
-    verify.addEventListener("click", async () => {
-      const value = code.value.replace(/\s/g, "");
-      if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
-      lock(true); note.className = "form-hint"; note.textContent = "";
-      try { await api.verifyDevice({ code: value }); await enter(); }
-      catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); lock(false); }
-    });
-    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "この端末の確認")),
-      h("p", { class: "feature-desc" }, "この端末での利用は、まだ確認されていません。本人の確認のため、登録されたメールアドレスに確認コードを送ります。コードを入力すると、この端末で受注一覧を表示できます(確認は端末ごとに必要です)。"),
-      h("div", { class: "form-row" }, send), codeRow, note,
-      h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */
@@ -419,19 +313,19 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       list, msg, h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
-  /** ログイン後: 参加待ち → 担当者の画面。所属がない人には会社名・施設名を出さない */
+  /** ログイン後: 本人確認(必要なとき)→ 担当者の画面。確認できるまで会社名・施設名を出さない */
+  let laterInvitation = false;   // 新しい参加の案内を後回しにした(この画面を開いている間だけ)
   async function enter() {
     panel.replaceChildren(h("p", { class: "form-hint", role: "status" }, "確認しています…"));
     try {
-      const inv = await api.myInvitations();
-      if (inv.invitations && inv.invitations.length) { await showInvitations(inv.invitations, enter); return; }
       // 有効な所属だけを候補にする(無効化された旧会社が残っていても、有効な1社ならそのまま開く。2社以上なら選ぶ)
-      choices = ((await api.companies()).companies || []);
+      const r = await api.companies();
+      choices = r.companies || [];
+      if (r.pendingInvitation && !laterInvitation) { showVerify({ onLater: () => { laterInvitation = true; enter(); } }); return; }
       if (choices.length > 1) { showCompanyChoice(); return; }
       await showPortal(await api.context(choices.length === 1 ? { companyId: choices[0].companyId } : {}));
     } catch (e) {
-      if (onLinkMicrosoft && e && e.details && e.details.reason === "microsoft-unregistered") { showMicrosoftRegister(); return; }
-      if (e && e.details && e.details.reason === "device-unverified") { showDeviceVerify(); return; }
+      if (e && e.details && e.details.reason === "verification-required") { showVerify(); return; }
       showMessage("ディーラー画面", describeCallableError(e), { error: true });   // 所属がない・会社の停止など(会社名・施設名は出さない)
     }
   }
