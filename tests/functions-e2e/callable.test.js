@@ -466,3 +466,93 @@ test("ディーラー専用画面のログイン: 参加は招待されたメー
   assert.equal((await getDoc(`dealerCompanyInvitations/${invC}`)).fields.status.stringValue, "pending", "招待は残る");
   assert.equal(await getDoc(`dealerCompanies/${cid}/staff/${unverified.uid}`), null, "所属は作られない");
 });
+
+/** Microsoft でログイン(エミュレータの模擬トークン) */
+async function signInWithMicrosoftE2E(email, { sub, verified = true } = {}) {
+  const idt = JSON.stringify({ sub: sub || `m-${email}`, email, email_verified: verified });
+  const r = await (await fetch(`${AUTH_API}/accounts:signInWithIdp?key=fake`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postBody: `id_token=${encodeURIComponent(idt)}&providerId=microsoft.com`, requestUri: "http://localhost", returnSecureToken: true }) })).json();
+  return { uid: r.localId, idToken: r.idToken };
+}
+
+/** ログイン中のアカウントに Microsoft を連携(画面の linkWithPopup と同じく、現在のトークンを渡す)→ 連携の結果のトークンを refresh token で更新(getIdToken(true) と同じ) */
+async function linkMicrosoftE2E(idToken, email, sub) {
+  const idt = JSON.stringify({ sub, email, email_verified: true });
+  const r = await (await fetch(`${AUTH_API}/accounts:signInWithIdp?key=fake`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, postBody: `id_token=${encodeURIComponent(idt)}&providerId=microsoft.com`, requestUri: "http://localhost", returnSecureToken: true }) })).json();
+  const t = await (await fetch(`http://${AUTH}/securetoken.googleapis.com/v1/token?key=fake`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(r.refreshToken)}` })).json();
+  return { uid: r.localId, linkToken: r.idToken, idToken: t.id_token };
+}
+const decodeToken = (t) => JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString());
+
+// MS-03: 画面と同じ順序(メールのリンクで参加 → Microsoft を連携 → トークンを更新 → 確認コードで登録)。連携の直後のトークンは microsoft.com になる
+test("ディーラー専用画面の Microsoft ログイン(MS-03): 連携の直後(Microsoft のトークン)でも、承認済みのメールに届く確認コードで登録できる。登録前はどのログインでも閲覧できない", async () => {
+  const op = (data) => call("dealerPortalOperator", data, operator.idToken);
+  const api = (data, token) => call("dealerPortalApi", data, token);
+  const cid = (await op({ action: "createCompany", name: "エム商事", requestId: "portal-e2e-ms-company" })).body.result.companyId;
+  const email = "staff-m@dealer-m.example.jp";
+  const inv = (await op({ action: "inviteStaff", companyId: cid, email, name: "担当M", role: "reader" })).body.result.invitationId;
+  const link = await signInWithEmailLinkE2E(email);
+  assert.equal((await dealerJoinE2E(inv, link.idToken)).body.result.accepted, true);
+  assert.equal((await api({ action: "context" }, link.idToken)).body.result.company.id, cid);
+  // 連携 → 更新したトークン: UID は同じ、ログイン方法は microsoft.com(Codex の確認と同じ)
+  const linked = await linkMicrosoftE2E(link.idToken, email, "m-staff-m");
+  assert.equal(linked.uid, link.uid);
+  assert.deepEqual([decodeToken(linked.linkToken).firebase.sign_in_provider, decodeToken(linked.idToken).firebase.sign_in_provider], ["microsoft.com", "microsoft.com"]);
+  // 登録前: 連携直後のトークンでも、メールのリンクでログインし直しても閲覧できない(未登録の Microsoft が連携されている)
+  assert.equal((await api({ action: "context" }, linked.idToken)).body.error.status, "PERMISSION_DENIED");
+  const relink = await signInWithEmailLinkE2E(email);
+  assert.ok(decodeToken(relink.idToken).firebase.identities["microsoft.com"], "連携済み");
+  assert.equal((await api({ action: "context" }, relink.idToken)).body.error.status, "PERMISSION_DENIED");
+  // 確認コードなしでは登録できない。連携直後のトークンから、承認済みのメールにコードを送って登録
+  assert.equal((await api({ action: "trustMicrosoft" }, linked.idToken)).body.error.status, "FAILED_PRECONDITION");
+  assert.equal((await api({ action: "sendMicrosoftCode" }, linked.idToken)).body.result.ok, true);
+  const sink = await getDoc(`dealerJoinCodeTestSink/ms-${link.uid}`);
+  assert.deepEqual([sink.fields.to.stringValue, sink.fields.purpose.stringValue], [email, "microsoft"]);
+  assert.equal((await api({ action: "trustMicrosoft", code: sink.fields.code.stringValue }, linked.idToken)).body.result.ok, true);
+  // 以後は Microsoft でも、メールのリンクでも使える
+  const m2 = await signInWithMicrosoftE2E(email, { sub: "m-staff-m" });
+  assert.equal(m2.uid, link.uid);
+  assert.equal((await api({ action: "context" }, m2.idToken)).body.result.company.id, cid);
+  assert.equal((await api({ action: "context" }, (await signInWithEmailLinkE2E(email)).idToken)).body.result.company.id, cid);
+});
+
+// 注意: エミュレータは、同じメールを名乗る Microsoft のトークンを既存の UID に結び付けることがある(本番の Firebase は通常、競合として扱う)。
+// その場合でも、本人が登録した Microsoft アカウントでなければ、ログイン方法を変えても閲覧・登録できないことを確かめる(Codex の MS-01 の再現)
+test("ディーラー専用画面の Microsoft ログイン(MS-01): 未登録の Microsoft のセッションからパスワードを設定して入り直しても、閲覧・登録できない。未確認・未招待は不可", async () => {
+  const op = (data) => call("dealerPortalOperator", data, operator.idToken);
+  const api = (data, token) => call("dealerPortalApi", data, token);
+  const cid = (await op({ action: "createCompany", name: "エヌ商事", requestId: "portal-e2e-ms-company-2" })).body.result.companyId;
+  const email = "staff-n@dealer-m.example.jp";
+  const inv = (await op({ action: "inviteStaff", companyId: cid, email, name: "担当N", role: "reader" })).body.result.invitationId;
+  const link = await signInWithEmailLinkE2E(email);
+  assert.equal((await dealerJoinE2E(inv, link.idToken)).body.result.accepted, true);
+  // 同じメールを名乗る未登録の Microsoft(エミュレータでは同じ UID に入る)
+  const m1 = await signInWithMicrosoftE2E(email, { sub: "m-intruder" });
+  assert.equal(m1.uid, link.uid, "エミュレータの既定では同じ UID");
+  assert.equal((await api({ action: "context" }, m1.idToken)).body.error.status, "PERMISSION_DENIED");
+  // パスワードを設定して入り直す(以降、メールのリンクは使わない)
+  await (await fetch(`${AUTH_API}/accounts:update?key=fake`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken: m1.idToken, password: "password-set-by-attacker-02", returnSecureToken: true }) })).json();
+  const pw = await (await fetch(`${AUTH_API}/accounts:signInWithPassword?key=fake`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: "password-set-by-attacker-02", returnSecureToken: true }) })).json();
+  const tok = decodeToken(pw.idToken);
+  assert.deepEqual([tok.firebase.sign_in_provider, tok.email_verified, !!tok.firebase.identities["microsoft.com"]], ["password", true, true], "Codex の再現と同じトークン");
+  for (const [action, data] of [["context", {}], ["companies", {}], ["list", { from: "2026-01-01", to: "2026-12-31", facilityFilter: { mode: "selected", facilityIds: [] } }]]) {
+    assert.equal((await api({ action, ...data }, pw.idToken)).body.error.status, "PERMISSION_DENIED", action);
+  }
+  assert.equal((await api({ action: "trustMicrosoft" }, pw.idToken)).body.error.status, "FAILED_PRECONDITION");
+  assert.equal((await api({ action: "trustMicrosoft", code: "12345678" }, pw.idToken)).body.error.status, "FAILED_PRECONDITION");
+  // コードを要求しても、届くのは承認済みのメール(本人)だけ。登録はされない
+  assert.equal((await api({ action: "sendMicrosoftCode" }, pw.idToken)).body.result.ok, true);
+  assert.equal((await getDoc(`dealerJoinCodeTestSink/ms-${link.uid}`)).fields.to.stringValue, email);
+  assert.equal((await getDoc(`dealerStaffIndex/${link.uid}`)).fields.trustedMicrosoftIds, undefined, "登録されない");
+  assert.equal((await api({ action: "context" }, (await signInWithMicrosoftE2E(email, { sub: "m-intruder" })).idToken)).body.error.status, "PERMISSION_DENIED");
+  // 新しい Microsoft だけのアカウント(未招待)・メール未確認の Microsoft は使えない
+  const outsider = await signInWithMicrosoftE2E("someone@outlook-like.example.com");
+  assert.equal((await api({ action: "context" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
+  assert.equal((await api({ action: "sendMicrosoftCode" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
+  const unv = await signInWithMicrosoftE2E("unverified-m@dealer-m.example.jp", { verified: false });
+  assert.ok(unv.idToken);
+  assert.equal(decodeToken(unv.idToken).email_verified, false);
+  for (const action of ["invitations", "companies", "context", "sendMicrosoftCode", "trustMicrosoft"]) assert.equal((await api({ action }, unv.idToken)).body.error.status, "PERMISSION_DENIED", action);
+});

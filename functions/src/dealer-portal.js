@@ -28,7 +28,7 @@ export const PORTAL_LIMITS = Object.freeze({
   // 検索時点に固定した読み取り(readTime)ができる時間(Firestore は過去1時間以内)。時刻差の余裕を引く。続きのカーソルはこれを超えて使えない
   pinnedReadWindowMs: 59.5 * 60 * 1000,
   // 参加の確認コード(招待されたメールに送る。一度だけ・短時間。会社・招待の世代・UID・メールに結び付ける)
-  joinCodeTtlMs: 10 * 60 * 1000, joinCodeMaxAttempts: 5, joinCodeResendMs: 60 * 1000, joinCodeMaxSends: 5, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
+  joinCodeTtlMs: 10 * 60 * 1000, joinCodeMaxAttempts: 5, joinCodeResendMs: 60 * 1000, joinCodeMaxSends: 5, microsoftCodeWindowMs: 24 * 60 * 60 * 1000, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JST_MS = 9 * 60 * 60 * 1000;
@@ -257,6 +257,98 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return { ok: true, expiresInMinutes: Math.round(PORTAL_LIMITS.joinCodeTtlMs / 60000) };
   }
 
+  // ======================= Microsoft ログイン =======================
+  /**
+   * Microsoft アカウント(トークンの firebase.identities["microsoft.com"])が連携された UID は、**ログイン方法にかかわらず**
+   * (Microsoft・メールのリンク・パスワード・Google)、本人が登録した Microsoft の ID(dealerStaffIndex.trustedMicrosoftIds)と一致するときだけ通す(MS-01)。
+   * 未登録の Microsoft が連携されたまま、パスワードなどでログインし直して制限を外すことはできない。
+   * Microsoft のメールは組織の管理者が変更できる場合があり、メールの一致・UID の結び付け・ログイン方法は本人の証明にしない。
+   * 登録は、承認済みのメールに届く確認コードで本人が行う(sendMicrosoftCode → trustMicrosoft)。
+   */
+  const MS = "microsoft.com";
+  const MS_ID_RE = /^[\x21-\x7e]{1,256}$/;
+  const msNotRegistered = () => new RegistrationError("permission-denied", "Microsoft アカウントの登録が完了していません。画面の「確認コードを送る」から、メールに届く確認コードで登録してください", { reason: "microsoft-unregistered" });
+  const msIdsOf = (auth) => { const ids = auth && auth.token && auth.token.firebase && auth.token.firebase.identities && auth.token.firebase.identities[MS]; return Array.isArray(ids) ? ids.map(String) : []; };
+  const trustedMsOf = (idx) => (idx && idx.exists && Array.isArray(idx.get("trustedMicrosoftIds")) ? idx.get("trustedMicrosoftIds").map(String) : []);
+  function assertSignInRegistered(auth, idx) {
+    const t = (auth && auth.token) || {};
+    const ids = msIdsOf(auth);
+    if (ids.length === 0 && !(t.firebase && t.firebase.sign_in_provider === MS)) return;   // Microsoft が連携されていない
+    if (ids.length !== 1 || !trustedMsOf(idx).includes(ids[0])) throw msNotRegistered();
+  }
+  /** いま連携されている Microsoft の ID(ちょうど1つ)。登録の対象 */
+  function linkedMicrosoftId(auth) {
+    const ids = msIdsOf(auth);
+    if (ids.length !== 1 || !MS_ID_RE.test(ids[0])) throw new RegistrationError("failed-precondition", "Microsoft アカウントが連携されていません。「Microsoftアカウントを連携」からやり直してください");
+    return ids[0];
+  }
+  /**
+   * トランザクション内で、いま有効な所属を新しい順に確かめ、最初の1件を返す(MS-02: 所属の記録だけでは認めない。
+   * 担当者の無効化・会社の停止・承認済みのメールの変更と競合したら、トランザクションがやり直しになる)
+   */
+  async function firstActiveAffiliationTx(tx, user, idx) {
+    const ids = [...new Set((idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : []).filter(isId))];
+    for (let i = 0; i < ids.length; i += PORTAL_LIMITS.affiliationsBatch) {
+      const found = (await Promise.all(ids.slice(i, i + PORTAL_LIMITS.affiliationsBatch).map(cid => affiliationOf(user, cid, tx)))).filter(Boolean);
+      if (found.length) return found[0];
+    }
+    return null;
+  }
+
+  /** Microsoft アカウントの登録の確認コードを、承認済みのメール(=ログインのメール。有効な所属と一致)に送る。連携の後、本人が行う */
+  async function sendMicrosoftCode(auth, data) {
+    strict(data || {}, []);
+    const user = assertVerifiedUser(auth);
+    const msId = linkedMicrosoftId(auth);
+    if (typeof sendJoinCode !== "function") throw codeError("現在、確認コードを送れません。運営者にお問い合わせください");
+    const code = String(randomInt(0, 100000000)).padStart(8, "0");
+    const salt = randomBytes(16).toString("hex");
+    const prepared = await db.runTransaction(async (tx) => {
+      const idx = await tx.get(staffIndexRef(user.uid));
+      const aff = await firstActiveAffiliationTx(tx, user, idx);
+      if (!aff) throw noAffiliation();
+      if (trustedMsOf(idx).includes(msId)) return { already: true };
+      const prev = idx.get("microsoftCode") || null;
+      const fresh = prev && typeof prev.sentAtMs === "number" && now() - prev.sentAtMs < PORTAL_LIMITS.microsoftCodeWindowMs;
+      const sends = fresh && Number.isInteger(prev.sends) ? prev.sends : 0;
+      if (fresh && now() - prev.sentAtMs < PORTAL_LIMITS.joinCodeResendMs) throw codeError("確認コードは1分ほど待ってから送り直してください");
+      if (sends >= PORTAL_LIMITS.joinCodeMaxSends) throw codeError("確認コードの送信回数の上限に達しました。時間をおいてお試しください");
+      const expiresAtMs = now() + PORTAL_LIMITS.joinCodeTtlMs;
+      tx.update(idx.ref, { microsoftCode: { hash: codeHash(code, salt), salt, uid: user.uid, email: user.email, microsoftId: msId, expiresAtMs, sentAtMs: now(), attempts: 0, sends: sends + 1 } });
+      audit(tx, { action: "staff.microsoftCodeSent", companyId: aff.companyId, actorUid: user.uid });
+      return { companyName: String(aff.company.name || ""), email: user.email, expiresAtMs };
+    });
+    if (prepared.already) return { ok: true, alreadyRegistered: true };
+    const r = await sendJoinCode({ purpose: "microsoft", key: `ms-${user.uid}`, to: prepared.email, code, companyName: prepared.companyName, expiresAtMs: prepared.expiresAtMs });
+    if (!r || r.ok !== true) throw codeError("確認コードを送れませんでした。しばらくしてからもう一度お試しください");
+    return { ok: true, expiresInMinutes: Math.round(PORTAL_LIMITS.joinCodeTtlMs / 60000) };
+  }
+
+  /**
+   * Microsoft アカウントの登録(本人)。いま連携されている Microsoft の ID と、その ID・UID・メールに結び付けて送った確認コードが一致し、
+   * いま有効な所属があるときだけ(MS-02)。ログイン方法は問わない(連携の直後は Microsoft のセッションになるため。MS-03)。1つの UID に Microsoft は1つ。
+   */
+  async function trustMicrosoft(auth, data) {
+    strict(data || {}, ["code"]);
+    const user = assertVerifiedUser(auth);
+    const msId = linkedMicrosoftId(auth);
+    if (typeof (data || {}).code !== "string" || !/^\d{8}$/.test(data.code)) throw codeError("メールに届いた8桁の確認コードを入力してください");
+    const wrong = await db.runTransaction(async (tx) => {
+      const idx = await tx.get(staffIndexRef(user.uid));
+      const mc = idx.exists ? idx.get("microsoftCode") : null;
+      if (!mc || mc.uid !== user.uid || mc.email !== user.email || mc.microsoftId !== msId || !(mc.expiresAtMs > now()) || !(mc.attempts < PORTAL_LIMITS.joinCodeMaxAttempts)) {
+        throw codeError("確認コードが無効です(期限切れ・使用済み・別の Microsoft アカウントの可能性があります)。確認コードを送り直してください");
+      }
+      const aff = await firstActiveAffiliationTx(tx, user, idx);
+      if (!aff) throw noAffiliation();
+      if (!sameHash(codeHash(data.code, mc.salt), mc.hash)) { tx.update(idx.ref, { "microsoftCode.attempts": mc.attempts + 1 }); return true; }
+      tx.update(idx.ref, { trustedMicrosoftIds: [msId], microsoftTrustedAt: FieldValue.serverTimestamp(), microsoftCode: FieldValue.delete() });
+      audit(tx, { action: "staff.trustMicrosoft", companyId: aff.companyId, actorUid: user.uid });
+      return false;
+    });
+    if (wrong) throw codeError("確認コードが違います。メールに届いたコードを入力してください");
+    return { ok: true };
+  }
   function assertOperator(auth) {
     const user = assertVerifiedUser(auth);
     if (user.isPlatformAdmin !== true) throw new RegistrationError("permission-denied", "この操作は運営者のみ行えます");
@@ -272,6 +364,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   async function authorizeStaff(auth, companyId) {
     const user = assertVerifiedUser(auth);
     if (companyId !== undefined && companyId !== null && !isId(companyId)) throw badInput();
+    const idx0 = await staffIndexRef(user.uid).get();
+    assertSignInRegistered(auth, idx0);   // Microsoft でのログインは、登録した Microsoft アカウントだけ
     if (!companyId) {
       // 会社の指定なし: 所属の一覧のうち、いま有効な所属だけから選ぶ(旧会社の無効化・停止が残っていても、有効な1社なら進める)
       const valid = await validAffiliations(user);
@@ -288,8 +382,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   }
 
   /** 1社分の所属の確認(会社が有効で方針が既知・担当者が有効・承認済みのメールと一致)。無効なら null */
-  async function affiliationOf(user, cid) {
-    const [c, s] = await Promise.all([companyRef(cid).get(), staffRef(cid, user.uid).get()]);
+  async function affiliationOf(user, cid, tx = null) {
+    const read = (ref) => (tx ? tx.get(ref) : ref.get());
+    const [c, s] = await Promise.all([read(companyRef(cid)), read(staffRef(cid, user.uid))]);
     if (!c.exists || !policyOk(c.data())) return null;
     if (!s.exists || s.get("status") !== "active" || !STAFF_ROLES.includes(s.get("role")) || normEmail(s.get("approvedEmail")) !== user.email) return null;
     return { user, companyId: cid, company: c.data(), staff: s.data() };
@@ -311,6 +406,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   async function myCompanies(auth, data) {
     strict(data || {}, []);
     const user = assertVerifiedUser(auth);
+    assertSignInRegistered(auth, await staffIndexRef(user.uid).get());
     return { companies: (await validAffiliations(user)).map(a => ({ companyId: a.companyId, name: String(a.company.name || "") })) };
   }
 
@@ -594,7 +690,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const ids = idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : [];
       const next = [...new Set([cid, ...ids])];   // 新しい所属を先頭に。古い所属は(有効かどうかにかかわらず)削らない
       if (next.length > PORTAL_LIMITS.affiliationsMax) throw new RegistrationError("failed-precondition", "所属の記録が上限を超えています。運営者にお問い合わせください");
-      tx.set(staffIndexRef(user.uid), { companyIds: next, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(staffIndexRef(user.uid), { companyIds: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });   // 登録した Microsoft アカウントなどは残す
       tx.update(inv.ref, { status: "accepted", respondedAt: FieldValue.serverTimestamp(), respondedUid: user.uid, joinCode: FieldValue.delete() });   // コードは一度だけ(消費)
       audit(tx, { action: "staff.join", companyId: cid, actorUid: user.uid, invitationId: inv.id });
       return { ok: true, accepted: true, companyId: cid };
@@ -615,6 +711,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "list": return listOrders(auth, rest);
       case "get": return getOrder(auth, rest);
       case "companies": return myCompanies(auth, rest);
+      case "sendMicrosoftCode": return sendMicrosoftCode(auth, rest);
+      case "trustMicrosoft": return trustMicrosoft(auth, rest);
       case "invitations": return myInvitations(auth, rest);
       case "sendCode": return sendInvitationCode(auth, rest);
       case "respond": return respondInvitation(auth, rest);
@@ -839,12 +937,16 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       // 無効化: 同じ会社・承認済みのメール宛ての参加待ちも同時に取り消す(無効化の前の案内で本人が復帰できないように)。時刻は承諾時の照合に使う
       const disabling = patch.status === "disabled" && s.get("status") !== "disabled";
       const inv = disabling ? await tx.get(db.doc(`dealerCompanyInvitations/${invitationIdOf(data.companyId, s.get("approvedEmail"))}`)) : null;
+      const idx = disabling ? await tx.get(staffIndexRef(data.uid)) : null;
+      const msClear = !!(idx && idx.exists && (idx.get("trustedMicrosoftIds") !== undefined || idx.get("microsoftCode") !== undefined));
       if (disabling) patch.disabledAt = FieldValue.serverTimestamp();
       tx.update(s.ref, { ...patch, revision: (Number(s.get("revision")) || 0) + 1, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid });
       if (inv && inv.exists && inv.get("status") === "pending") {
         tx.update(inv.ref, { status: "cancelled", cancelledBy: user.uid, cancelledAt: FieldValue.serverTimestamp(), cancelledReason: "staffDisabled" });
       }
-      audit(tx, { action: "staff.update", companyId: data.companyId, targetUid: data.uid, actorUid: user.uid, operator: true, fields: Object.keys(patch).filter(k => k !== "disabledAt"), ...(inv && inv.exists && inv.get("status") === "pending" ? { invitationCancelled: inv.id } : {}) });
+      // 無効化: 登録した Microsoft アカウントと送信中の確認コードも消す(有効に戻した後は、メールの確認コードで登録し直す)
+      if (msClear) tx.update(idx.ref, { trustedMicrosoftIds: FieldValue.delete(), microsoftCode: FieldValue.delete() });
+      audit(tx, { action: "staff.update", companyId: data.companyId, targetUid: data.uid, actorUid: user.uid, operator: true, fields: Object.keys(patch).filter(k => k !== "disabledAt"), ...(inv && inv.exists && inv.get("status") === "pending" ? { invitationCancelled: inv.id } : {}), ...(msClear ? { microsoftCleared: true } : {}) });
       return { ok: true };
     });
   }

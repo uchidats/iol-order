@@ -20,10 +20,11 @@ export const LIMITS = Object.freeze({
 
 /** クライアントに返すエラー。code は firebase-functions の HttpsError コードに対応 */
 export class RegistrationError extends Error {
-  constructor(code, message) {
+  constructor(code, message, details) {
     super(message);
     this.name = "RegistrationError";
     this.code = code;
+    if (details !== undefined) this.details = details;   // 画面の分岐用(例: { reason })。秘密や個人の情報は入れない
   }
 }
 

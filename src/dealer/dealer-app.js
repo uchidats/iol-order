@@ -13,12 +13,12 @@ import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDa
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
  */
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, onLinkMicrosoft = null }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
-  let gen = 0;
-  let searchedAt = null;   // 検索時点(サーバーが最初のページを読んだ時点)             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
+  let gen = 0;             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
+  let searchedAt = null;   // 検索時点(サーバーが最初のページを読んだ時点)
   let choices = [];        // 本人の有効な所属会社(2社以上なら会社を選ぶ)
 
   const panel = h("section", { class: "feature-card dealer-panel", id: "dealerPanel" });
@@ -42,7 +42,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       withSignOut ? h("div", { class: "onboarding-actions" }, signOutBtn()) : null].filter(Boolean));
   }
 
-  // ---------- ログイン(Google: 推奨 / メールリンク: 代替) ----------
+  // ---------- ログイン(Google・Microsoft / メールリンク) ----------
   /** ログインの失敗を利用者向けの文言に(Firebase Auth のエラーコード) */
   function describeLoginError(e, mode) {
     const code = String((e && e.code) || "");
@@ -50,27 +50,36 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     if (code === "auth/popup-blocked") return "ポップアップがブロックされました。ブラウザでポップアップを許可するか、下のメールアドレスでのログインをお使いください。";
     if (code === "auth/account-exists-with-different-credential") return "このメールアドレスは別のログイン方法で登録されています。メールアドレスでのログインをお試しください。";
     if (code === "auth/network-request-failed") return "通信に失敗しました。通信状況を確認して、もう一度お試しください。";
-    if (code.startsWith("auth/")) return mode === "google" ? "Googleでのログインに失敗しました。もう一度お試しいただくか、メールアドレスでログインしてください。" : "ログインリンクを送信できませんでした。メールアドレスを確認してください。";
+    if (code === "auth/credential-already-in-use") return "この Microsoft アカウントは、別のアカウントにすでに連携されています。運営者にお問い合わせください。";
+    if (code === "auth/provider-already-linked") return "Microsoft アカウントはすでに連携されています。";
+    if (code === "auth/operation-not-allowed") return "このログイン方法は現在利用できません。メールアドレスでログインしてください。";
+    const PROVIDER = { google: "Google", microsoft: "Microsoft" };
+    if (code.startsWith("auth/")) return PROVIDER[mode] ? `${PROVIDER[mode]}でのログインに失敗しました。もう一度お試しいただくか、メールアドレスでログインしてください。` : "ログインリンクを送信できませんでした。メールアドレスを確認してください。";
     if (e && /メールアドレスを入力/.test(String(e.message))) return e.message;
     return describeCallableError(e);
   }
 
   /**
-   * ログイン画面。上段に「Googleでログイン」(推奨)、下段にメールリンク(代替。Googleアカウントがない企業メール向け)。
-   * どちらでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
+   * ログイン画面。上段に「Googleでログイン」「Microsoftでログイン」(横に並べる。スマホ幅では縦)、下段にメールリンク(パスワード不要)。
+   * どれでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
+   * 会社への参加(初回)と Microsoft アカウントの登録は、どのログインでも、メールに届く確認コードで行う。
    */
-  function showLogin({ notice = "", error = "", onGoogle = null, onSend }) {
+  function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
+    const microsoft = onMicrosoft ? h("button", { type: "button", class: "btn btn-primary dealer-login-microsoft", id: "btnDealerMicrosoft" }, "Microsoftでログイン") : null;
+    const providers = google || microsoft;
     const email = h("input", { class: "form-control", type: "email", id: "dealerEmail", autocomplete: "email", "aria-label": "企業メールアドレス", maxlength: "254" });
-    const send = h("button", { type: "button", class: onGoogle ? "btn btn-secondary" : "btn btn-primary", id: "btnDealerSendLink" }, "ログインリンクを送信");
+    const send = h("button", { type: "button", class: providers ? "btn btn-secondary" : "btn btn-primary", id: "btnDealerSendLink" }, "ログインリンクを送信");
     const msg = h("p", { class: notice ? "form-hint" : "error-message", role: "status" }, notice || error);
-    const busy = (b) => { send.disabled = b; if (google) google.disabled = b; };
-    if (google) google.addEventListener("click", async () => {
+    const busy = (v) => { send.disabled = v; if (google) google.disabled = v; if (microsoft) microsoft.disabled = v; };
+    const signIn = (btn, fn, mode) => btn && btn.addEventListener("click", async () => {
       busy(true); msg.className = "form-hint"; msg.textContent = "";
-      try { await onGoogle(); }   // 成功すると認証状態の変化で画面が切り替わる
-      catch (e) { msg.className = "error-message"; msg.textContent = describeLoginError(e, "google"); }
+      try { await fn(); }   // 成功すると認証状態の変化で画面が切り替わる
+      catch (e) { msg.className = "error-message"; msg.textContent = describeLoginError(e, mode); }
       finally { busy(false); }
     });
+    signIn(google, onGoogle, "google");
+    signIn(microsoft, onMicrosoft, "microsoft");
     send.addEventListener("click", async () => {
       busy(true); msg.className = "form-hint"; msg.textContent = "";
       try { await onSend(email.value); msg.className = "form-hint"; msg.textContent = "ログインリンクを送信しました。メール内のリンクをこの端末で開いてください。"; }
@@ -80,12 +89,12 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー用 受注一覧")),
       h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
-      google ? h("div", { class: "dealer-login-block", "data-login": "google" },
-        h("div", { class: "form-label" }, "Googleアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。初めて参加するときは、招待されたメールアドレスに届く確認コードで本人の確認をします。"),
-        h("div", { class: "onboarding-actions" }, google)) : null,
+      providers ? h("div", { class: "dealer-login-block", "data-login": "accounts" },
+        h("div", { class: "form-label" }, "会社のアカウントでログイン(推奨)"),
+        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。初めて参加するときは、招待されたメールアドレスに届く確認コードで本人の確認をします。Microsoft アカウントは、初めて使うときにメールに届く確認コードで登録します。"),
+        h("div", { class: "dealer-login-providers" }, google, microsoft)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
-        h("label", { class: "form-label", for: "dealerEmail" }, google ? "メールアドレスでログイン(Googleアカウントがない場合。パスワード不要)" : "企業メールアドレス"),
+        h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "企業メールアドレス"),
         h("p", { class: "form-hint" }, "招待された企業メールアドレスを入力すると、ログイン用のリンクが届きます。"),
         email,
         h("div", { class: "onboarding-actions" }, send)),
@@ -283,9 +292,63 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
       h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
       h("p", { class: "form-hint" }, "医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。"),
+      onLinkMicrosoft ? msLinkSection() : null,
       noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
     if (ctx.facilities.length) await run(false);
+  }
+
+  /**
+   * Microsoft アカウントの連携と登録: 連携(連携済みなら省略)→ 承認済みのメールに確認コードを送る → コードを入力して登録。
+   * 登録した Microsoft アカウントだけが使える(サーバーが確認する)。連携の後に登録が終わらなくても、次のログインでここから再開できる。
+   * @param {() => void} onRegistered 登録できたとき
+   */
+  function msRegisterControls(onRegistered, startLabel) {
+    const start = h("button", { type: "button", class: "btn btn-secondary", "data-act": "linkMicrosoft" }, startLabel);
+    const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "msCode" });
+    const register = h("button", { type: "button", class: "btn btn-primary", "data-act": "trustMicrosoft" }, "登録する");
+    const note = h("p", { class: "form-hint", role: "status" });
+    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, register);
+    const lock = (v) => { start.disabled = register.disabled = v; };
+    const fail = (e, login) => { note.className = "error-message"; note.textContent = login ? describeLoginError(e, "microsoft") : describeCallableError(e); };
+    start.addEventListener("click", async () => {
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try { await onLinkMicrosoft(); } catch (e) { fail(e, true); lock(false); return; }   // 連携(済みなら省略)。失敗したら登録しない
+      try {
+        const r = await api.sendMicrosoftCode();
+        if (r && r.alreadyRegistered) { note.textContent = "この Microsoft アカウントは登録済みです。"; onRegistered(); return; }
+        codeRow.hidden = false;
+        note.textContent = `登録されたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールのコードを入力して「登録する」を押してください。`;
+        code.focus();
+      } catch (e) { fail(e, false); }
+      finally { lock(false); }
+    });
+    register.addEventListener("click", async () => {
+      const value = code.value.replace(/\s/g, "");
+      if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try { await api.trustMicrosoft({ code: value }); note.textContent = "Microsoft アカウントを登録しました。次回から「Microsoftでログイン」を使えます。"; codeRow.hidden = true; onRegistered(); }
+      catch (e) { fail(e, false); }
+      finally { lock(false); }
+    });
+    return [h("div", { class: "form-row" }, start), codeRow, note];
+  }
+
+  /** 受注一覧の「Microsoftアカウントでもログインする」 */
+  function msLinkSection() {
+    return h("details", { class: "dealer-ms-link" },
+      h("summary", {}, "Microsoftアカウントでもログインする"),
+      h("p", { class: "form-hint" }, "招待されたメールアドレスの Microsoft アカウントを選んで連携し、登録されたメールアドレスに届く確認コードで登録してください。登録した Microsoft アカウントだけが使えます。"),
+      ...msRegisterControls(() => {}, "Microsoftアカウントを連携"));
+  }
+
+  /** 連携済みで登録が終わっていない Microsoft アカウント(MS-03 の再開)。会社・施設の情報は出さない */
+  function showMicrosoftRegister() {
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "Microsoftアカウントの登録")),
+      h("p", { class: "feature-desc" }, "このアカウントには、まだ登録が終わっていない Microsoft アカウントが連携されています。登録が終わるまでは、どのログイン方法でも受注一覧を表示できません。登録されたメールアドレスに確認コードを送り、コードを入力して登録してください。"),
+      ...msRegisterControls(() => { enter(); }, "確認コードを送る"),
+      h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */
@@ -317,6 +380,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       if (choices.length > 1) { showCompanyChoice(); return; }
       await showPortal(await api.context(choices.length === 1 ? { companyId: choices[0].companyId } : {}));
     } catch (e) {
+      if (onLinkMicrosoft && e && e.details && e.details.reason === "microsoft-unregistered") { showMicrosoftRegister(); return; }
       showMessage("ディーラー画面", describeCallableError(e), { error: true });   // 所属がない・会社の停止など(会社名・施設名は出さない)
     }
   }

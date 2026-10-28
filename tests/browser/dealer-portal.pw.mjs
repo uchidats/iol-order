@@ -50,8 +50,13 @@ function installFakeServer(page, scenario) {
       { receiptId: "rcp-b", facilityId: "fB", facilityName: "B眼科", orderNumber: "IOL-20261027-02", orderedAt: "2026-10-27T02:00:00.000Z", lineCount: 1, totalQuantity: 1 }
     ];
     let joined = scenario !== "invited";
+    let msRegistered = scenario !== "msNotRegistered";
     window.__fakeCallables = {
       dealerPortalApi: async (d) => {
+        // Microsoft の登録(確認コードは偽: 12345678)。未登録の Microsoft が連携された間は、参加の確認・登録以外を拒否(理由付き)
+        if (d.action === "sendMicrosoftCode") { if (window.__failMsSend) { window.__failMsSend = false; throw Object.assign(new Error("確認コードを送れませんでした。しばらくしてからもう一度お試しください"), { code: "functions/failed-precondition" }); } return { ok: true, expiresInMinutes: 10 }; }
+        if (d.action === "trustMicrosoft") { if (d.code !== "12345678") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" }); msRegistered = true; return { ok: true }; }
+        if (!msRegistered && d.action !== "invitations") throw Object.assign(new Error("Microsoft アカウントの登録が完了していません"), { code: "functions/permission-denied", details: { reason: "microsoft-unregistered" } });
         if (scenario === "disabled") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });   // 機能の停止中: すべての取得を拒否
         // 招待の一覧に会社名は出さない(会社名は確認コードのメールに書く)。参加は、送った確認コード(偽: 12345678)の入力が必要
         if (d.action === "invitations") return { invitations: joined || scenario === "none" ? [] : [{ invitationId: "dinv-1", role: "reader" }] };
@@ -273,7 +278,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(g.y < m.y, `${width}: Google が上段`);
         assert.match(await google.getAttribute("class"), /btn-primary/);
         assert.match(await send.getAttribute("class"), /btn-secondary/, "メールリンクは代替");
-        assert.match(await page.locator('[data-login="google"]').innerText(), /推奨/);
+        assert.match(await page.locator('[data-login="accounts"]').innerText(), /推奨/);
+        // Microsoft: Google と並べる(PC は横、スマホは縦)。メールのリンクより上
+        const msb = page.locator("#btnDealerMicrosoft");
+        assert.equal(await msb.innerText(), "Microsoftでログイン");
+        const mb = await msb.boundingBox();
+        assert.ok(mb.y < m.y, `${width}: Microsoft もメールより上`);
+        if (width >= 1100) assert.ok(Math.abs(mb.y - g.y) < 2 && mb.x > g.x, "PC は横に並ぶ"); else assert.ok(mb.y > g.y, "スマホは縦に並ぶ");
+        await msb.click();
+        await page.getByText("ログインがキャンセルされました。").waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__microsoftCalls), [{ prompt: "select_account" }]);
+        await page.evaluate(() => { window.__fakeMicrosoft = async () => { throw Object.assign(new Error("x"), { code: "auth/account-exists-with-different-credential" }); }; });
+        await msb.click();
+        await page.getByText(/別のログイン方法で登録されています/).waitFor();
+        await page.evaluate(() => { window.__fakeMicrosoft = null; });
         // 押すとアカウントの選択画面を出す指定で呼ぶ。閉じた・ブロックされたときは案内(サーバーには問い合わせない)
         await google.click();
         await page.getByText("ログインがキャンセルされました。").waitFor();
@@ -323,7 +341,6 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.equal(await page.locator(".dealer-row").count(), 0);
     await context.close();
 
-
     // 機能の停止中: Google などでログインできても(認証はスイッチで止まらない)、サーバーがすべて拒否し、会社・施設・注文は何も出ない
     context = await newFakeContext(browser, base, 390, STAFF);
     page = await context.newPage();
@@ -333,6 +350,52 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
     assert.equal(await page.locator(".dealer-row").count(), 0);
     assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    await context.close();
+
+    // 連携済みで登録が終わっていない Microsoft(MS-03 の再開): 会社の情報は出さず、登録の画面。連携は省略し、確認コードで登録 → 受注一覧
+    context = await newFakeContext(browser, base, 390, { ...STAFF, user: { ...STAFF.user, providerData: [{ providerId: "microsoft.com" }] } });
+    page = await context.newPage();
+    await installFakeServer(page, "msNotRegistered");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("Microsoftアカウントの登録", { exact: true }).waitFor();
+    assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
+    assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    assert.equal(await page.locator('[data-f="msCode"]').isVisible(), false, "コード欄は送るまで出さない");
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/確認コードを送りました/).waitFor();
+    assert.equal(await page.evaluate(() => window.__linkCalls), undefined, "連携済みなら連携の画面を出さない");
+    await page.fill('[data-f="msCode"]', "00000000");
+    await page.click('[data-act="trustMicrosoft"]');
+    await page.getByText(/確認コードが違います/).waitFor();
+    await page.fill('[data-f="msCode"]', "1234 5678");
+    await page.click('[data-act="trustMicrosoft"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.deepEqual((await calls(page, "trustMicrosoft")).at(-1), { action: "trustMicrosoft", code: "12345678" });
+    await context.close();
+
+    // 受注一覧の「Microsoftアカウントを連携」: 連携(アカウントの選択画面)→ 確認コードを送る → コードで登録
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "staff");
+    await page.goto(`${base}dealer.html`);
+    await page.locator(".dealer-row").first().waitFor();
+    await page.locator(".dealer-ms-link summary").click();
+    // 別のアカウントに連携済みの Microsoft は、案内してコードを送らない
+    await page.evaluate(() => { window.__fakeLink = async () => { throw Object.assign(new Error("x"), { code: "auth/credential-already-in-use" }); }; });
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/別のアカウントにすでに連携されています/).waitFor();
+    assert.deepEqual(await calls(page, "sendMicrosoftCode"), [], "連携に失敗したときは送らない");
+    // 連携は成功したが確認コードの送信が一時的に失敗 → もう一度押すと、連携を省略して送信からやり直せる(MS-03)
+    await page.evaluate(() => { window.__fakeLink = null; window.__linkCalls = []; window.__failMsSend = true; });
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/確認コードを送れませんでした/).waitFor();
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/確認コードを送りました/).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__linkCalls), [["microsoft.com", { prompt: "select_account" }]], "連携は1回だけ");
+    assert.equal((await calls(page, "sendMicrosoftCode")).length, 2);
+    await page.fill('[data-f="msCode"]', "12345678");
+    await page.click('[data-act="trustMicrosoft"]');
+    await page.getByText(/Microsoft アカウントを登録しました/).waitFor();
     await context.close();
 
     // 参加の確認: 会社名を出さない → コードなしでは送らない → 確認コードを送る → 違うコードは拒否 → メールのコードで参加 → 受注一覧
