@@ -82,7 +82,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
       google ? h("div", { class: "dealer-login-block", "data-login": "google" },
         h("div", { class: "form-label" }, "Googleアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。初めての参加の確認は、Gmail 以外のメールアドレスでは、下のメールでのログインで行ってください。"),
+        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。初めて参加するときは、招待されたメールアドレスに届く確認コードで本人の確認をします。"),
         h("div", { class: "onboarding-actions" }, google)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
         h("label", { class: "form-label", for: "dealerEmail" }, google ? "メールアドレスでログイン(Googleアカウントがない場合。パスワード不要)" : "企業メールアドレス"),
@@ -93,25 +93,44 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   }
 
   // ---------- 参加の確認 ----------
+  /**
+   * 参加の確認: 招待されたメールアドレスに確認コードを送り、届いた8桁のコードを入力して参加する(ログイン方法にかかわらず必要)。
+   * 会社名は確認コードのメールに書く(画面には出さない。メールを受け取れることを確かめるまで、会社の情報を出さない)。辞退はコードなしでできる。
+   */
   async function showInvitations(invitations, onDone) {
     const ROLE = { reader: "閲覧者", companyAdmin: "会社管理者" };
     const msg = h("p", { class: "error-message", role: "alert" });
     const list = h("ul", { class: "pending-invite-list" }, invitations.map(inv => {
+      const sendCode = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendCode" }, "確認コードを送る");
+      const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "joinCode" });
       const accept = h("button", { type: "button", class: "btn btn-primary", "data-act": "accept" }, "参加する");
       const decline = h("button", { type: "button", class: "btn btn-secondary", "data-act": "decline" }, "参加しない");
+      const note = h("p", { class: "form-hint", role: "status" });
+      const lock = (v) => { sendCode.disabled = accept.disabled = decline.disabled = v; };
+      sendCode.addEventListener("click", async () => {
+        lock(true); msg.textContent = ""; note.textContent = "";
+        try { const r = await api.sendJoinCode({ invitationId: inv.invitationId }); note.textContent = `招待されたメールアドレスに確認コードを送りました(${r.expiresInMinutes || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。`; code.focus(); }
+        catch (e) { msg.textContent = describeCallableError(e); }
+        finally { lock(false); }
+      });
       const respond = async (yes) => {
-        accept.disabled = decline.disabled = true; msg.textContent = "";
-        try { await api.respondInvitation({ invitationId: inv.invitationId, accept: yes }); await onDone(); }
-        catch (e) { msg.textContent = describeCallableError(e); accept.disabled = decline.disabled = false; }
+        const value = code.value.replace(/\s/g, "");
+        if (yes && !/^\d{8}$/.test(value)) { msg.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
+        lock(true); msg.textContent = "";
+        try { await api.respondInvitation({ invitationId: inv.invitationId, accept: yes, ...(yes ? { code: value } : {}) }); await onDone(); }
+        catch (e) { msg.textContent = describeCallableError(e); lock(false); }
       };
       accept.addEventListener("click", () => respond(true));
       decline.addEventListener("click", () => respond(false));
-      return h("li", { class: "pending-invite" }, h("div", { class: "pending-invite-facility" }, inv.companyName),
+      return h("li", { class: "pending-invite" },
+        h("div", { class: "pending-invite-facility" }, "ディーラー画面への参加の案内"),
         h("div", { class: "pending-invite-meta" }, "役割 ", h("span", { class: "member-role-badge" }, ROLE[inv.role] || inv.role)),
-        h("div", { class: "onboarding-actions" }, accept, decline));
+        h("div", { class: "onboarding-actions" }, sendCode), note,
+        h("div", { class: "form-row dealer-join-row" }, code, accept),
+        h("div", { class: "onboarding-actions" }, decline));
     }));
     panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー画面への参加の確認")),
-      h("p", { class: "feature-desc" }, "次の会社の担当者として登録されています。参加すると、その会社に許可された医療機関の、自社宛ての注文を閲覧できます。"),
+      h("p", { class: "feature-desc" }, "ディーラーの担当者として招待されています。本人の確認のため、招待されたメールアドレスに確認コードを送ります。メールに書かれた会社名を確かめてから、コードを入力して参加してください。参加すると、その会社に許可された医療機関の、自社宛ての注文を閲覧できます。"),
       list, msg, h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
@@ -293,11 +312,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     try {
       const inv = await api.myInvitations();
       if (inv.invitations && inv.invitations.length) { await showInvitations(inv.invitations, enter); return; }
-      // 参加待ちがあるが、このログインではメールの受信を証明できない(Gmail 以外の Google ログインなど): 会社名は出さず、メールのリンクでのログインを案内
-      if (inv.emailLinkRequired) {
-        showMessage("ディーラー画面への参加", "参加の確認は、招待されたメールアドレスに届くログインリンクで行ってください。ログアウトして、「メールアドレスでログイン」からリンクを受け取ってください。");
-        return;
-      }
       // 有効な所属だけを候補にする(無効化された旧会社が残っていても、有効な1社ならそのまま開く。2社以上なら選ぶ)
       choices = ((await api.companies()).companies || []);
       if (choices.length > 1) { showCompanyChoice(); return; }
