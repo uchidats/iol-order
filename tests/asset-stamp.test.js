@@ -32,3 +32,10 @@ test("内容が変わると、そのファイルのバージョンが変わる(�
   assert.match(html, /href="styles\.css\?v=[0-9a-f]{10}"/);
   assert.match(html, /src="src\/main\.js\?v=[0-9a-f]{10}"/);
 });
+
+test("dealer.html(ディーラー専用画面の入口)のバージョンも最新", () => {
+  const dealer = fs.readFileSync(new URL("../dealer.html", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(stampHtml(dealer), dealer, "dealer.html is stale: run `npm run stamp`");
+  assert.match(dealer, /src="src\/dealer\/main\.js\?v=[0-9a-f]{10}"/);
+  assert.ok(dealer.indexOf('type="importmap"') < dealer.indexOf('type="module"'));
+});

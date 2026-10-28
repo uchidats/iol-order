@@ -8,7 +8,7 @@
  * （docs/self-registration.md 参照）
  */
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineString, defineBoolean, defineSecret } from "firebase-functions/params";
 import { createRegistrationService, RegistrationError } from "./src/registration.js";
@@ -21,6 +21,7 @@ import { onDocumentWrittenWithAuthContext, onDocumentCreated, onDocumentUpdated 
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { createMailDispatchService, createResendSender, verifyWebhookSignature } from "./src/order-mail-outbox.js";
 import { createSettingsAuditService } from "./src/settings-audit.js";
+import { createDealerPortalService } from "./src/dealer-portal.js";
 
 initializeApp();
 
@@ -188,3 +189,18 @@ export const resendWebhook = onRequest({ region: REGION, maxInstances: 5, servic
     res.status(500).send("");   // 配信サービスが再送する
   }
 });
+
+// ディーラー専用画面(第1段階: 閲覧。docs/dealer-portal.md)。注文受付・メール送信とは別の機能スイッチで止められる(既定は停止)。
+// 受信の索引は注文の作成をきっかけに別の処理で作るため、ここが失敗・停止しても注文の受付とメール送信は止まらない
+const DEALER_PORTAL_ENABLED = defineBoolean("DEALER_PORTAL_ENABLED", { default: false });
+const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value() });
+export const dealerPortalApi = onCall(options, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
+export const facilityDealerPortal = onCall(options, wrap(dealerPortal.facility));    // 施設の管理者・副管理者(閲覧の許可・取消)
+export const dealerPortalOperator = onCall(options, wrap(dealerPortal.operator));   // 運営者(会社・支店・担当者・関連付け・索引の作り直し)
+// 一時的な失敗は例外を投げて再試行(retry)。索引の ID は冪等なので重複しない。注文・メールの処理とは別なので、ここが失敗しても止まらない。
+// 再試行はイベントから24時間で打ち切る(indexOrderEvent。運営者が reindex で補う)
+export const indexDealerReceipts = onDocumentCreated({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, retry: true, document: "facilities/{facilityId}/orders/{orderId}" },
+  async (event) => {
+    try { await dealerPortal.indexOrderEvent({ facilityId: event.params.facilityId, orderId: event.params.orderId, eventTime: event.time }); }
+    catch (e) { console.error("dealer receipt indexing failed (will retry):", event.params.facilityId, event.params.orderId, e); throw e; }
+  });

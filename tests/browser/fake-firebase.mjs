@@ -7,9 +7,14 @@ export const FAKE_SDK = {
   "firebase-auth.js": `
     export const getAuth = () => ({ get currentUser() { return window.__fakeUser || null; } });
     export function onAuthStateChanged(auth, cb) { setTimeout(() => { window.__authAt = performance.now(); cb(window.__fakeUser || null); }, window.__fakeAuthDelay || 0); return () => {}; }
-    export class GoogleAuthProvider {}
-    export const signInWithPopup = async () => { throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); };
-    export const sendSignInLinkToEmail = async () => {};
+    export class GoogleAuthProvider { setCustomParameters(p) { this.params = p; } }
+    // Googleログイン: 呼び出し(指定したパラメーター)を記録。window.__fakeGoogle があればその結果(既定は「閉じられた」)
+    export const signInWithPopup = async (auth, provider) => {
+      (window.__googleCalls = window.__googleCalls || []).push(provider.params || null);
+      if (window.__fakeGoogle) return window.__fakeGoogle();
+      throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" });
+    };
+    export const sendSignInLinkToEmail = async (auth, email, settings) => { (window.__linkSent = window.__linkSent || []).push([email, settings && settings.url]); };
     export const isSignInWithEmailLink = () => false;
     export const signInWithEmailLink = async () => ({});
     export const signOut = async () => {};`,
@@ -46,7 +51,13 @@ export const FAKE_SDK = {
     }`,
   "firebase-functions.js": `
     export const getFunctions = () => ({});
-    export const httpsCallable = (fns, name) => async () => ({ data: name === "listMyPendingMemberships" ? { memberships: [] } : {} });`
+    // 呼び出しの記録(window.__calls)と、テストごとの応答(window.__fakeCallables[name](data)。例外の { code, message } はエラー)
+    export const httpsCallable = (fns, name) => async (data) => {
+      (window.__calls = window.__calls || []).push([name, data]);
+      const h = window.__fakeCallables && window.__fakeCallables[name];
+      if (h) return { data: await h(data) };
+      return { data: name === "listMyPendingMemberships" ? { memberships: [] } : {} };
+    };`
 };
 
 /**
