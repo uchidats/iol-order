@@ -60,7 +60,7 @@ function wrap(handler) {
     try {
       return await handler({ auth: request.auth, data: request.data });
     } catch (e) {
-      if (e instanceof RegistrationError) throw new HttpsError(e.code, e.message);
+      if (e instanceof RegistrationError) throw new HttpsError(e.code, e.message, e.details);
       console.error("callable failed:", e);
       throw new HttpsError("internal", "処理に失敗しました。時間をおいて再度お試しください");
     }
@@ -193,8 +193,28 @@ export const resendWebhook = onRequest({ region: REGION, maxInstances: 5, servic
 // ディーラー専用画面(第1段階: 閲覧。docs/dealer-portal.md)。注文受付・メール送信とは別の機能スイッチで止められる(既定は停止)。
 // 受信の索引は注文の作成をきっかけに別の処理で作るため、ここが失敗・停止しても注文の受付とメール送信は止まらない
 const DEALER_PORTAL_ENABLED = defineBoolean("DEALER_PORTAL_ENABLED", { default: false });
-const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value() });
-export const dealerPortalApi = onCall(options, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
+// 参加の確認コード: 招待されたメールに送る(注文メールと同じ送信の設定。送信停止中は送れないので参加できない。テスト用の宛先への送信中は本人に届かない)。
+// エミュレータのテストだけは、demo- のプロジェクトで DEALER_JOIN_CODE_TEST_SINK=true のときに限り、コードをテスト用の文書に書く(本番では使わない)
+const DEALER_JOIN_CODE_TEST_SINK = defineBoolean("DEALER_JOIN_CODE_TEST_SINK", { default: false });
+const isDemoProject = () => String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").startsWith("demo-");
+// purpose: "join"(参加。key は招待 ID)/ "microsoft"(Microsoft アカウントの登録。key は ms-{uid})
+async function sendDealerJoinCode({ purpose = "join", key, to, code, companyName, invitationId, expiresAtMs }) {
+  const id = String(key || invitationId);
+  if (isDemoProject() && DEALER_JOIN_CODE_TEST_SINK.value()) {
+    await getFirestore().doc(`dealerJoinCodeTestSink/${id}`).set({ to, code, purpose, at: FieldValue.serverTimestamp() });
+    return { ok: true };
+  }
+  if (!(MAIL_SENDING_ENABLED.value() && MAIL_FROM.value())) return { ok: false, error: "mail-disabled" };
+  const recipient = MAIL_TEST_ONLY.value() ? String(MAIL_TEST_RECIPIENT.value() || "").trim() : to;
+  if (!recipient) return { ok: false, error: "no-recipient" };
+  const minutes = Math.max(1, Math.round((expiresAtMs - Date.now()) / 60000));
+  const what = purpose === "microsoft" ? "ディーラー専用画面での Microsoft アカウントの登録" : "ディーラー専用画面への参加";
+  const text = `${companyName} の${what}の確認コードです。\n\n確認コード: ${code}\n\nこのコードは ${minutes} 分間、1回だけ有効です。画面の「確認コード」に入力してください。\nお心当たりがない場合は、このメールを破棄してください(コードを他の人に伝えないでください)。\n`;
+  return createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
+    .send({ to: [recipient], subject: `【確認コード】${what}`, text, idempotencyKey: `dealer-${purpose}-${id}-${expiresAtMs}` });
+}
+const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value(), sendJoinCode: sendDealerJoinCode });
+export const dealerPortalApi = onCall({ ...options, secrets: [RESEND_API_KEY, MAIL_TEST_RECIPIENT] }, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
 export const facilityDealerPortal = onCall(options, wrap(dealerPortal.facility));    // 施設の管理者・副管理者(閲覧の許可・取消)
 export const dealerPortalOperator = onCall(options, wrap(dealerPortal.operator));   // 運営者(会社・支店・担当者・関連付け・索引の作り直し)
 // 一時的な失敗は例外を投げて再試行(retry)。索引の ID は冪等なので重複しない。注文・メールの処理とは別なので、ここが失敗しても止まらない。

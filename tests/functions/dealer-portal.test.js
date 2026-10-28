@@ -17,13 +17,16 @@ const PROJECT = "demo-iol-functions";
 const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").split(":");
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
 let env, db, portal, orders, testOrders, clock, enabled;
+const sentCodes = [], sendResult = { v: { ok: true } };
 
 before(async () => {
   if (!getApps().length) initializeApp({ projectId: PROJECT });
   db = getFirestore();
   clock = { t: null };
   enabled = { v: true };
-  portal = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => enabled.v, now: () => clock.t ?? Date.now() });
+  // 参加の確認コード: 送ったもの(宛先・コード・会社名)を記録する偽の送信。sendResult で送信の失敗も試せる
+  portal = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => enabled.v, now: () => clock.t ?? Date.now(),
+    sendJoinCode: async (m) => { sentCodes.push(m); return sendResult.v; } });
   orders = createOrderService({ db, FieldValue, isEnabled: () => true });
   testOrders = createOrderService({ db, FieldValue, isEnabled: () => true, getPolicy: () => ({ unrestricted: false, facilityIds: ["fA"], uids: ["ordA"], testMode: true }) });
   env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: fs.readFileSync(rulesPath, "utf8"), host, port: Number(port) } });
@@ -60,7 +63,7 @@ beforeEach(async () => {
   C.Y = (await op("createCompany", { name: "ワイ医療", requestId: crypto.randomUUID() })).companyId;
   for (const [cid, uid, role] of [[C.X, "x1", "companyAdmin"], [C.X, "x2", "reader"], [C.Y, "y1", "reader"]]) {
     const { invitationId } = await op("inviteStaff", { companyId: cid, email: `${uid}@corp.example.jp`, name: `担当${uid}`, role });
-    await api(uid, "respond", { invitationId, accept: true });
+    await join(uid, invitationId);
   }
   await op("proposeLink", { facilityId: "fA", localDealerId: "dA1", companyId: C.X });
   await op("proposeLink", { facilityId: "fA", localDealerId: "dA2", companyId: C.Y });
@@ -79,6 +82,12 @@ async function placeOrder(facilityId, uid, lines, { notes = "共通の備考(患
   return r;
 }
 const list = (uid, over = {}) => api(uid, "list", { ...range(), ...over });
+/** 正規の参加: 確認コードを送り(招待されたメールに届く)、そのコードで承諾する */
+async function join(who, invitationId) {
+  await api(who, "sendCode", { invitationId });
+  const m = sentCodes.filter(x => x.invitationId === invitationId).at(-1);
+  return api(who, "respond", { invitationId, accept: true, code: m.code });
+}
 /** 続きを最後までたどる(同じ検索)。各ページの newSinceSearch もまとめる */
 async function rest(uid, first, over = {}, call = (c) => list(uid, { ...over, cursor: c })) {
   const items = [], flags = [];
@@ -97,18 +106,18 @@ test("権限: 会社・支店・担当者・関連付けの管理は運営者だ
   await rejects(op("inviteStaff", { companyId: C.X, email: "a@b.jp", name: "", role: "reader", extra: 1 }), "invalid-argument");
   const { invitationId } = await op("inviteStaff", { companyId: C.Y, email: "new@corp.example.jp", name: "新人", role: "reader" });
   // 他人(x1)は承諾できない。未招待の人には会社名も出さない
-  await rejects(api("x1", "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join("x1", invitationId), "failed-precondition");
   assert.deepEqual((await api("x1", "invitations")).invitations, []);
-  assert.deepEqual((await api("new", "invitations")).invitations, [{ invitationId, companyName: "ワイ医療", role: "reader" }]);
+  assert.deepEqual((await api("new", "invitations")).invitations, [{ invitationId, role: "reader" }], "会社名は返さない(確認コードのメールに書く)");
   await rejects(api("stranger", "context"), "permission-denied");
   // 期限切れ
   clock.t = Date.now() + 31 * 24 * 3600 * 1000;
   assert.deepEqual((await api("new", "invitations")).invitations, []);
-  await rejects(api("new", "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join("new", invitationId), "failed-precondition");
   clock.t = null;
   // 取り消し後は承諾できない
   await op("cancelInvitation", { invitationId });
-  await rejects(api("new", "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join("new", invitationId), "failed-precondition");
   // 支店: 同じ会社の有効な支店だけ。他社の支店は指定できない
   const { branchId } = await op("upsertBranch", { companyId: C.Y, name: "東京支店" });
   await rejects(op("updateStaff", { companyId: C.X, uid: "x1", branchId }), "invalid-argument");
@@ -251,7 +260,7 @@ test("退職・所属変更: 担当者の無効化、ログインのメールの
   await rejects(api(auth("x1", { email: "x1@corp.example.jp", email_verified: false }), "context"), "permission-denied");
   // 再招待・承諾で復帰
   const { invitationId } = await op("inviteStaff", { companyId: C.X, email: "x2@corp.example.jp", name: "担当x2", role: "reader" });
-  await api("x2", "respond", { invitationId, accept: true });
+  await join("x2", invitationId);
   assert.equal((await list("x2")).items.length, 1);
 });
 
@@ -444,18 +453,18 @@ test("F-02: 無効化の前に発行した参加待ちでは復帰できない(�
   const { invitationId } = await op("inviteStaff", { companyId: C.X, email: "x2@corp.example.jp", name: "担当x2", role: "reader" });
   await op("updateStaff", { companyId: C.X, uid: "x2", status: "disabled" });
   assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "cancelled", "無効化と同時に参加待ちを取り消す");
-  await rejects(api("x2", "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join("x2", invitationId), "failed-precondition");
   await rejects(api("x2", "context"), "permission-denied");
   assert.equal((await db.doc(`dealerCompanies/${C.X}/staff/x2`).get()).get("status"), "disabled");
   // 取消が漏れた(参加待ちのまま残った)場合も、無効化より前に発行された案内は使えない
   await db.doc(`dealerCompanyInvitations/${invitationId}`).update({ status: "pending" });
-  await rejects(api("x2", "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join("x2", invitationId), "failed-precondition");
   await rejects(list("x2"), "permission-denied");
   // 同じメールの別アカウント(別UID)も、取り消された案内では参加できない
-  await rejects(api(auth("x2b", { email: "x2@corp.example.jp" }), "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(join(auth("x2b", { email: "x2@corp.example.jp" }), invitationId), "failed-precondition");
   // 無効化の後に運営者が発行した案内で復帰
   const again = await op("inviteStaff", { companyId: C.X, email: "x2@corp.example.jp", name: "担当x2", role: "reader" });
-  await api("x2", "respond", { invitationId: again.invitationId, accept: true });
+  await join("x2", again.invitationId);
   assert.equal((await list("x2")).items.length, 1);
   // 辞退は無効化の後でもできる(状態は変わらない)
   await op("updateStaff", { companyId: C.X, uid: "x2", status: "disabled" });
@@ -563,7 +572,7 @@ test("F-06: 所属の変更後(旧会社で無効化)も、会社を指定せず
   // x1 が会社Xを退職し、会社Yへ参加
   await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
   const { invitationId } = await op("inviteStaff", { companyId: C.Y, email: "x1@corp.example.jp", name: "担当x1", role: "reader" });
-  await api("x1", "respond", { invitationId, accept: true });
+  await join("x1", invitationId);
   assert.deepEqual((await db.doc("dealerStaffIndex/x1").get()).get("companyIds").sort(), [C.X, C.Y].sort(), "所属の一覧には旧会社も残る");
   const ctx = await api("x1", "context");
   assert.equal(ctx.company.id, C.Y, "有効な1社を開く");
@@ -571,7 +580,7 @@ test("F-06: 所属の変更後(旧会社で無効化)も、会社を指定せず
   await rejects(api("x1", "context", { companyId: C.X }), "permission-denied");
   // 有効な所属が2社: 会社の指定が必要。候補は2社
   const inv2 = await op("inviteStaff", { companyId: C.X, email: "y1@corp.example.jp", name: "担当y1", role: "reader" });
-  await api("y1", "respond", { invitationId: inv2.invitationId, accept: true });
+  await join("y1", inv2.invitationId);
   await rejects(api("y1", "context"), "failed-precondition");
   assert.deepEqual((await api("y1", "companies")).companies.map(c => c.name), ["エックス商事", "ワイ医療"]);
   assert.equal((await api("y1", "context", { companyId: C.X })).company.id, C.X);
@@ -602,7 +611,7 @@ test("F-06(再レビュー): 無効な旧所属が20件以上残っていても�
   assert.equal((await api(uid, "context")).company.id, C.X);
   // 招待の承諾では、新しい所属を一覧の先頭に加える
   const { invitationId } = await op("inviteStaff", { companyId: C.Y, email: `${uid}@corp.example.jp`, name: "", role: "reader" });
-  await api(uid, "respond", { invitationId, accept: true });
+  await join(uid, invitationId);
   assert.equal((await db.doc(`dealerStaffIndex/${uid}`).get()).get("companyIds")[0], C.Y);
   assert.deepEqual((await api(uid, "companies")).companies.map(c => c.companyId).sort(), [C.X, C.Y].sort());
   await rejects(api(uid, "context"), "failed-precondition");   // 有効2社: 会社の選択が必要
@@ -630,7 +639,7 @@ test("F-06(再々レビュー): 無効な旧所属が500件を超えて残って
   assert.equal((await api(uid, "context")).company.id, C.X);
   // 承諾: 新しい所属を先頭に加え、末尾の有効な所属(X)も残す
   const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "", role: "reader" });
-  await api(uid, "respond", { invitationId, accept: true });
+  await join(uid, invitationId);
   const ids = (await db.doc(`dealerStaffIndex/${uid}`).get()).get("companyIds");
   assert.deepEqual([ids.length, ids[0], ids.at(-1)], [502, C.Y, C.X]);
   assert.deepEqual((await api(uid, "companies")).companies.map(c => c.companyId).sort(), [C.X, C.Y].sort());
@@ -638,7 +647,7 @@ test("F-06(再々レビュー): 無効な旧所属が500件を超えて残って
   const full = Array.from({ length: 2000 }, (_, i) => `dco-full-${i}`);
   await db.doc("dealerStaffIndex/y1").set({ companyIds: full });
   const inv = await op("inviteStaff", { companyId: C.X, email: "y1@corp.example.jp", name: "", role: "reader" });
-  await assert.rejects(api("y1", "respond", { invitationId: inv.invitationId, accept: true }), (e) => e.code === "failed-precondition" && /上限/.test(e.message));
+  await assert.rejects(join("y1", inv.invitationId), (e) => e.code === "failed-precondition" && /上限/.test(e.message));
   assert.equal((await db.doc("dealerStaffIndex/y1").get()).get("companyIds").length, 2000, "削らない");
 });
 
@@ -701,37 +710,94 @@ test("N-02: 続きのカーソルは、検索時点から読み取り可能な�
 
 // ======================= Googleログインのレビュー(docs/reviews/dealer-google-login-audit.md)の再現 =======================
 
-test("G-02: 招待の承諾はメールの受信を証明したログインだけ(メールのリンクから30分以内、または Gmail の Google ログイン)。Gmail 以外の企業メールの Google ログインでは会社名も見せず、承諾できない", async () => {
+test("G-02-R1: 通常のパスワードのログイン(メールのリンクと区別できない)・Google からパスワードを設定して入り直す経路では、確認コードなしに参加できない。会社名も見せない", async () => {
   const email = "newcomer@corp.example.jp";
   const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "新人", role: "reader" });
-  const google = auth("newg", { email, firebase: { sign_in_provider: "google.com" } });
-  // 企業メールの Google ログイン: 招待は見せず(会社名なし)、メールのリンクを案内。承諾は拒否、所属は作られない
-  assert.deepEqual(await api(google, "invitations"), { invitations: [], emailLinkRequired: true });
-  await assert.rejects(api(google, "respond", { invitationId, accept: true }), (e) => e.code === "failed-precondition" && /ログインリンク/.test(e.message));
-  assert.equal((await db.doc("dealerCompanies/" + C.Y + "/staff/newg").get()).exists, false);
-  assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "pending", "招待は残る");
-  // ログイン方法が分からない・古いメールのリンク(30分超)も承諾できない
-  await rejects(api(auth("newx", { email, firebase: {} }), "respond", { invitationId, accept: true }), "failed-precondition");
-  await rejects(api(auth("newx", { email, auth_time: Math.floor(Date.now() / 1000) - 31 * 60 }), "respond", { invitationId, accept: true }), "failed-precondition");
-  await rejects(api(auth("newx", { email, firebase: { sign_in_provider: "anonymous" } }), "respond", { invitationId, accept: true }), "failed-precondition");
-  // メールのリンクで今ログインした本人は承諾できる
-  const link = auth("newl", { email });
-  assert.equal((await api(link, "invitations")).invitations.length, 1);
-  await api(link, "respond", { invitationId, accept: true });
-  assert.equal((await api(link, "context")).company.id, C.Y);
-  // Gmail のアドレスは、Google ログインで承諾できる(Google が受信箱を管理し、所有者が入れ替わらない)
-  const gmail = "dealer.person@gmail.com";
-  const inv2 = await op("inviteStaff", { companyId: C.X, email: gmail, name: "", role: "reader" });
-  const gg = auth("gmailu", { email: gmail, firebase: { sign_in_provider: "google.com" } });
-  assert.equal((await api(gg, "invitations")).invitations.length, 1);
-  await api(gg, "respond", { invitationId: inv2.invitationId, accept: true });
-  assert.equal((await api(gg, "context")).company.id, C.X);
-  // 承諾した後の閲覧は、ログイン方法に依存しない(同じ UID・承認済みのメールなら Google でも可)
-  assert.equal((await api(auth("newl", { email, firebase: { sign_in_provider: "google.com" } }), "context")).company.id, C.Y);
-  // 辞退は、どのログインでもできる(所属は増えない)
-  const inv3 = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
-  await api(google, "respond", { invitationId: inv3.invitationId, accept: false });
-  assert.equal((await db.doc(`dealerCompanyInvitations/${inv3.invitationId}`).get()).get("status"), "declined");
+  // メールのリンクを使っていない、確認済みメールのパスワードのログイン(直近の auth_time)
+  const password = auth("pw", { email, firebase: { sign_in_provider: "password" }, auth_time: Math.floor(Date.now() / 1000) });
+  // Google(企業メール)→ パスワードを設定して入り直した直後のトークン(Codex の再現: sign_in_provider は password・auth_time は今・email_verified は true)
+  const viaGoogle = auth("gp", { email, firebase: { sign_in_provider: "password", identities: { "google.com": ["g-1"], email: [email] } }, auth_time: Math.floor(Date.now() / 1000) });
+  for (const who of [password, viaGoogle, auth("gg", { email, firebase: { sign_in_provider: "google.com" } })]) {
+    const inv = await api(who, "invitations");
+    assert.deepEqual(inv.invitations, [{ invitationId, role: "reader" }], "会社名は返さない");
+    assert.ok(!JSON.stringify(inv).includes("ワイ医療"));
+    await assert.rejects(api(who, "respond", { invitationId, accept: true }), (e) => e.code === "failed-precondition" && /確認コード/.test(e.message));
+    await rejects(api(who, "respond", { invitationId, accept: true, code: "12345678" }), "failed-precondition");
+    await rejects(api(who, "context"), "permission-denied");
+  }
+  assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "pending");
+  assert.equal((await db.collection(`dealerCompanies/${C.Y}/staff`).where("approvedEmail", "==", email).get()).size, 0, "所属は作られない");
+  // 招待されたメールに届いたコードを入力した本人だけが参加できる(ログイン方法は問わない。Google でも可)
+  await api(viaGoogle, "sendCode", { invitationId });
+  const mail = sentCodes.at(-1);
+  assert.deepEqual([mail.to, mail.companyName, mail.invitationId], [email, "ワイ医療", invitationId], "コードは招待されたメールへ。会社名はメールに書く");
+  assert.match(mail.code, /^\d{8}$/);
+  await api(viaGoogle, "respond", { invitationId, accept: true, code: mail.code });
+  assert.equal((await api(viaGoogle, "context")).company.id, C.Y);
+  // 使ったコードは再利用できない
+  await rejects(api(viaGoogle, "respond", { invitationId, accept: true, code: mail.code }), "failed-precondition");
+});
+
+test("G-02-R1: 確認コードは一度だけ・10分・5回まで。別の UID・別の招待・作り直した招待のコードは使えない。無効化した旧 UID は、旧い資格情報だけでは再発行の招待を先取りできない", async () => {
+  const email = "code-user@corp.example.jp";
+  let { invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
+  const a = auth("ca", { email }), b = auth("cb", { email });
+  // 期限切れ
+  await api(a, "sendCode", { invitationId });
+  const c1 = sentCodes.at(-1).code;
+  clock.t = Date.now() + 11 * 60 * 1000;
+  await assert.rejects(api(a, "respond", { invitationId, accept: true, code: c1 }), (e) => e.code === "failed-precondition" && /期限切れ/.test(e.message));
+  // 送り直しは1分あける・回数の上限
+  clock.t = Date.now() + 12 * 60 * 1000;
+  await api(a, "sendCode", { invitationId });
+  await assert.rejects(api(a, "sendCode", { invitationId }), (e) => e.code === "failed-precondition" && /1分/.test(e.message));
+  const c2 = sentCodes.at(-1).code;
+  // 別の UID(同じメール)は、他人に送ったコードを使えない
+  await assert.rejects(api(b, "respond", { invitationId, accept: true, code: c2 }), (e) => /確認コードが無効/.test(e.message));
+  // 5回間違えると、正しいコードでも使えない
+  for (let i = 0; i < 5; i++) await assert.rejects(api(a, "respond", { invitationId, accept: true, code: c2 === "00000000" ? "11111111" : "00000000" }), (e) => /確認コードが違います/.test(e.message));
+  await assert.rejects(api(a, "respond", { invitationId, accept: true, code: c2 }), (e) => /確認コードが無効/.test(e.message));
+  // 作り直した招待(新しい世代)では、前のコードは使えない
+  await api(a, "sendCode", { invitationId }).catch(() => {});
+  clock.t = Date.now() + 14 * 60 * 1000;
+  await api(a, "sendCode", { invitationId });
+  const c3 = sentCodes.at(-1).code;
+  ({ invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" }));
+  await rejects(api(a, "respond", { invitationId, accept: true, code: c3 }), "failed-precondition");
+  // 別の招待(別の会社)のコードは使えない
+  const other = await op("inviteStaff", { companyId: C.Y, email, name: "", role: "reader" });
+  await api(a, "sendCode", { invitationId: other.invitationId });
+  const cy = sentCodes.at(-1).code;
+  await rejects(api(a, "respond", { invitationId, accept: true, code: cy }), "failed-precondition");
+  clock.t = null;
+  // 無効化した旧 UID の先取り: 旧 UID(x1)を無効化 → 再招待。旧 UID がコードを要求しても、コードは招待されたメール(本人)に届くだけ。推測では参加できない
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
+  const re = await op("inviteStaff", { companyId: C.X, email: "x1@corp.example.jp", name: "", role: "reader" });
+  await api("x1", "sendCode", { invitationId: re.invitationId });
+  assert.equal(sentCodes.at(-1).to, "x1@corp.example.jp", "コードは招待されたメールへ");
+  await rejects(api("x1", "respond", { invitationId: re.invitationId, accept: true, code: "00000000" }), "failed-precondition");
+  // 本人(新しい UID)がメールのコードで参加。旧 UID は本人のコードを使えない
+  const owner = auth("x1new", { email: "x1@corp.example.jp" });
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await api(owner, "sendCode", { invitationId: re.invitationId });
+  const oc = sentCodes.at(-1).code;
+  await rejects(api("x1", "respond", { invitationId: re.invitationId, accept: true, code: oc }), "failed-precondition");
+  await api(owner, "respond", { invitationId: re.invitationId, accept: true, code: oc });
+  clock.t = null;
+  assert.equal((await api(owner, "context")).company.id, C.X);
+  await rejects(api("x1", "context"), "permission-denied");
+});
+
+test("G-02-R1: 確認コードを送れないとき(送信の停止・失敗・未設定)は参加できない。辞退はコードなしでできる", async () => {
+  const email = "nomail@corp.example.jp";
+  const { invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
+  sendResult.v = { ok: false, error: "mail-disabled" };
+  await assert.rejects(api(auth("nm", { email }), "sendCode", { invitationId }), (e) => e.code === "failed-precondition" && /確認コードを送れませんでした/.test(e.message));
+  sendResult.v = { ok: true };
+  const noSender = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => true });
+  await assert.rejects(noSender.portal({ auth: auth("nm", { email }), data: { action: "sendCode", invitationId } }), (e) => e.code === "failed-precondition");
+  await api(auth("nm", { email }), "respond", { invitationId, accept: false });
+  assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "declined");
 });
 
 test("G-03: 同じ会社に同じメールの有効な別アカウントがある間は、別の UID で承諾・有効化できない。移行は旧 UID の無効化 → 再招待 → 承諾。運営者の一覧に同じメールの別アカウントを示す", async () => {
@@ -741,14 +807,14 @@ test("G-03: 同じ会社に同じメールの有効な別アカウントがあ�
   const other = auth("x1b", { email });   // 同じメールの別アカウント(別 UID)
   // 有効な x1 がいる間の再招待: 別 UID では承諾できない(2つの有効な UID にしない)
   const { invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "担当x1", role: "reader" });
-  await assert.rejects(api(other, "respond", { invitationId, accept: true }), (e) => e.code === "failed-precondition" && /同じメールアドレスの有効な登録/.test(e.message));
+  await assert.rejects(join(other, invitationId), (e) => e.code === "failed-precondition" && /同じメールアドレスの有効な登録/.test(e.message));
   await rejects(api(other, "context"), "permission-denied");
   assert.equal((await db.doc(`dealerCompanies/${C.X}/staff/x1b`).get()).exists, false);
   // 正式な移行: 旧 UID(x1)を無効化(参加待ちも同時に取消)→ 再招待 → 新しい UID(x1b)が承諾
   await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
-  await rejects(api(other, "respond", { invitationId, accept: true }), "failed-precondition");   // 無効化前の招待は使えない
+  await rejects(join(other, invitationId), "failed-precondition");   // 無効化前の招待は使えない
   const again = await op("inviteStaff", { companyId: C.X, email, name: "担当x1", role: "reader" });
-  await api(other, "respond", { invitationId: again.invitationId, accept: true });
+  await join(other, again.invitationId);
   assert.equal((await list(other)).items.length, 1);
   await rejects(list("x1"), "permission-denied", "旧 UID は閲覧できない");
   // 旧 UID を有効に戻すことはできない(同じメールの有効な UID を2つにしない)
@@ -803,6 +869,154 @@ test("共存: 閲覧を許可中も、施設は採用IOLの既定ディーラー
   await del(doc(adminDb, "facilities/fA/facilityDealers/dA1"));
   assert.equal((await db.doc("facilities/fA/facilityDealers/dA1").get()).exists, false);
   await rejects(api("x1", "get", { receiptId: xs[0].receiptId }), "not-found");
+});
+
+// ======================= Microsoft ログイン =======================
+const msAuth = (uid, email, ids, over = {}) => auth(uid, { email, firebase: { sign_in_provider: "microsoft.com", identities: { "microsoft.com": ids, email: [email] } }, ...over });
+// メールのリンク・通常のパスワード(トークン上は区別できない)。msIds があれば Microsoft が連携済み
+const linkAuth = (uid, email, msIds, over = {}) => auth(uid, { email, firebase: { sign_in_provider: "password", identities: { email: [email], ...(msIds ? { "microsoft.com": msIds } : {}) } }, auth_time: Math.floor(Date.now() / 1000), ...over });
+const googleAuth = (uid, email, msIds) => auth(uid, { email, firebase: { sign_in_provider: "google.com", identities: { "google.com": ["g-" + uid], email: [email], ...(msIds ? { "microsoft.com": msIds } : {}) } } });
+const msUnregistered = (e) => e.code === "permission-denied" && e.details && e.details.reason === "microsoft-unregistered";
+/** Microsoft アカウントの登録: 確認コードを送り(承認済みのメールに届く)、そのコードで登録する */
+async function trustMs(who) {
+  const r = await api(who, "sendMicrosoftCode");
+  if (r.alreadyRegistered) return r;
+  return api(who, "trustMicrosoft", { code: sentCodes.at(-1).code });
+}
+
+test("MS-01: 未登録の Microsoft が連携された UID は、ログイン方法をパスワード・メールのリンク・Google に切り替えても閲覧できない(G-02 の経路)。登録は承認済みのメールに届く確認コードだけ", async () => {
+  await grant("adminA", "fA", "dA1");
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  const email = "x1@corp.example.jp";
+  // Codex の再現: 未登録の Microsoft のセッション → パスワードを設定して入り直したトークン(password・確認済み・直近の auth_time、Microsoft は連携されたまま)
+  for (const who of [msAuth("x1", email, ["m-x1"]), linkAuth("x1", email, ["m-x1"]), googleAuth("x1", email, ["m-x1"])]) {
+    for (const [action, data] of [["context", {}], ["companies", {}], ["list", range()], ["get", { receiptId: "x" }]]) {
+      await assert.rejects(api(who, action, data), msUnregistered, `${who.token.firebase.sign_in_provider} ${action}`);
+    }
+    // 確認コードなし・送っていないコードでは登録できない(ログイン方法・メールの一致・UID は証明にならない)
+    await rejects(api(who, "trustMicrosoft"), "failed-precondition");
+    await assert.rejects(api(who, "trustMicrosoft", { code: "12345678" }), (e) => e.code === "failed-precondition" && /確認コードが無効/.test(e.message));
+  }
+  assert.equal((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), undefined, "登録されない");
+  // MS-03: 連携の直後(Microsoft のセッション)から、承認済みのメールに確認コードを送って登録できる
+  const ms = msAuth("x1", email, ["m-x1"]);
+  await api(ms, "sendMicrosoftCode");
+  const mail = sentCodes.at(-1);
+  assert.deepEqual([mail.purpose, mail.key, mail.to, mail.companyName], ["microsoft", "ms-x1", email, "エックス商事"]);
+  await assert.rejects(api(ms, "trustMicrosoft", { code: mail.code === "00000000" ? "11111111" : "00000000" }), (e) => /確認コードが違います/.test(e.message));
+  await assert.rejects(api(msAuth("x1", email, ["m-other"]), "trustMicrosoft", { code: mail.code }), (e) => /確認コードが無効/.test(e.message), "別の Microsoft の ID には使えない");
+  await assert.rejects(api(msAuth("x2", "x2@corp.example.jp", ["m-x1"]), "trustMicrosoft", { code: mail.code }), (e) => /確認コードが無効/.test(e.message), "別の UID には使えない");
+  await api(ms, "trustMicrosoft", { code: mail.code });
+  await rejects(api(ms, "trustMicrosoft", { code: mail.code }), "failed-precondition");   // 一度だけ
+  assert.deepEqual((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), ["m-x1"]);
+  for (const who of [ms, linkAuth("x1", email, ["m-x1"]), googleAuth("x1", email, ["m-x1"])]) assert.equal((await api(who, "context")).company.id, C.X);
+  assert.equal((await api(ms, "list", range())).items.length, 1);
+  assert.deepEqual(await api(ms, "sendMicrosoftCode"), { ok: true, alreadyRegistered: true });
+  // 登録していない ID・複数の ID・未確認のメール・他社の指定は拒否
+  await assert.rejects(api(msAuth("x1", email, ["m-evil"]), "context"), msUnregistered);
+  await rejects(api(msAuth("x1", email, ["m-x1", "m-evil"]), "context"), "permission-denied");
+  await rejects(api(msAuth("x1", email, ["m-x1"], { email_verified: false }), "context"), "permission-denied");
+  await rejects(api(ms, "list", { ...range(), companyId: C.Y }), "permission-denied");
+  // Microsoft を連携していないログインは従来どおり
+  assert.equal((await api(linkAuth("x1", email, null), "context")).company.id, C.X);
+});
+
+test("MS-01: 連携・解除・再連携でも、確認コードなしに権限は移らない。別の Microsoft に替えたら登録し直すまで使えない。Microsoft の ID は別の UID の権限にならない", async () => {
+  const email = "x1@corp.example.jp";
+  await trustMs(msAuth("x1", email, ["m-a"]));
+  // 解除(Microsoft のない UID のトークン)→ 従来どおり。同じ ID を再連携 → 登録済み
+  assert.equal((await api(linkAuth("x1", email, null), "context")).company.id, C.X);
+  assert.equal((await api(msAuth("x1", email, ["m-a"]), "context")).company.id, C.X);
+  // 別の Microsoft に替えた(再連携)→ 登録し直すまでどのログインでも拒否。前に送ったコードは新しい ID に使えない
+  await assert.rejects(api(linkAuth("x1", email, ["m-b"]), "context"), msUnregistered);
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await api(msAuth("x1", email, ["m-b"]), "sendMicrosoftCode");
+  const cb = sentCodes.at(-1).code;
+  await assert.rejects(api(msAuth("x1", email, ["m-c"]), "trustMicrosoft", { code: cb }), (e) => /確認コードが無効/.test(e.message));
+  await api(msAuth("x1", email, ["m-b"]), "trustMicrosoft", { code: cb });
+  clock.t = null;
+  assert.deepEqual((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), ["m-b"], "1つの UID に Microsoft は1つ(置き換え)");
+  await assert.rejects(api(msAuth("x1", email, ["m-a"]), "context"), msUnregistered, "前の Microsoft は使えない");
+  // 登録した Microsoft の ID が別の UID に連携されても、その UID の所属・登録がなければ何も見えない(メールが同じでも)
+  await rejects(api(msAuth("x1other", email, ["m-b"]), "context"), "permission-denied");
+  await rejects(api(msAuth("x1other", email, ["m-b"]), "sendMicrosoftCode"), "permission-denied");
+  // 期限切れ・誤り5回
+  await api(msAuth("x2", "x2@corp.example.jp", ["m-x2"]), "sendMicrosoftCode");
+  const c2 = sentCodes.at(-1).code;
+  for (let i = 0; i < 5; i++) await rejects(api(msAuth("x2", "x2@corp.example.jp", ["m-x2"]), "trustMicrosoft", { code: c2 === "00000000" ? "11111111" : "00000000" }), "failed-precondition");
+  await assert.rejects(api(msAuth("x2", "x2@corp.example.jp", ["m-x2"]), "trustMicrosoft", { code: c2 }), (e) => /確認コードが無効/.test(e.message));
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await api(msAuth("x2", "x2@corp.example.jp", ["m-x2"]), "sendMicrosoftCode");
+  const c3 = sentCodes.at(-1).code;
+  clock.t = Date.now() + 13 * 60 * 1000;
+  await assert.rejects(api(msAuth("x2", "x2@corp.example.jp", ["m-x2"]), "trustMicrosoft", { code: c3 }), (e) => /確認コードが無効/.test(e.message));
+  clock.t = null;
+});
+
+test("MS-02: 無効化した担当者(所属の記録だけが残る)は、確認コードの送信も登録もできない。無効化で登録済みの Microsoft と送信中のコードを消し、有効に戻しても登録し直すまで使えない", async () => {
+  const email = "x1@corp.example.jp";
+  await trustMs(msAuth("x1", email, ["m-x1"]));
+  // コードを送った後に無効化 → そのコードで登録できない(Codex の再現: 無効化の後も trustMicrosoft が成功した)
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await api(linkAuth("x1", email, ["m-x1b"]), "sendMicrosoftCode").catch(() => {});
+  await assert.rejects(api(linkAuth("x1", email, ["m-x1b"]), "context"), msUnregistered);
+  const pending = sentCodes.at(-1).code;
+  clock.t = null;
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
+  const idx = (await db.doc("dealerStaffIndex/x1").get()).data();
+  assert.ok(idx.companyIds.includes(C.X), "所属の記録は残る");
+  assert.equal(idx.trustedMicrosoftIds, undefined, "登録済みの Microsoft を消す");
+  assert.equal(idx.microsoftCode, undefined, "送信中のコードも消す");
+  await rejects(api(linkAuth("x1", email, ["m-x1b"]), "trustMicrosoft", { code: pending }), "failed-precondition");
+  await rejects(api(msAuth("x1", email, ["m-x1"]), "sendMicrosoftCode"), "permission-denied");
+  assert.equal((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), undefined);
+  // 有効に戻しても、Microsoft はメールの確認コードで登録し直すまで使えない
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "active" });
+  await assert.rejects(api(msAuth("x1", email, ["m-x1"]), "context"), msUnregistered);
+  await trustMs(msAuth("x1", email, ["m-x1"]));
+  assert.equal((await api(msAuth("x1", email, ["m-x1"]), "context")).company.id, C.X);
+  // 登録の直前に所属が無効になった場合も登録しない(トランザクションの中で所属を確かめる)
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await api(msAuth("x1", email, ["m-x1c"]), "sendMicrosoftCode");
+  const late = sentCodes.at(-1).code;
+  await db.doc(`dealerCompanies/${C.X}/staff/x1`).update({ status: "disabled" });   // 運営者の操作を経ない無効化(コードは残る)でも
+  await rejects(api(msAuth("x1", email, ["m-x1c"]), "trustMicrosoft", { code: late }), "permission-denied");
+  clock.t = null;
+  assert.deepEqual((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), ["m-x1"]);
+});
+
+test("Microsoft: 参加は確認コードで(Microsoft のセッションでも可。会社名は見せない)。参加しても Microsoft は登録するまで使えない。送信できないと登録できない。機能の停止中は登録もできない", async () => {
+  const email = "ms-new@corp.example.jp";
+  const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "", role: "reader" });
+  const ms = msAuth("msu", email, ["m-new"]);
+  assert.deepEqual(await api(ms, "invitations"), { invitations: [{ invitationId, role: "reader" }] });
+  await rejects(api(ms, "respond", { invitationId, accept: true }), "failed-precondition");
+  await join(ms, invitationId);
+  await assert.rejects(api(ms, "context"), msUnregistered, "参加しても、Microsoft は登録まで使えない");
+  // 送信の失敗・送信手段なしでは登録できない
+  sendResult.v = { ok: false, error: "mail-disabled" };
+  await rejects(api(ms, "sendMicrosoftCode"), "failed-precondition");
+  sendResult.v = { ok: true };
+  const noSender = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => true });
+  await assert.rejects(noSender.portal({ auth: ms, data: { action: "sendMicrosoftCode" } }), (e) => e.code === "failed-precondition");
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await trustMs(ms);
+  clock.t = null;
+  assert.equal((await api(ms, "context")).company.id, C.Y);
+  // 未招待の Microsoft アカウント(個人など)は何も見えない・送れない
+  const outsider = msAuth("msout", "someone@outlook-like.example.com", ["m-out"]);
+  assert.deepEqual((await api(outsider, "invitations")).invitations, []);
+  await rejects(api(outsider, "context"), "permission-denied");
+  await rejects(api(outsider, "sendMicrosoftCode"), "permission-denied");
+  // 連携していない・未確認のメール
+  await rejects(api(linkAuth("msu", email, null), "sendMicrosoftCode"), "failed-precondition");
+  await rejects(api(msAuth("msu", email, ["m-new"], { email_verified: false }), "sendMicrosoftCode"), "permission-denied");
+  // 機能の停止中は、登録も含めてディーラーの API は使えない
+  enabled.v = false;
+  await rejects(api(ms, "sendMicrosoftCode"), "failed-precondition");
+  await rejects(api(ms, "trustMicrosoft", { code: "12345678" }), "failed-precondition");
+  await rejects(api(ms, "context"), "failed-precondition");
+  enabled.v = true;
 });
 
 test("Rules: 新しい領域(会社・担当者・索引・許可・関連付け・参加待ち)は、担当者・施設の管理者・運営者もクライアントから直接読めない。担当者は施設の注文を読めない", async () => {

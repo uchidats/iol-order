@@ -18,12 +18,15 @@ export function createDealerPortalApi({ functions, httpsCallable }) {
   return {
     // ディーラーの担当者
     companies: () => portal({ action: "companies" }),
+    sendMicrosoftCode: () => portal({ action: "sendMicrosoftCode" }),
+    trustMicrosoft: (a) => portal({ action: "trustMicrosoft", code: String((a && a.code) || "") }),
     context: (a = {}) => portal({ action: "context", ...pick(a, ["companyId"]) }),
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),
     getOrder: (a) => portal({ action: "get", ...pick(a, ["companyId", "receiptId"]) }),
     myInvitations: () => portal({ action: "invitations" }),
-    respondInvitation: (a) => portal({ action: "respond", invitationId: a.invitationId, accept: a.accept === true }),
+    sendJoinCode: (a) => portal({ action: "sendCode", invitationId: a.invitationId }),
+    respondInvitation: (a) => portal({ action: "respond", invitationId: a.invitationId, accept: a.accept === true, ...(a.accept === true && a.code ? { code: String(a.code) } : {}) }),
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),
     grant: (a) => facility({ action: "grant", ...pick(a, ["facilityId", "localDealerId", "revision"]) }),
