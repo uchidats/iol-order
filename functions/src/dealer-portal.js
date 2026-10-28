@@ -26,7 +26,9 @@ export const PORTAL_LIMITS = Object.freeze({
   // 所属の一覧(dealerStaffIndex.companyIds)の上限。参加の時点で超えるなら理由を示して止める(黙って古い所属を削らない)。確認は20件ずつ全件
   affiliationsMax: 2000, affiliationsBatch: 20,
   // 検索時点に固定した読み取り(readTime)ができる時間(Firestore は過去1時間以内)。時刻差の余裕を引く。続きのカーソルはこれを超えて使えない
-  pinnedReadWindowMs: 59.5 * 60 * 1000, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
+  pinnedReadWindowMs: 59.5 * 60 * 1000,
+  // 招待の承諾(会社への所属の付与)に必要な、メールの受信を証明したログインからの時間
+  joinProofMaxAgeMs: 30 * 60 * 1000, lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JST_MS = 9 * 60 * 60 * 1000;
@@ -212,6 +214,22 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   const policyOk = (c) => c && c.status === "active" && c.accessMode === PORTAL_POLICY.accessMode && c.policyVersion === PORTAL_POLICY.policyVersion;
 
   function assertOn() { if (!isEnabled()) throw disabled(); }
+
+  /**
+   * 招待の承諾に使えるログインか(招待されたメールを今受け取れることの証明)。会社への所属(staff/{uid})はここでだけ付与する。
+   *  - メールのリンク(確認済みメール)でのログインから30分以内(トークンの sign_in_provider が "password"。リンクでのログインはこの値)
+   *  - Google ログインで、Google が受信箱を管理する Gmail のアドレス(所有者が入れ替わらない)
+   * Gmail 以外の企業メールの Google ログインは、そのメールを今受け取れることの証明にならない(Google の email_verified は過去の確認の場合がある)ため使えない。
+   * 承諾した後の閲覧は、UID・承認済みのメール・会社と施設の許可を毎回確かめる(ログイン方法に依存しない)。
+   */
+  function mailboxProven(auth, email) {
+    const t = (auth && auth.token) || {};
+    const provider = t.firebase && t.firebase.sign_in_provider;
+    if (provider === "password") return typeof t.auth_time === "number" && now() - t.auth_time * 1000 <= PORTAL_LIMITS.joinProofMaxAgeMs;
+    if (provider === "google.com") return email.endsWith("@gmail.com") || email.endsWith("@googlemail.com");
+    return false;
+  }
+  const needsEmailLink = () => new RegistrationError("failed-precondition", "参加の確認は、招待されたメールアドレスに届くログインリンクでログインしてから行ってください(Gmail 以外のメールでは、Google でのログインでは参加できません)");
   function assertOperator(auth) {
     const user = assertVerifiedUser(auth);
     if (user.isPlatformAdmin !== true) throw new RegistrationError("permission-denied", "この操作は運営者のみ行えます");
@@ -479,6 +497,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     strict(data || {}, []);
     const user = assertVerifiedUser(auth);
     const snap = await db.collection("dealerCompanyInvitations").where("email", "==", user.email).where("status", "==", "pending").get();
+    const proven = mailboxProven(auth, user.email);
     const out = [];
     for (const d of snap.docs) {
       const exp = millisOf(d.get("expiresAt"));
@@ -487,6 +506,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!c.exists || c.get("status") !== "active") continue;
       out.push({ invitationId: d.id, companyName: String(c.get("name") || ""), role: d.get("role") });
     }
+    // メールの受信を証明していないログインには、会社名を見せず、メールのリンクでのログインを案内する
+    if (!proven && out.length) return { invitations: [], emailLinkRequired: true };
     return { invitations: out };
   }
 
@@ -508,6 +529,11 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       // 無効化(退職など)された担当者は、無効化の後に運営者が発行した案内でだけ復帰できる(無効化の前の案内が残っていても使えない)。
       // 同じ会社で同じメールの無効化済み担当者(別のアカウントを含む)すべてと照合する
       if (data.accept) {
+        if (!mailboxProven(auth, user.email)) throw needsEmailLink();
+        // 同じ会社に、同じメールの有効な別アカウント(UID)があれば参加させない(メールの一致だけで権限を移さない。移行は旧 UID を無効化してから再招待)
+        if (sameEmail.docs.some(d => d.id !== user.uid && d.get("status") === "active")) {
+          throw new RegistrationError("failed-precondition", "この会社には、同じメールアドレスの有効な登録が別のアカウントにあります。運営者にお問い合わせください");
+        }
         const issued = millisOf(inv.get("createdAt"));
         const disabled = [s, ...sameEmail.docs].filter(d => d.exists && d.get("status") !== "active");
         if (disabled.some(d => { const at = millisOf(d.get("disabledAt")); return issued === null || at === null || issued <= at; })) {
@@ -763,6 +789,11 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (data.name !== undefined) { const n = typeof data.name === "string" ? normalizeName(data.name) : null; if (n === null || n.length > PORTAL_LIMITS.staffNameMax) throw badInput(); patch.name = n; }
       if (data.facilityIds !== undefined) patch.facilityAssignments = parseFacilityIds(data.facilityIds);
       if (!Object.keys(patch).length) throw badInput();
+      // 有効に戻す: 同じ会社に同じメールの有効な別アカウントがあれば戻さない(同じメールの有効な UID を2つにしない)
+      if (patch.status === "active" && s.get("status") !== "active") {
+        const same = await tx.get(companyRef(data.companyId).collection("staff").where("approvedEmail", "==", s.get("approvedEmail")));
+        if (same.docs.some(d => d.id !== data.uid && d.get("status") === "active")) throw new RegistrationError("failed-precondition", "同じメールアドレスの有効な担当者が別のアカウントにあります。先にそちらを無効にしてください");
+      }
       // 無効化: 同じ会社・承認済みのメール宛ての参加待ちも同時に取り消す(無効化の前の案内で本人が復帰できないように)。時刻は承諾時の照合に使う
       const disabling = patch.status === "disabled" && s.get("status") !== "disabled";
       const inv = disabling ? await tx.get(db.doc(`dealerCompanyInvitations/${invitationIdOf(data.companyId, s.get("approvedEmail"))}`)) : null;
@@ -809,7 +840,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       out.push({
         companyId: c.id, name: c.get("name"), status: c.get("status"),
         branches: branches.docs.map(b => ({ branchId: b.id, name: b.get("name"), status: b.get("status") })),
-        staff: staff.docs.map(s => ({ uid: s.id, name: s.get("name") || "", email: s.get("approvedEmail"), role: s.get("role"), status: s.get("status"), branchId: s.get("branchId") || null, facilityIds: s.get("facilityAssignments") || [] })),
+        staff: staff.docs.map(s => ({ uid: s.id, name: s.get("name") || "", email: s.get("approvedEmail"), role: s.get("role"), status: s.get("status"), branchId: s.get("branchId") || null, facilityIds: s.get("facilityAssignments") || [],
+          sameEmailAccounts: staff.docs.filter(o => o.id !== s.id && normEmail(o.get("approvedEmail")) === normEmail(s.get("approvedEmail"))).length })),   // 同じメールの別アカウント(UID)の数(移行・退職の確認用)
         invitations: invitations.docs.filter(i => i.get("companyId") === c.id).map(i => ({ invitationId: i.id, email: i.get("email"), name: i.get("name") || "", role: i.get("role"), expiresAt: isoOf(i.get("expiresAt")) })),
         grants: grants.docs.filter(g => g.get("companyId") === c.id).map(g => ({ facilityId: g.get("facilityId"), localDealerId: g.get("localDealerId"), effectiveFrom: isoOf(g.get("effectiveFrom")) }))
       });

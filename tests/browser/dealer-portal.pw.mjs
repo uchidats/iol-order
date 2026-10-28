@@ -52,10 +52,12 @@ function installFakeServer(page, scenario) {
     let joined = scenario !== "invited";
     window.__fakeCallables = {
       dealerPortalApi: async (d) => {
+        if (scenario === "disabled") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });   // 機能の停止中: すべての取得を拒否
+        if (d.action === "invitations" && scenario === "linkRequired") return { invitations: [], emailLinkRequired: true };   // Gmail 以外の Google ログインで参加待ちがある
         if (d.action === "invitations") return { invitations: joined || scenario === "none" ? [] : [{ invitationId: "dinv-1", companyName: "エックス商事", role: "reader" }] };
         if (d.action === "respond") { joined = d.accept; return { ok: true, accepted: d.accept }; }
         // 有効な所属だけ(所属なしは空。multi は2社)
-        if (d.action === "companies") return { companies: scenario === "none" || !joined ? [] : [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])] };
+        if (d.action === "companies") return { companies: scenario === "none" || scenario === "linkRequired" || !joined ? [] : [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])] };
         if (scenario === "none" || !joined) throw deny("ディーラー画面の利用登録が確認できません。運営者にお問い合わせください");
         if (d.action === "list" && window.__listOverride) return window.__listOverride(d);
         if (d.action === "context") return {
@@ -317,6 +319,29 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     const text = await page.locator("main").innerText();
     assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(text));
     assert.equal(await page.locator(".dealer-row").count(), 0);
+    await context.close();
+
+    // 参加待ちはあるが、このログイン(Gmail 以外の Google)では参加できない: 会社名を出さず、メールのリンクでのログインを案内(ログアウトできる)
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "linkRequired");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText(/招待されたメールアドレスに届くログインリンクで行ってください/).waitFor();
+    assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
+    assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    assert.deepEqual(await calls(page, "respond"), []);
+    assert.deepEqual(await calls(page, "context"), []);
+    await context.close();
+
+    // 機能の停止中: Google などでログインできても(認証はスイッチで止まらない)、サーバーがすべて拒否し、会社・施設・注文は何も出ない
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "disabled");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("ディーラー画面は現在ご利用いただけません").waitFor();
+    assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
+    assert.equal(await page.locator(".dealer-row").count(), 0);
+    assert.equal(await page.locator('[data-act="signout"]').count(), 1);
     await context.close();
 
     // 参加の確認 → 承諾 → 受注一覧

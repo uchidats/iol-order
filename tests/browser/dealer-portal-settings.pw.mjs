@@ -57,7 +57,7 @@ const OPERATOR_PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8
 <script type="module">
 import { createDealerPortalOperator } from "/src/ui/dealer-portal-operator.js";
 window.__calls = [];
-const companies = [{ companyId: "dco-x", name: "エックス商事", status: "active", branches: [], staff: [{ uid: "x1", name: "担当x1", email: "x1@corp.example.jp", role: "reader", status: "active", branchId: null, facilityIds: [] }], invitations: [], grants: [{ facilityId: "fA", localDealerId: "dA1", effectiveFrom: "2026-10-27T03:00:00.000Z" }] }];
+const companies = [{ companyId: "dco-x", name: "エックス商事", status: "active", branches: [], staff: [{ uid: "x1", name: "担当x1", email: "x1@corp.example.jp", role: "reader", status: "active", branchId: null, facilityIds: [], sameEmailAccounts: 0 }, { uid: "x1-other-uid", name: "担当x1", email: "x1@corp.example.jp", role: "reader", status: "disabled", branchId: null, facilityIds: [], sameEmailAccounts: 1 }], invitations: [], grants: [{ facilityId: "fA", localDealerId: "dA1", effectiveFrom: "2026-10-27T03:00:00.000Z" }] }];
 const facilities = [{ facilityId: "fA", name: "A眼科", dealers: [{ localDealerId: "dA1", name: "エックス商事A窓口", link: { companyId: "dco-x", status: "active" } }, { localDealerId: "dA2", name: "<b>ワイ</b>医療", link: null }] }];
 const rec = (name) => async (a) => { window.__calls.push([name, a]); return { ok: true }; };
 const api = { overview: async () => ({ companies, facilities }), createCompany: rec("createCompany"), updateCompany: rec("updateCompany"), upsertBranch: rec("upsertBranch"),
@@ -197,6 +197,10 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(`${base}operator`);
       await page.waitForFunction(() => window.__ready);
+      // 同じメールの別アカウント(UID)があれば、アカウントを区別して警告(移行・退職で全アカウントを確認するため)
+      assert.equal(await page.locator('[data-uid="x1-other-uid"] [data-dup]').isVisible(), true);
+      assert.equal(await page.locator('[data-uid="x1"] [data-dup]').count(), 0);
+      assert.match(await page.locator('[data-uid="x1-other-uid"]').innerText(), /アカウント x1-other…/);
       await page.fill('[data-f="companyName"]', "ゼット商会");
       await page.click('[data-act="createCompany"]');
       await page.waitForFunction(() => window.__calls.some(c => c[0] === "createCompany"));
@@ -209,7 +213,7 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       await page.waitForFunction(() => window.__calls.some(c => c[0] === "inviteStaff"));
       assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c[0] === "inviteStaff")[1]), { companyId: "dco-x", email: "x2@corp.example.jp", name: "担当x2", role: "reader" });
       // 担当施設(代行): 許可済みの施設だけが候補
-      assert.deepEqual(await page.locator(".dealer-operator-assign input").evaluateAll(cs => cs.map(c => c.value)), ["fA"]);
+      assert.deepEqual(await page.locator('[data-uid="x1"] .dealer-operator-assign input').evaluateAll(cs => cs.map(c => c.value)), ["fA"]);
       // 関連付け: 施設 → 発注先 → 会社
       await page.selectOption('[data-f="linkFacility"]', "fA");
       await page.selectOption('[data-f="linkDealer"]', "dA2");

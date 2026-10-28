@@ -67,7 +67,9 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
       run(() => api.updateStaff({ companyId: c.companyId, uid: s.uid, status: s.status === "active" ? "disabled" : "active" }), "担当者の状態を変更しました。", err);
     });
     return h("li", { class: "dealer-operator-staff", "data-uid": s.uid },
-      h("div", {}, h("strong", {}, s.name || "(氏名未登録)"), ` ${s.email} ・ ${ROLE_LABELS[s.role] || s.role} ・ ${STAFF_STATUS[s.status] || s.status}`),
+      h("div", {}, h("strong", {}, s.name || "(氏名未登録)"), ` ${s.email} ・ ${ROLE_LABELS[s.role] || s.role} ・ ${STAFF_STATUS[s.status] || s.status} ・ アカウント ${String(s.uid).slice(0, 8)}…`),
+      // 同じメールの別アカウント(UID)がある: 移行・退職では、すべてのアカウントの状態を確認する(メールの一致だけで権限を移さない)
+      s.sameEmailAccounts ? h("p", { class: "error-message", "data-dup": "" }, `同じメールアドレスの別のアカウントが ${s.sameEmailAccounts} 件あります。移行・退職のときは、すべてのアカウントの状態を確認してください。`) : null,
       h("div", { class: "form-row" }, field("支店", branchSel)),
       facs.length ? h("div", { class: "dealer-operator-assign" }, h("span", { class: "form-hint" }, "担当施設(表示用。閲覧の権限は変わりません)"), ...checks) : h("p", { class: "form-hint" }, "閲覧を許可した施設はまだありません(担当施設は許可済みの施設から選びます)。"),
       h("div", { class: "form-row" }, save, toggle), err);

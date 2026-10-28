@@ -398,7 +398,9 @@ async function signInWithGoogleE2E(email, { sub, verified = true } = {}) {
   return { uid: r.localId, idToken: r.idToken, error: r.error };
 }
 
-test("ディーラー専用画面のログイン: メールリンク↔Googleを切り替えても同じUIDで所属を引き継ぐ。未招待・メール未確認のGoogleアカウントは会社の注文を閲覧できない", async () => {
+// 注意: Google のトークンは試験用の模擬トークン(エミュレータ)。UID の引き継ぎは、エミュレータの既定(同じメールは1アカウント・自動連携できる条件)での確認であり、
+// 本番の設定・Google の管理主体・既存アカウントによっては、競合(auth/account-exists-with-different-credential)や別の UID になり得る(docs/dealer-portal.md)
+test("ディーラー専用画面のログイン: メールリンクで参加 → Google でも同じ UID なら所属を使える。Gmail 以外の Google ログインでは参加できない(メールのリンクで参加)。Gmail は Google で参加できる。未招待・メール未確認は閲覧できない", async () => {
   const op = (data) => call("dealerPortalOperator", data, operator.idToken);
   const cid = (await op({ action: "createCompany", name: "ジー商事", requestId: "portal-e2e-google-company" })).body.result.companyId;
   const api = (data, token) => call("dealerPortalApi", data, token);
@@ -410,17 +412,26 @@ test("ディーラー専用画面のログイン: メールリンク↔Googleを
   const gA = await signInWithGoogleE2E(a);
   assert.equal(gA.uid, linkA.uid, "同じメールは同じアカウント(UID)");
   assert.equal((await api({ action: "context" }, gA.idToken)).body.result.company.id, cid, "Googleでも同じ所属");
-  // B: Google で参加 → 次回はメールリンク
+  // B: Gmail 以外の企業メールの Google ログインでは参加できない(会社名も見せない)→ メールのリンクで参加 → 以後は Google でも(同じ UID なら)使える
   const b = "staff-b@dealer-g.example.jp";
   const invB = (await op({ action: "inviteStaff", companyId: cid, email: b, name: "担当B", role: "reader" })).body.result.invitationId;
   const gB = await signInWithGoogleE2E(b);
-  assert.equal((await api({ action: "respond", invitationId: invB, accept: true }, gB.idToken)).body.result.accepted, true);
+  assert.deepEqual((await api({ action: "invitations" }, gB.idToken)).body.result, { invitations: [], emailLinkRequired: true });
+  assert.equal((await api({ action: "respond", invitationId: invB, accept: true }, gB.idToken)).body.error.status, "FAILED_PRECONDITION");
+  assert.equal((await api({ action: "context" }, gB.idToken)).body.error.status, "PERMISSION_DENIED");
   const linkB = await signInWithEmailLinkE2E(b);
-  assert.equal(linkB.uid, gB.uid);
-  assert.equal((await api({ action: "context" }, linkB.idToken)).body.result.company.id, cid, "メールリンクでも同じ所属");
+  assert.equal(linkB.uid, gB.uid, "エミュレータの既定では同じ UID");
+  assert.equal((await api({ action: "respond", invitationId: invB, accept: true }, linkB.idToken)).body.result.accepted, true);
+  const gB2 = await signInWithGoogleE2E(b);
+  assert.equal((await api({ action: "context" }, gB2.idToken)).body.result.company.id, cid, "参加の後は Google でも同じ所属");
+  // Gmail のアドレスは Google で参加できる
+  const gm = "dealer.person.e2e@gmail.com";
+  const invG = (await op({ action: "inviteStaff", companyId: cid, email: gm, name: "", role: "reader" })).body.result.invitationId;
+  const gG = await signInWithGoogleE2E(gm);
+  assert.equal((await api({ action: "respond", invitationId: invG, accept: true }, gG.idToken)).body.result.accepted, true);
   // 所属の記録は1人1件(UID ごと)。消えたり重複したりしない
   const staffDocs = await (await fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/dealerCompanies/${cid}/staff`, { headers: { Authorization: "Bearer owner" } })).json();
-  assert.deepEqual(staffDocs.documents.map(d => d.name.split("/").pop()).sort(), [linkA.uid, gB.uid].sort());
+  assert.deepEqual(staffDocs.documents.map(d => d.name.split("/").pop()).sort(), [linkA.uid, gB.uid, gG.uid].sort());
   // 未招待の Google アカウント(個人のメールなど): 招待は見えず、他人の招待は承諾できず、会社の画面は開けない
   const outsider = await signInWithGoogleE2E("personal-someone@gmail-like.example.com");
   assert.deepEqual((await api({ action: "invitations" }, outsider.idToken)).body.result.invitations, []);
@@ -428,10 +439,14 @@ test("ディーラー専用画面のログイン: メールリンク↔Googleを
   assert.equal((await api({ action: "respond", invitationId: invC, accept: true }, outsider.idToken)).body.error.status, "FAILED_PRECONDITION");
   assert.equal((await api({ action: "context" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
   assert.equal((await api({ action: "list", from: "2026-10-01", to: "2026-10-28", facilityFilter: { mode: "all" }, companyId: cid }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
-  // メールが未確認の Google アカウントは、招待先と同じメールでも使えない
+  // メールが未確認の Google アカウント(招待先と同じメール): トークンは発行されるが、確認済みでないので、すべて拒否し状態を変えない
   const unverified = await signInWithGoogleE2E("staff-c@dealer-g.example.jp", { sub: "g-unverified", verified: false });
-  if (unverified.idToken) {
-    const r = await api({ action: "respond", invitationId: invC, accept: true }, unverified.idToken);
-    assert.ok(r.body.error, "未確認のメールでは参加できない");
+  assert.ok(unverified.idToken, "エミュレータは未確認のトークンを発行する(この前提で拒否を確かめる)");
+  assert.equal(JSON.parse(Buffer.from(unverified.idToken.split(".")[1], "base64url").toString()).email_verified, false);
+  for (const data of [{ action: "invitations" }, { action: "respond", invitationId: invC, accept: true }, { action: "companies" }, { action: "context" },
+    { action: "list", from: "2026-10-01", to: "2026-10-28", facilityFilter: { mode: "all" }, companyId: cid }]) {
+    assert.equal((await api(data, unverified.idToken)).body.error.status, "PERMISSION_DENIED", data.action);
   }
+  assert.equal((await getDoc(`dealerCompanyInvitations/${invC}`)).fields.status.stringValue, "pending", "招待は残る");
+  assert.equal(await getDoc(`dealerCompanies/${cid}/staff/${unverified.uid}`), null, "所属は作られない");
 });

@@ -30,7 +30,8 @@ before(async () => {
 });
 after(async () => { await env.clearFirestore(); await env.cleanup(); });
 
-const auth = (uid, over = {}) => ({ uid, token: { email: `${uid}@example.jp`, email_verified: true, name: uid, ...over } });
+// 既定はメールのリンクでログインした直後(招待の承諾に使えるログイン)。Google などは over で指定する
+const auth = (uid, over = {}) => ({ uid, token: { email: `${uid}@example.jp`, email_verified: true, name: uid, firebase: { sign_in_provider: "password" }, auth_time: Math.floor((clock.t ?? Date.now()) / 1000), ...over } });
 const ops = () => auth("ops1", { platformAdmin: true });
 const staffAuth = (uid) => auth(uid, { email: `${uid}@corp.example.jp` });
 const rejects = (p, code) => assert.rejects(p, (e) => e.code === code, `expected ${code}`);
@@ -696,6 +697,87 @@ test("N-02: 続きのカーソルは、検索時点から読み取り可能な�
   await assert.rejects(list("x1", { limit: 1, cursor: p2.nextCursor }), (e) => e.code === "invalid-argument" && /先頭から検索し直してください/.test(e.message));
   clock.t = null;
   assert.equal((await list("x1")).items.length, 3, "再検索は読める");
+});
+
+// ======================= Googleログインのレビュー(docs/reviews/dealer-google-login-audit.md)の再現 =======================
+
+test("G-02: 招待の承諾はメールの受信を証明したログインだけ(メールのリンクから30分以内、または Gmail の Google ログイン)。Gmail 以外の企業メールの Google ログインでは会社名も見せず、承諾できない", async () => {
+  const email = "newcomer@corp.example.jp";
+  const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "新人", role: "reader" });
+  const google = auth("newg", { email, firebase: { sign_in_provider: "google.com" } });
+  // 企業メールの Google ログイン: 招待は見せず(会社名なし)、メールのリンクを案内。承諾は拒否、所属は作られない
+  assert.deepEqual(await api(google, "invitations"), { invitations: [], emailLinkRequired: true });
+  await assert.rejects(api(google, "respond", { invitationId, accept: true }), (e) => e.code === "failed-precondition" && /ログインリンク/.test(e.message));
+  assert.equal((await db.doc("dealerCompanies/" + C.Y + "/staff/newg").get()).exists, false);
+  assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "pending", "招待は残る");
+  // ログイン方法が分からない・古いメールのリンク(30分超)も承諾できない
+  await rejects(api(auth("newx", { email, firebase: {} }), "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(api(auth("newx", { email, auth_time: Math.floor(Date.now() / 1000) - 31 * 60 }), "respond", { invitationId, accept: true }), "failed-precondition");
+  await rejects(api(auth("newx", { email, firebase: { sign_in_provider: "anonymous" } }), "respond", { invitationId, accept: true }), "failed-precondition");
+  // メールのリンクで今ログインした本人は承諾できる
+  const link = auth("newl", { email });
+  assert.equal((await api(link, "invitations")).invitations.length, 1);
+  await api(link, "respond", { invitationId, accept: true });
+  assert.equal((await api(link, "context")).company.id, C.Y);
+  // Gmail のアドレスは、Google ログインで承諾できる(Google が受信箱を管理し、所有者が入れ替わらない)
+  const gmail = "dealer.person@gmail.com";
+  const inv2 = await op("inviteStaff", { companyId: C.X, email: gmail, name: "", role: "reader" });
+  const gg = auth("gmailu", { email: gmail, firebase: { sign_in_provider: "google.com" } });
+  assert.equal((await api(gg, "invitations")).invitations.length, 1);
+  await api(gg, "respond", { invitationId: inv2.invitationId, accept: true });
+  assert.equal((await api(gg, "context")).company.id, C.X);
+  // 承諾した後の閲覧は、ログイン方法に依存しない(同じ UID・承認済みのメールなら Google でも可)
+  assert.equal((await api(auth("newl", { email, firebase: { sign_in_provider: "google.com" } }), "context")).company.id, C.Y);
+  // 辞退は、どのログインでもできる(所属は増えない)
+  const inv3 = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
+  await api(google, "respond", { invitationId: inv3.invitationId, accept: false });
+  assert.equal((await db.doc(`dealerCompanyInvitations/${inv3.invitationId}`).get()).get("status"), "declined");
+});
+
+test("G-03: 同じ会社に同じメールの有効な別アカウントがある間は、別の UID で承諾・有効化できない。移行は旧 UID の無効化 → 再招待 → 承諾。運営者の一覧に同じメールの別アカウントを示す", async () => {
+  await grant("adminA", "fA", "dA1");
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  const email = "x1@corp.example.jp";
+  const other = auth("x1b", { email });   // 同じメールの別アカウント(別 UID)
+  // 有効な x1 がいる間の再招待: 別 UID では承諾できない(2つの有効な UID にしない)
+  const { invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "担当x1", role: "reader" });
+  await assert.rejects(api(other, "respond", { invitationId, accept: true }), (e) => e.code === "failed-precondition" && /同じメールアドレスの有効な登録/.test(e.message));
+  await rejects(api(other, "context"), "permission-denied");
+  assert.equal((await db.doc(`dealerCompanies/${C.X}/staff/x1b`).get()).exists, false);
+  // 正式な移行: 旧 UID(x1)を無効化(参加待ちも同時に取消)→ 再招待 → 新しい UID(x1b)が承諾
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
+  await rejects(api(other, "respond", { invitationId, accept: true }), "failed-precondition");   // 無効化前の招待は使えない
+  const again = await op("inviteStaff", { companyId: C.X, email, name: "担当x1", role: "reader" });
+  await api(other, "respond", { invitationId: again.invitationId, accept: true });
+  assert.equal((await list(other)).items.length, 1);
+  await rejects(list("x1"), "permission-denied", "旧 UID は閲覧できない");
+  // 旧 UID を有効に戻すことはできない(同じメールの有効な UID を2つにしない)
+  await assert.rejects(op("updateStaff", { companyId: C.X, uid: "x1", status: "active" }), (e) => e.code === "failed-precondition" && /別のアカウント/.test(e.message));
+  // 運営者の一覧: 同じメールの別アカウントの数
+  const staff = (await op("overview")).companies.find(c => c.companyId === C.X).staff;
+  assert.deepEqual(staff.filter(s => s.email === email).map(s => [s.uid, s.status, s.sameEmailAccounts]).sort(), [["x1", "disabled", 1], ["x1b", "active", 1]]);
+  assert.equal(staff.find(s => s.uid === "x2").sameEmailAccounts, 0);
+});
+
+test("G-04: メール未確認(false・欠落・文字列の \"true\")のアカウントは、Google でもメールのリンクでも、招待・承諾・会社・一覧・詳細をすべて拒否し、状態を変えない", async () => {
+  await grant("adminA", "fA", "dA1");
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  const rid = (await list("x1")).items[0].receiptId;
+  const email = "unverified@corp.example.jp";
+  const { invitationId } = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
+  for (const over of [{ email_verified: false }, { email_verified: undefined }, { email_verified: "true" }]) {
+    for (const provider of ["google.com", "password"]) {
+      const a = auth("unv", { email, firebase: { sign_in_provider: provider }, ...over });
+      for (const [action, data] of [["invitations", {}], ["respond", { invitationId, accept: true }], ["companies", {}], ["context", {}], ["list", range({ companyId: C.X })], ["get", { companyId: C.X, receiptId: rid }]]) {
+        await assert.rejects(api(a, action, data), (e) => e.code === "permission-denied", `${provider} ${JSON.stringify(over)} ${action}`);
+      }
+      // 確認済みの x1 の UID・メールを名乗っても、メールが未確認なら拒否
+      await rejects(api(auth("x1", { email: "x1@corp.example.jp", firebase: { sign_in_provider: provider }, ...over }), "list", range()), "permission-denied");
+    }
+  }
+  assert.equal((await db.doc(`dealerCompanyInvitations/${invitationId}`).get()).get("status"), "pending");
+  assert.equal((await db.doc(`dealerCompanies/${C.X}/staff/unv`).get()).exists, false);
+  assert.equal((await db.doc("dealerStaffIndex/unv").get()).exists, false);
 });
 
 test("Rules: 新しい領域(会社・担当者・索引・許可・関連付け・参加待ち)は、担当者・施設の管理者・運営者もクライアントから直接読めない。担当者は施設の注文を読めない", async () => {

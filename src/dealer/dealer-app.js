@@ -82,7 +82,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
       google ? h("div", { class: "dealer-login-block", "data-login": "google" },
         h("div", { class: "form-label" }, "Googleアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。"),
+        h("p", { class: "form-hint" }, "企業メールアドレスが Google アカウント(Google Workspace など)の場合は、こちらからログインできます。招待されたメールアドレスのアカウントを選んでください。初めての参加の確認は、Gmail 以外のメールアドレスでは、下のメールでのログインで行ってください。"),
         h("div", { class: "onboarding-actions" }, google)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
         h("label", { class: "form-label", for: "dealerEmail" }, google ? "メールアドレスでログイン(Googleアカウントがない場合。パスワード不要)" : "企業メールアドレス"),
@@ -293,6 +293,11 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     try {
       const inv = await api.myInvitations();
       if (inv.invitations && inv.invitations.length) { await showInvitations(inv.invitations, enter); return; }
+      // 参加待ちがあるが、このログインではメールの受信を証明できない(Gmail 以外の Google ログインなど): 会社名は出さず、メールのリンクでのログインを案内
+      if (inv.emailLinkRequired) {
+        showMessage("ディーラー画面への参加", "参加の確認は、招待されたメールアドレスに届くログインリンクで行ってください。ログアウトして、「メールアドレスでログイン」からリンクを受け取ってください。");
+        return;
+      }
       // 有効な所属だけを候補にする(無効化された旧会社が残っていても、有効な1社ならそのまま開く。2社以上なら選ぶ)
       choices = ((await api.companies()).companies || []);
       if (choices.length > 1) { showCompanyChoice(); return; }
