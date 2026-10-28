@@ -21,9 +21,9 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     const token = device ? device.get() : null;
     const r = await rawPortal(token ? { ...payload, deviceToken: token } : payload);
     if (!r || typeof r.deviceToken !== "string") return r;
-    if (device) device.set(r.deviceToken);
-    const { deviceToken, ...rest } = r;   // 値は画面の処理に渡さない
-    return rest;
+    const saved = device ? device.set(r.deviceToken) !== false : false;
+    const { deviceToken, ...rest } = r;   // 値は画面の処理に渡さない(端末に保存できたかだけを返す)
+    return { ...rest, deviceSaved: saved };
   };
   const facility = call("facilityDealerPortal");
   const operator = call("dealerPortalOperator");

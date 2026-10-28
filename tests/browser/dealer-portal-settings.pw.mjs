@@ -198,7 +198,7 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       await page.goto(`${base}operator`);
       await page.waitForFunction(() => window.__ready);
       // 担当者は担当者 ID で扱い、確認コードで紐付け済みのログイン方法を表示する(UID は表示しない)
-      assert.match(await page.locator('[data-staff="dstf_x1"]').innerText(), /ログイン方法 メール\(確認済みの端末\)・Google/);
+      assert.match(await page.locator('[data-staff="dstf_x1"]').innerText(), /ログイン方法 確認済みの端末・Google/);
       assert.match(await page.locator('[data-staff="dstf_x9"]').innerText(), /ログイン方法 未確認/);
       await page.click('[data-staff="dstf_x1"] [data-act="toggleStaff"]');
       await page.locator('.confirm-dialog [data-act="ok"]').click();

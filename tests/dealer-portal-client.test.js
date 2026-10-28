@@ -86,14 +86,14 @@ test("Firestore Rules: ディーラー専用画面の新しい領域は明示的
 
 test("ディーラー画面 API: 確認済みの端末の値を担当者の呼び出しに付け、サーバーが返した値は保存して画面には渡さない(施設・運営者の呼び出しには付けない)", async () => {
   const calls = [];
-  let saved = "tok-1";
-  const device = { get: () => saved, set: (t) => { saved = t; } };
+  let saved = "tok-1", persists = true;
+  const device = { get: () => saved, set: (t) => { saved = t; return persists; } };
   const api = createDealerPortalApi({ functions: {}, device, httpsCallable: (f, name) => async (payload) => {
     calls.push([name, payload]);
     return { data: payload.action === "verifyCode" ? { ok: true, deviceToken: "tok-2" } : { ok: true } };
   } });
   await api.context({ companyId: "c" });
-  assert.deepEqual(await api.verifyCode({ code: "12345678" }), { ok: true }, "値は画面に渡さない");
+  assert.deepEqual(await api.verifyCode({ code: "12345678" }), { ok: true, deviceSaved: true }, "値は画面に渡さない(保存できたかだけ)");
   assert.equal(saved, "tok-2");
   await api.sendCode();
   await api.facilityStatus({ facilityId: "fA" });
@@ -107,4 +107,7 @@ test("ディーラー画面 API: 確認済みの端末の値を担当者の呼�
   saved = null; calls.length = 0;
   await api.companies();
   assert.deepEqual(calls, [["dealerPortalApi", { action: "companies" }]]);
+  // 端末に保存できなかったら、そのことを返す(画面はこの間だけメモリの値で使い、案内を出す。AB-04)
+  persists = false;
+  assert.deepEqual(await api.verifyCode({ code: "12345678" }), { ok: true, deviceSaved: false });
 });

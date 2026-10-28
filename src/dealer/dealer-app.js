@@ -60,7 +60,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   /**
    * ログイン画面。上段に「Googleでログイン」「Microsoftでログイン」(横に並べる。スマホ幅では縦)、下段にメールリンク(パスワード不要)。
    * どれでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
-   * 初めて使うログイン方法(参加を含む)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
+   * 初めて使うログイン方法(参加を含む)・新しい端末(ブラウザ)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
    */
   function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
@@ -89,7 +89,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
       providers ? h("div", { class: "dealer-login-block", "data-login": "accounts" },
         h("div", { class: "form-label" }, "会社のアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときは、招待されたメールアドレスに届く確認コードで本人確認をします。"),
+        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときと、新しい端末(ブラウザ)では、招待されたメールアドレスに届く確認コードで本人確認をします。"),
         h("div", { class: "dealer-login-providers" }, google, microsoft)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
         h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "企業メールアドレス"),
@@ -101,7 +101,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
 
   // ---------- 本人確認 ----------
   /**
-   * 本人確認(参加・初めてのログイン方法・メールリンクの新しい端末で共通): ログインのメールアドレス(=承認済みのメール。サーバーが確定する)に
+   * 本人確認(参加・初めてのログイン方法・新しい端末で共通): ログインのメールアドレス(=承認済みのメール。サーバーが確定する)に
    * 確認コードを送り、届いた8桁のコードで確認する。確認できると、参加の案内を承諾し、今回のログイン方法を担当者に紐付ける。
    * 会社名は確認コードのメールに書く(画面には出さない。メールを受け取れることを確かめるまで、会社の情報を出さない)。
    * @param {{onLater?: () => void}} [opts] onLater: すでに使える会社があるとき、新しい参加の案内を後回しにする
@@ -119,7 +119,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       try {
         const r = await api.sendCode();
         codeRow.hidden = false;
-        note.textContent = `ログインしたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。`;
+        // 登録の有無で応答を変えない(未招待には送らない)ので、届かない場合の案内も添える
+        note.textContent = `ログインしたメールアドレスが登録されていれば、確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください。`;
         code.focus();
       } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
       finally { lock(false); }
@@ -128,7 +129,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       const value = code.value.replace(/\s/g, "");
       if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
       lock(true); note.className = "form-hint"; note.textContent = "";
-      try { await api.verifyCode({ code: value }); await enter(); }
+      try { const r = await api.verifyCode({ code: value }); deviceNotSaved = r && r.deviceSaved === false; await enter(); }
       catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); lock(false); }
     });
     const later = onLater ? h("button", { type: "button", class: "btn btn-secondary", "data-act": "later" }, "あとで(受注一覧へ)") : null;
@@ -136,7 +137,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     panel.replaceChildren(...[h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, onLater ? "参加の確認" : "本人確認")),
       h("p", { class: "feature-desc" }, onLater
         ? "新しい会社から、ディーラー画面への参加の案内が届いています。本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると参加できます。"
-        : "本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると、受注一覧を表示できます(初めて使うログイン方法・メールのリンクでの新しい端末で必要です)。招待されたメールアドレス以外のアカウントでは使えません。"),
+        : "本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると、受注一覧を表示できます(初めて使うログイン方法・新しい端末(ブラウザ)で必要です)。招待されたメールアドレス以外のアカウントでは使えません。"),
       h("div", { class: "form-row" }, send), codeRow, note,
       h("div", { class: "onboarding-actions" }, ...[later, signOutBtn()].filter(Boolean))].filter(Boolean));
   }
@@ -290,6 +291,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
       h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
       h("p", { class: "form-hint" }, "医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。"),
+      deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
       noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
     if (ctx.facilities.length) await run(false);
@@ -314,7 +316,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
   }
 
   /** ログイン後: 本人確認(必要なとき)→ 担当者の画面。確認できるまで会社名・施設名を出さない */
-  let laterInvitation = false;   // 新しい参加の案内を後回しにした(この画面を開いている間だけ)
+  let laterInvitation = false;
+  let deviceNotSaved = false;   // 確認の記録(端末の値)を端末に保存できなかった(この画面の間はメモリの値で使える)   // 新しい参加の案内を後回しにした(この画面を開いている間だけ)
   async function enter() {
     panel.replaceChildren(h("p", { class: "form-hint", role: "status" }, "確認しています…"));
     try {

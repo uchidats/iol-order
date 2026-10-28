@@ -28,11 +28,18 @@ async function bootstrap() {
     emailStorageKey: "iol_dealer_emaillink_pending" });   // メールリンクの保存も医療機関の画面と分ける
   let uid = null;
   // 確認済みの端末の値(ログインした利用者ごと。サーバーが確認コードを確かめた後に返す)。ログアウトでは消さない(同じ端末で次も使う)。
-  // 保存できない環境(プライベートブラウズなど)では、ログインのたびに確認コードで確認する
+  // まずメモリに持ち、端末にも保存する。保存できない環境(プライベートブラウズなど)では、この画面を開いている間だけ使え、
+  // 次のログインでは確認コードで確認し直す(AB-04)。利用者の切り替え・ログアウトでは画面を読み直すので、メモリの値は残らない
   const deviceKey = () => `iolDealerDevice.${uid}`;
+  let memoryDevice = null;
   const device = {
-    get: () => { try { return uid ? window.localStorage.getItem(deviceKey()) : null; } catch (e) { return null; } },
-    set: (t) => { try { if (uid) window.localStorage.setItem(deviceKey(), t); } catch (e) { /* 保存できなくても続ける */ } }
+    get: () => { if (!uid) return null; if (memoryDevice && memoryDevice.uid === uid) return memoryDevice.token; try { return window.localStorage.getItem(deviceKey()); } catch (e) { return null; } },
+    /** @returns {boolean} 端末に保存できたか */
+    set: (t) => {
+      if (!uid) return false;
+      memoryDevice = { uid, token: t };
+      try { window.localStorage.setItem(deviceKey(), t); return window.localStorage.getItem(deviceKey()) === t; } catch (e) { return false; }
+    }
   };
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
   const ui = createDealerApp({

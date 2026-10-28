@@ -5,7 +5,7 @@ import { formatJstDateTime } from "../domain/dealer-portal.js";
 
 const ROLE_LABELS = { reader: "閲覧者", companyAdmin: "会社管理者" };
 const STAFF_STATUS = { active: "有効", disabled: "無効(退職など)" };
-const LOGIN_LABELS = { google: "Google", microsoft: "Microsoft", device: "メール(確認済みの端末)" };
+const LOGIN_LABELS = { google: "Google", microsoft: "Microsoft", device: "確認済みの端末" };
 const LINK_LABELS = { proposed: "関連付け済み(施設の許可待ち)", active: "施設が閲覧を許可中", revoked: "施設が取消済み" };
 const newRequestId = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
 const field = (label, input) => h("label", { class: "form-label" }, h("span", {}, label), input);

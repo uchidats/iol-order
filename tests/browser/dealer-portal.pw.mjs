@@ -53,18 +53,19 @@ function installFakeServer(page, scenario) {
       { receiptId: "rcp-b", facilityId: "fB", facilityName: "B眼科", orderNumber: "IOL-20261027-02", orderedAt: "2026-10-27T02:00:00.000Z", lineCount: 1, totalQuantity: 1 }
     ];
     let verified = !["unverified", "none"].includes(scenario);
+    const needDevice = scenario === "unverified";   // 確認した後は、実際のサーバーと同じく端末の値がないと閲覧できない(紛失を検出する)
     let pending = scenario === "pendingInvite";
     window.__fakeCallables = {
       dealerPortalApi: async (d) => {
         if (scenario === "disabled") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });   // 機能の停止中: すべての取得を拒否
-        // 本人確認: 送り先はサーバーが決める(画面からは送らない)。未招待には送らない
-        if (d.action === "sendCode") { if (scenario === "none") throw deny("ディーラー画面の利用登録が確認できません。運営者にお問い合わせください"); return { ok: true, expiresInMinutes: 10 }; }
+        // 本人確認: 送り先はサーバーが決める(画面からは送らない)。未招待には送らないが、応答は同じ
+        if (d.action === "sendCode") return { ok: true, expiresInMinutes: 10 };
         if (d.action === "verifyCode") {
-          if (d.code !== "12345678") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" });
+          if (d.code !== "12345678" || scenario === "none") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" });
           verified = true; pending = false;
           return { ok: true, companies: 1, joined: 1, deviceToken: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" };
         }
-        if (!verified) throw Object.assign(new Error("本人確認が必要です"), { code: "functions/permission-denied", details: { reason: "verification-required" } });
+        if (!verified || (needDevice && d.deviceToken !== "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")) throw Object.assign(new Error("本人確認が必要です"), { code: "functions/permission-denied", details: { reason: "verification-required" } });
         // 有効な所属だけ(multi は2社)と、未確認の参加の案内があるか
         if (d.action === "companies") return { companies: [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])], pendingInvitation: pending };
         if (d.action === "list" && window.__listOverride) return window.__listOverride(d);
@@ -344,7 +345,7 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.equal(await page.locator('[data-act="later"]').count(), 0);
     assert.equal(await page.locator('[data-f="code"]').isVisible(), false, "コード欄は送るまで出さない");
     await page.click('[data-act="sendCode"]');
-    await page.getByText(/ログインしたメールアドレスに確認コードを送りました/).waitFor();
+    await page.getByText(/ログインしたメールアドレスが登録されていれば、確認コードを送りました/).waitFor();
     assert.deepEqual(await calls(page, "sendCode"), [{ action: "sendCode" }], "送り先は画面から送らない");
     await page.fill('[data-f="code"]', "00000000");
     await page.click('[data-act="verifyCode"]');
@@ -370,14 +371,33 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.locator(".dealer-row").first().waitFor();
     await context.close();
 
-    // 未招待(承認済みのメールでないアカウントを含む): 本人確認の画面で送れず、会社の情報は出さない
+    // AB-04: 端末の値を保存できないブラウザでも、確認の直後から(この画面の間は)使える。保存できなかったことを伝える
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await page.addInitScript(() => { const orig = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith("iolDealerDevice.")) throw new Error("QuotaExceededError"); return orig.call(this, k, v); }; });
+    await installFakeServer(page, "unverified");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("本人確認", { exact: true }).waitFor();
+    await page.click('[data-act="sendCode"]');
+    await page.fill('[data-f="code"]', "12345678");
+    await page.click('[data-act="verifyCode"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "メモリに持った値を付ける");
+    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), null);
+    assert.equal(await page.locator('[data-notice="device-not-saved"]').count(), 1);
+    await context.close();
+
+    // 未招待(承認済みのメールでないアカウントを含む): 応答は同じ(届かない場合の案内)で、確認できず、会社の情報は出さない
     context = await newFakeContext(browser, base, 390, STAFF);
     page = await context.newPage();
     await installFakeServer(page, "none");
     await page.goto(`${base}dealer.html`);
     await page.getByText("本人確認", { exact: true }).waitFor();
     await page.click('[data-act="sendCode"]');
-    await page.getByText("ディーラー画面の利用登録が確認できません", { exact: false }).waitFor();
+    await page.getByText(/届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください/).waitFor();
+    await page.fill('[data-f="code"]', "12345678");
+    await page.click('[data-act="verifyCode"]');
+    await page.getByText(/確認コードが違います/).waitFor();
     assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
     assert.equal(await page.locator(".dealer-row").count(), 0);
     await context.close();
