@@ -209,15 +209,15 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     syncSummaryHeads();
   }
   /**
-   * 折りたたみの要約を簡潔に: 直前のレンズと手術日・担当医が両方同じなら、「手術日 … 担当医Dr」の行を省く(先頭のレンズは必ず表示)。
-   * どちらかが違えば表示する。追加・削除・編集・折りたたみ・展開のたびに判定し直す(表示だけ。入力・確認画面・注文データは変えない)
+   * 折りたたみの要約を簡潔に: 直前のレンズが折りたたまれていて、手術日・担当医が両方同じなら、「手術日 … 担当医Dr」の行を省く(先頭のレンズは必ず表示)。
+   * 直前のレンズが開いている、またはどちらかが違えば表示する。追加・削除・編集・折りたたみ・展開のたびに判定し直す(表示だけ。入力・確認画面・注文データは変えない)
    */
   function syncSummaryHeads() {
     lines.forEach((l, i) => {
       const head = l.summary && l.summary.querySelector(".summary-date-head");
       if (!head) return;
       const prev = lines[i - 1];
-      head.hidden = Boolean(prev && l.date.value && prev.date.value === l.date.value && prev.doctor.value === l.doctor.value);
+      head.hidden = Boolean(prev && prev.collapsed && l.date.value && prev.date.value === l.date.value && prev.doctor.value === l.doctor.value);
     });
   }
   /** 選択肢の変更(マスター・担当医・発注先)の後: 折りたたみ中で入力が正しくなくなったら展開し、正しければ要約を作り直す */

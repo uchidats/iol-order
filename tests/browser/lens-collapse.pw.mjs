@@ -259,3 +259,38 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`レンズの折りたたみ(簡潔な表示): 直前のレンズが折りたたまれているときだけ省く。直前が開いていれば必ず表示し、折りたたむと再び省く(3枚以上も直前のレンズで判定): ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+      await page.goto(base);
+      await page.waitForFunction(() => window.__ready);
+      const heads = () => page.locator(".lens-line").evaluateAll(ls => ls.map(l => {
+        const h = l.querySelector(".lens-line-summary .summary-date-head");
+        return l.classList.contains("is-collapsed") ? (h && !h.hidden && getComputedStyle(h).display !== "none" ? "head" : "main-only") : "open";
+      }));
+      // 3枚とも同じ手術日・担当医
+      for (let i = 0; i < 3; i++) {
+        if (i) await page.click("#btnAddLine");
+        await fill(card(page, i), { model: "alcon-cna0t0", power: `+${7 + i}.0D` });
+      }
+      await card(page, 2).locator('[data-act="toggle"]').click();
+      assert.deepEqual(await heads(), ["head", "main-only", "main-only"]);
+      // レンズ1を開く → 折りたたまれたレンズ2は見出しを出す(レンズ3は直前のレンズ2が折りたたまれているので省いたまま)
+      await card(page, 0).locator(".lens-line-summary").click();
+      assert.deepEqual(await heads(), ["open", "head", "main-only"]);
+      // レンズ1を折りたたむ → レンズ2は再び省く
+      await card(page, 0).locator('[data-act="toggle"]').click();
+      assert.deepEqual(await heads(), ["head", "main-only", "main-only"]);
+      // 真ん中(レンズ2)を開く → レンズ3は見出しを出す。閉じると戻る
+      await card(page, 1).locator(".lens-line-summary").click();
+      assert.deepEqual(await heads(), ["head", "open", "head"]);
+      await card(page, 1).locator('[data-act="toggle"]').click();
+      assert.deepEqual(await heads(), ["head", "main-only", "main-only"]);
+      await page.close();
+    } finally { await browser.close(); }
+  });
+}
