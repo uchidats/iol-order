@@ -450,3 +450,47 @@ test("ディーラー専用画面のログイン: メールリンクで参加 �
   assert.equal((await getDoc(`dealerCompanyInvitations/${invC}`)).fields.status.stringValue, "pending", "招待は残る");
   assert.equal(await getDoc(`dealerCompanies/${cid}/staff/${unverified.uid}`), null, "所属は作られない");
 });
+
+/** Microsoft でログイン(エミュレータの模擬トークン) */
+async function signInWithMicrosoftE2E(email, { sub, verified = true } = {}) {
+  const idt = JSON.stringify({ sub: sub || `m-${email}`, email, email_verified: verified });
+  const r = await (await fetch(`${AUTH_API}/accounts:signInWithIdp?key=fake`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postBody: `id_token=${encodeURIComponent(idt)}&providerId=microsoft.com`, requestUri: "http://localhost", returnSecureToken: true }) })).json();
+  return { uid: r.localId, idToken: r.idToken };
+}
+
+// 注意: エミュレータは、同じメールを名乗る Microsoft のトークンを既存の UID に結び付けることがある(本番の Firebase は通常、競合として扱う)。
+// その場合でも、本人が登録した Microsoft アカウントでなければ閲覧できないことを確かめる
+test("ディーラー専用画面の Microsoft ログイン: 同じメールの Microsoft で同じ UID に入っても、登録前は閲覧できない。メールのリンクの直後に登録すると使える。Microsoft では参加できない。未確認・未招待は不可", async () => {
+  const op = (data) => call("dealerPortalOperator", data, operator.idToken);
+  const api = (data, token) => call("dealerPortalApi", data, token);
+  const cid = (await op({ action: "createCompany", name: "エム商事", requestId: "portal-e2e-ms-company" })).body.result.companyId;
+  const email = "staff-m@dealer-m.example.jp";
+  const inv = (await op({ action: "inviteStaff", companyId: cid, email, name: "担当M", role: "reader" })).body.result.invitationId;
+  // Microsoft では参加できない(会社名も見せない)
+  const m0 = await signInWithMicrosoftE2E(email);
+  assert.deepEqual((await api({ action: "invitations" }, m0.idToken)).body.result, { invitations: [], emailLinkRequired: true });
+  assert.equal((await api({ action: "respond", invitationId: inv, accept: true }, m0.idToken)).body.error.status, "FAILED_PRECONDITION");
+  // メールのリンクで参加
+  const link = await signInWithEmailLinkE2E(email);
+  assert.equal((await api({ action: "respond", invitationId: inv, accept: true }, link.idToken)).body.result.accepted, true);
+  // 同じメールの Microsoft でログイン(エミュレータでは同じ UID になる)→ 登録前は拒否
+  const m1 = await signInWithMicrosoftE2E(email);
+  const dec = (t) => JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString());
+  assert.equal(dec(m1.idToken).firebase.sign_in_provider, "microsoft.com");
+  assert.equal((await api({ action: "context" }, m1.idToken)).body.error.status, "PERMISSION_DENIED", "メールの一致・同じ UID でも、登録前は閲覧できない");
+  assert.equal((await api({ action: "trustMicrosoft" }, m1.idToken)).body.error.status, "FAILED_PRECONDITION", "Microsoft のセッションでは登録できない");
+  // メールのリンクでログインした直後(Microsoft が連携されたトークン)に登録 → 以後 Microsoft で使える
+  const link2 = await signInWithEmailLinkE2E(email);
+  assert.ok(dec(link2.idToken).firebase.identities["microsoft.com"], "連携済み");
+  assert.equal((await api({ action: "trustMicrosoft" }, link2.idToken)).body.result.ok, true);
+  const m2 = await signInWithMicrosoftE2E(email);
+  assert.equal((await api({ action: "context" }, m2.idToken)).body.result.company.id, cid);
+  // 新しい Microsoft だけのアカウント(未招待)・メール未確認の Microsoft は使えない
+  const outsider = await signInWithMicrosoftE2E("someone@outlook-like.example.com");
+  assert.equal((await api({ action: "context" }, outsider.idToken)).body.error.status, "PERMISSION_DENIED");
+  const unv = await signInWithMicrosoftE2E("unverified-m@dealer-m.example.jp", { verified: false });
+  assert.ok(unv.idToken);
+  assert.equal(dec(unv.idToken).email_verified, false);
+  for (const action of ["invitations", "companies", "context", "trustMicrosoft"]) assert.equal((await api({ action }, unv.idToken)).body.error.status, "PERMISSION_DENIED", action);
+});

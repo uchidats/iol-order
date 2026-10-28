@@ -41,6 +41,22 @@ test("Googleログイン: selectAccount を指定すると毎回アカウント�
   assert.deepEqual(params, [null, { prompt: "select_account" }]);
 });
 
+test("Microsoftログイン: OAuthProvider(\"microsoft.com\") のポップアップ(アカウントの選択画面)。連携はログイン中のアカウントに linkWithPopup し、トークンを更新する", async () => {
+  const calls = [];
+  class OAuthProvider { constructor(id) { this.id = id; } setCustomParameters(p) { this.p = p; } }
+  const user = { uid: "u", getIdToken: async (force) => { calls.push(["token", force]); return "t"; } };
+  const { fns } = makeFns({ OAuthProvider,
+    signInWithPopup: async (a, p) => { calls.push(["popup", p.id, p.p || null]); return {}; },
+    linkWithPopup: async (u, p) => { calls.push(["link", u.uid, p.id, p.p || null]); return {}; } });
+  const s = createAuthService({ auth: { currentUser: user }, fns, currentUrl: () => "https://x/y/" });
+  await s.signInWithMicrosoft({ selectAccount: true });
+  await s.signInWithMicrosoft();
+  await s.linkMicrosoft();
+  assert.deepEqual(calls, [["popup", "microsoft.com", { prompt: "select_account" }], ["popup", "microsoft.com", null], ["link", "u", "microsoft.com", { prompt: "select_account" }], ["token", true]]);
+  const none = createAuthService({ auth: { currentUser: null }, fns, currentUrl: () => "https://x/y/" });
+  await assert.rejects(none.linkMicrosoft(), (e) => e.code === "auth/no-current-user");
+});
+
 test("メールリンク送信は handleCodeInApp とクエリ無しの戻り先を使う", async () => {
   const { fns, calls } = makeFns();
   const storage = memStore();

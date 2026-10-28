@@ -2346,6 +2346,10 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-login-block { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }   /* ログイン: 上段 Google(推奨)・下段メールリンク(代替) */
 .dealer-login-block + .dealer-login-block { border-top: 1px solid var(--border-light); }
 .dealer-login-block .form-hint { margin: 0; }
+.dealer-login-providers { display: flex; flex-wrap: wrap; gap: 8px; }   /* Google・Microsoft を横に並べる(スマホ幅は縦) */
+@media (max-width: 560px) { .dealer-login-providers .btn { flex: 1 1 100%; } }
+.dealer-ms-link { font-size: 0.9rem; }
+.dealer-ms-link summary { cursor: pointer; color: var(--text-muted); }
 .dealer-title-row { justify-content: space-between; align-items: center; gap: 8px; }
 .dealer-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: #ffffff; }
 .dealer-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

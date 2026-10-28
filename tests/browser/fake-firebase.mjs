@@ -5,11 +5,15 @@
 export const FAKE_SDK = {
   "firebase-app.js": "export const initializeApp = (c) => ({ c });",
   "firebase-auth.js": `
-    export const getAuth = () => ({ get currentUser() { return window.__fakeUser || null; } });
+    export const getAuth = () => ({ get currentUser() { return window.__fakeUser ? { ...window.__fakeUser, getIdToken: async () => "fake-token" } : null; } });
     export function onAuthStateChanged(auth, cb) { setTimeout(() => { window.__authAt = performance.now(); cb(window.__fakeUser || null); }, window.__fakeAuthDelay || 0); return () => {}; }
-    export class GoogleAuthProvider { setCustomParameters(p) { this.params = p; } }
+    export class GoogleAuthProvider { constructor() { this.providerId = "google.com"; } setCustomParameters(p) { this.params = p; } }
+    export class OAuthProvider { constructor(id) { this.providerId = id; } setCustomParameters(p) { this.params = p; } }
+    // Microsoft の連携: 呼び出しを記録。window.__fakeLink があればその結果
+    export const linkWithPopup = async (user, provider) => { (window.__linkCalls = window.__linkCalls || []).push([provider.providerId, provider.params || null]); if (window.__fakeLink) return window.__fakeLink(); return {}; };
     // Googleログイン: 呼び出し(指定したパラメーター)を記録。window.__fakeGoogle があればその結果(既定は「閉じられた」)
     export const signInWithPopup = async (auth, provider) => {
+      if (provider.providerId === "microsoft.com") { (window.__microsoftCalls = window.__microsoftCalls || []).push(provider.params || null); if (window.__fakeMicrosoft) return window.__fakeMicrosoft(); throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); }
       (window.__googleCalls = window.__googleCalls || []).push(provider.params || null);
       if (window.__fakeGoogle) return window.__fakeGoogle();
       throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" });

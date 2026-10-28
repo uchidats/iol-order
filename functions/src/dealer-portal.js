@@ -229,6 +229,41 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     if (provider === "google.com") return email.endsWith("@gmail.com") || email.endsWith("@googlemail.com");
     return false;
   }
+  /**
+   * Microsoft でのログイン(sign_in_provider が microsoft.com)は、本人が登録した Microsoft の ID(dealerStaffIndex.trustedMicrosoftIds)と
+   * 一致するときだけ通す。Microsoft アカウントのメールは組織の管理者が変更できる場合があり(確認済みと限らない)、メールの一致や
+   * UID の自動的な結び付けだけでは本人と言えないため。登録は、メールのリンクでログインした直後に本人が行う(trustMicrosoft)。
+   */
+  const MS = "microsoft.com";
+  const msNotRegistered = () => new RegistrationError("permission-denied", "この Microsoft アカウントでのログインは、まだ登録されていません。メールアドレスでログインしてから、画面の「Microsoftアカウントを連携」で登録してください");
+  const msIdsOf = (auth) => { const ids = auth && auth.token && auth.token.firebase && auth.token.firebase.identities && auth.token.firebase.identities[MS]; return Array.isArray(ids) ? ids.map(String) : []; };
+  function assertSignInRegistered(auth, idx) {
+    const t = (auth && auth.token) || {};
+    if (!(t.firebase && t.firebase.sign_in_provider === MS)) return;
+    const ids = msIdsOf(auth);
+    const trusted = idx && idx.exists && Array.isArray(idx.get("trustedMicrosoftIds")) ? idx.get("trustedMicrosoftIds") : [];
+    if (ids.length !== 1 || !trusted.includes(ids[0])) throw msNotRegistered();
+  }
+
+  /** Microsoft アカウントの登録(本人)。メールのリンクでログインした直後のセッションで、その UID に Microsoft が連携されているときだけ */
+  async function trustMicrosoft(auth, data) {
+    strict(data || {}, []);
+    const user = assertVerifiedUser(auth);
+    const t = auth.token || {};
+    if (!(t.firebase && t.firebase.sign_in_provider === "password") || !mailboxProven(auth, user.email)) {
+      throw new RegistrationError("failed-precondition", "Microsoft アカウントの登録は、メールアドレスに届くログインリンクでログインした直後に行ってください");
+    }
+    const ids = msIdsOf(auth);
+    if (ids.length !== 1 || !/^[\x21-\x7e]{1,256}$/.test(ids[0])) throw new RegistrationError("failed-precondition", "Microsoft アカウントが連携されていません。「Microsoftアカウントを連携」からやり直してください");
+    return db.runTransaction(async (tx) => {
+      const idx = await tx.get(staffIndexRef(user.uid));
+      if (!idx.exists || !Array.isArray(idx.get("companyIds")) || !idx.get("companyIds").length) throw noAffiliation();
+      tx.set(idx.ref, { trustedMicrosoftIds: [ids[0]], microsoftTrustedAt: FieldValue.serverTimestamp() }, { merge: true });   // 1つの UID に Microsoft は1つ
+      audit(tx, { action: "staff.trustMicrosoft", actorUid: user.uid });
+      return { ok: true };
+    });
+  }
+
   const needsEmailLink = () => new RegistrationError("failed-precondition", "参加の確認は、招待されたメールアドレスに届くログインリンクでログインしてから行ってください(Gmail 以外のメールでは、Google でのログインでは参加できません)");
   function assertOperator(auth) {
     const user = assertVerifiedUser(auth);
@@ -245,6 +280,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   async function authorizeStaff(auth, companyId) {
     const user = assertVerifiedUser(auth);
     if (companyId !== undefined && companyId !== null && !isId(companyId)) throw badInput();
+    const idx0 = await staffIndexRef(user.uid).get();
+    assertSignInRegistered(auth, idx0);   // Microsoft でのログインは、登録した Microsoft アカウントだけ
     if (!companyId) {
       // 会社の指定なし: 所属の一覧のうち、いま有効な所属だけから選ぶ(旧会社の無効化・停止が残っていても、有効な1社なら進める)
       const valid = await validAffiliations(user);
@@ -284,6 +321,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   async function myCompanies(auth, data) {
     strict(data || {}, []);
     const user = assertVerifiedUser(auth);
+    assertSignInRegistered(auth, await staffIndexRef(user.uid).get());
     return { companies: (await validAffiliations(user)).map(a => ({ companyId: a.companyId, name: String(a.company.name || "") })) };
   }
 
@@ -555,7 +593,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const ids = idx.exists && Array.isArray(idx.get("companyIds")) ? idx.get("companyIds") : [];
       const next = [...new Set([cid, ...ids])];   // 新しい所属を先頭に。古い所属は(有効かどうかにかかわらず)削らない
       if (next.length > PORTAL_LIMITS.affiliationsMax) throw new RegistrationError("failed-precondition", "所属の記録が上限を超えています。運営者にお問い合わせください");
-      tx.set(staffIndexRef(user.uid), { companyIds: next, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(staffIndexRef(user.uid), { companyIds: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });   // 登録した Microsoft アカウントなどは残す
       tx.update(inv.ref, { status: "accepted", respondedAt: FieldValue.serverTimestamp(), respondedUid: user.uid });
       audit(tx, { action: "staff.join", companyId: cid, actorUid: user.uid, invitationId: inv.id });
       return { ok: true, accepted: true, companyId: cid };
@@ -574,6 +612,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "list": return listOrders(auth, rest);
       case "get": return getOrder(auth, rest);
       case "companies": return myCompanies(auth, rest);
+      case "trustMicrosoft": return trustMicrosoft(auth, rest);
       case "invitations": return myInvitations(auth, rest);
       case "respond": return respondInvitation(auth, rest);
       default: throw badInput();

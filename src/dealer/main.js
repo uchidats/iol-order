@@ -26,7 +26,9 @@ async function bootstrap() {
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable });
   const ui = createDealerApp({
     mount, api, setSubtitle,
-    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } }   // 表示中のデータもメモリごと破棄する
+    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
+    // Microsoft アカウントの連携と登録(メールのリンクでログインした直後に本人が行う。登録はサーバーが条件を確認する)
+    onLinkMicrosoft: async () => { await service.linkMicrosoft(); await api.trustMicrosoft(); }
   });
 
   let error = "";
@@ -43,12 +45,13 @@ async function bootstrap() {
       ui.showLogin({
         error,
         onGoogle: () => service.signInWithGoogle({ selectAccount: true }),   // 会社のアカウントを選べるよう、毎回アカウントの選択画面を出す
+        onMicrosoft: () => service.signInWithMicrosoft({ selectAccount: true }),   // ポップアップ(スマホも。リダイレクトは別ドメインの認証で保存が分断されるため使わない)
         onSend: (email) => service.sendEmailLink(email)
       });
       return;
     }
     uid = user.uid;
-    if (user.emailVerified === false) { ui.showMessage("ディーラー画面", "メールアドレスの確認が済んだアカウントのみ利用できます。", { error: true }); return; }
+    if (user.emailVerified === false) { ui.showMessage("ディーラー画面", "メールアドレスの確認が済んだアカウントのみ利用できます。Microsoft などでメールが確認済みでない場合は、ログアウトして、メールアドレスでログインしてください。", { error: true }); return; }
     await ui.enter();
   });
 }

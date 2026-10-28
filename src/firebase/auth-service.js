@@ -14,6 +14,11 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
   const store = storage || { getItem() { return null; }, setItem() {}, removeItem() {} };
 
   const safe = (fn) => { try { return fn(); } catch (e) { return null; } };
+  const microsoftProvider = (selectAccount) => {
+    const p = new fns.OAuthProvider("microsoft.com");
+    if (selectAccount && typeof p.setCustomParameters === "function") p.setCustomParameters({ prompt: "select_account" });
+    return p;
+  };
 
   return {
     /** 認証状態の購読。ログイン状態はSDKのlocal永続化で保持される */
@@ -29,6 +34,23 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
       const provider = new fns.GoogleAuthProvider();
       if (selectAccount && typeof provider.setCustomParameters === "function") provider.setCustomParameters({ prompt: "select_account" });
       return fns.signInWithPopup(auth, provider);
+    },
+
+    /**
+     * Microsoft アカウントでログイン(ポップアップ。Firebase 標準の OAuthProvider("microsoft.com")。企業(Entra ID)と個人の両方)。
+     * @param {{selectAccount?:boolean}} [opts] selectAccount: 毎回アカウントの選択画面を出す
+     */
+    async signInWithMicrosoft({ selectAccount = false } = {}) {
+      return fns.signInWithPopup(auth, microsoftProvider(selectAccount));
+    },
+
+    /** ログイン中のアカウントに Microsoft アカウントを連携し、連携を反映した ID トークンに更新する(本人の操作でだけ呼ぶ) */
+    async linkMicrosoft() {
+      const user = auth.currentUser;
+      if (!user) throw Object.assign(new Error("ログインが必要です"), { code: "auth/no-current-user" });
+      const r = await fns.linkWithPopup(user, microsoftProvider(true));
+      await user.getIdToken(true);
+      return r;
     },
 
     /** パスワード不要のメールリンクを送る */

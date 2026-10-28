@@ -52,6 +52,7 @@ function installFakeServer(page, scenario) {
     let joined = scenario !== "invited";
     window.__fakeCallables = {
       dealerPortalApi: async (d) => {
+        if (scenario === "msNotRegistered" && d.action !== "invitations") throw Object.assign(new Error("この Microsoft アカウントでのログインは、まだ登録されていません。メールアドレスでログインしてから、画面の「Microsoftアカウントを連携」で登録してください"), { code: "functions/permission-denied" });
         if (scenario === "disabled") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });   // 機能の停止中: すべての取得を拒否
         if (d.action === "invitations" && scenario === "linkRequired") return { invitations: [], emailLinkRequired: true };   // Gmail 以外の Google ログインで参加待ちがある
         if (d.action === "invitations") return { invitations: joined || scenario === "none" ? [] : [{ invitationId: "dinv-1", companyName: "エックス商事", role: "reader" }] };
@@ -77,6 +78,7 @@ function installFakeServer(page, scenario) {
             { no: 2, manufacturer: "J&J", model: "DIB00V", toricModel: "", isToric: false, isMultifocal: false, power: "+22.0D", quantity: 1, surgeryDate: "2026-11-07", doctorName: "山田" }]
         };
         if (d.action === "setAssignments") return { ok: true, assignedFacilityIds: d.facilityIds };
+        if (d.action === "trustMicrosoft") return { ok: true };
         throw new Error("unexpected " + d.action);
       }
     };
@@ -271,7 +273,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(g.y < m.y, `${width}: Google が上段`);
         assert.match(await google.getAttribute("class"), /btn-primary/);
         assert.match(await send.getAttribute("class"), /btn-secondary/, "メールリンクは代替");
-        assert.match(await page.locator('[data-login="google"]').innerText(), /推奨/);
+        assert.match(await page.locator('[data-login="accounts"]').innerText(), /推奨/);
+        // Microsoft: Google と並べる(PC は横、スマホは縦)。メールのリンクより上
+        const msb = page.locator("#btnDealerMicrosoft");
+        assert.equal(await msb.innerText(), "Microsoftでログイン");
+        const mb = await msb.boundingBox();
+        assert.ok(mb.y < m.y, `${width}: Microsoft もメールより上`);
+        if (width >= 1100) assert.ok(Math.abs(mb.y - g.y) < 2 && mb.x > g.x, "PC は横に並ぶ"); else assert.ok(mb.y > g.y, "スマホは縦に並ぶ");
+        await msb.click();
+        await page.getByText("ログインがキャンセルされました。").waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__microsoftCalls), [{ prompt: "select_account" }]);
+        await page.evaluate(() => { window.__fakeMicrosoft = async () => { throw Object.assign(new Error("x"), { code: "auth/account-exists-with-different-credential" }); }; });
+        await msb.click();
+        await page.getByText(/別のログイン方法で登録されています/).waitFor();
+        await page.evaluate(() => { window.__fakeMicrosoft = null; });
         // 押すとアカウントの選択画面を出す指定で呼ぶ。閉じた・ブロックされたときは案内(サーバーには問い合わせない)
         await google.click();
         await page.getByText("ログインがキャンセルされました。").waitFor();
@@ -342,6 +357,33 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
     assert.equal(await page.locator(".dealer-row").count(), 0);
     assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    await context.close();
+
+    // 登録していない Microsoft アカウントでのログイン: 会社の情報は出さず、登録の方法を案内
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "msNotRegistered");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText(/Microsoft アカウントでのログインは、まだ登録されていません/).waitFor();
+    assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
+    await context.close();
+
+    // 受注一覧の「Microsoftアカウントを連携」: 連携(アカウントの選択画面)→ サーバーに登録
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "staff");
+    await page.goto(`${base}dealer.html`);
+    await page.locator(".dealer-row").first().waitFor();
+    await page.locator(".dealer-ms-link summary").click();
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/Microsoft アカウントを登録しました/).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__linkCalls), [["microsoft.com", { prompt: "select_account" }]]);
+    assert.equal((await calls(page, "trustMicrosoft")).length, 1);
+    // 別のアカウントに連携済みの Microsoft は、案内して登録しない
+    await page.evaluate(() => { window.__fakeLink = async () => { throw Object.assign(new Error("x"), { code: "auth/credential-already-in-use" }); }; });
+    await page.click('[data-act="linkMicrosoft"]');
+    await page.getByText(/別のアカウントにすでに連携されています/).waitFor();
+    assert.equal((await calls(page, "trustMicrosoft")).length, 1, "失敗したときは登録しない");
     await context.close();
 
     // 参加の確認 → 承諾 → 受注一覧

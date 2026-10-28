@@ -780,6 +780,66 @@ test("G-04: メール未確認(false・欠落・文字列の \"true\")のアカ�
   assert.equal((await db.doc("dealerStaffIndex/unv").get()).exists, false);
 });
 
+// ======================= Microsoft ログイン =======================
+const msAuth = (uid, email, ids, over = {}) => auth(uid, { email, firebase: { sign_in_provider: "microsoft.com", identities: { "microsoft.com": ids, email: [email] } }, ...over });
+const linkAuth = (uid, email, msIds, over = {}) => auth(uid, { email, firebase: { sign_in_provider: "password", identities: { email: [email], ...(msIds ? { "microsoft.com": msIds } : {}) } }, ...over });
+
+test("Microsoft: 参加済みの担当者でも、Microsoft でのログインは本人が登録した Microsoft アカウントだけ(メールの一致・UID の結び付けだけでは不可)。登録はメールのリンクの直後・連携済みのときだけ", async () => {
+  await grant("adminA", "fA", "dA1");
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  const email = "x1@corp.example.jp";
+  // 同じ UID・同じメールでも、未登録の Microsoft でのログインは会社・一覧・会社の候補を拒否(案内付き)
+  for (const [action, data] of [["context", {}], ["companies", {}], ["list", range()]]) {
+    await assert.rejects(api(msAuth("x1", email, ["m-x1"]), action, data), (e) => e.code === "permission-denied" && /Microsoft アカウントでのログインは、まだ登録されていません/.test(e.message), action);
+  }
+  // 登録の条件: Microsoft のセッションでは不可、連携していないメールのリンクでも不可、古いメールのリンクでも不可
+  await rejects(api(msAuth("x1", email, ["m-x1"]), "trustMicrosoft"), "failed-precondition");
+  await rejects(api(linkAuth("x1", email, null), "trustMicrosoft"), "failed-precondition");
+  await rejects(api(linkAuth("x1", email, ["m-x1"], { auth_time: Math.floor(Date.now() / 1000) - 31 * 60 }), "trustMicrosoft"), "failed-precondition");
+  await rejects(api(linkAuth("x1", email, ["m-x1", "m-x1b"]), "trustMicrosoft"), "failed-precondition");
+  // 所属のない人は登録できない
+  await rejects(api(linkAuth("nobody", "nobody@corp.example.jp", ["m-n"]), "trustMicrosoft"), "permission-denied");
+  // 本人がメールのリンクでログインした直後に連携 → 登録
+  await api(linkAuth("x1", email, ["m-x1"]), "trustMicrosoft");
+  assert.deepEqual((await db.doc("dealerStaffIndex/x1").get()).get("trustedMicrosoftIds"), ["m-x1"]);
+  assert.equal((await api(msAuth("x1", email, ["m-x1"]), "context")).company.id, C.X);
+  assert.equal((await api(msAuth("x1", email, ["m-x1"]), "list", range())).items.length, 1);
+  // 登録していない Microsoft の ID・複数の ID・未確認のメールは拒否
+  await rejects(api(msAuth("x1", email, ["m-evil"]), "context"), "permission-denied");
+  await rejects(api(msAuth("x1", email, ["m-x1", "m-evil"]), "context"), "permission-denied");
+  await rejects(api(msAuth("x1", email, ["m-x1"], { email_verified: false }), "context"), "permission-denied");
+  // 他社の会社を指定しても読めない(会社の所属は従来どおり)
+  await rejects(api(msAuth("x1", email, ["m-x1"]), "list", { ...range(), companyId: C.Y }), "permission-denied");
+  // 担当者を無効化すれば、登録した Microsoft でも使えない
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
+  await rejects(api(msAuth("x1", email, ["m-x1"]), "context"), "permission-denied");
+});
+
+test("Microsoft: Microsoft でのログインでは参加できない(会社名も見せない)。未招待の Microsoft アカウントは何も見えない。参加の後も登録は残る。機能の停止中は登録もできない", async () => {
+  const email = "ms-new@corp.example.jp";
+  const { invitationId } = await op("inviteStaff", { companyId: C.Y, email, name: "", role: "reader" });
+  const ms = msAuth("msu", email, ["m-new"]);
+  assert.deepEqual(await api(ms, "invitations"), { invitations: [], emailLinkRequired: true });
+  await rejects(api(ms, "respond", { invitationId, accept: true }), "failed-precondition");
+  assert.equal((await db.doc(`dealerCompanies/${C.Y}/staff/msu`).get()).exists, false);
+  // 未招待の Microsoft アカウント(個人など)
+  const outsider = msAuth("msout", "someone@outlook-like.example.com", ["m-out"]);
+  assert.deepEqual((await api(outsider, "invitations")).invitations, []);
+  await rejects(api(outsider, "context"), "permission-denied");
+  // メールのリンクで参加 → 連携・登録 → 別の会社にも参加しても、登録は残る
+  await api(linkAuth("msu", email), "respond", { invitationId, accept: true });
+  await api(linkAuth("msu", email, ["m-new"]), "trustMicrosoft");
+  const inv2 = await op("inviteStaff", { companyId: C.X, email, name: "", role: "reader" });
+  await api(linkAuth("msu", email, ["m-new"]), "respond", { invitationId: inv2.invitationId, accept: true });
+  assert.deepEqual((await db.doc("dealerStaffIndex/msu").get()).get("trustedMicrosoftIds"), ["m-new"]);
+  assert.equal((await api(ms, "companies")).companies.length, 2);
+  // 機能の停止中は、登録も含めてディーラーの API は使えない
+  enabled.v = false;
+  await rejects(api(linkAuth("msu", email, ["m-new"]), "trustMicrosoft"), "failed-precondition");
+  await rejects(api(ms, "context"), "failed-precondition");
+  enabled.v = true;
+});
+
 test("Rules: 新しい領域(会社・担当者・索引・許可・関連付け・参加待ち)は、担当者・施設の管理者・運営者もクライアントから直接読めない。担当者は施設の注文を読めない", async () => {
   await grant("adminA", "fA", "dA1");
   const r = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
