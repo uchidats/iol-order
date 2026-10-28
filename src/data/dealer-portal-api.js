@@ -7,12 +7,24 @@
  */
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => o && o[k] !== undefined).map(k => [k, o[k]]));
 
-export function createDealerPortalApi({ functions, httpsCallable }) {
+/**
+ * @param {object} [deps.device] 確認済みの端末の値の保存先 { get(): string|null, set(token) }(ディーラー画面だけ)。
+ *   担当者の呼び出しに付け、サーバーが返した新しい値(参加・Microsoft の登録・端末の確認の後)を保存する
+ */
+export function createDealerPortalApi({ functions, httpsCallable, device = null }) {
   const call = (name) => {
     const fn = httpsCallable(functions, name);
     return async (payload) => (await fn(payload)).data;
   };
-  const portal = call("dealerPortalApi");
+  const rawPortal = call("dealerPortalApi");
+  const portal = async (payload) => {
+    const token = device ? device.get() : null;
+    const r = await rawPortal(token ? { ...payload, deviceToken: token } : payload);
+    if (!r || typeof r.deviceToken !== "string") return r;
+    if (device) device.set(r.deviceToken);
+    const { deviceToken, ...rest } = r;   // 値は画面の処理に渡さない
+    return rest;
+  };
   const facility = call("facilityDealerPortal");
   const operator = call("dealerPortalOperator");
   return {
@@ -20,6 +32,8 @@ export function createDealerPortalApi({ functions, httpsCallable }) {
     companies: () => portal({ action: "companies" }),
     sendMicrosoftCode: () => portal({ action: "sendMicrosoftCode" }),
     trustMicrosoft: (a) => portal({ action: "trustMicrosoft", code: String((a && a.code) || "") }),
+    sendDeviceCode: () => portal({ action: "sendDeviceCode" }),
+    verifyDevice: (a) => portal({ action: "verifyDevice", code: String((a && a.code) || "") }),
     context: (a = {}) => portal({ action: "context", ...pick(a, ["companyId"]) }),
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),

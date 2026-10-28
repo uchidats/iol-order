@@ -61,6 +61,15 @@ test("Microsoftログイン: OAuthProvider(\"microsoft.com\") のポップアッ
   assert.deepEqual(calls, [["token", true]]);
 });
 
+test("Microsoft の連携の解除: ログイン中のアカウントから microsoft.com を外し、トークンを更新する。未ログインは不可", async () => {
+  const calls = [];
+  const user = { uid: "u", getIdToken: async (force) => { calls.push(["token", force]); return "t"; } };
+  const { fns } = makeFns({ unlink: async (u, id) => { calls.push(["unlink", u.uid, id]); return u; } });
+  await createAuthService({ auth: { currentUser: user }, fns, currentUrl: () => "https://x/y/" }).unlinkMicrosoft();
+  assert.deepEqual(calls, [["unlink", "u", "microsoft.com"], ["token", true]]);
+  await assert.rejects(createAuthService({ auth: { currentUser: null }, fns, currentUrl: () => "https://x/y/" }).unlinkMicrosoft(), (e) => e.code === "auth/no-current-user");
+});
+
 test("メールリンク送信は handleCodeInApp とクエリ無しの戻り先を使う", async () => {
   const { fns, calls } = makeFns();
   const storage = memStore();

@@ -23,12 +23,22 @@ async function bootstrap() {
   await setupAppCheck({ app });
   const auth = sdk.auth.getAuth(app);
   const service = createAuthService({ auth, fns: sdk.auth, currentUrl: () => dealerEntryUrl(location.origin), storage: window.localStorage });
-  const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable });
+  let uid = null;
+  // 確認済みの端末の値(ログインした利用者ごと。サーバーが確認コードを確かめた後に返す)。ログアウトでは消さない(同じ端末で次も使う)。
+  // 保存できない環境(プライベートブラウズなど)では、ログインのたびに確認コードで確認する
+  const deviceKey = () => `iolDealerDevice.${uid}`;
+  const device = {
+    get: () => { try { return uid ? window.localStorage.getItem(deviceKey()) : null; } catch (e) { return null; } },
+    set: (t) => { try { if (uid) window.localStorage.setItem(deviceKey(), t); } catch (e) { /* 保存できなくても続ける */ } }
+  };
+  const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
   const ui = createDealerApp({
     mount, api, setSubtitle,
     onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
     // Microsoft アカウントの連携(連携済みなら省略)。登録は画面がメールの確認コードで行う(サーバーが条件を確認する)
-    onLinkMicrosoft: () => service.linkMicrosoft()
+    onLinkMicrosoft: () => service.linkMicrosoft(),
+    // 心当たりのない Microsoft の連携を外す(登録せずに済ませる。外しても、閲覧には確認済みの端末が要る)
+    onUnlinkMicrosoft: () => service.unlinkMicrosoft()
   });
 
   let error = "";
@@ -38,7 +48,6 @@ async function bootstrap() {
     history.replaceState(null, "", location.origin + location.pathname);
   }
 
-  let uid = null;
   service.onChange(async (user) => {
     if (uid && (!user || user.uid !== uid)) { location.reload(); return; }   // 別のユーザーへの切り替え: 画面の状態を持ち越さない
     if (!user) {

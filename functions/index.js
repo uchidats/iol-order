@@ -197,7 +197,7 @@ const DEALER_PORTAL_ENABLED = defineBoolean("DEALER_PORTAL_ENABLED", { default: 
 // エミュレータのテストだけは、demo- のプロジェクトで DEALER_JOIN_CODE_TEST_SINK=true のときに限り、コードをテスト用の文書に書く(本番では使わない)
 const DEALER_JOIN_CODE_TEST_SINK = defineBoolean("DEALER_JOIN_CODE_TEST_SINK", { default: false });
 const isDemoProject = () => String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").startsWith("demo-");
-// purpose: "join"(参加。key は招待 ID)/ "microsoft"(Microsoft アカウントの登録。key は ms-{uid})
+// purpose: "join"(参加。key は招待 ID)/ "microsoft"(Microsoft アカウントの登録。key は ms-{uid})/ "device"(端末の確認。key は dev-{uid})
 async function sendDealerJoinCode({ purpose = "join", key, to, code, companyName, invitationId, expiresAtMs }) {
   const id = String(key || invitationId);
   if (isDemoProject() && DEALER_JOIN_CODE_TEST_SINK.value()) {
@@ -208,7 +208,7 @@ async function sendDealerJoinCode({ purpose = "join", key, to, code, companyName
   const recipient = MAIL_TEST_ONLY.value() ? String(MAIL_TEST_RECIPIENT.value() || "").trim() : to;
   if (!recipient) return { ok: false, error: "no-recipient" };
   const minutes = Math.max(1, Math.round((expiresAtMs - Date.now()) / 60000));
-  const what = purpose === "microsoft" ? "ディーラー専用画面での Microsoft アカウントの登録" : "ディーラー専用画面への参加";
+  const what = purpose === "microsoft" ? "ディーラー専用画面での Microsoft アカウントの登録" : purpose === "device" ? "ディーラー専用画面の端末の確認" : "ディーラー専用画面への参加";
   const text = `${companyName} の${what}の確認コードです。\n\n確認コード: ${code}\n\nこのコードは ${minutes} 分間、1回だけ有効です。画面の「確認コード」に入力してください。\nお心当たりがない場合は、このメールを破棄してください(コードを他の人に伝えないでください)。\n`;
   return createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
     .send({ to: [recipient], subject: `【確認コード】${what}`, text, idempotencyKey: `dealer-${purpose}-${id}-${expiresAtMs}` });

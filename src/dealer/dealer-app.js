@@ -13,7 +13,7 @@ import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDa
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
  */
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, onLinkMicrosoft = null }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, onLinkMicrosoft = null, onUnlinkMicrosoft = null }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -348,6 +348,56 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "Microsoftアカウントの登録")),
       h("p", { class: "feature-desc" }, "このアカウントには、まだ登録が終わっていない Microsoft アカウントが連携されています。登録が終わるまでは、どのログイン方法でも受注一覧を表示できません。登録されたメールアドレスに確認コードを送り、コードを入力して登録してください。"),
       ...msRegisterControls(() => { enter(); }, "確認コードを送る"),
+      onUnlinkMicrosoft ? msUnlinkBlock() : null,
+      h("div", { class: "onboarding-actions" }, signOutBtn()));
+  }
+
+  /** 心当たりのない Microsoft アカウントは、登録せずに連携を外す(外した後も、閲覧には確認済みの端末が要る) */
+  function msUnlinkBlock() {
+    const btn = h("button", { type: "button", class: "btn btn-secondary", "data-act": "unlinkMicrosoft" }, "連携を解除する");
+    const note = h("p", { class: "form-hint", role: "status" });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; note.className = "form-hint"; note.textContent = "";
+      try { await onUnlinkMicrosoft(); await enter(); }
+      catch (e) { note.className = "error-message"; note.textContent = describeLoginError(e, "microsoft"); btn.disabled = false; }
+    });
+    return h("div", { class: "dealer-login-block" },
+      h("p", { class: "form-hint" }, "心当たりのない Microsoft アカウントの場合は、登録せずに連携を解除し、運営者にお知らせください。"),
+      h("div", { class: "onboarding-actions" }, btn), note);
+  }
+
+  /**
+   * この端末の確認(MS-01): 閲覧は、メールの確認コードで確認した端末からだけ(ログイン方法・連携の状態では判断しない)。
+   * 参加・Microsoft の登録をした端末は確認済み。新しい端末・保存を消した端末では、ここで確認する。会社・施設の情報は出さない
+   */
+  function showDeviceVerify() {
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    const send = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendDeviceCode" }, "確認コードを送る");
+    const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "deviceCode" });
+    const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyDevice" }, "確認する");
+    const note = h("p", { class: "form-hint", role: "status" });
+    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify);
+    const lock = (v) => { send.disabled = verify.disabled = v; };
+    send.addEventListener("click", async () => {
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try {
+        const r = await api.sendDeviceCode();
+        codeRow.hidden = false;
+        note.textContent = `登録されたメールアドレスに確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールのコードを入力して「確認する」を押してください。`;
+        code.focus();
+      } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
+      finally { lock(false); }
+    });
+    verify.addEventListener("click", async () => {
+      const value = code.value.replace(/\s/g, "");
+      if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
+      lock(true); note.className = "form-hint"; note.textContent = "";
+      try { await api.verifyDevice({ code: value }); await enter(); }
+      catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); lock(false); }
+    });
+    panel.replaceChildren(h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "この端末の確認")),
+      h("p", { class: "feature-desc" }, "この端末での利用は、まだ確認されていません。本人の確認のため、登録されたメールアドレスに確認コードを送ります。コードを入力すると、この端末で受注一覧を表示できます(確認は端末ごとに必要です)。"),
+      h("div", { class: "form-row" }, send), codeRow, note,
       h("div", { class: "onboarding-actions" }, signOutBtn()));
   }
 
@@ -381,6 +431,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       await showPortal(await api.context(choices.length === 1 ? { companyId: choices[0].companyId } : {}));
     } catch (e) {
       if (onLinkMicrosoft && e && e.details && e.details.reason === "microsoft-unregistered") { showMicrosoftRegister(); return; }
+      if (e && e.details && e.details.reason === "device-unverified") { showDeviceVerify(); return; }
       showMessage("ディーラー画面", describeCallableError(e), { error: true });   // 所属がない・会社の停止など(会社名・施設名は出さない)
     }
   }

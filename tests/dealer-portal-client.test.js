@@ -77,3 +77,28 @@ test("Firestore Rules: ディーラー専用画面の新しい領域は明示的
     assert.match(rules.slice(i, i + 120), /allow read, write: if false;/, m);
   }
 });
+
+test("ディーラー画面 API: 確認済みの端末の値を担当者の呼び出しに付け、サーバーが返した値は保存して画面には渡さない(施設・運営者の呼び出しには付けない)", async () => {
+  const calls = [];
+  let saved = "tok-1";
+  const device = { get: () => saved, set: (t) => { saved = t; } };
+  const api = createDealerPortalApi({ functions: {}, device, httpsCallable: (f, name) => async (payload) => {
+    calls.push([name, payload]);
+    return { data: payload.action === "verifyDevice" ? { ok: true, deviceToken: "tok-2" } : { ok: true } };
+  } });
+  await api.context({ companyId: "c" });
+  assert.deepEqual(await api.verifyDevice({ code: "12345678" }), { ok: true }, "値は画面に渡さない");
+  assert.equal(saved, "tok-2");
+  await api.sendDeviceCode();
+  await api.facilityStatus({ facilityId: "fA" });
+  assert.deepEqual(calls, [
+    ["dealerPortalApi", { action: "context", companyId: "c", deviceToken: "tok-1" }],
+    ["dealerPortalApi", { action: "verifyDevice", code: "12345678", deviceToken: "tok-1" }],
+    ["dealerPortalApi", { action: "sendDeviceCode", deviceToken: "tok-2" }],
+    ["facilityDealerPortal", { action: "status", facilityId: "fA" }]
+  ]);
+  // 保存がない(未確認の端末)なら付けない
+  saved = null; calls.length = 0;
+  await api.companies();
+  assert.deepEqual(calls, [["dealerPortalApi", { action: "companies" }]]);
+});

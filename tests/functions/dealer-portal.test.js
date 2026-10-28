@@ -18,6 +18,8 @@ const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").s
 const rulesPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../firestore.rules");
 let env, db, portal, orders, testOrders, clock, enabled;
 const sentCodes = [], sendResult = { v: { ok: true } };
+// 確認済みの端末(UID ごと)。参加・Microsoft の登録・端末の確認で返った値を持ち、以後の呼び出しに付ける(画面が端末に保存するのと同じ)
+const devices = new Map();
 
 before(async () => {
   if (!getApps().length) initializeApp({ projectId: PROJECT });
@@ -39,7 +41,15 @@ const ops = () => auth("ops1", { platformAdmin: true });
 const staffAuth = (uid) => auth(uid, { email: `${uid}@corp.example.jp` });
 const rejects = (p, code) => assert.rejects(p, (e) => e.code === code, `expected ${code}`);
 const op = (action, data = {}) => portal.operator({ auth: ops(), data: { action, ...data } });
-const api = (uid, action, data = {}) => portal.portal({ auth: typeof uid === "string" ? staffAuth(uid) : uid, data: { action, ...data } });
+/** data に deviceToken を書けばその値(null なら付けない)。書かなければ、その UID の確認済みの端末を付ける */
+async function api(uid, action, data = {}) {
+  const a = typeof uid === "string" ? staffAuth(uid) : uid;
+  const { deviceToken, ...rest } = data;
+  const dev = "deviceToken" in data ? deviceToken : devices.get(a.uid);
+  const r = await portal.portal({ auth: a, data: { action, ...rest, ...(dev ? { deviceToken: dev } : {}) } });
+  if (r && typeof r.deviceToken === "string") devices.set(a.uid, r.deviceToken);
+  return r;
+}
 const fac = (uid, action, data = {}) => portal.facility({ auth: auth(uid), data: { action, ...data } });
 const today = () => jstDateOf(Date.now());
 const surgery = () => jstDateOf(Date.now() + 10 * 24 * 3600 * 1000);
@@ -48,7 +58,7 @@ let C = {};   // 会社ID
 
 beforeEach(async () => {
   await env.clearFirestore();
-  clock.t = null; enabled.v = true;
+  clock.t = null; enabled.v = true; devices.clear();
   for (const [f, name] of [["fA", "A眼科"], ["fB", "B眼科"]]) {
     await db.doc(`facilities/${f}`).set({ name, status: "active" });
     for (const id of ["jj-dib00v"]) await db.doc(`facilities/${f}/adoptedIols/${id}`).set({ facilityId: f, catalogIolId: id, enabled: true });
@@ -87,6 +97,11 @@ async function join(who, invitationId) {
   await api(who, "sendCode", { invitationId });
   const m = sentCodes.filter(x => x.invitationId === invitationId).at(-1);
   return api(who, "respond", { invitationId, accept: true, code: m.code });
+}
+/** DB に直接作った担当者の端末を、実際の手順(確認コード)で確認済みにする */
+async function verifyDev(uid) {
+  await api(uid, "sendDeviceCode", { deviceToken: null });
+  return api(uid, "verifyDevice", { code: sentCodes.at(-1).code, deviceToken: null });
 }
 /** 続きを最後までたどる(同じ検索)。各ページの newSinceSearch もまとめる */
 async function rest(uid, first, over = {}, call = (c) => list(uid, { ...over, cursor: c })) {
@@ -559,7 +574,7 @@ test("F-04(再レビュー): 次ページの処理中(読み取りの直前)に�
     const v = t[p]; return typeof v === "function" ? v.bind(t) : v;
   } });
   const racyPortal = createDealerPortalService({ db: racy, FieldValue, Timestamp, FieldPath, isEnabled: () => true });
-  const p2 = await rest("x1", p1, {}, (c) => racyPortal.portal({ auth: staffAuth("x1"), data: { action: "list", ...range(), limit: 1, cursor: c } }));
+  const p2 = await rest("x1", p1, {}, (c) => racyPortal.portal({ auth: staffAuth("x1"), data: { action: "list", ...range(), limit: 1, cursor: c, deviceToken: devices.get("x1") } }));
   assert.ok(injected);
   assert.deepEqual(p2.items.map(i => i.orderNumber), [o1.orderNumber]);
   assert.deepEqual([p2.complete, p2.newSinceSearch], [true, true], "欠けたまま「新しい注文なし」としない");
@@ -590,8 +605,8 @@ test("F-06: 所属の変更後(旧会社で無効化)も、会社を指定せず
   // すべて無効
   await op("updateStaff", { companyId: C.Y, uid: "x1", status: "disabled" });
   await rejects(api("x1", "context"), "permission-denied");
-  assert.deepEqual((await api("x1", "companies")).companies, []);
-  assert.deepEqual((await api("stranger", "companies")).companies, []);
+  await assert.rejects(api("x1", "companies"), (e) => e.code === "permission-denied", "無効化で確認済みの端末も消える");
+  await assert.rejects(api("stranger", "companies"), (e) => e.code === "permission-denied");
   await rejects(api("x1", "companies", { companyId: C.Y }), "invalid-argument");
 });
 
@@ -607,6 +622,7 @@ test("F-06(再レビュー): 無効な旧所属が20件以上残っていても�
   // 有効な会社(X)は一覧の22件目
   await db.doc(`dealerCompanies/${C.X}/staff/${uid}`).set({ uid, approvedEmail: `${uid}@corp.example.jp`, role: "reader", status: "active", facilityAssignments: [] });
   await db.doc(`dealerStaffIndex/${uid}`).set({ companyIds: [...old, C.X] });
+  await verifyDev(uid);
   assert.deepEqual((await api(uid, "companies")).companies, [{ companyId: C.X, name: "エックス商事" }]);
   assert.equal((await api(uid, "context")).company.id, C.X);
   // 招待の承諾では、新しい所属を一覧の先頭に加える
@@ -635,6 +651,7 @@ test("F-06(再々レビュー): 無効な旧所属が500件を超えて残って
   }
   await db.doc(`dealerCompanies/${C.X}/staff/${uid}`).set({ uid, approvedEmail: email, role: "reader", status: "active", facilityAssignments: [] });
   await db.doc(`dealerStaffIndex/${uid}`).set({ companyIds: [...old, C.X] });   // 有効な会社 X は 501 件目
+  await verifyDev(uid);
   assert.deepEqual((await api(uid, "companies")).companies, [{ companyId: C.X, name: "エックス商事" }]);
   assert.equal((await api(uid, "context")).company.id, C.X);
   // 承諾: 新しい所属を先頭に加え、末尾の有効な所属(X)も残す
@@ -1016,6 +1033,93 @@ test("Microsoft: 参加は確認コードで(Microsoft のセッションでも�
   await rejects(api(ms, "sendMicrosoftCode"), "failed-precondition");
   await rejects(api(ms, "trustMicrosoft", { code: "12345678" }), "failed-precondition");
   await rejects(api(ms, "context"), "failed-precondition");
+  enabled.v = true;
+});
+
+// ======================= MS-01(統合版の最終レビュー): Microsoft の連携を解除してパスワードで入り直す経路 =======================
+const deviceUnverified = (e) => e.code === "permission-denied" && e.details && e.details.reason === "device-unverified";
+
+test("MS-01-R2: 未登録の Microsoft から連携を解除し、パスワードで入り直したセッション(トークンは本人と同じ形)は、確認済みの端末でなければ会社・一覧・詳細を取得できない", async () => {
+  await grant("adminA", "fA", "dA1");
+  const r = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" }), line({ dealerId: "dA2", power: "+21.0D" })]);
+  const email = "x1@corp.example.jp";
+  const rid = (await list("x1")).items[0].receiptId;   // 本人(参加した端末)は使える
+  // Codex の再現: 同じ UID・確認済みのメール・password・Microsoft の ID なし(解除済み)・直近の auth_time。参加・登録のコードは受け取っていない
+  const intruder = linkAuth("x1", email, null);
+  for (const [action, data] of [["context", {}], ["companies", {}], ["list", range()], ["get", { receiptId: rid }], ["setAssignments", { facilityIds: ["fA"] }]]) {
+    await assert.rejects(api(intruder, action, { ...data, deviceToken: null }), deviceUnverified, action);
+  }
+  // 最初の API の前に解除した場合も同じ(未登録の Microsoft の記録の有無に依存しない)。偽の値・他人の端末の値も不可
+  await assert.rejects(api(intruder, "context", { deviceToken: "A".repeat(43) }), deviceUnverified);
+  await assert.rejects(api(intruder, "context", { deviceToken: devices.get("y1") }), deviceUnverified, "別の UID の端末");
+  await rejects(api(intruder, "context", { deviceToken: "short" }), "permission-denied");
+  // 確認コードを要求しても、届くのは承認済みのメール(本人)だけ。推測では確認できない
+  await api(intruder, "sendDeviceCode", { deviceToken: null });
+  assert.deepEqual([sentCodes.at(-1).purpose, sentCodes.at(-1).key, sentCodes.at(-1).to], ["device", "dev-x1", email]);
+  const code = sentCodes.at(-1).code;
+  for (let i = 0; i < 5; i++) await rejects(api(intruder, "verifyDevice", { code: code === "00000000" ? "11111111" : "00000000", deviceToken: null }), "failed-precondition");
+  await assert.rejects(api(intruder, "verifyDevice", { code, deviceToken: null }), (e) => /確認コードが無効/.test(e.message), "5回の誤りの後は正しいコードも無効");
+  await assert.rejects(api(intruder, "context", { deviceToken: null }), deviceUnverified);
+  // 本人の端末は、ログイン方法・連携の状態が変わっても使える(サーバーの記録は解除で消えない)。自社の明細だけ
+  for (const who of [intruder, googleAuth("x1", email, null)]) assert.equal((await api(who, "context")).company.id, C.X);
+  const d = await api(intruder, "get", { receiptId: rid });
+  assert.equal(d.orderNumber, r.orderNumber);
+  assert.ok(!JSON.stringify(d).includes("ワイ医療"));
+});
+
+test("MS-01-R2: 本人は新しい端末でもメールの確認コードで確認できる(永久に使えなくならない)。端末は UID ごと・期限・上限・無効化で消える。参加・Microsoft の登録でも端末を確認済みにする", async () => {
+  const email = "x1@corp.example.jp";
+  const first = devices.get("x1");
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/, "参加で確認済みの端末");
+  assert.equal((await db.collection("dealerStaffDevices").where("uid", "==", "x1").get()).size, 1);
+  const stored = (await db.collection("dealerStaffDevices").where("uid", "==", "x1").get()).docs[0];
+  assert.notEqual(stored.id, first, "保存はハッシュだけ");
+  assert.ok(!JSON.stringify(stored.data()).includes(first));
+  // 新しい端末: コードを送って確認 → 新しい値。前の端末も使える
+  const fresh = linkAuth("x1", email, null);
+  await api(fresh, "sendDeviceCode", { deviceToken: null });
+  const r = await api(fresh, "verifyDevice", { code: sentCodes.at(-1).code, deviceToken: null });
+  assert.notEqual(r.deviceToken, first);
+  assert.equal((await api(fresh, "context", { deviceToken: r.deviceToken })).company.id, C.X);
+  assert.equal((await api(fresh, "context", { deviceToken: first })).company.id, C.X);
+  await rejects(api(fresh, "verifyDevice", { code: sentCodes.at(-1).code, deviceToken: null }), "failed-precondition");   // コードは一度だけ
+  // 期限(180日)を過ぎた端末は使えない
+  clock.t = Date.now() + 181 * 24 * 3600 * 1000;
+  await assert.rejects(api(fresh, "context", { deviceToken: first }), deviceUnverified);
+  clock.t = null;
+  // 上限(10台)を超えたら古いものから消す
+  for (let i = 0; i < 10; i++) {
+    clock.t = Date.now() + (i + 1) * 2 * 60 * 1000;
+    if (i % 5 === 0 && i) clock.t += 25 * 3600 * 1000;   // 送信回数の上限(24時間に5回)を避ける
+    await api(fresh, "sendDeviceCode", { deviceToken: null });
+    await api(fresh, "verifyDevice", { code: sentCodes.at(-1).code, deviceToken: null });
+  }
+  clock.t = null;
+  assert.equal((await db.collection("dealerStaffDevices").where("uid", "==", "x1").get()).size, 10);
+  await assert.rejects(api(fresh, "context", { deviceToken: first }), deviceUnverified, "最も古い端末は消える");
+  // 担当者の無効化で確認済みの端末をすべて消す。有効に戻しても確認し直すまで使えない。無効の間は確認できない
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "disabled" });
+  assert.equal((await db.collection("dealerStaffDevices").where("uid", "==", "x1").get()).size, 0);
+  await rejects(api(fresh, "sendDeviceCode", { deviceToken: null }), "permission-denied");
+  await op("updateStaff", { companyId: C.X, uid: "x1", status: "active" });
+  await assert.rejects(api("x1", "context"), deviceUnverified);
+  clock.t = Date.now() + 30 * 3600 * 1000;
+  await api(fresh, "sendDeviceCode", { deviceToken: null });
+  await api(fresh, "verifyDevice", { code: sentCodes.at(-1).code });
+  clock.t = null;
+  assert.equal((await api("x1", "context")).company.id, C.X);
+  // Microsoft の登録でも、その端末を確認済みにする(コードは1回で済む)
+  const ms = msAuth("x2", "x2@corp.example.jp", ["m-x2"]);
+  await api(ms, "sendMicrosoftCode", { deviceToken: null });
+  const t = await api(ms, "trustMicrosoft", { code: sentCodes.at(-1).code, deviceToken: null });
+  assert.match(t.deviceToken, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal((await api(ms, "context", { deviceToken: t.deviceToken })).company.id, C.X);
+  // 未参加・未確認のメールは送信・確認できない。機能の停止中も不可
+  await rejects(api(auth("nobody", { email: "nobody@corp.example.jp" }), "sendDeviceCode"), "permission-denied");
+  await rejects(api(auth("x1", { email, email_verified: false }), "sendDeviceCode"), "permission-denied");
+  enabled.v = false;
+  await rejects(api(fresh, "sendDeviceCode", { deviceToken: null }), "failed-precondition");
+  await rejects(api(fresh, "verifyDevice", { code: "12345678", deviceToken: null }), "failed-precondition");
   enabled.v = true;
 });
 

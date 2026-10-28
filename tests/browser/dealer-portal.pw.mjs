@@ -51,18 +51,22 @@ function installFakeServer(page, scenario) {
     ];
     let joined = scenario !== "invited";
     let msRegistered = scenario !== "msNotRegistered";
+    let deviceOk = scenario !== "deviceUnverified";   // 確認済みの端末(偽: 確認コード 12345678 で "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" を返す)
     window.__fakeCallables = {
       dealerPortalApi: async (d) => {
         // Microsoft の登録(確認コードは偽: 12345678)。未登録の Microsoft が連携された間は、参加の確認・登録以外を拒否(理由付き)
         if (d.action === "sendMicrosoftCode") { if (window.__failMsSend) { window.__failMsSend = false; throw Object.assign(new Error("確認コードを送れませんでした。しばらくしてからもう一度お試しください"), { code: "functions/failed-precondition" }); } return { ok: true, expiresInMinutes: 10 }; }
         if (d.action === "trustMicrosoft") { if (d.code !== "12345678") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" }); msRegistered = true; return { ok: true }; }
+        if (d.action === "sendDeviceCode") return { ok: true, expiresInMinutes: 10 };
+        if (d.action === "verifyDevice") { if (d.code !== "12345678") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" }); deviceOk = true; return { ok: true, deviceToken: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" }; }
+        if (!deviceOk && !["invitations", "sendCode", "respond"].includes(d.action) && d.deviceToken !== "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD") throw Object.assign(new Error("この端末での利用の確認が必要です"), { code: "functions/permission-denied", details: { reason: "device-unverified" } });
         if (!msRegistered && d.action !== "invitations") throw Object.assign(new Error("Microsoft アカウントの登録が完了していません"), { code: "functions/permission-denied", details: { reason: "microsoft-unregistered" } });
         if (scenario === "disabled") throw Object.assign(new Error("ディーラー画面は現在ご利用いただけません"), { code: "functions/failed-precondition" });   // 機能の停止中: すべての取得を拒否
         // 招待の一覧に会社名は出さない(会社名は確認コードのメールに書く)。参加は、送った確認コード(偽: 12345678)の入力が必要
         if (d.action === "invitations") return { invitations: joined || scenario === "none" ? [] : [{ invitationId: "dinv-1", role: "reader" }] };
         if (d.action === "sendCode") return { ok: true, expiresInMinutes: 10 };
         if (d.action === "respond" && d.accept && d.code !== "12345678") throw Object.assign(new Error("確認コードが違います。メールに届いたコードを入力してください"), { code: "functions/failed-precondition" });
-        if (d.action === "respond") { joined = d.accept; return { ok: true, accepted: d.accept }; }
+        if (d.action === "respond") { joined = d.accept; return { ok: true, accepted: d.accept, ...(d.accept ? { deviceToken: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" } : {}) }; }
         // 有効な所属だけ(所属なしは空。multi は2社)
         if (d.action === "companies") return { companies: scenario === "none" || !joined ? [] : [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])] };
         if (scenario === "none" || !joined) throw deny("ディーラー画面の利用登録が確認できません。運営者にお問い合わせください");
@@ -398,6 +402,41 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.getByText(/Microsoft アカウントを登録しました/).waitFor();
     await context.close();
 
+    // この端末の確認(MS-01): 未確認の端末では会社の情報を出さず、メールの確認コードで確認 → 以後の呼び出しに端末の値を付ける(端末に保存)
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "deviceUnverified");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("この端末の確認", { exact: true }).waitFor();
+    assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()));
+    assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    assert.equal(await page.locator('[data-f="deviceCode"]').isVisible(), false, "コード欄は送るまで出さない");
+    await page.click('[data-act="sendDeviceCode"]');
+    await page.getByText(/確認コードを送りました/).waitFor();
+    await page.fill('[data-f="deviceCode"]', "00000000");
+    await page.click('[data-act="verifyDevice"]');
+    await page.getByText(/確認コードが違います/).waitFor();
+    await page.fill('[data-f="deviceCode"]', "1234 5678");
+    await page.click('[data-act="verifyDevice"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.deepEqual((await calls(page, "verifyDevice")).at(-1), { action: "verifyDevice", code: "12345678" });
+    assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "以後の呼び出しに端末の値を付ける");
+    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD");
+    await context.close();
+
+    // 心当たりのない Microsoft: 登録せずに連携を解除できる(解除後も端末の確認が要る)
+    context = await newFakeContext(browser, base, 390, { ...STAFF, user: { ...STAFF.user, providerData: [{ providerId: "microsoft.com" }] } });
+    page = await context.newPage();
+    await installFakeServer(page, "msNotRegistered");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("Microsoftアカウントの登録", { exact: true }).waitFor();
+    await page.evaluate(() => { window.__fakeCallables.dealerPortalApi = ((orig) => async (d) => { if (window.__unlinkCalls && window.__unlinkCalls.length && !["sendDeviceCode", "verifyDevice"].includes(d.action) && d.action !== "invitations") throw Object.assign(new Error("この端末での利用の確認が必要です"), { code: "functions/permission-denied", details: { reason: "device-unverified" } }); return orig(d); })(window.__fakeCallables.dealerPortalApi); });
+    await page.click('[data-act="unlinkMicrosoft"]');
+    await page.getByText("この端末の確認", { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__unlinkCalls), ["microsoft.com"]);
+    assert.deepEqual(await calls(page, "trustMicrosoft"), [], "登録はしない");
+    await context.close();
+
     // 参加の確認: 会社名を出さない → コードなしでは送らない → 確認コードを送る → 違うコードは拒否 → メールのコードで参加 → 受注一覧
     context = await newFakeContext(browser, base, 390, STAFF);
     page = await context.newPage();
@@ -420,6 +459,8 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.click('[data-act="accept"]');
     await page.locator(".dealer-row").first().waitFor();
     assert.deepEqual((await calls(page, "respond")).at(-1), { action: "respond", invitationId: "dinv-1", accept: true, code: "12345678" });
+    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "参加した端末は確認済み(値を端末に保存)");
+    assert.equal((await calls(page, "context")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD");
     await context.close();
   } finally { await browser.close(); }
 });

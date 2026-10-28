@@ -57,6 +57,14 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
       return r;
     },
 
+    /** ログイン中のアカウントから Microsoft の連携を外し、トークンを更新する(本人の操作でだけ呼ぶ) */
+    async unlinkMicrosoft() {
+      const user = auth.currentUser;
+      if (!user) throw Object.assign(new Error("ログインが必要です"), { code: "auth/no-current-user" });
+      await fns.unlink(user, "microsoft.com");
+      await user.getIdToken(true);
+    },
+
     /** パスワード不要のメールリンクを送る */
     async sendEmailLink(email) {
       const trimmed = String(email || "").trim();
