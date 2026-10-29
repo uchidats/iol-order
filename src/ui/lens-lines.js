@@ -80,6 +80,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     fillDealers(line, prefill.dealerId || ""); // 直前の明細の発注先を引き継ぐ(変更可)
     line.qty = [1, 2].map(q => h("input", { type: "radio", name: `lensQty-${n}`, value: String(q), "data-f": "quantity" }));
     line.qty[0].checked = true;
+    line.qtyManual = false;   // 利用者が枚数を変えたら true(以後はトーリック・多焦点のチェックで枚数を変えない)
     line.errs = {};
     const err = (k) => (line.errs[k] = h("p", { class: "error-message", "data-err": k }));
     line.title = h("strong", { class: "lens-line-title" });
@@ -136,8 +137,8 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.doctor.addEventListener("change", () => { clearErr(line, "doctor"); doctorTitle(); });
     doctorTitle();
     line.dealer.addEventListener("change", () => clearErr(line, "dealer"));
-    line.qty.forEach(r => r.addEventListener("change", () => clearErr(line, "quantity")));
-    const onFilter = () => { rebuildModels(line, line.model.value); onChange(); };
+    line.qty.forEach(r => r.addEventListener("change", () => { line.qtyManual = true; clearErr(line, "quantity"); }));
+    const onFilter = () => { rebuildModels(line, line.model.value); applyDefaultQuantity(line); onChange(); };
     line.chkMf.addEventListener("change", onFilter);
     line.chkToric.addEventListener("change", onFilter);
     line.removeBtn.addEventListener("click", () => removeLine(line));
@@ -284,6 +285,16 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
   const setErr = (line, k, msg, ctl) => { line.errs[k].textContent = msg; ctl?.classList.add("is-invalid"); };
 
+  /** 枚数の初期値: トーリック・多焦点のどちらかにチェックがあれば2枚、どちらもなければ1枚 */
+  const defaultQuantity = (line) => (line.chkToric.checked || line.chkMf.checked ? 2 : 1);
+  const setQuantity = (line, q) => line.qty.forEach(r => { r.checked = r.value === String(q); });
+  /** チェックの操作で枚数を初期値にそろえる。利用者が枚数を変えた明細は変えない(明細ごと) */
+  function applyDefaultQuantity(line) {
+    if (line.qtyManual) return;
+    setQuantity(line, defaultQuantity(line));
+    clearErr(line, "quantity");
+  }
+
   /** 絞り込み後の選択肢でIOLモデルを作り直す。選択が外れたら、モデルとパワーを持ち越さない */
   function rebuildModels(line, prevKey = "") {
     const shown = filterLensOptions(getOptions(), { multifocal: line.chkMf.checked, toric: line.chkToric.checked });
@@ -338,7 +349,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   function readState(line) {
     return {
       toric: line.chkToric.checked, multifocal: line.chkMf.checked, modelKey: line.model.value, power: line.power.value,
-      quantity: parseInt((line.qty.find(r => r.checked) || {}).value || "1", 10),
+      quantity: parseInt((line.qty.find(r => r.checked) || {}).value || "1", 10), quantityManual: line.qtyManual === true,
       date: line.date.value, doctorId: line.doctor.value, dealerId: line.dealer.value
     };
   }
@@ -354,7 +365,10 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     rebuildModels(line, st.modelKey || "");
     line.model.title = line.model.value && line.model.selectedOptions[0] ? line.model.selectedOptions[0].title : "";
     line.power.value = keepPowerIfAvailable(st.power || "", [...line.power.options].map(o => o.value).filter(Boolean));
-    line.qty.forEach(r => { r.checked = r.value === String(st.quantity === 2 ? 2 : 1); });
+    const qty = st.quantity === 2 ? 2 : 1;
+    setQuantity(line, qty);   // 保存された枚数をそのまま使う(初期値で上書きしない)
+    // 利用者が変えた枚数か: 記録があればそれ。記録のない古い下書きは、チェックの状態の初期値と違えば利用者の選択とみなす
+    line.qtyManual = st.quantityManual === true || qty !== defaultQuantity(line);
     line.date.value = st.date && st.date >= minDate() ? st.date : "";           // 過去の日付は復元しない
     fillDoctors(line, st.doctorId || "");
     fillDealers(line, st.dealerId || "");          // 下書き・元に戻す: 保存された発注先(今も登録にあるもの)をそのまま使う(既定ディーラーで上書きしない)
