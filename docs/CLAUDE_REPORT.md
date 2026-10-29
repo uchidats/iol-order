@@ -1,12 +1,11 @@
 # 作業報告
 
 - 日時: 2026-10-29（日本時間）。
-- 作業: PR #3（`fix/dealer-auth-bindings-ab2`、`d09c717`）へ最新main（`7d53875`）を取り込み、競合を最小限の変更で解消。PRのmainへのマージは、この記録を含む統合コミットのpush後に実施する。
-- 競合: Firestore Rulesはディーラー閲覧許可中の識別項目の保護と、件名プレフィックスの許可・C0/DEL/C1等の拒否を両立。画面のimport mapは統合したソースから再生成。作業報告は今回分に更新。
-- 保持: 件名プレフィックスの画面・保存処理・サーバー生成処理、C1制御文字対策を維持。注文受付・メール送信設定の環境変数と、既存の注文受付/件名生成ソースはmainと一致。実際の宛先・許可リスト・プレフィックス設定は変更していない。
-- テスト: 関連する単体6件（件名・設定検証2、アセット番号4）、Functions/Rules 6件（招待取消単独を含む配送直前の再検証・5分期限、停止時の制御、閲覧許可中のRules、新領域の保護、注文時の件名、発注先設定の検証）、Chromiumの施設設定1件が成功。全テスト・全ブラウザは再実行していない。
-- 統合回帰: 既存F-01に、閲覧許可中のプレフィックス変更（全角・半角保持）とC1文字の拒否を追加し、同テスト1件だけの再実行も成功。初回の絞り込み実行は対象外ファイルに該当テストがなく終了エラーとなったため、対象ファイルを1つに修正して成功を確認。
-- commit: 本体 `d09c717` とmain `7d53875`。統合コミットは本記録を含む `git log -1` で確認できる。記録時点では未push・PR未マージ。完了後のマージIDは最終回答で報告する。
-- Firebase本番: デプロイ・設定変更・認証機能の有効化は実施しない。`DEALER_PORTAL_ENABLED` の既定falseを維持し、`functions/.env.medconf-iol-dev` はmainから変更していない。
-- 本番で未確認: 実Google/Microsoft認証、確認コードの実メール到達、実機動作。機能有効化は別途判断。テストは独立したローカルFirestoreエミュレータと偽の送信処理を使用し、実注文・実メール送信は行っていない。
-- 他AIの作業: 専用worktreeで作業し、元の作業ツリーと未追跡資料は変更していない。
+- 作業: ディーラー認証基盤を、機能停止のまま本番（medconf-iol-dev）へ配備。対象はmain `4859adc`。
+- 配備: Firestore Rules（差分はディーラー関連のみ）、新規Functions 5つ（dealerPortalApi・facilityDealerPortal・dealerPortalOperator・indexDealerReceipts・deliverDealerAuthCode）。createOrder・sendOrderMailは再デプロイしていない（更新時刻が配備前と同じ）。
+- 設定: `functions/.env.medconf-iol-dev` に `DEALER_PORTAL_ENABLED=false`、`DEALER_JOIN_CODE_TEST_SINK=false`（エミュレータ専用。非対話の配備で値が必要）を追加。注文受付・メール送信の設定、許可リスト、宛先は変更していない。配備時にCLIが、既存のSecret 2つへ実行アカウントの読み取り権限を再確認した（権限を持つのは同じアカウントだけ）。
+- 配備後の確認: 新しい関数5つはすべて `DEALER_PORTAL_ENABLED=false`。未認証のdealerPortalApi（context・list・detail）は「現在ご利用いただけません」、facilityDealerPortal・dealerPortalOperator・createOrderは「ログインが必要です」。配備後のエラーログは0件。公開サイトのindex.html・dealer.htmlはmainと一致し、未ログインの表示は正常。ログイン後の停止中の表示は既存のブラウザテストで確認済みの内容で、今回は実ログインで確認していない。
+- 未完了: トリガー2つ（indexdealerreceipts・deliverdealerauthcode）のCloud Runサービスへの、実行アカウントの `roles/run.invoker` の付与。自動の安全確認で止められたため実施していない。付与されるまで、索引のトリガーは注文ごとに失敗して再試行され、24時間で打ち切られる（注文・メールには影響しない。付与後にreindexで補う）。停止中は送信の依頼が作られないため、deliverDealerAuthCodeへの影響はない。
+- テスト: 全テストは再実行していない（指示どおり）。テスト注文・実メール送信は行っていない。
+- commit: env追加（ブランチ `deploy/dealer-portal-disabled`、本記録と同じcommit）。記録時点では未push。
+- 判断待ち: 呼び出し権限の付与（ユーザーが実施するか、許可を受けてClaudeが実施）。認証機能の有効化は別途判断。
