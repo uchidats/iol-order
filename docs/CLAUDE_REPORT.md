@@ -1,11 +1,12 @@
 # 作業報告
 
 - 日時: 2026-10-29（日本時間）。
-- 作業: ディーラー認証基盤を、機能停止のまま本番（medconf-iol-dev）へ配備。対象はmain `4859adc`。
-- 配備: Firestore Rules（差分はディーラー関連のみ）、新規Functions 5つ（dealerPortalApi・facilityDealerPortal・dealerPortalOperator・indexDealerReceipts・deliverDealerAuthCode）。createOrder・sendOrderMailは再デプロイしていない（更新時刻が配備前と同じ）。
-- 設定: `functions/.env.medconf-iol-dev` に `DEALER_PORTAL_ENABLED=false`、`DEALER_JOIN_CODE_TEST_SINK=false`（エミュレータ専用。非対話の配備で値が必要）を追加。注文受付・メール送信の設定、許可リスト、宛先は変更していない。配備時にCLIが、既存のSecret 2つへ実行アカウントの読み取り権限を再確認した（権限を持つのは同じアカウントだけ）。
-- 配備後の確認: 新しい関数5つはすべて `DEALER_PORTAL_ENABLED=false`。未認証のdealerPortalApi（context・list・detail）は「現在ご利用いただけません」、facilityDealerPortal・dealerPortalOperator・createOrderは「ログインが必要です」。配備後のエラーログは0件。公開サイトのindex.html・dealer.htmlはmainと一致し、未ログインの表示は正常。ログイン後の停止中の表示は既存のブラウザテストで確認済みの内容で、今回は実ログインで確認していない。
-- 呼び出し権限: ユーザーの指示で、トリガー2つ（indexdealerreceipts・deliverdealerauthcode）のCloud Runサービスだけに、実行アカウントの `roles/run.invoker` を付与。既存の設定を保持し、allUsersなどは付与していない。付与後の両トリガーの警告・権限エラーのログは0件（配備後に呼び出しはまだない）。
-- テスト: 全テストは再実行していない（指示どおり）。テスト注文・実メール送信は行っていない。
-- commit: env追加 `354815c`（ブランチ `deploy/dealer-portal-disabled`）。mainへ早送りで統合してpushする。
-- 判断待ち: 認証機能の有効化（別途判断）。
+- 作業: ディーラー認証の実環境テストの準備（ブランチ `feature/dealer-portal-test-uids`、main `eb1a73c` から）。
+- 本番Authの確認（読み取りのみ）: メール（リンク）とGoogleが有効、1メール1アカウント、メール列挙の保護あり、承認済みドメインに公開サイトを含む。Microsoftのプロバイダーは未設定。施設側のログイン設定は変更していない。
+- 追加: 停止中の試験モード。`DEALER_PORTAL_TEST_UIDS` に書いたUIDだけ、`DEALER_PORTAL_ENABLED=false` のままディーラー画面のAPIと確認コードの送信を使える（サーバーで強制。未ログイン・他のUIDは従来どおり停止中の応答）。施設の閲覧許可と受信の索引は全体のスイッチだけで動くため、試験で注文は表示されない。既存の認可の確認は変更していない。本番のenvは空（誰も使えない）。
+- 本番データ（件数のみ確認）: ディーラーの会社・担当者・紐付け・関連付け・閲覧許可はすべて0件。テストの会社・担当者は未作成（運営者の画面で作成する。招待するメールは運営者が決める）。
+- テスト: 関連するFunctionsテスト10件成功（新規1件: 試験UIDだけ利用可、他UID・未ログインは停止、許可・索引は停止のまま、未招待には送らない、空なら誰も使えない）。全テストは実行していない。
+- デプロイ: していない。`DEALER_PORTAL_ENABLED=false` を維持。注文受付・メール・宛先・閲覧許可は変更していない。注文・注文メールの送信なし。
+- 実環境テスト: 未実施（試験モードのデプロイと、運営者による実ログイン・確認コードの受信が必要）。
+- 判断待ち: (1) 試験モードのデプロイ（`dealerPortalApi`・`deliverDealerAuthCode`。運営者のUIDを設定）。(2) Microsoftのプロバイダーの設定（Azureのアプリ登録とFirebase Authの有効化。本番の認証設定の変更）。(3) 試験の会社・担当者の作成。
+- commit: 本記録と同じcommit（ブランチ `feature/dealer-portal-test-uids`）。push済みかは `git status -sb` で確認。

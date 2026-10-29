@@ -206,9 +206,10 @@ export function initialFacilitySelection(allowedFacilities, assignedIds) {
  * @param {object} deps.Timestamp
  * @param {object} deps.FieldPath
  * @param {() => boolean} [deps.isEnabled] ディーラー画面の機能スイッチ(注文受付・メールのスイッチとは別)。false なら API・索引作成を止める
+ * @param {() => string[]} [deps.testUids] 停止中の試験に使う UID(運営者)。停止中もこの UID だけ担当者の画面と確認コードの送信を使える
  * @param {() => number} [deps.now]
  */
-export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, now = Date.now, sendJoinCode = null }) {
+export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, testUids = () => [], now = Date.now, sendJoinCode = null }) {
   const audit = (tx, entry) => tx.create(db.collection("dealerPortalAuditLogs").doc(), { ...entry, at: FieldValue.serverTimestamp() });
   const companyRef = (cid) => db.doc(`dealerCompanies/${cid}`);
   const linkRef = (fid, lid) => db.doc(`facilities/${fid}/dealerPortalLinks/${lid}`);
@@ -216,6 +217,15 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   const policyOk = (c) => c && c.status === "active" && c.accessMode === PORTAL_POLICY.accessMode && c.policyVersion === PORTAL_POLICY.policyVersion;
 
   function assertOn() { if (!isEnabled()) throw disabled(); }
+  /**
+   * 担当者の画面(と確認コードの送信)を使えるか。停止中は、試験の UID(運営者)だけ。認可の確認(担当者・紐付け・施設の許可)はそのまま行う。
+   * 施設の許可と受信の索引は全体のスイッチだけで動く(停止中は許可を作れず索引も作らないため、試験で注文は公開されない)
+   */
+  function portalOpenFor(uid) {
+    if (isEnabled()) return true;
+    const list = testUids();
+    return typeof uid === "string" && uid !== "" && Array.isArray(list) && list.includes(uid);
+  }
 
   // ======================= 担当者の本人確認(認証主体のホワイトリスト) =======================
   /**
@@ -425,7 +435,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (typeof jobExp !== "number" || !(jobExp > now())) { tx.update(cref, { deliveryStatus: "expired" }); return { skipped: true }; }   // 期限切れの依頼からはコードを作らない
       const live = current.filter(Boolean);
       const expiresAtMs = now() + PORTAL_LIMITS.codeTtlMs;
-      const willSend = live.length > 0 && isEnabled() && typeof sendJoinCode === "function";
+      const willSend = live.length > 0 && portalOpenFor(c.get("uid")) && typeof sendJoinCode === "function";
       // 送る直前に対象がなくなった(取消・無効化・会社の停止など)ときも、照合の結果を同じにするためコードのハッシュは作る(送らない)
       const status = willSend ? "sending" : !requested.length ? "no-target" : !live.length ? "target-changed" : "not-sent";
       tx.update(cref, { hash: codeHash(code, salt), salt, expiresAtMs, attempts: 0, targets: live.map(x => x.t), deliveryStatus: status });
@@ -717,7 +727,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   /** ディーラー画面の呼び出し(担当者・招待先本人) */
   async function portal({ auth, data }) {
-    assertOn();
+    if (!portalOpenFor(auth && auth.uid)) throw disabled();   // 認証の確認より前(停止中は、試験の UID 以外に同じ応答)
     const d = data && typeof data === "object" && !Array.isArray(data) ? data : null;
     if (!d || typeof d.action !== "string") throw badInput();
     const { action, deviceToken, ...rest } = d;

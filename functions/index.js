@@ -193,6 +193,9 @@ export const resendWebhook = onRequest({ region: REGION, maxInstances: 5, servic
 // ディーラー専用画面(第1段階: 閲覧。docs/dealer-portal.md)。注文受付・メール送信とは別の機能スイッチで止められる(既定は停止)。
 // 受信の索引は注文の作成をきっかけに別の処理で作るため、ここが失敗・停止しても注文の受付とメール送信は止まらない
 const DEALER_PORTAL_ENABLED = defineBoolean("DEALER_PORTAL_ENABLED", { default: false });
+// 停止中の試験: ここに書いた UID(運営者。カンマ区切り)だけ、担当者の画面と確認コードの送信を使える。施設の許可・索引は停止のまま。空なら誰も使えない
+const DEALER_PORTAL_TEST_UIDS = defineString("DEALER_PORTAL_TEST_UIDS", { default: "" });
+const dealerTestUids = () => String(DEALER_PORTAL_TEST_UIDS.value() || "").split(",").map(v => v.trim()).filter(v => /^[A-Za-z0-9]{1,128}$/.test(v));
 // 本人確認の確認コード: 承認済みのメールに送る(注文メールと同じ送信の設定。送信停止中は送れないので確認できない。テスト用の宛先への送信中は本人に届かない)。
 // エミュレータのテストだけは、demo- のプロジェクトで DEALER_JOIN_CODE_TEST_SINK=true のときに限り、コードをテスト用の文書に書く(本番では使わない)
 const DEALER_JOIN_CODE_TEST_SINK = defineBoolean("DEALER_JOIN_CODE_TEST_SINK", { default: false });
@@ -213,7 +216,7 @@ async function sendDealerJoinCode({ purpose = "verify", key, to, code, companyNa
   return createResendSender({ apiKey: RESEND_API_KEY.value(), from: MAIL_FROM.value() })
     .send({ to: [recipient], subject: `【確認コード】${what}`, text, idempotencyKey: `dealer-${purpose}-${id}-${expiresAtMs}` });
 }
-const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value(), sendJoinCode: sendDealerJoinCode });
+const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value(), testUids: dealerTestUids, sendJoinCode: sendDealerJoinCode });
 export const dealerPortalApi = onCall(options, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
 export const facilityDealerPortal = onCall(options, wrap(dealerPortal.facility));    // 施設の管理者・副管理者(閲覧の許可・取消)
 export const dealerPortalOperator = onCall(options, wrap(dealerPortal.operator));   // 運営者(会社・支店・担当者・関連付け・索引の作り直し)

@@ -1021,6 +1021,44 @@ test("確認コードの送信の直前の読み直し: 依頼の後に担当者
   assert.equal((await challengeOf("u-d4")).get("deliveryStatus"), "sent");
 });
 
+test("停止中の試験(運営者の UID だけ): 停止中も試験の UID だけ担当者の画面と確認コードの送信を使える。ほかの UID・未ログインは停止中の応答。施設の許可・索引は止まったまま。認可の確認はそのまま", async () => {
+  const tester = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => false, testUids: () => ["x1"], now: () => clock.t ?? Date.now(),
+    sendJoinCode: async (m) => { sentCodes.push(m); return sendResult.v; } });
+  const call = (who, action, data = {}) => tester.portal({ auth: who, data: { action, ...data } });
+  const disabledErr = (e) => e.code === "failed-precondition" && /現在ご利用いただけません/.test(e.message);
+  // 未ログイン・試験の UID でない担当者は停止中の応答(認証の確認より前)
+  await assert.rejects(call(null, "context"), disabledErr);
+  for (const action of ["context", "companies", "list", "sendCode"]) await assert.rejects(call(staffAuth("x2"), action, { deviceToken: devices.get("x2") }), disabledErr, action);
+  // 試験の UID: 確認済みの端末で使える。端末の値がなければ確認し直し(認可は緩めない)
+  assert.equal((await call(staffAuth("x1"), "context", { deviceToken: devices.get("x1") })).company.id, C.X);
+  await assert.rejects(call(staffAuth("x1"), "context"), needsVerify);
+  // 確認コード: 試験の UID の依頼だけ送る。停止前に受けた別の UID の依頼は送らない
+  await resetCodes();
+  const before = sentCodes.length;
+  await portal.portal({ auth: staffAuth("x2"), data: { action: "sendCode" } });   // (有効だった間の要求。送信の処理はまだ)
+  assert.deepEqual(await call(staffAuth("x1"), "sendCode"), UNIFORM);
+  await deliverJobs(tester);
+  assert.deepEqual(sentCodes.slice(before).map(m => m.key), ["v-x1"]);
+  assert.equal((await challengeOf("x2")).get("deliveryStatus"), "not-sent");
+  const v = await call(staffAuth("x1"), "verifyCode", { code: sentCodes.at(-1).code });
+  assert.equal(v.ok, true);
+  assert.match(v.deviceToken, /^[A-Za-z0-9_-]{43}$/);
+  // 試験の UID でも、未招待のメールのアカウントは担当者にならない(送らない)
+  const tester2 = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => false, testUids: () => ["u-out"], sendJoinCode: async (m) => { sentCodes.push(m); return { ok: true }; } });
+  const n = sentCodes.length;
+  await tester2.portal({ auth: googleAuth("u-out", "outsider@corp.example.jp", "g-out"), data: { action: "sendCode" } });
+  await deliverJobs(tester2);
+  assert.equal(sentCodes.length, n, "未招待には送らない");
+  // 施設の許可・索引は停止のまま(試験で注文は公開されない)
+  await assert.rejects(tester.facility({ auth: auth("adminA"), data: { action: "grant", facilityId: "fA", localDealerId: "dA1", revision: await revOf("fA", "dA1") } }), (e) => e.code === "failed-precondition");
+  const o = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1" })] } });
+  assert.equal((await tester.indexOrder("fA", o.orderId)).disabled, true);
+  assert.deepEqual((await call(staffAuth("x1"), "list", { ...range(), deviceToken: v.deviceToken })).items, [], "許可がないので注文は出ない");
+  // 試験の UID が空なら誰も使えない
+  const none = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => false, testUids: () => [] });
+  await assert.rejects(none.portal({ auth: staffAuth("x1"), data: { action: "context", deviceToken: v.deviceToken } }), disabledErr);
+});
+
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
   const email = "x1@corp.example.jp", staffId = sid(C.X, "x1");
   const g = googleAuth("ug1", email, "g-x1"), m = msAuth("um1", email, "m-x1");

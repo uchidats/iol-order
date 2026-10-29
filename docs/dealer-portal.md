@@ -134,6 +134,7 @@
 1. Firestore Rules: `firebase deploy --only firestore:rules`。新しい領域の明示的な拒否に加えて、**既存の発注先(facilityDealers)の作成・更新・削除の条件も変わる**(閲覧を許可中の発注先の識別項目のロック)。「追加のみ」ではないので、本番との差分を確認してから配備する。
 2. Functions: `dealerPortalApi`・`facilityDealerPortal`・`dealerPortalOperator`・`indexDealerReceipts`(新規)。`DEALER_PORTAL_ENABLED` は既定の false のまま。新しいトリガーの Cloud Run サービス `indexdealerreceipts` だけに、関数の実行アカウントの `roles/run.invoker` を付ける。
 3. 画面(`main` へ取り込み)。機能が止まっている間は、施設設定の項目は表示されない。`dealer.html` は「現在ご利用いただけません」。
+3a. 停止中の試験(運営者だけ): `DEALER_PORTAL_ENABLED=false` のまま、`DEALER_PORTAL_TEST_UIDS` に運営者の UID(カンマ区切り)を書いて `dealerPortalApi`・`deliverDealerAuthCode` を再デプロイする。この UID だけ担当者の画面と確認コードの送信を使える(ほかの人・未ログインは「現在ご利用いただけません」)。施設の許可と受信の索引は停止のままなので、試験で注文は表示されない。認可の確認(招待・確認コード・紐付け・端末)はそのまま。試験の会社・担当者は運営者の画面で登録し(取引先との関連付け・施設の許可は作らない)、試験の後は UID を空に戻して再デプロイする。Microsoft のログインは Firebase Auth に Microsoft のプロバイダーを設定してから(本番の認証設定の変更)。
 4. 運営者が試験の会社・担当者・関連付けを登録し、`DEALER_PORTAL_ENABLED=true` にして Functions を再デプロイ。施設の管理者・副管理者が許可した後の新規注文から表示される。
 5. 停止するときは `DEALER_PORTAL_ENABLED=false`(注文・メールには影響しない)。
 
