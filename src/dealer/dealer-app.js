@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate } from "../domain/dealer-portal.js";
 
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
@@ -159,14 +159,14 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       checks.replaceChildren(...(ctx.facilities.length ? ctx.facilities.map(f => {
         const cb = h("input", { type: "checkbox", value: f.id, "data-facility": f.id });
         cb.checked = selected.has(f.id);
-        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; invalidate(); });
+        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; facilitiesChanged(); });
         return h("label", { class: "settings-check dealer-facility" }, cb, h("span", {}, f.name), f.assigned ? h("span", { class: "member-role-badge" }, "担当") : null);
       }) : [h("p", { class: "form-hint" }, "閲覧を許可している医療機関はまだありません。")]));
       scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`;
     };
     const selBtn = (kind, label) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-select": kind }, label);
-      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); invalidate(); });
+      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); facilitiesChanged(); });
       return b;
     };
     const saveAssigned = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "saveAssigned" }, "選択中の施設を担当施設として保存");
@@ -189,6 +189,75 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const fetched = h("p", { class: "form-hint dealer-fetched" });
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
+
+    // ---- 表示の切り替え: 手術日(週)/ 注文日順 ----
+    let view = "week";
+    let weekStart = mondayOf(jstDate(Date.now()));   // 初期表示は今週(日本時間の月曜〜日曜)
+    let weekGen = 0;
+    const weekArea = h("div", { class: "dealer-week-area", id: "dealerWeekArea" });
+    const orderedArea = h("div", { class: "dealer-ordered-area", id: "dealerOrderedArea", hidden: true });
+    const viewBtn = (v, label) => {
+      const b = h("button", { type: "button", class: "history-sort-btn", "data-view": v, "aria-pressed": String(view === v) }, label);
+      b.addEventListener("click", () => setView(v));
+      return b;
+    };
+    const viewBar = h("div", { class: "history-sort dealer-view", role: "group", "aria-label": "表示" }, viewBtn("week", "手術日（週）"), viewBtn("ordered", "注文日順"));
+    function setView(v) {
+      if (view === v) return;
+      view = v;
+      viewBar.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
+      weekArea.hidden = v !== "week"; orderedArea.hidden = v !== "ordered";
+      if (v === "week") loadWeek();
+      else if (!lastQuery && !items.length && ctx.facilities.length) run(false);   // 注文日順を初めて開いたら、従来どおり検索
+    }
+    function facilitiesChanged() { if (view === "week") loadWeek(); else invalidate(); }
+    const weekLabelEl = h("span", { class: "dealer-week-label", id: "dealerWeekLabel", "aria-live": "polite" });
+    const weekNavBtn = (k, label) => {
+      const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-week": k }, label);
+      b.addEventListener("click", () => { weekStart = k === "this" ? mondayOf(jstDate(Date.now())) : addDays(weekStart, k === "prev" ? -7 : 7); loadWeek(); });
+      return b;
+    };
+    const weekMsg = h("p", { class: "form-hint", role: "status", id: "dealerWeekMsg" });
+    const weekBox = h("div", { class: "dealer-week", id: "dealerWeek" });
+    weekArea.append(h("div", { class: "dealer-week-nav" }, weekLabelEl, weekNavBtn("prev", "← 前週"), weekNavBtn("this", "今週"), weekNavBtn("next", "翌週 →")), weekMsg, weekBox);
+
+    /** 週表示を読む(手術日がこの週に入る自社宛ての明細だけ。認可はサーバー) */
+    async function loadWeek() {
+      const my = ++weekGen;
+      weekLabelEl.textContent = weekLabel(weekStart);
+      weekMsg.textContent = "読み込み中…";
+      weekBox.replaceChildren();
+      if (!ctx.facilities.length) { weekMsg.textContent = ""; return; }
+      try {
+        const r = await api.listWeek({ companyId: ctx.company.id, weekStart, facilityFilter: facilityFilterOf([...selected]) });
+        if (my !== weekGen) return;   // 週・施設を変えた後に届いた古い結果は表示しない
+        renderWeek(r);
+      } catch (e) {
+        if (my !== weekGen) return;
+        weekMsg.textContent = describeCallableError(e);
+        if (String((e && e.code) || "").endsWith("permission-denied")) showMessage("ディーラー画面", describeCallableError(e), { error: true });
+      }
+    }
+    function renderWeek(r) {
+      const days = (r.days || []).filter(d => d.orders.length);
+      const count = days.reduce((n, d) => n + d.orders.length, 0);
+      weekMsg.textContent = (count ? `この週に手術予定の注文明細: ${days.length}日・${count}件` : "この週に手術予定の自社宛ての注文はありません。")
+        + (r.truncated ? " 件数が多いため一部だけを表示しています。医療機関を絞り込んでください。" : "");
+      weekBox.replaceChildren(...days.map(d => h("section", { class: "dealer-day", "data-date": d.date },
+        h("h3", { class: "dealer-day-head" }, formatDayHead(d.date)),
+        h("ul", { class: "dealer-week-list" }, d.orders.map(o => {
+          const b = h("button", { type: "button", class: "dealer-week-order", "data-receipt": o.receiptId, "data-date": d.date },
+            h("div", { class: "dealer-week-top" }, h("span", { class: "dealer-week-facility" }, o.facilityName), h("span", { class: "dealer-week-number" }, `注文番号 ${o.orderNumber}`)),
+            h("ul", { class: "dealer-week-lines" }, o.lines.map(l => h("li", {},
+              h("span", { class: "summary-maker" }, l.manufacturer), h("span", { class: "summary-model" }, l.toricModel || l.model),
+              h("span", { class: "summary-power" }, l.power), h("span", { class: "summary-qty" }, `${l.quantity}枚`)))),
+            // 同じ注文がほかの手術日にもある: 注文番号は同じ(重複発注ではない)ことを示す
+            h("p", { class: "dealer-week-note" }, `注文 ${formatJstDateTime(o.orderedAt)}`,
+              o.otherDates.length ? ` ・ 同じ注文のほかの手術日: ${o.otherDates.map(shortDate).join("、")}（自社宛て 全${o.ownLineCount}件）` : ""));
+          b.addEventListener("click", () => openDetail(o.receiptId));
+          return h("li", {}, b);
+        })))));
+    }
 
     /** 検索条件(施設・期間・注文番号)を変えたら、表示中の結果と続きを破棄する。「さらに表示」で古い条件の続きを読まない */
     const CHANGED = "条件を変更しました。「検索」を押すと、新しい条件で検索します。";
@@ -279,16 +348,20 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       }
     }
 
-    searchArea.append(
+    orderedArea.append(
       h("div", { class: "dealer-filters" },
         h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), from, h("span", {}, "〜"), to),
         h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerOrderNumber" }, "注文番号"), number),
+        h("div", { class: "onboarding-actions" }, search)),
+      fetched, listMsg, listBox, more);
+    searchArea.append(
+      viewBar,
+      h("div", { class: "dealer-filters" },
         h("div", { class: "form-label" }, "医療機関"),
         h("div", { class: "dealer-select-actions" }, selBtn("assigned", "担当施設を選択"), selBtn("all", "閲覧可能施設をすべて選択"), selBtn("none", "選択を解除")),
         checks, scope,
-        h("div", { class: "dealer-select-actions" }, saveAssigned), assignMsg,
-        h("div", { class: "onboarding-actions" }, search)),
-      fetched, listMsg, listBox, more);
+        h("div", { class: "dealer-select-actions" }, saveAssigned), assignMsg),
+      weekArea, orderedArea);
     const noAssigned = ctx.selection === "all-unassigned" ? h("p", { class: "form-hint" }, "担当施設が未設定のため、閲覧可能な全施設を選択しています。") : null;
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
@@ -297,7 +370,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
       noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
-    if (ctx.facilities.length) await run(false);
+    await loadWeek();   // 初期表示は今週の手術日(注文日順は切り替えて表示)
   }
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */

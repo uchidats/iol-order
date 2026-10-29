@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createDealerPortalApi, isPortalUnavailable } from "../src/data/dealer-portal-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE } from "../src/domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE, mondayOf, addDays, formatDayHead, weekLabel, shortDate } from "../src/domain/dealer-portal.js";
+import { weekDatesOf } from "../functions/src/dealer-portal.js";
 import { buildDealerOrderView, ownLinesOf, initialFacilitySelection, jstDayStartMs } from "../functions/src/dealer-portal.js";
 
 test("ディーラー画面 API: 送るのは各操作の選択値だけ(役割・UID・メール・余分な項目は送らない)", async () => {
@@ -110,4 +111,17 @@ test("ディーラー画面 API: 確認済みの端末の値を担当者の呼�
   // 端末に保存できなかったら、そのことを返す(画面はこの間だけメモリの値で使い、案内を出す。AB-04)
   persists = false;
   assert.deepEqual(await api.verifyCode({ code: "12345678" }), { ok: true, deviceSaved: false });
+});
+
+test("週表示の日付: 月曜の算出(日曜は前の月曜)・週の移動・見出し・年をまたぐ週。サーバーの週(月〜日)と一致", () => {
+  assert.deepEqual(["2026-11-02", "2026-11-04", "2026-11-08", "2026-11-09"].map(mondayOf), ["2026-11-02", "2026-11-02", "2026-11-02", "2026-11-09"]);
+  assert.deepEqual([addDays("2026-11-02", 7), addDays("2026-11-02", -7), addDays("2026-12-28", 7)], ["2026-11-09", "2026-10-26", "2027-01-04"]);
+  assert.deepEqual([formatDayHead("2026-11-02"), formatDayHead("2026-11-08"), formatDayHead("bad")], ["11月2日(月)", "11月8日(日)", "—"]);
+  assert.equal(weekLabel("2026-11-02"), "2026年11月2日(月)〜11月8日(日)");
+  assert.equal(weekLabel("2026-12-28"), "2026年12月28日(月)〜2027年1月3日(日)");
+  assert.equal(shortDate("2026-11-12"), "11/12");
+  for (const d of ["2026-11-04", "2026-12-31", "2027-03-01"]) {
+    const w = weekDatesOf(mondayOf(d));
+    assert.ok(w && w.includes(d) && w[0] === mondayOf(d) && w[6] === addDays(mondayOf(d), 6), d);
+  }
 });

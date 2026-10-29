@@ -20,6 +20,31 @@ export function formatJstDateTime(iso) {
   return `${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+// ---- 手術日の週表示(月曜〜日曜) ----
+const DAY = 24 * 60 * 60 * 1000;
+const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
+const utcOf = (date) => Date.parse(`${date}T00:00:00Z`);
+/** 日付を n 日ずらす(YYYY-MM-DD) */
+export const addDays = (date, n) => new Date(utcOf(date) + n * DAY).toISOString().slice(0, 10);
+/** その日を含む週の月曜(YYYY-MM-DD) */
+export function mondayOf(date) {
+  const dow = new Date(utcOf(date)).getUTCDay();
+  return addDays(date, -((dow + 6) % 7));
+}
+/** 「11月2日(月)」 */
+export function formatDayHead(date) {
+  const d = new Date(utcOf(date));
+  return Number.isFinite(d.getTime()) ? `${d.getUTCMonth() + 1}月${d.getUTCDate()}日(${WEEKDAY[d.getUTCDay()]})` : "—";
+}
+/** 「2026年11月2日(月)〜11月8日(日)」(年をまたぐ週は終わりにも年) */
+export function weekLabel(weekStart) {
+  const end = addDays(weekStart, 6);
+  const y = (d) => d.slice(0, 4);
+  return `${y(weekStart)}年${formatDayHead(weekStart)}〜${y(end) !== y(weekStart) ? `${y(end)}年` : ""}${formatDayHead(end)}`;
+}
+/** 「11/12」(ほかの手術日の案内) */
+export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+
 /** YYYY-MM-DD → 「YYYY/MM/DD」 */
 export const formatDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.replace(/-/g, "/") : "—");
 

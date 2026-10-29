@@ -37,6 +37,7 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),
     getOrder: (a) => portal({ action: "get", ...pick(a, ["companyId", "receiptId"]) }),
+    listWeek: (a) => portal({ action: "week", ...pick(a, ["companyId", "weekStart", "facilityFilter"]) }),   // 手術日の週表示(月曜〜日曜)
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),
     grant: (a) => facility({ action: "grant", ...pick(a, ["facilityId", "localDealerId", "revision"]) }),
