@@ -208,9 +208,9 @@ service cloud.firestore {
       }
 
       // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
-      // 注文メールの件名の先頭に付ける文字: 1〜20文字・改行・タブなどの制御文字と行/段落の区切りは不可(ヘッダーの注入を防ぐ)
+      // 注文メールの件名の先頭に付ける文字: 1〜20文字・改行・タブなどの制御文字(C0・DEL・C1)と行/段落の区切りは不可(ヘッダーの注入を防ぐ)
       function subjectPrefixOk(v) {
-        return stringIn(v, 1, 20) && v.matches('[^\\x00-\\x1F\\x7F\\x{2028}\\x{2029}]*');
+        return stringIn(v, 1, 20) && v.matches('[^\\x00-\\x1F\\x7F-\\x{9F}\\x{2028}\\x{2029}]*');
       }
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);

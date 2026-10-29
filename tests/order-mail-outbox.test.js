@@ -200,6 +200,8 @@ test("件名の先頭に付ける文字(発注先ごと): 設定した発注先�
   // 念のための除去(保存時は画面・Rules が拒否する): 改行・制御文字は除き、上限で切る。件名に改行は入らない
   assert.equal(subjectPrefixOf({ subjectPrefix: "@@@\r\nBcc: x@evil.jp" }), "@@@Bcc: x@evil.jp");
   assert.equal(subjectPrefixOf({ subjectPrefix: "a\u0000b\tc\u2028d\u007f" }), "abcd");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "@@@\u0085x\u0080\u009f" }), "@@@x", "C1 制御文字(U+0080〜U+009F。U+0085 は改行として扱われ得る)も除く");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "＠＠＠ 自動転送 @" }), "＠＠＠ 自動転送 @", "日本語・全角＠・半角@・通常の空白は保持");
   assert.equal(subjectPrefixOf({ subjectPrefix: "x".repeat(30) }).length, MAIL_SETTINGS_LIMITS.subjectPrefixMax);
   assert.equal(subjectPrefixOf({ subjectPrefix: 123 }), "");
   assert.equal(subjectPrefixOf(null), "");
@@ -217,7 +219,8 @@ test("施設設定(ディーラー): 件名の先頭に付ける文字は任意�
   assert.equal(v.cleaned[0].subjectPrefix, "@@@");
   assert.equal(validateDealers([row({ subjectPrefix: "＠＠＠ " })]).cleaned[0].subjectPrefix, "＠＠＠ ", "全角・空白もそのまま");
   assert.equal(validateDealers([row({ subjectPrefix: "   " })]).cleaned[0].subjectPrefix, "", "空白だけは未設定");
-  for (const bad of ["x".repeat(21), "@@@\n", "a\tb", "a\u0007b", "a\u2028b"]) {
+  assert.equal(validateDealers([row({ subjectPrefix: "＠＠＠ 自動転送 @" })]).cleaned[0].subjectPrefix, "＠＠＠ 自動転送 @", "日本語・全角＠・半角@・通常の空白は保持");
+  for (const bad of ["x".repeat(21), "@@@\n", "a\tb", "a\u0007b", "a\u2028b", "@@@\u0085", "a\u0080b", "a\u009fb"]) {
     v = validateDealers([row({ subjectPrefix: bad })]);
     assert.equal(v.ok, false, JSON.stringify(bad));
     assert.equal(v.errors[0].field, "subjectPrefix");

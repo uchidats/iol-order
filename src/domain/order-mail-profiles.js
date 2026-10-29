@@ -49,8 +49,8 @@ export const DEFAULT_GAS_PROFILE = createGasProfile({ id: "gas-default" });
 /** 施設設定(メール)の上限。画面・Rules・サーバーで同じ値を使う(subjectPrefixMax: 発注先ごとの件名の先頭に付ける文字) */
 export const MAIL_SETTINGS_LIMITS = Object.freeze({ signatureMax: 500, signatureLines: 10, mailNameMax: 100, subjectPrefixMax: 20 });
 
-/** 件名の先頭に付ける文字に使えない文字(改行・タブなどの制御文字・行/段落の区切り)。ヘッダーの注入を防ぐ */
-export const SUBJECT_PREFIX_FORBIDDEN = /[\u0000-\u001F\u007F\u2028\u2029]/;
+/** 件名の先頭に付ける文字に使えない文字(改行・タブなどの制御文字(C0・DEL・C1)・行/段落の区切り)。ヘッダーの注入を防ぐ */
+export const SUBJECT_PREFIX_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 
 /**
  * 発注先ごとの「件名の先頭に付ける文字」(任意)。送信時にサーバーが発注先の設定から読む(注文の入力では指定できない)。
