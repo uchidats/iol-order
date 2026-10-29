@@ -102,7 +102,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.fill("#notesInput", "右眼\n備考のテスト");
       await page.waitForFunction((k) => { const v = JSON.parse(localStorage.getItem(k) || "null"); return v && v.notes === "右眼\n備考のテスト" && v.lines.length === 2; }, "iol-order-draft:v1:u1:fac1");
       const d = await stored();
-      assert.deepEqual(d.lines[0], { toric: false, multifocal: false, modelKey: "jj-dib00v", power: "+20.0D", quantity: 2, date: "2099-02-01", doctorId: "o2", dealerId: "" });
+      assert.deepEqual(d.lines[0], { toric: false, multifocal: false, modelKey: "jj-dib00v", power: "+20.0D", quantity: 2, quantityManual: true, date: "2099-02-01", doctorId: "o2", dealerId: "" });
+      assert.deepEqual([d.lines[1].quantity, d.lines[1].quantityManual], [2, false], "トーリックは初期値が2枚(利用者は変えていない)");
       assert.deepEqual(d.lines[1].modelKey, "jj-diwxxx-toric|DIW300");
       assert.ok(!/token|password|idToken|email|uid/i.test(JSON.stringify(d)), "認証情報・ユーザー情報は保存しない: " + JSON.stringify(d));
 
@@ -111,7 +112,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.evaluate(() => window.__restored), true);
       assert.equal(await page.locator(".lens-line").count(), 2);
       assert.deepEqual(await read(0), { toric: false, model: "jj-dib00v", power: "+20.0D", qty: "2", date: "2099-02-01", doctor: "o2", title: "レンズ1" });
-      assert.deepEqual(await read(1), { toric: true, model: "jj-diwxxx-toric|DIW300", power: "+18.5D", qty: "1", date: "2099-02-09", doctor: "o1", title: "レンズ2" });
+      assert.deepEqual(await read(1), { toric: true, model: "jj-diwxxx-toric|DIW300", power: "+18.5D", qty: "2", date: "2099-02-09", doctor: "o1", title: "レンズ2" });
       assert.equal(await page.inputValue("#notesInput"), "右眼\n備考のテスト");
       assert.equal(await page.evaluate(() => window.__lines.values()[1].lens.toricModel), "DIW300", "復元後も、型番に対応するデータとして使われる");
       assert.equal(await page.evaluate(() => window.__lines.validate().ok), true);
@@ -211,6 +212,76 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
       assert.deepEqual(errors, []);
       await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`枚数の初期値: トーリック・多焦点なら2枚、どちらもなければ1枚。利用者が変えた枚数は、チェック・再描画・復元で上書きしない(レンズごと): ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await (await browser.newContext({ viewport: { width: 390, height: 900 } })).newPage();
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      const open = async (uid) => { await page.goto(`${base}?uid=${uid}`); await page.waitForFunction(() => window.__ready); };
+      const L = (i) => page.locator(".lens-line").nth(i);
+      const qty = (i) => L(i).evaluate(l => (l.querySelector("[data-f=quantity]:checked") || {}).value);
+      const check = (i, f, on) => L(i).locator(`[data-f=${f}]`).setChecked(on);
+      const pick = (i, n) => L(i).locator(".quantity-btn").nth(n - 1).click();
+      const key = (uid) => `iol-order-draft:v1:${uid}:fac1`;
+
+      await open("q1");
+      assert.equal(await qty(0), "1", "どちらも未選択なら1枚");
+      await check(0, "toric", true); assert.equal(await qty(0), "2", "トーリック → 2枚");
+      await check(0, "toric", false); assert.equal(await qty(0), "1", "外すと1枚");
+      await check(0, "multifocal", true); assert.equal(await qty(0), "2", "多焦点 → 2枚");
+      await check(0, "toric", true); await check(0, "multifocal", false); assert.equal(await qty(0), "2", "トーリックが残っていれば2枚");
+      await check(0, "toric", false); assert.equal(await qty(0), "1");
+      // レンズごとに独立
+      await page.click("#btnAddLine");
+      await check(1, "toric", true);
+      assert.deepEqual([await qty(0), await qty(1)], ["1", "2"]);
+      // 利用者が変えた後は、チェックの操作で変えない(そのレンズだけ)
+      await pick(0, 2);
+      await check(0, "toric", true); await check(0, "toric", false); await check(0, "multifocal", true);
+      assert.equal(await qty(0), "2", "手動の2枚のまま");
+      await pick(0, 1);
+      await check(0, "toric", true);
+      assert.equal(await qty(0), "1", "多焦点・トーリックでも、手動の1枚を優先");
+      await check(1, "toric", false); assert.equal(await qty(1), "1", "レンズ2は自動のまま");
+      await check(1, "multifocal", true); assert.equal(await qty(1), "2");
+      // 再描画(選択肢の作り直し)でも変えない
+      await page.evaluate(() => window.__lines.refresh());
+      assert.deepEqual([await qty(0), await qty(1)], ["1", "2"]);
+      // リフレッシュ後の復元: 手動の枚数は守り、自動の明細は引き続きチェックに合わせる
+      await page.waitForFunction((k) => { const d = JSON.parse(localStorage.getItem(k) || "null"); return d && d.lines.length === 2 && d.lines[1].multifocal; }, key("q1"));
+      await open("q1");
+      assert.deepEqual([await qty(0), await qty(1)], ["1", "2"]);
+      await check(0, "toric", false); await check(0, "toric", true);
+      assert.equal(await qty(0), "1", "復元後も手動の枚数を優先");
+      await check(1, "multifocal", false);
+      assert.equal(await qty(1), "1", "復元後も自動の明細はチェックに合わせる");
+      // 記録のない古い下書き: チェックの状態の初期値と違う枚数は、利用者の選択とみなす
+      await page.evaluate((k) => {
+        window.__draft.setReady(false);
+        localStorage.setItem(k, JSON.stringify({ v: 1, savedAt: Date.now(), notes: "", lines: [
+          { toric: true, multifocal: false, modelKey: "", power: "", quantity: 1, date: "", doctorId: "", dealerId: "" },
+          { toric: true, multifocal: false, modelKey: "", power: "", quantity: 2, date: "", doctorId: "", dealerId: "" }] }));
+      }, key("q2"));
+      await open("q2");
+      assert.deepEqual([await qty(0), await qty(1)], ["1", "2"]);
+      await check(0, "toric", false); await check(0, "toric", true);
+      await check(1, "toric", false);
+      assert.deepEqual([await qty(0), await qty(1)], ["1", "1"], "古い下書き: トーリックで1枚は手動、2枚は自動として扱う");
+      // 削除して元に戻しても、手動の記録を保つ
+      await pick(1, 2);
+      await L(1).locator(".lens-line-trash").click();
+      await page.locator(".undo-toast").getByRole("button", { name: "元に戻す" }).click();
+      await check(1, "toric", true); await check(1, "toric", false);
+      assert.equal(await qty(1), "2");
+      assert.equal(await page.evaluate(() => window.__lines.values()[1].quantity), 2, "注文の値も画面と同じ");
+      assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });
 }
