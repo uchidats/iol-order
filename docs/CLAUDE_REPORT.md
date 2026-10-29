@@ -1,11 +1,12 @@
 # 作業報告
 
 - 日時: 2026-10-29（日本時間）。
-- 作業: ディーラー認証基盤を、機能停止のまま本番（medconf-iol-dev）へ配備。対象はmain `4859adc`。
-- 配備: Firestore Rules（差分はディーラー関連のみ）、新規Functions 5つ（dealerPortalApi・facilityDealerPortal・dealerPortalOperator・indexDealerReceipts・deliverDealerAuthCode）。createOrder・sendOrderMailは再デプロイしていない（更新時刻が配備前と同じ）。
-- 設定: `functions/.env.medconf-iol-dev` に `DEALER_PORTAL_ENABLED=false`、`DEALER_JOIN_CODE_TEST_SINK=false`（エミュレータ専用。非対話の配備で値が必要）を追加。注文受付・メール送信の設定、許可リスト、宛先は変更していない。配備時にCLIが、既存のSecret 2つへ実行アカウントの読み取り権限を再確認した（権限を持つのは同じアカウントだけ）。
-- 配備後の確認: 新しい関数5つはすべて `DEALER_PORTAL_ENABLED=false`。未認証のdealerPortalApi（context・list・detail）は「現在ご利用いただけません」、facilityDealerPortal・dealerPortalOperator・createOrderは「ログインが必要です」。配備後のエラーログは0件。公開サイトのindex.html・dealer.htmlはmainと一致し、未ログインの表示は正常。ログイン後の停止中の表示は既存のブラウザテストで確認済みの内容で、今回は実ログインで確認していない。
-- 呼び出し権限: ユーザーの指示で、トリガー2つ（indexdealerreceipts・deliverdealerauthcode）のCloud Runサービスだけに、実行アカウントの `roles/run.invoker` を付与。既存の設定を保持し、allUsersなどは付与していない。付与後の両トリガーの警告・権限エラーのログは0件（配備後に呼び出しはまだない）。
-- テスト: 全テストは再実行していない（指示どおり）。テスト注文・実メール送信は行っていない。
-- commit: env追加 `354815c`（ブランチ `deploy/dealer-portal-disabled`）。mainへ早送りで統合してpushする。
-- 判断待ち: 認証機能の有効化（別途判断）。
+- 作業: 注文履歴の削除機能（管理者・副管理者、論理削除）と、注文履歴の詳細の表示の改善を、同じブランチ `feature/order-soft-delete`（main `eb1a73c` から）で実装。
+- 削除: 詳細の一番下に「この注文を削除」（管理者・副管理者だけに表示、確認ダイアログあり）。新しいCallable `deleteOrder` が施設の所属と役割を確認し、注文に削除の印・日時・削除者を付け、操作の記録を残す。注文の内容・メールの記録は変更せず、メールの再送信・新たな注文は起きない。Firestore Rulesは従来どおりクライアントからの書き込み・削除をすべて拒否。削除した注文は注文履歴の一覧と重複注文の確認から除く。
+- 詳細の表示: 注文確認画面の部品を再利用し、「手術日＋担当医」ごとの見出しの下にレンズ（IOL名・度数・枚数）を表示。発注先が2社以上ならディーラーごとのまとまりと小計、最後に注文全体の合計と備考を1回。注文番号・発注日時・発注者・状態・備考・メール送信履歴は維持。データ構造・メール送信の処理は変更していない（注文メールが使う共通ファイルも変更なし）。
+- マニュアル: 2（注文履歴の詳細の説明、注文者は閲覧のみ）、3（役割の表、11章「注文履歴から注文を削除する」、施設の削除の条件の補足）、目次を更新。
+- テスト: unit 271、削除のFunctions 4、Rulesの注文 1、ブラウザ（注文履歴 9・マニュアル 14）が成功。全テスト・全ブラウザE2Eは実行していない（指示どおり。注文受付・メール送信の処理は変更なし）。
+- commit: 本記録と同じcommit（ブランチ `feature/order-soft-delete`）。push済みかは `git status -sb` で確認。mainへの取り込みはしていない。
+- Firebaseデプロイ: していない。
+- 判断待ち: (1) `deleteOrder` のデプロイとmainへの取り込みの順序（先にFunctions。画面だけ先に公開すると削除が失敗表示になる）。(2) 削除した注文に送信待ち・停止中のメールがある場合の扱い（現状は変更せず送信の処理が続く）。(3) ディーラー専用画面での削除した注文の扱い（現状は変更なし。機能は停止中）。
+- 別件: ディーラー認証の停止中の試験モードはブランチ `feature/dealer-portal-test-uids`（push済み・未デプロイ）。

@@ -33,7 +33,7 @@ export function formatOrderDate(createdAt) {
 export function findPastOrderDuplicates(currentLines, orders) {
   const index = new Map();   // 過去の明細のキー → 注文(重複なし)
   for (const o of orders || []) {
-    if (o.testOrder === true || !isCounted(o.status)) continue;
+    if (o.testOrder === true || o.deleted === true || !isCounted(o.status)) continue;   // 論理削除した注文は照合しない
     for (const l of orderLinesOf(o)) {
       if (!isCounted(l.status)) continue;
       const item = l.item || {};

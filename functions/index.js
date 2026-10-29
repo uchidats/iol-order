@@ -15,6 +15,7 @@ import { createRegistrationService, RegistrationError } from "./src/registration
 import { createFacilityApplicationService, createApplicationNotifier, createApplicationResultNotifier } from "./src/facility-applications.js";
 import { createFacilityPreregistrationService } from "./src/facility-preregistrations.js";
 import { createOrderService } from "./src/orders.js";
+import { createOrderDeletionService } from "./src/order-deletion.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
 import { onDocumentWrittenWithAuthContext, onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
@@ -96,6 +97,8 @@ export const deleteFacility = onCall(options, wrap(service.deleteFacility));   /
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)
 export const createOrder = onCall(options, wrap(orderService.createOrder));
+// 注文の削除(論理削除。施設の管理者・副管理者のみ)。注文受付のスイッチとは独立。メールの送信待ち・発注には触れない
+export const deleteOrder = onCall(options, wrap(createOrderDeletionService({ db: getFirestore(), FieldValue }).deleteOrder));
 
 // 利用者の所属削除(施設管理者のみ)。所属の削除と操作履歴の記録を1つのトランザクションで行う
 const memberService = createMemberService({

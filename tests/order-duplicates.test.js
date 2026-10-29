@@ -53,6 +53,7 @@ test("下書き・送信失敗・取り消しの注文(と明細)は対象外。
   assert.equal(findPastOrderDuplicates([cur({ modelId: "hoya-xy1", power: "+19.5D" })], [mixed]).length, 1);
   // テスト注文(開発用受付)は、通常の注文の重複確認に使わない
   assert.deepEqual(findPastOrderDuplicates([cur()], [order("t", "2026-10-20T00:00:00Z", [pl()], { testOrder: true })]), []);
+  assert.deepEqual(findPastOrderDuplicates([cur()], [order("d", "2026-10-20T00:00:00Z", [pl()], { deleted: true })]), [], "論理削除した注文も対象外");
 });
 
 test("旧形式の注文(注文全体の orderer / 旧単一IOL形式)も照合できる。担当医が分からない・今回の担当医が未選択なら一致しない", () => {

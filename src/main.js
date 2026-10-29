@@ -86,7 +86,7 @@ async function bootstrapWithFirebase(config) {
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
-  let orderHistory = null;  // 注文履歴（所属メンバー全員。閲覧のみ・初回表示時に生成）
+  let orderHistory = null;  // 注文履歴（所属メンバー全員が閲覧。管理者・副管理者は削除も・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
   let dealerOperator = null;    // ディーラー画面の管理(運営者 = platformAdmin のみ。権限はサーバーが確認する)
@@ -253,7 +253,7 @@ async function bootstrapWithFirebase(config) {
     await dealerOperator.open();
   }
 
-  /** 注文履歴を開く(閲覧のみ)。表示するのは選択中の施設の注文だけ。権限は Firestore Rules でも検証される */
+  /** 注文履歴を開く(閲覧。管理者・副管理者は削除も)。表示するのは選択中の施設の注文だけ。権限は Firestore Rules でも検証される */
   async function openHistory() {
     const access = decideAccess(state);
     if (access.state !== ACCESS.GRANTED) return;
@@ -266,11 +266,13 @@ async function bootstrapWithFirebase(config) {
       orderHistory = createOrderHistory({
         mount: document.querySelector("main.main-content"),
         repository: ctx.repository,
+        deleteOrder: ctx.orderApi ? (facilityId, orderId) => ctx.orderApi.deleteOrder({ facilityId, orderId }) : null,
         onClose: () => setOrderViewHidden(false)
       });
     }
     setOrderViewHidden(true);
-    await orderHistory.open({ id: access.facilityId, name: facilityName(access.facilityId) });
+    // 削除ボタンは管理者・副管理者だけに出す(実行の可否はサーバーの deleteOrder が確認する)
+    await orderHistory.open({ id: access.facilityId, name: facilityName(access.facilityId), canDelete: isManagerRole(access.role) });
   }
 
   /** 施設設定を開く。表示は管理者・副管理者のみ（書き込みはFirestoreルール・Functionsでも検証される） */
