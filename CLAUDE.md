@@ -43,6 +43,12 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - 内容は現行の実装と照合し、未実装の機能を実装済みとして書かない。
 - デプロイ・移行の手順は `docs/release-plan.md` に従う。
 
+## ディーラー専用画面(docs/dealer-portal.md)
+- 閲覧は「会社の担当者として有効 × 施設の管理者・副管理者の明示的な許可 × 自社宛ての明細」だけ。元の注文ドキュメントをディーラーへ渡さず、返す項目を列挙して組み立てる(共通備考・入力者・他社の情報は返さない)。担当施設は表示用で、権限の判定に使わない。
+- ディーラーの担当者を施設の `members` に入れない。新しい領域(`dealerCompanies` など)は Rules でクライアントの読み書きを拒否したまま、サーバーだけで扱う。
+- 機能スイッチ `DEALER_PORTAL_ENABLED` は注文受付・メールのスイッチと別。ポータルの処理(索引のトリガー)を注文の受付・メール送信の処理に組み込まない。
+- 入口の `dealer.html` も `node scripts/stamp-assets.mjs` の対象。
+
 ## テスト範囲(変更内容に応じて調整する)
 - **軽微なUI/CSS変更**(ボタン位置・余白・色・文言など): 関連箇所の確認だけでよい(`npm test`、変更箇所のブラウザでの確認、関連するブラウザテストのファイル単体)。Functions・Rules・全ブラウザE2E(`npm run test:browser` 全体)は毎回は実行しない。確認後、速やかに commit・push して本番へ反映する。
 - **注文処理・メール送信・認証・権限などに影響する変更**: 従来どおり十分にテストする(`npm test`、`npm run test:rules`、`npm run test:functions` / `test:functions:e2e`、`npm run test:browser`)。

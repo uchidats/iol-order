@@ -10,10 +10,15 @@ const EMAIL_STORAGE_KEY = "iol_order_emaillink_pending";
  * @param {() => string} deps.currentUrl  メールリンクの戻り先（クエリ/ハッシュ除去済み）
  * @param {Storage} [deps.storage]
  */
-export function createAuthService({ auth, fns, currentUrl, storage }) {
+export function createAuthService({ auth, fns, currentUrl, storage, emailStorageKey = EMAIL_STORAGE_KEY }) {
   const store = storage || { getItem() { return null; }, setItem() {}, removeItem() {} };
 
   const safe = (fn) => { try { return fn(); } catch (e) { return null; } };
+  const microsoftProvider = (selectAccount) => {
+    const p = new fns.OAuthProvider("microsoft.com");
+    if (selectAccount && typeof p.setCustomParameters === "function") p.setCustomParameters({ prompt: "select_account" });
+    return p;
+  };
 
   return {
     /** 認証状態の購読。ログイン状態はSDKのlocal永続化で保持される */
@@ -21,9 +26,22 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
       return fns.onAuthStateChanged(auth, callback);
     },
 
-    async signInWithGoogle() {
+    /**
+     * Googleでログイン(ポップアップ)。
+     * @param {{selectAccount?:boolean}} [opts] selectAccount: 毎回アカウントの選択画面を出す(個人のアカウントなどで自動的にログインしないように。ディーラー画面で使う)
+     */
+    async signInWithGoogle({ selectAccount = false } = {}) {
       const provider = new fns.GoogleAuthProvider();
+      if (selectAccount && typeof provider.setCustomParameters === "function") provider.setCustomParameters({ prompt: "select_account" });
       return fns.signInWithPopup(auth, provider);
+    },
+
+    /**
+     * Microsoft アカウントでログイン(ポップアップ。Firebase 標準の OAuthProvider("microsoft.com")。企業(Entra ID)と個人の両方)。
+     * @param {{selectAccount?:boolean}} [opts] selectAccount: 毎回アカウントの選択画面を出す
+     */
+    async signInWithMicrosoft({ selectAccount = false } = {}) {
+      return fns.signInWithPopup(auth, microsoftProvider(selectAccount));
     },
 
     /** パスワード不要のメールリンクを送る */
@@ -34,7 +52,7 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
         url: currentUrl(),
         handleCodeInApp: true
       });
-      safe(() => store.setItem(EMAIL_STORAGE_KEY, trimmed));
+      safe(() => store.setItem(emailStorageKey, trimmed));
     },
 
     /** 現在のURLがメールリンクか */
@@ -48,11 +66,11 @@ export function createAuthService({ auth, fns, currentUrl, storage }) {
      */
     async completeEmailLink(href, askEmail) {
       if (!fns.isSignInWithEmailLink(auth, href)) return null;
-      let email = safe(() => store.getItem(EMAIL_STORAGE_KEY));
+      let email = safe(() => store.getItem(emailStorageKey));
       if (!email) email = askEmail ? askEmail() : null;
       if (!email) throw new Error("メールアドレスの確認が必要です");
       const cred = await fns.signInWithEmailLink(auth, email.trim(), href);
-      safe(() => store.removeItem(EMAIL_STORAGE_KEY));
+      safe(() => store.removeItem(emailStorageKey));
       return cred;
     },
 

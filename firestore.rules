@@ -214,7 +214,26 @@ service cloud.firestore {
       }
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
-        allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
+        // ディーラー専用画面で閲覧を許可中(関連付けが active)の発注先は、識別項目(名称・宛名・発注用メール・連携ID)を変更・削除・作り直しできない。
+        // 変えるときは先に閲覧を取り消す(取消で許可の世代が終わり、再許可はその時点以降の新しい注文だけ)。並び順・使用報告用メールは変更できる
+        allow create: if dealerWriteOk(fid) && !portalActive(fid, id);
+        allow update: if dealerWriteOk(fid) && (!portalActive(fid, id) || dealerIdentityUnchanged());
+        // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
+        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'facilityDealers', id) && !portalActive(fid, id);
+      }
+
+      function portalActive(fid, id) {
+        return exists(/databases/$(database)/documents/facilities/$(fid)/dealerPortalLinks/$(id))
+          && get(/databases/$(database)/documents/facilities/$(fid)/dealerPortalLinks/$(id)).data.get('status', '') == 'active';
+      }
+      function dealerIdentityUnchanged() {
+        return request.resource.data.get('name', null) == resource.data.get('name', null)
+          && request.resource.data.get('mailName', null) == resource.data.get('mailName', null)
+          && request.resource.data.get('orderEmails', null) == resource.data.get('orderEmails', null)
+          && request.resource.data.get('dealerId', null) == resource.data.get('dealerId', null);
+      }
+      function dealerWriteOk(fid) {
+        return (isPlatformAdmin() || isFacilityManager(fid))
           && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'mailName', 'subjectPrefix', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
@@ -226,8 +245,6 @@ service cloud.firestore {
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
           && validSortOrder(request.resource.data)
           && actorOk(request.resource.data);
-        // ディーラーに有効/無効はない。自施設の管理者・副管理者が削除できる(他施設は不可)。過去の注文に保存されたディーラー情報は注文側に残る
-        allow delete: if (isPlatformAdmin() || isFacilityManager(fid)) && deletionMarkOk(fid, 'facilityDealers', id);
       }
 
       // 削除の記録(担当医・ディーラーを削除する一括書き込みで、本人が書く)。ID = {コレクション}_{ドキュメントID}。
@@ -297,6 +314,10 @@ service cloud.firestore {
           && actorOk(request.resource.data);
         allow delete: if false;
       }
+      // ディーラー専用画面: 施設別発注先と会社の関連付け(閲覧の許可・取消はサーバーだけが行う。施設の管理者も直接は読み書きしない)
+      match /dealerPortalLinks/{localDealerId} {
+        allow read, write: if false;
+      }
     }
 
     // 施設のセルフ登録・招待参加はサーバー側(Cloud Functions / Admin SDK)専用。クライアントからは一切読み書きできない
@@ -325,6 +346,35 @@ service cloud.firestore {
     match /rateLimits/{id} {
       allow read, write: if false;
     }
+    // ディーラー専用画面(docs/dealer-portal.md)。会社・支店・担当者・担当施設・参加待ち・閲覧許可・受信の索引・操作履歴は、
+    // すべてサーバー(Cloud Functions)だけが扱う。ディーラーの担当者・施設の管理者・運営者を含め、クライアントからは読み書きできない
+    // (担当者の所属は staff。既存の /{path=**}/members の規則に巻き込まないため members という名前にしない)
+    match /dealerCompanies/{document=**} {
+      allow read, write: if false;
+    }
+    // 担当者(招待中・有効・無効)。ID は会社×承認済みのメールで決まる(Firebase の UID ではない)
+    match /dealerStaff/{staffId} {
+      allow read, write: if false;
+    }
+    match /dealerPortalGrants/{id} {
+      allow read, write: if false;
+    }
+    match /dealerPortalAuditLogs/{id} {
+      allow read, write: if false;
+    }
+    // 確認コードで担当者に紐付けた認証主体(Google・Microsoft の固有ID、メールリンクの端末の値のハッシュ)
+    match /dealerAuthBindings/{id} {
+      allow read, write: if false;
+    }
+    // 確認コード(ハッシュ)と送信回数
+    match /dealerAuthChallenges/{id} {
+      allow read, write: if false;
+    }
+    // 確認コードの送信の依頼(コードは含まない。サーバーだけが扱う)
+    match /dealerAuthCodeJobs/{id} {
+      allow read, write: if false;
+    }
+
     // サービス紹介「IOL Orderについて」の本文(原稿 docs/introduction/service-introduction-web.md を、運営者が
     // scripts/publish-introduction.mjs で登録する。Admin 権限の書き込みのみ)。読めるのは platformAdmin だけ。
     // 一般公開は、運営者の承認後に introductionPublic() を true にしてデプロイしたときだけ(画面側の設定も合わせて変える)

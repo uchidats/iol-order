@@ -3,13 +3,21 @@
 // Firestore の Rules のうち、紹介の本文(platformContent)だけは同じ制限(platformAdmin のみ)をまねる。
 
 export const FAKE_SDK = {
-  "firebase-app.js": "export const initializeApp = (c) => ({ c });",
+  // アプリの名前を記録する(ディーラー画面は医療機関の画面と別の名前でログイン状態を分ける)
+  "firebase-app.js": "export const initializeApp = (c, name) => { (window.__appNames = window.__appNames || []).push(name || '[DEFAULT]'); return { c, name }; };",
   "firebase-auth.js": `
-    export const getAuth = () => ({ get currentUser() { return window.__fakeUser || null; } });
+    export const getAuth = () => ({ get currentUser() { return window.__fakeUser ? { ...window.__fakeUser, getIdToken: async () => "fake-token" } : null; } });
     export function onAuthStateChanged(auth, cb) { setTimeout(() => { window.__authAt = performance.now(); cb(window.__fakeUser || null); }, window.__fakeAuthDelay || 0); return () => {}; }
-    export class GoogleAuthProvider {}
-    export const signInWithPopup = async () => { throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); };
-    export const sendSignInLinkToEmail = async () => {};
+    export class GoogleAuthProvider { constructor() { this.providerId = "google.com"; } setCustomParameters(p) { this.params = p; } }
+    export class OAuthProvider { constructor(id) { this.providerId = id; } setCustomParameters(p) { this.params = p; } }
+    // Googleログイン: 呼び出し(指定したパラメーター)を記録。window.__fakeGoogle があればその結果(既定は「閉じられた」)
+    export const signInWithPopup = async (auth, provider) => {
+      if (provider.providerId === "microsoft.com") { (window.__microsoftCalls = window.__microsoftCalls || []).push(provider.params || null); if (window.__fakeMicrosoft) return window.__fakeMicrosoft(); throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" }); }
+      (window.__googleCalls = window.__googleCalls || []).push(provider.params || null);
+      if (window.__fakeGoogle) return window.__fakeGoogle();
+      throw Object.assign(new Error("closed"), { code: "auth/popup-closed-by-user" });
+    };
+    export const sendSignInLinkToEmail = async (auth, email, settings) => { (window.__linkSent = window.__linkSent || []).push([email, settings && settings.url]); };
     export const isSignInWithEmailLink = () => false;
     export const signInWithEmailLink = async () => ({});
     export const signOut = async () => {};`,
@@ -46,7 +54,13 @@ export const FAKE_SDK = {
     }`,
   "firebase-functions.js": `
     export const getFunctions = () => ({});
-    export const httpsCallable = (fns, name) => async () => ({ data: name === "listMyPendingMemberships" ? { memberships: [] } : {} });`
+    // 呼び出しの記録(window.__calls)と、テストごとの応答(window.__fakeCallables[name](data)。例外の { code, message } はエラー)
+    export const httpsCallable = (fns, name) => async (data) => {
+      (window.__calls = window.__calls || []).push([name, data]);
+      const h = window.__fakeCallables && window.__fakeCallables[name];
+      if (h) return { data: await h(data) };
+      return { data: name === "listMyPendingMemberships" ? { memberships: [] } : {} };
+    };`
 };
 
 /**

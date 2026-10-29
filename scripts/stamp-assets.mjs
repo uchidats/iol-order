@@ -33,7 +33,7 @@ export function buildImportMap() {
 const BEGIN = "<!-- asset-stamp:begin -->";
 const END = "<!-- asset-stamp:end -->";
 
-/** index.html に、import map とバージョン付きの main.js / styles.css を反映した文字列を返す */
+/** index.html・dealer.html に、import map とバージョン付きの main.js(ディーラー用は src/dealer/main.js)/ styles.css を反映した文字列を返す */
 export function stampHtml(html) {
   const map = buildImportMap();
   const block = `${BEGIN}\n  <script type="importmap">\n${JSON.stringify({ imports: map }, null, 2).replace(/^/gm, "  ")}\n  </script>\n  ${END}`;
@@ -42,6 +42,7 @@ export function stampHtml(html) {
   out = out.replace(new RegExp(`${BEGIN}[\\s\\S]*?${END}`), () => block);
   out = out.replace(/href="styles\.css(\?v=[0-9a-f]+)?"/, `href="styles.css?v=${hashOf(rootPath("styles.css"))}"`);
   out = out.replace(/src="src\/main\.js(\?v=[0-9a-f]+)?"/, `src="src/main.js?v=${hashOf(rootPath("src/main.js"))}"`);
+  out = out.replace(/src="src\/dealer\/main\.js(\?v=[0-9a-f]+)?"/, `src="src/dealer/main.js?v=${hashOf(rootPath("src/dealer/main.js"))}"`);
   return out;
 }
 
@@ -49,9 +50,11 @@ if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].re
   // マニュアルの表示データ(src/manual/manual-pages.js)を先に作り直す(原稿 docs/manual の変更もバージョンに反映する)
   const { writeManualModule } = await import("./build-manual.mjs");
   if (writeManualModule()) console.log("src/manual/manual-pages.js を更新しました");
-  const file = rootPath("index.html");
-  const html = fs.readFileSync(file, "utf8");
-  const stamped = stampHtml(html);
-  fs.writeFileSync(file, stamped);
-  console.log(stamped === html.replace(/\r\n/g, "\n") ? "index.html は最新です" : "index.html を更新しました");
+  for (const name of ["index.html", "dealer.html"]) {   // dealer.html: ディーラー専用画面の入口
+    const file = rootPath(name);
+    const html = fs.readFileSync(file, "utf8");
+    const stamped = stampHtml(html);
+    fs.writeFileSync(file, stamped);
+    console.log(stamped === html.replace(/\r\n/g, "\n") ? `${name} は最新です` : `${name} を更新しました`);
+  }
 }

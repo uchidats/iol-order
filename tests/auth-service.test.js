@@ -31,6 +31,38 @@ test("Googleログインはポップアップ + GoogleAuthProvider", async () =>
   assert.deepEqual(calls[0], ["popup", true]);
 });
 
+test("Googleログイン: selectAccount を指定すると毎回アカウントの選択画面(ディーラー画面)。指定なしは従来どおり(医療機関の画面)", async () => {
+  const params = [];
+  class GoogleAuthProvider { setCustomParameters(p) { this.p = p; } }
+  const { fns } = makeFns({ GoogleAuthProvider, signInWithPopup: async (a, p) => { params.push(p.p || null); return { user: { uid: "u" } }; } });
+  const s = createAuthService({ auth: {}, fns, currentUrl: () => "https://x/y/" });
+  await s.signInWithGoogle();
+  await s.signInWithGoogle({ selectAccount: true });
+  assert.deepEqual(params, [null, { prompt: "select_account" }]);
+});
+
+test("Microsoftログイン: OAuthProvider(\"microsoft.com\") のポップアップ(アカウントの選択画面)。アカウントの連携・解除の機能は持たない", async () => {
+  const calls = [];
+  class OAuthProvider { constructor(id) { this.id = id; } setCustomParameters(p) { this.p = p; } }
+  const { fns } = makeFns({ OAuthProvider, signInWithPopup: async (a, p) => { calls.push(["popup", p.id, p.p || null]); return {}; } });
+  const s = createAuthService({ auth: { currentUser: null }, fns, currentUrl: () => "https://x/y/" });
+  await s.signInWithMicrosoft({ selectAccount: true });
+  await s.signInWithMicrosoft();
+  assert.deepEqual(calls, [["popup", "microsoft.com", { prompt: "select_account" }], ["popup", "microsoft.com", null]]);
+  assert.equal(s.linkMicrosoft, undefined);
+  assert.equal(s.unlinkMicrosoft, undefined);
+});
+
+test("メールリンクの保存キーを分けられる(ディーラー画面は医療機関の画面と別のキー。既定は従来のキー)", async () => {
+  const { fns } = makeFns();
+  const a = memStore(), b = memStore();
+  await createAuthService({ auth: {}, fns, currentUrl: () => "https://x/y/", storage: a }).sendEmailLink("a@example.jp");
+  await createAuthService({ auth: {}, fns, currentUrl: () => "https://x/y/", storage: b, emailStorageKey: "iol_dealer_emaillink_pending" }).sendEmailLink("b@example.jp");
+  assert.equal(a.getItem("iol_order_emaillink_pending"), "a@example.jp");
+  assert.equal(b.getItem("iol_order_emaillink_pending"), null);
+  assert.equal(b.getItem("iol_dealer_emaillink_pending"), "b@example.jp");
+});
+
 test("メールリンク送信は handleCodeInApp とクエリ無しの戻り先を使う", async () => {
   const { fns, calls } = makeFns();
   const storage = memStore();
