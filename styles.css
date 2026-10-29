@@ -221,6 +221,11 @@ body {
   line-height: 1.4;
 }
 
+/* ログイン画面(未ログイン): 説明 → Googleでログイン → メールでログイン の間隔をそろえる(PC・スマホ共通。ボタン・入力欄の大きさは変えない) */
+.auth-signin .feature-desc + .form-group { margin-top: 14px; }
+.auth-signin .form-group + .form-group { margin-top: 24px; }   /* Google とメールの区切り(前のまとまりの下の余白と重ねて 24px) */
+.auth-signin #authEmailInput + #btnAuthEmailLink { margin-top: 12px; }
+
 .btn-future {
   width: 100%;
   font-size: 0.85rem;

@@ -243,7 +243,7 @@ export function createAuthUi(handlers) {
 
     if (state === ACCESS.SIGNED_OUT) {
       panel.innerHTML = `
-        <div class="feature-info">
+        <div class="feature-info auth-signin">
           <div class="feature-title-row"><span class="feature-title">ログインが必要です</span></div>
           <p class="feature-desc">施設に登録された方のみ利用できます。</p>
           <div class="form-group">
