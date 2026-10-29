@@ -6,6 +6,7 @@ import {
   idempotencyKey, copyRecipient, senderName, senderAddress, formatFrom, replyToList, MAIL_STATUS
 } from "../functions/src/order-mail-outbox.js";
 import { validateMailSettings, planMailSettingsWrite, validateDealers, planDealerWrites } from "../src/domain/facility-settings.js";
+import { subjectPrefixOf, dealerSubjectExample, MAIL_SETTINGS_LIMITS } from "../src/domain/order-mail-profiles.js";
 
 const item = (o = {}) => ({ modelId: "jj-dib00v", manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", isToric: false, isMultifocal: false, toricModel: "", power: "+20.0D", quantity: 1, ...o });
 const line = (n, dealer, o = {}) => ({ lineNo: n, item: item(), surgeryDate: "2026-11-10", doctor: { id: "o1", name: "山田" }, dealerId: dealer ? dealer.id : null, dealer: dealer ? { id: dealer.id, name: dealer.name } : null, ...o });
@@ -179,4 +180,57 @@ test("ディーラーの宛名(正式表記・任意): 保存され、変更も�
   const empty = validateDealers([{ id: "d1", name: "A", mailName: "", orderEmailsText: "", usageEmailsText: "" }]);
   assert.equal("mailName" in planDealerWrites([], empty.cleaned, "f1")[0].data, false);
   assert.equal(validateDealers([{ id: null, name: "A", mailName: "x".repeat(101), orderEmailsText: "", usageEmailsText: "" }]).ok, false);
+});
+
+test("件名の先頭に付ける文字(発注先ごと): 設定した発注先だけ、従来の件名の先頭にそのまま付ける(空白を足さない)。未設定は従来どおり。複数の発注先にはそれぞれの設定", () => {
+  const K = { id: "dK", name: "栗原医療器械店", orderEmails: ["k@example.jp"], subjectPrefix: "@@@" };
+  const S = { id: "dS", name: "S商会", orderEmails: ["s@example.jp"], subjectPrefix: "[IOL] " };
+  const N = { id: "dN", name: "N医療", orderEmails: ["n@example.jp"] };
+  const ob = buildOrderOutbox({ facilityId: "f1", orderId: "o1", order: order([line(1, K), line(2, S), line(3, N)]), dealers: [K, S, N], mailSettings: { signature: "テスト眼科" } });
+  const by = Object.fromEntries(ob.mails.map(m => [m.id, m.data.subject]));
+  assert.equal(by.d_dK, "@@@【テスト眼科】IOL注文：ご確認のほどよろしくお願いします", "「@@@」を先頭にそのまま");
+  assert.equal(by.d_dS, "[IOL] 【テスト眼科】IOL注文：ご確認のほどよろしくお願いします", "入力した空白は残す(足しも削りもしない)");
+  assert.equal(by.d_dN, "【テスト眼科】IOL注文：ご確認のほどよろしくお願いします", "未設定は従来の件名");
+  const W = { id: "dW", name: "W商会", orderEmails: ["w@example.jp"], subjectPrefix: "＠＠＠@ａ" };
+  assert.equal(buildOrderOutbox({ facilityId: "f1", orderId: "o3", order: order([line(1, W)]), dealers: [W], mailSettings: {} }).mails[0].data.subject, "＠＠＠@ａ【テスト眼科】IOL注文：ご確認のほどよろしくお願いします", "全角・半角を変換しない");
+  // 本文・宛先は従来どおり
+  const k = ob.mails.find(m => m.id === "d_dK").data;
+  assert.deepEqual(k.to, ["k@example.jp"]);
+  assert.ok(k.text.startsWith("栗原医療器械店御中\n"));
+  // 念のための除去(保存時は画面・Rules が拒否する): 改行・制御文字は除き、上限で切る。件名に改行は入らない
+  assert.equal(subjectPrefixOf({ subjectPrefix: "@@@\r\nBcc: x@evil.jp" }), "@@@Bcc: x@evil.jp");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "a\u0000b\tc\u2028d\u007f" }), "abcd");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "@@@\u0085x\u0080\u009f" }), "@@@x", "C1 制御文字(U+0080〜U+009F。U+0085 は改行として扱われ得る)も除く");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "＠＠＠ 自動転送 @" }), "＠＠＠ 自動転送 @", "日本語・全角＠・半角@・通常の空白は保持");
+  assert.equal(subjectPrefixOf({ subjectPrefix: "x".repeat(30) }).length, MAIL_SETTINGS_LIMITS.subjectPrefixMax);
+  assert.equal(subjectPrefixOf({ subjectPrefix: 123 }), "");
+  assert.equal(subjectPrefixOf(null), "");
+  const bad = buildOrderOutbox({ facilityId: "f1", orderId: "o2", order: order([line(1, { ...K, subjectPrefix: "@@@\nBcc: x@evil.jp" })]), dealers: [{ ...K, subjectPrefix: "@@@\nBcc: x@evil.jp" }], mailSettings: {} });
+  assert.ok(!/[\r\n]/.test(bad.mails[0].data.subject));
+  // 画面の件名の例
+  assert.equal(dealerSubjectExample({ facilityName: "立川病院", subjectPrefix: "@@@" }), "@@@【立川病院】IOL注文：ご確認のほどよろしくお願いします");
+  assert.equal(dealerSubjectExample({ facilityName: "立川病院", subjectPrefix: "" }), "【立川病院】IOL注文：ご確認のほどよろしくお願いします");
+});
+
+test("施設設定(ディーラー): 件名の先頭に付ける文字は任意・20文字まで・改行や制御文字は不可。入力どおり保存し(全角半角の変換・空白の追加なし)、空なら保存しない", () => {
+  const row = (o = {}) => ({ id: "d1", name: "栗原医療器械店", mailName: "", orderEmailsText: "k@example.jp", usageEmailsText: "", ...o });
+  let v = validateDealers([row({ subjectPrefix: "@@@" })]);
+  assert.equal(v.ok, true);
+  assert.equal(v.cleaned[0].subjectPrefix, "@@@");
+  assert.equal(validateDealers([row({ subjectPrefix: "＠＠＠ " })]).cleaned[0].subjectPrefix, "＠＠＠ ", "全角・空白もそのまま");
+  assert.equal(validateDealers([row({ subjectPrefix: "   " })]).cleaned[0].subjectPrefix, "", "空白だけは未設定");
+  assert.equal(validateDealers([row({ subjectPrefix: "＠＠＠ 自動転送 @" })]).cleaned[0].subjectPrefix, "＠＠＠ 自動転送 @", "日本語・全角＠・半角@・通常の空白は保持");
+  for (const bad of ["x".repeat(21), "@@@\n", "a\tb", "a\u0007b", "a\u2028b", "@@@\u0085", "a\u0080b", "a\u009fb"]) {
+    v = validateDealers([row({ subjectPrefix: bad })]);
+    assert.equal(v.ok, false, JSON.stringify(bad));
+    assert.equal(v.errors[0].field, "subjectPrefix");
+  }
+  // 保存: 設定があれば保存、空なら項目を書かない(従来の件名)。変更の検出
+  const original = [{ id: "d1", name: "栗原医療器械店", sortOrder: 10, orderEmails: ["k@example.jp"], usageReportEmails: [] }];
+  const w = planDealerWrites(original, validateDealers([row({ subjectPrefix: "@@@" })]).cleaned, "f1");
+  assert.deepEqual([w.length, w[0].data.subjectPrefix], [1, "@@@"]);
+  assert.deepEqual(planDealerWrites([{ ...original[0], subjectPrefix: "@@@" }], validateDealers([row({ subjectPrefix: "@@@" })]).cleaned, "f1"), [], "変更なしは保存しない");
+  const cleared = planDealerWrites([{ ...original[0], subjectPrefix: "@@@" }], validateDealers([row({ subjectPrefix: "" })]).cleaned, "f1");
+  assert.equal(cleared.length, 1);
+  assert.equal("subjectPrefix" in cleared[0].data, false, "空にしたら項目を消す(上書きの保存)");
 });

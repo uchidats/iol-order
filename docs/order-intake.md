@@ -49,7 +49,7 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 
 ## 開発用受付の制限(サーバー側で強制)
 `ORDER_INTAKE_ENABLED=true` にしても、次を**すべて**満たす注文だけを受け付ける(`functions/.env.<project>`)。ブラウザ側の設定では回避できない。
-- `ORDER_TEST_FACILITY_IDS`(カンマ区切り)に、注文先の施設IDが含まれる(開発環境: せんじゅ眼科 `fac-bafcbe1e6d6c6f6c3528cb11`)。
+- `ORDER_TEST_FACILITY_IDS`(カンマ区切り)に、注文先の施設IDが含まれる(medconf-iol-dev: せんじゅ眼科 `fac-bafcbe1e6d6c6f6c3528cb11`・立川病院 `tachikawa-hospital`。立川病院は 2026-10-29 に追加)。
 - `ORDER_TEST_UIDS`(カンマ区切り)に、操作者のUIDが含まれる(開発環境: 運営者アカウント)。ログイン済み・メール確認済みも必須。
 - さらに従来どおり、その施設の有効な所属者であること(許可リストは所属確認の代わりにならない)。
 - どちらかのリストが空・未設定なら**全員拒否**(安全側)。`ORDER_INTAKE_UNRESTRICTED=true` にしたときだけ制限なしの受付になる(将来の本番用。エミュレータのE2Eでも使用)。

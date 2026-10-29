@@ -415,6 +415,10 @@ test("F-01: 閲覧を許可中の発注先は、識別項目(名称・宛名・�
   await assertFails(del(ref));
   // 並び順・使用報告用メールは変更できる(公開も続く)
   await updateDoc(ref, { sortOrder: 2000, usageReportEmails: ["usage@x.example.jp"], ...by() });
+  // mainとの統合: 閲覧許可中も件名プレフィックスは変更できるが、C1制御文字は拒否する
+  await updateDoc(ref, { subjectPrefix: "＠@@", ...by() });
+  assert.equal((await getDoc(ref)).get("subjectPrefix"), "＠@@");
+  await assertFails(updateDoc(ref, { subjectPrefix: "@\u0085@", ...by() }));
   assert.equal((await list("x1")).items.length, 1);
   assert.equal((await statusOf("adminA", "fA")).find(d => d.localDealerId === "dA1").link.grant.stale, false);
   // 許可していない発注先(dA2 は案のみ)は従来どおり変更できる

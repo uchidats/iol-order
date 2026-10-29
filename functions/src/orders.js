@@ -261,7 +261,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
       const adoptedBy = new Map(modelIds.map((id, i) => [id, adoptedSnaps[i]]));
       // 発注先ディーラー: この施設の登録ディーラー(facilityDealers)から決める。採用IOLの dealerId には依存しない
       const dealerDocs = (await tx.get(db.collection(`facilities/${input.facilityId}/facilityDealers`))).docs
-        .map(d => ({ id: d.id, name: d.get("name") || "", orderEmails: d.get("orderEmails"), mailName: d.get("mailName") || "" }));
+        .map(d => ({ id: d.id, name: d.get("name") || "", orderEmails: d.get("orderEmails"), mailName: d.get("mailName") || "", subjectPrefix: d.get("subjectPrefix") || "" }));   // 件名の先頭の文字も発注先の設定から(注文の入力では指定できない)
 
       // 所属・権限はサーバーで再確認する(無効化された人・他施設・所属なしは区別なく拒否)
       const allowed = fac.exists && fac.get("status") === "active"
