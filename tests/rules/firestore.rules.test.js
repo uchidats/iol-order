@@ -297,6 +297,8 @@ test("注文はクライアントから作成・変更・削除できない（�
     await assertFails(setDoc(doc(db, "facilities/fA/orders/new"), { status: "received", orderId: "FAKE-1" }));
     await assertFails(updateDoc(doc(db, "facilities/fA/orders/ord1"), { status: "sent" }));
     await assertFails(deleteDoc(doc(db, "facilities/fA/orders/ord1")));
+    // 論理削除の印もクライアントからは付けられない(削除はサーバーの deleteOrder だけ)
+    await assertFails(updateDoc(doc(db, "facilities/fA/orders/ord1"), { deleted: true }));
   }
 });
 

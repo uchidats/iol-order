@@ -1959,7 +1959,7 @@ input[type="date"].form-control {
 .dealer-head { display: flex; align-items: center; gap: 8px; }
 .dealer-head .form-control { flex: 1; min-width: 0; }
 
-/* 注文履歴(閲覧のみ)。明細の見た目は注文確認画面と同じ(.summary-line*) */
+/* 注文履歴(閲覧。管理者・副管理者は削除も)。詳細は注文確認画面と同じ部品(.summary-list・.summary-date-group・.summary-dealer-block など) */
 .history-list { list-style: none; margin: 0; padding: 0; }
 .history-list li + li { border-top: 1px solid #e5e7eb; }
 .history-row {
@@ -1970,11 +1970,21 @@ input[type="date"].form-control {
 .history-row:hover { background: #f8fafc; }
 .history-date { font-weight: 600; white-space: nowrap; }
 .history-by { color: #475569; overflow-wrap: anywhere; }
+.history-sub { font-size: 0.85rem; color: #64748b; }
+/* 並び順の切替(注文日順・手術日順)。押している方を濃く。タップしやすい高さ */
+.history-sort { display: inline-flex; margin: 4px 0 10px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: hidden; }
+.history-sort-btn { min-height: 36px; padding: 6px 14px; border: 0; background: #fff; color: #334155; font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+.history-sort-btn + .history-sort-btn { border-left: 1px solid var(--border-light); }
+.history-sort-btn[aria-pressed="true"] { background: var(--primary); color: #fff; }
+.history-more { display: block; margin: 12px auto 0; }
 .history-count { font-weight: 600; white-space: nowrap; }
 .history-detail-head { margin: 12px 0 8px; }
-.history-total { margin: 10px 0 0; font-weight: 700; }
-.history-notes, .history-notifications { margin-top: 10px; }
-.history-notes p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-notes { font-weight: 500; }
+.history-notifications { margin-top: 12px; }
+/* 削除は詳細の一番下に、区切り線の下で離して置く(誤操作を防ぐ。実行の前に確認ダイアログ) */
+.history-delete { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+.history-delete-msg { margin: 6px 0 0; }
+.history-delete-msg:empty { display: none; }
 .history-notifications ul { margin: 4px 0 0; padding-left: 1.2em; }
 .mail-copy-email[hidden] { display: none; }
 [data-section="mail"] .settings-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }

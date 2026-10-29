@@ -5,6 +5,7 @@
  *  - IOLモデルは、系列ID + トーリックの正式型番(トーリックのモデル違いは別のモデル)。
  *  - レンズ(明細)ごとに判定する。同じレンズに一致する過去の注文が複数あれば、すべての注文日を返す。
  *  - 下書き・送信失敗(キャンセル・却下を含む)の注文と明細、テスト注文(開発用受付。testOrder)は対象外。新旧の注文形式(旧 orderer)を読める。
+ *  - 論理削除した注文(deleted)も照合し、「削除済み」と分かるように返す(注文日に「（削除済み）」。送信済みのメールは取り消されないため)。
  * 確認後は発注を許可する(警告だけ。サーバー側の処理・入力チェックは変更しない)。
  */
 import { orderLinesOf, toMillis } from "./order-history.js";
@@ -28,7 +29,7 @@ export function formatOrderDate(createdAt) {
 /**
  * @param {Array<{lineNo:number, modelId:string, toricModel?:string, modelName?:string, power:string, surgeryDate:string, doctorId:string}>} currentLines 今回の明細(toOrderLines の結果)
  * @param {Array<object>} orders 施設の過去の注文(Firestore の注文ドキュメント。id・orderNumber・createdAt・status・lines を持つ)
- * @returns {Array<{lineNo:number, modelName:string, power:string, dates:string[], matches:Array<{orderId:string, orderNumber:string, date:string}>}>} 一致したレンズだけ(レンズ番号順)
+ * @returns {Array<{lineNo:number, modelName:string, power:string, dates:string[], matches:Array<{orderId:string, orderNumber:string, date:string, deleted:boolean}>}>} 一致したレンズだけ(レンズ番号順)
  */
 export function findPastOrderDuplicates(currentLines, orders) {
   const index = new Map();   // 過去の明細のキー → 注文(重複なし)
@@ -39,7 +40,7 @@ export function findPastOrderDuplicates(currentLines, orders) {
       const item = l.item || {};
       const k = key(item.modelId, item.toricModel, item.power, l.surgeryDate, l.doctor && l.doctor.id);
       if (!index.has(k)) index.set(k, new Map());
-      index.get(k).set(o.id, { orderId: o.id, orderNumber: o.orderNumber || "", date: formatOrderDate(o.createdAt), ms: toMillis(o.createdAt) ?? 0 });
+      index.get(k).set(o.id, { orderId: o.id, orderNumber: o.orderNumber || "", date: formatOrderDate(o.createdAt) + (o.deleted === true ? "（削除済み）" : ""), deleted: o.deleted === true, ms: toMillis(o.createdAt) ?? 0 });
     }
   }
   const out = [];
@@ -47,7 +48,7 @@ export function findPastOrderDuplicates(currentLines, orders) {
     if (!c.doctorId) continue;
     const hit = index.get(key(c.modelId, c.toricModel, c.power, c.surgeryDate, c.doctorId));
     if (!hit) continue;
-    const matches = [...hit.values()].sort((a, b) => b.ms - a.ms).map(({ orderId, orderNumber, date }) => ({ orderId, orderNumber, date }));   // 新しい順
+    const matches = [...hit.values()].sort((a, b) => b.ms - a.ms).map(({ orderId, orderNumber, date, deleted }) => ({ orderId, orderNumber, date, deleted }));   // 新しい順
     out.push({ lineNo: c.lineNo, modelName: c.modelName || c.model || "", power: c.power, dates: [...new Set(matches.map(m => m.date))], matches });
   }
   return out.sort((a, b) => a.lineNo - b.lineNo);
