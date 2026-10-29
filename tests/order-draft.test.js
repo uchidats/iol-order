@@ -16,9 +16,11 @@ test("保存するのは選んだ値だけ: 不明な項目(認証情報・患�
   const json = JSON.stringify(d);
   assert.ok(!/SECRET|山田太郎|a@example\.jp|ログイン太郎|token/i.test(json), json);
   assert.deepEqual(Object.keys(d).sort(), ["lines", "notes", "savedAt", "v"]);
-  assert.deepEqual(Object.keys(d.lines[0]).sort(), ["date", "dealerId", "doctorId", "modelKey", "multifocal", "power", "quantity", "toric"]);
+  assert.deepEqual(Object.keys(d.lines[0]).sort(), ["date", "dealerId", "doctorId", "modelKey", "multifocal", "power", "quantity", "quantityManual", "toric"]);
+  assert.equal(sanitizeLineState({ quantity: 1, quantityManual: true }).quantityManual, true, "利用者が変えた枚数の記録は保つ");
+  assert.equal(sanitizeLineState({ quantity: 1, quantityManual: "yes" }).quantityManual, false);
   const bad = sanitizeLineState({ quantity: 7, date: "2026/11/10", doctorId: "../evil", dealerId: "x y", modelKey: "m".repeat(500), power: 5, toric: "yes" });
-  assert.deepEqual(bad, { toric: false, multifocal: false, modelKey: "m".repeat(200), power: "", quantity: 1, date: "", doctorId: "", dealerId: "" });
+  assert.deepEqual(bad, { toric: false, multifocal: false, modelKey: "m".repeat(200), power: "", quantity: 1, quantityManual: false, date: "", doctorId: "", dealerId: "" });
   assert.equal(buildDraft({ now: NOW, lines: Array(30).fill(line()), notes: "あ".repeat(5000) }).lines.length, 20);
   assert.equal(buildDraft({ now: NOW, lines: [line()], notes: "あ".repeat(5000) }).notes.length, 1000);
 });

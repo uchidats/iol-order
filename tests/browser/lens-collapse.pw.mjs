@@ -142,7 +142,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await c1.locator(".summary-line-main > span").allInnerTexts(), ["ALCON", "CNA0T0", "+8.0D", "1枚"]);
         // 下書き・注文の値は従来どおり(折りたたみの状態を含まない)
         const snap = await page.evaluate(() => window.__lines.snapshot());
-        assert.deepEqual(snap.map(s => Object.keys(s).sort()), Array(3).fill(["date", "dealerId", "doctorId", "modelKey", "multifocal", "power", "quantity", "toric"]));
+        assert.deepEqual(snap.map(s => Object.keys(s).sort()), Array(3).fill(["date", "dealerId", "doctorId", "modelKey", "multifocal", "power", "quantity", "quantityManual", "toric"]));
         assert.deepEqual(snap.map(s => [s.modelKey, s.power, s.quantity]), [["alcon-cna0t0", "+8.0D", 1], ["alcon-cna0tx-cnw0tx-toric|CNA0T3", "+20.0D", 2], ["", "", 1]]);
         // 削除: 展開中のレンズ3を削除 → 折りたたみ中のレンズ1・2はそのまま。元に戻すと展開して戻る
         await c3.locator('[data-act="remove"]').click();
