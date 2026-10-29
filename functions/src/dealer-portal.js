@@ -229,6 +229,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
    * 確認済みの端末(確認コードの後にサーバーが発行した値)は、どの方式でも必要(AB-02)。更新したトークンの identities は、そのセッションで
    * 認証したアカウントではなく UID に「いま」連携されているアカウントを示すことがあり(連携を入れ替えた後の古い更新トークン)、
    * トークンだけではセッションの本人を決められないため。確認コードを確かめたセッションに、サーバーが値を発行して結び付ける。
+   * 端末の値は、発行したときの認証主体(issuedFor: Google・Microsoft はその固有ID、メールリンクは "device")に結び付ける(AB-02 再レビュー)。
+   * 閲覧では、今回の主体と同じ主体に発行した値だけを認める(別の Google・Microsoft・password への転用は不可。置き換えた主体の値は消す)。
    * どの方式でも、ログインのメールが承認済みのメールと一致する担当者だけ(別のメールのアカウントは使えない)。
    * 紐付けは担当者の世代(authRevision)と一致するときだけ有効。無効化・再招待で世代を進めると、その担当者の紐付けはすべて失効する。
    */
@@ -295,6 +297,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         const [s, c, d] = await Promise.all([staffRef(sid).get(), companyRef(cid).get(), pr.kind === "device" ? b : bindingRef(cid, pr.deviceKey).get()]);
         if (!staffActive(s, c, pr.email) || s.get("companyId") !== cid || s.get("authRevision") !== b.get("authRevision")) return null;
         if (!bindingOk(d, sid, cid, "device", s.get("authRevision"))) return null;   // 確認済みの端末(セッションの証明)
+        if (d.get("issuedFor") !== (pr.kind === "device" ? "device" : pr.key)) return null;   // 今回の主体・方式に発行した値だけ(転用しない)
         return { principal: pr, staffId: sid, companyId: cid, company: c.data(), staff: s.data() };
       }))).filter(Boolean));
     }
@@ -355,17 +358,16 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   /**
    * 確認コードを、ログインのメール(=承認済みのメール。サーバーが担当者・招待と照合して確定する)に送る。
    * 対象(期限内の招待・有効な所属)を会社・担当者・世代・状態ごとに記録し、照合ではこれと一致する対象だけに紐付ける(AB-01)。
-   * 対象がなくても応答は同じ(メールは送らない。登録の有無を応答で区別しない。AB-03)。
+   * 送信はこの要求では行わず、送信の依頼(dealerAuthCodeJobs)を作るだけ(AB-03 再レビュー)。コードの生成と送信は依頼をきっかけに別の処理(deliverCodeJob)が行う。
+   * このため、登録の有無・送信の成否・送信の待ち時間で応答が変わらない(対象がなければ送らない)。
    * 送り直しは1分あけ、認証主体ごとに24時間で5回・メールごとに24時間で10回まで。回数はコードの消費で消えない(AB-05)。
    */
   async function sendCode(auth, data) {
     strict(data || {}, []);
     const pr = principalOf(auth);
-    if (typeof sendJoinCode !== "function") throw codeError("現在、確認コードを送れません。運営者にお問い合わせください");
-    const code = String(randomInt(0, 100000000)).padStart(8, "0");
-    const salt = randomBytes(16).toString("hex");
     const cref = challengeRef(pr), qref = mailQuotaRef(pr.email);
-    const prepared = await db.runTransaction(async (tx) => {
+    const requestId = randomBytes(16).toString("hex");
+    await db.runTransaction(async (tx) => {
       const [prev, quota] = await Promise.all([tx.get(cref), tx.get(qref)]);
       const eligible = await eligibleStaffOf(pr.email, tx);
       const p = prev.exists ? prev.data() : null;
@@ -377,19 +379,52 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const qFresh = q && typeof q.windowStartMs === "number" && now() - q.windowStartMs < PORTAL_LIMITS.codeWindowMs;
       const qSends = qFresh && Number.isInteger(q.sends) ? q.sends : 0;
       if (qSends >= PORTAL_LIMITS.codeMaxSendsPerEmail) throw codeError("このメールアドレスへの確認コードの送信回数の上限に達しました。時間をおいてお試しください");
-      const expiresAtMs = now() + PORTAL_LIMITS.codeTtlMs;
       const targets = eligible.map(e => ({ companyId: e.cid, staffId: e.s.id, authRevision: Number.isInteger(e.s.get("authRevision")) ? e.s.get("authRevision") : 1, status: e.invited ? "invited" : "active" }));
-      tx.set(cref, { hash: codeHash(code, salt), salt, targets, uid: pr.uid, kind: pr.kind, principalKey: pr.kind === "device" ? null : pr.key, email: pr.email,
-        expiresAtMs, sentAtMs: now(), attempts: 0, sends: sends + 1, windowStartMs: fresh ? p.windowStartMs : now() });
+      // 前のコードは無効にする(新しいコードは送信の処理で作る)。対象がなくても同じ書き込み
+      tx.set(cref, { targets, uid: pr.uid, kind: pr.kind, principalKey: pr.kind === "device" ? null : pr.key, email: pr.email, requestId,
+        companyName: [...new Set(eligible.map(e => String(e.c.get("name") || "")))].join("、"),
+        sentAtMs: now(), sends: sends + 1, windowStartMs: fresh ? p.windowStartMs : now(), deliveryStatus: "queued" });
       tx.set(qref, { windowStartMs: qFresh ? q.windowStartMs : now(), sends: qSends + 1 });
-      for (const e of eligible) audit(tx, { action: "staff.codeSent", companyId: e.cid, staffId: e.s.id, actorUid: pr.uid, provider: pr.kind });
-      if (!eligible.length) audit(tx, { action: "staff.codeNoTarget", actorUid: pr.uid, provider: pr.kind });   // 送らない(応答は同じ)
-      return { send: eligible.length > 0, companyName: [...new Set(eligible.map(e => String(e.c.get("name") || "")))].join("、"), expiresAtMs };
+      tx.create(db.collection("dealerAuthCodeJobs").doc(), { challengeId: cref.id, requestId, createdAt: FieldValue.serverTimestamp() });
+      audit(tx, { action: "staff.codeRequested", actorUid: pr.uid, provider: pr.kind, targets: targets.length });
     });
-    if (!prepared.send) return { ok: true, expiresInMinutes: Math.round(PORTAL_LIMITS.codeTtlMs / 60000) };
-    const r = await sendJoinCode({ purpose: "verify", key: `v-${pr.uid}`, to: pr.email, code, companyName: prepared.companyName, expiresAtMs: prepared.expiresAtMs });
-    if (!r || r.ok !== true) throw codeError("確認コードを送れませんでした。しばらくしてからもう一度お試しください");
     return { ok: true, expiresInMinutes: Math.round(PORTAL_LIMITS.codeTtlMs / 60000) };
+  }
+
+  /**
+   * 確認コードの送信(送信の依頼をきっかけに呼ぶ。要求の応答とは別)。依頼が最新の要求のときだけ、コードを作ってハッシュを保存し、
+   * 対象があれば承認済みのメールに送る(対象がなければ送らない。照合の結果は対象がある場合と同じ「違います/無効」になる)。
+   * 送信の成否は記録だけする(利用者への応答には出さない)。機能の停止中・送信手段がないときは送らない
+   * @returns {Promise<{sent:boolean, reason?:string}>}
+   */
+  async function deliverCodeJob(jobId) {
+    const jref = db.doc(`dealerAuthCodeJobs/${jobId}`);
+    const code = String(randomInt(0, 100000000)).padStart(8, "0");
+    const salt = randomBytes(16).toString("hex");
+    const job = await db.runTransaction(async (tx) => {
+      const j = await tx.get(jref);
+      if (!j.exists || !isId(j.get("challengeId"))) return null;
+      const cref = db.doc(`dealerAuthChallenges/${j.get("challengeId")}`);
+      const c = await tx.get(cref);
+      tx.delete(jref);   // 依頼は1回だけ処理する
+      if (!c.exists || c.get("requestId") !== j.get("requestId") || c.get("deliveryStatus") !== "queued") return null;   // 新しい要求がある・処理済み
+      const expiresAtMs = now() + PORTAL_LIMITS.codeTtlMs;
+      const targets = Array.isArray(c.get("targets")) ? c.get("targets") : [];
+      const willSend = targets.length > 0 && isEnabled() && typeof sendJoinCode === "function";
+      tx.update(cref, { hash: codeHash(code, salt), salt, expiresAtMs, attempts: 0, deliveryStatus: willSend ? "sending" : (targets.length ? "not-sent" : "no-target") });
+      return willSend ? { ref: cref, to: c.get("email"), uid: c.get("uid"), companyName: c.get("companyName") || "", expiresAtMs, requestId: c.get("requestId") } : { skipped: true };
+    });
+    if (!job || job.skipped) return { sent: false, reason: job ? "skipped" : "stale" };
+    let r;
+    try { r = await sendJoinCode({ purpose: "verify", key: `v-${job.uid}`, to: job.to, code, companyName: job.companyName, expiresAtMs: job.expiresAtMs }); }
+    catch (e) { r = { ok: false, error: String((e && e.message) || e).slice(0, 200) }; }
+    const ok = !!(r && r.ok === true);
+    await db.runTransaction(async (tx) => {
+      const c = await tx.get(job.ref);
+      if (c.exists && c.get("requestId") === job.requestId) tx.update(job.ref, { deliveryStatus: ok ? "sent" : "failed", ...(ok ? {} : { deliveryError: String((r && r.error) || "unknown").slice(0, 200) }) });
+    });
+    if (!ok) console.error("dealer auth code delivery failed:", jobId, (r && r.error) || "unknown");
+    return { sent: ok };
   }
 
   /**
@@ -421,9 +456,10 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!eligible.length) throw invalid();   // 対象がない・すべて世代が変わった(登録の有無は区別しない)
       const device = randomBytes(32).toString("base64url");
       const deviceKey = `device:${sha256(device)}`;
+      const issuedFor = pr.kind === "device" ? "device" : pr.key;   // 端末の値を発行した主体(閲覧ではこれと今回の主体の一致を確かめる)
       const bind = (e, key, provider, rev) => {
         tx.set(bindingRef(e.cid, key), { companyId: e.cid, staffId: e.s.id, principalKey: key, provider, uid: pr.uid, authRevision: rev,
-          verifiedAt: Timestamp.fromMillis(now()), ...(provider === "device" ? { expiresAt: Timestamp.fromMillis(now() + PORTAL_LIMITS.deviceTtlMs) } : {}) });
+          verifiedAt: Timestamp.fromMillis(now()), ...(provider === "device" ? { issuedFor, expiresAt: Timestamp.fromMillis(now() + PORTAL_LIMITS.deviceTtlMs) } : {}) });
       };
       eligible.forEach((e, i) => {
         const rev = Number.isInteger(e.s.get("authRevision")) ? e.s.get("authRevision") : 1;
@@ -432,12 +468,14 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
           audit(tx, { action: "staff.join", companyId: e.cid, staffId: e.s.id, actorUid: pr.uid, provider: pr.kind });
         }
         const byVerified = (a, b) => (millisOf(a.get("verifiedAt")) || 0) - (millisOf(b.get("verifiedAt")) || 0);
-        const devices = existing[i].docs.filter(d => d.get("provider") === "device").sort(byVerified);
-        for (const d of devices.slice(0, Math.max(0, devices.length - PORTAL_LIMITS.devicesMax + 1))) tx.delete(d.ref);
-        if (pr.kind !== "device") {
-          for (const d of existing[i].docs.filter(d => d.get("provider") === pr.kind && d.get("principalKey") !== pr.key)) tx.delete(d.ref);
-          bind(e, pr.key, pr.kind, rev);
-        }
+        // 置き換える主体(同じ方式の別の Google・Microsoft)の紐付けと、その主体に発行した端末の値は消す
+        const replaced = pr.kind === "device" ? [] : existing[i].docs.filter(d => d.get("provider") === pr.kind && d.get("principalKey") !== pr.key);
+        const replacedKeys = new Set(replaced.map(d => d.get("principalKey")));
+        const devices = existing[i].docs.filter(d => d.get("provider") === "device");
+        const stale = devices.filter(d => replacedKeys.has(d.get("issuedFor")));
+        const kept = devices.filter(d => !replacedKeys.has(d.get("issuedFor"))).sort(byVerified);
+        for (const d of [...replaced, ...stale, ...kept.slice(0, Math.max(0, kept.length - PORTAL_LIMITS.devicesMax + 1))]) tx.delete(d.ref);
+        if (pr.kind !== "device") bind(e, pr.key, pr.kind, rev);
         bind(e, deviceKey, "device", rev);
         audit(tx, { action: "staff.bind", companyId: e.cid, staffId: e.s.id, actorUid: pr.uid, provider: pr.kind });
       });
@@ -1103,5 +1141,5 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return indexOrder(facilityId, orderId);
   }
 
-  return { portal, facility, operator, indexOrder, indexOrderEvent, authorizeStaff, allowedScope };
+  return { portal, facility, operator, indexOrder, indexOrderEvent, authorizeStaff, allowedScope, deliverCodeJob };
 }

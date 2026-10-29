@@ -91,6 +91,8 @@ function installFakeServer(page, scenario) {
     };
   }, scenario);
 }
+/** 端末の値の保存(キーは UID・ログイン方法・主体ごと。iolDealerDevice.{uid}.…) */
+const deviceStored = (page, uid = "x1") => page.evaluate((u) => Object.keys(localStorage).filter(k => k.startsWith(`iolDealerDevice.${u}.`)).map(k => [k.split(".").length, localStorage.getItem(k)]), uid);
 const calls = (page, action) => page.evaluate((a) => (window.__calls || []).filter(([n, d]) => n === "dealerPortalApi" && d.action === a).map(([, d]) => d), action);
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
@@ -345,7 +347,7 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.equal(await page.locator('[data-act="later"]').count(), 0);
     assert.equal(await page.locator('[data-f="code"]').isVisible(), false, "コード欄は送るまで出さない");
     await page.click('[data-act="sendCode"]');
-    await page.getByText(/ログインしたメールアドレスが登録されていれば、確認コードを送りました/).waitFor();
+    await page.getByText(/ログインしたメールアドレスが登録されていれば、確認コードを送ります/).waitFor();
     assert.deepEqual(await calls(page, "sendCode"), [{ action: "sendCode" }], "送り先は画面から送らない");
     await page.fill('[data-f="code"]', "00000000");
     await page.click('[data-act="verifyCode"]');
@@ -355,7 +357,8 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.click('[data-act="verifyCode"]');
     await page.locator(".dealer-row").first().waitFor();
     assert.deepEqual((await calls(page, "verifyCode")).at(-1), { action: "verifyCode", code: "12345678" });
-    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD");
+    assert.deepEqual(await deviceStored(page), [[4, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"]], "UID だけでなく、ログイン方法・主体ごとのキーに保存");
+    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), null, "UID だけのキーは使わない");
     assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "以後の呼び出しに端末の値を付ける");
     // 連携・解除の画面はない
     for (const sel of ['[data-act="linkMicrosoft"]', '[data-act="unlinkMicrosoft"]', ".dealer-ms-link"]) assert.equal(await page.locator(sel).count(), 0, sel);
@@ -383,8 +386,43 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.click('[data-act="verifyCode"]');
     await page.locator(".dealer-row").first().waitFor();
     assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "メモリに持った値を付ける");
-    assert.equal(await page.evaluate(() => localStorage.getItem("iolDealerDevice.x1")), null);
+    assert.deepEqual(await deviceStored(page), []);
     assert.equal(await page.locator('[data-notice="device-not-saved"]').count(), 1);
+    await context.close();
+
+    // 「この端末を記憶する」を外す(共用のパソコン): 確認の後もこの画面の間だけ使い、端末には保存しない。保存できなかった旨の案内も出さない
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await installFakeServer(page, "unverified");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("本人確認", { exact: true }).waitFor();
+    await page.click('[data-act="sendCode"]');
+    assert.equal(await page.locator('[data-f="remember"]').isChecked(), true, "既定は記憶する");
+    await page.uncheck('[data-f="remember"]');
+    await page.fill('[data-f="code"]', "12345678");
+    await page.click('[data-act="verifyCode"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD");
+    assert.deepEqual(await deviceStored(page), [], "記憶しない");
+    assert.equal(await page.locator('[data-notice="device-not-saved"]').count(), 0);
+    await context.close();
+
+    // AB-04: localStorage の取得そのものが拒否される(SecurityError)ブラウザでも起動し、本人確認から受注一覧まで進める
+    context = await newFakeContext(browser, base, 390, STAFF);
+    page = await context.newPage();
+    await page.addInitScript(() => { Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("denied", "SecurityError"); } }); });
+    const bootErrors = [];
+    page.on("pageerror", e => bootErrors.push(String(e)));
+    await installFakeServer(page, "unverified");
+    await page.goto(`${base}dealer.html`);
+    await page.getByText("本人確認", { exact: true }).waitFor();
+    await page.click('[data-act="sendCode"]');
+    await page.fill('[data-f="code"]', "12345678");
+    await page.click('[data-act="verifyCode"]');
+    await page.locator(".dealer-row").first().waitFor();
+    assert.equal((await calls(page, "list")).at(-1).deviceToken, "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", "メモリの値で使える");
+    assert.equal(await page.locator('[data-notice="device-not-saved"]').count(), 1);
+    assert.deepEqual(bootErrors, []);
     await context.close();
 
     // 未招待(承認済みのメールでないアカウントを含む): 応答は同じ(届かない場合の案内)で、確認できず、会社の情報は出さない

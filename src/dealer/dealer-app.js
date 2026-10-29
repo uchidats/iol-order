@@ -13,7 +13,7 @@ import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDa
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
  */
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {} }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -112,7 +112,10 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
     const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "code" });
     const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyCode" }, "確認する");
     const note = h("p", { class: "form-hint", role: "status" });
-    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify);
+    const rememberBox = h("input", { type: "checkbox", "data-f": "remember" });
+    rememberBox.checked = true;
+    const remember = h("label", { class: "settings-check" }, rememberBox, h("span", {}, "この端末(ブラウザ)を記憶する(共用のパソコンでは外してください。外すと、次のログインでも確認コードが必要です)"));
+    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify, remember);
     const lock = (v) => { send.disabled = verify.disabled = v; };
     send.addEventListener("click", async () => {
       lock(true); note.className = "form-hint"; note.textContent = "";
@@ -120,7 +123,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
         const r = await api.sendCode();
         codeRow.hidden = false;
         // 登録の有無で応答を変えない(未招待には送らない)ので、届かない場合の案内も添える
-        note.textContent = `ログインしたメールアドレスが登録されていれば、確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください。`;
+        note.textContent = `ログインしたメールアドレスが登録されていれば、確認コードを送ります(届くまで少し時間がかかることがあります。${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください。`;
         code.focus();
       } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
       finally { lock(false); }
@@ -129,7 +132,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {} 
       const value = code.value.replace(/\s/g, "");
       if (!/^\d{8}$/.test(value)) { note.className = "error-message"; note.textContent = "メールに届いた8桁の確認コードを入力してください。"; return; }
       lock(true); note.className = "form-hint"; note.textContent = "";
-      try { const r = await api.verifyCode({ code: value }); deviceNotSaved = r && r.deviceSaved === false; await enter(); }
+      try { setRememberDevice(rememberBox.checked); const r = await api.verifyCode({ code: value }); deviceNotSaved = rememberBox.checked && r && r.deviceSaved === false; await enter(); }
       catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); lock(false); }
     });
     const later = onLater ? h("button", { type: "button", class: "btn btn-secondary", "data-act": "later" }, "あとで(受注一覧へ)") : null;

@@ -214,11 +214,15 @@ async function sendDealerJoinCode({ purpose = "verify", key, to, code, companyNa
     .send({ to: [recipient], subject: `【確認コード】${what}`, text, idempotencyKey: `dealer-${purpose}-${id}-${expiresAtMs}` });
 }
 const dealerPortal = createDealerPortalService({ db: getFirestore(), FieldValue, Timestamp, FieldPath, isEnabled: () => DEALER_PORTAL_ENABLED.value(), sendJoinCode: sendDealerJoinCode });
-export const dealerPortalApi = onCall({ ...options, secrets: [RESEND_API_KEY, MAIL_TEST_RECIPIENT] }, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
+export const dealerPortalApi = onCall(options, wrap(dealerPortal.portal));            // ディーラーの担当者(一覧・検索・詳細・担当施設・参加)
 export const facilityDealerPortal = onCall(options, wrap(dealerPortal.facility));    // 施設の管理者・副管理者(閲覧の許可・取消)
 export const dealerPortalOperator = onCall(options, wrap(dealerPortal.operator));   // 運営者(会社・支店・担当者・関連付け・索引の作り直し)
 // 一時的な失敗は例外を投げて再試行(retry)。索引の ID は冪等なので重複しない。注文・メールの処理とは別なので、ここが失敗しても止まらない。
 // 再試行はイベントから24時間で打ち切る(indexOrderEvent。運営者が reindex で補う)
+// 確認コードの送信(送信の依頼をきっかけに1回。要求の応答とは別なので、登録の有無・送信の成否で応答が変わらない。再試行はしない: 利用者が送り直す)
+export const deliverDealerAuthCode = onDocumentCreated({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, retry: false,
+  secrets: [RESEND_API_KEY, MAIL_TEST_RECIPIENT], document: "dealerAuthCodeJobs/{jobId}" },
+  (event) => dealerPortal.deliverCodeJob(event.params.jobId));
 export const indexDealerReceipts = onDocumentCreated({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, retry: true, document: "facilities/{facilityId}/orders/{orderId}" },
   async (event) => {
     try { await dealerPortal.indexOrderEvent({ facilityId: event.params.facilityId, orderId: event.params.orderId, eventTime: event.time }); }

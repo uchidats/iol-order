@@ -24,12 +24,13 @@ beforeEach(async () => {
     await setDoc(doc(db, "dealerCompanies/c1/receipts/r1"), { facilityId: "fA" });
     await setDoc(doc(db, "dealerPortalGrants/g1"), { companyId: "c1", facilityId: "fA", status: "active" });
     await setDoc(doc(db, "dealerAuthBindings/dab_1"), { companyId: "c1", staffId: "dstf_x1", principalKey: "google:g-x1", provider: "google", uid: "x1", authRevision: 1 });
+    await setDoc(doc(db, "dealerAuthCodeJobs/j1"), { challengeId: "c_1", requestId: "r1" });
     await setDoc(doc(db, "dealerAuthChallenges/c_1"), { uid: "x1", kind: "google", email: "x1@corp.example.jp", attempts: 0 });
   });
 });
 
 const PATHS = ["dealerCompanies/c1", "dealerStaff/dstf_x1", "dealerCompanies/c1/receipts/r1", "dealerCompanies/c1/branches/b1",
-  "dealerPortalGrants/g1", "dealerPortalAuditLogs/l1", "dealerAuthBindings/dab_1", "dealerAuthChallenges/c_1", "facilities/fA/dealerPortalLinks/d1"];
+  "dealerPortalGrants/g1", "dealerPortalAuditLogs/l1", "dealerAuthBindings/dab_1", "dealerAuthChallenges/c_1", "dealerAuthCodeJobs/j1", "facilities/fA/dealerPortalLinks/d1"];
 
 test("ディーラーの担当者・施設の管理者・運営者・未ログインのいずれも、新しい領域を読み書きできない(自己登録・許可の偽装を防ぐ)", async () => {
   const clients = [

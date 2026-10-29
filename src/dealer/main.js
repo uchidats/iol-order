@@ -24,27 +24,53 @@ async function bootstrap() {
   const app = sdk.app.initializeApp(FIREBASE_CONFIG, "dealer-portal");
   await setupAppCheck({ app });
   const auth = sdk.auth.getAuth(app);
-  const service = createAuthService({ auth, fns: sdk.auth, currentUrl: () => dealerEntryUrl(location.origin), storage: window.localStorage,
+  // ブラウザの保存領域。取得そのものが拒否される環境(サイトデータの保存を拒否した場合など)でも起動できるよう、取得の例外も扱う(AB-04)。
+  // 使えなければ null(ログインの保存はメモリだけ・端末の値はこの画面の間だけ)
+  const storage = (() => { try { const st = window.localStorage; st.getItem("iolDealerProbe"); return st; } catch (e) { return null; } })();
+  const service = createAuthService({ auth, fns: sdk.auth, currentUrl: () => dealerEntryUrl(location.origin), storage,
     emailStorageKey: "iol_dealer_emaillink_pending" });   // メールリンクの保存も医療機関の画面と分ける
   let uid = null;
-  // 確認済みの端末の値(ログインした利用者ごと。サーバーが確認コードを確かめた後に返す)。ログアウトでは消さない(同じ端末で次も使う)。
-  // まずメモリに持ち、端末にも保存する。保存できない環境(プライベートブラウズなど)では、この画面を開いている間だけ使え、
-  // 次のログインでは確認コードで確認し直す(AB-04)。利用者の切り替え・ログアウトでは画面を読み直すので、メモリの値は残らない
-  const deviceKey = () => `iolDealerDevice.${uid}`;
-  let memoryDevice = null;
+  // 確認済みの端末の値(サーバーが確認コードを確かめた後に返す)。保存の単位は UID と今回のログイン方法・認証主体(固有IDのハッシュ)。
+  // 別の方式・別の主体に自動で持ち越さない(サーバーも、発行した主体と今回の主体の一致を確かめる。AB-02)。
+  // まずメモリに持ち、「この端末を記憶する」のときだけ端末にも保存する。保存できない環境では、この画面を開いている間だけ使える(AB-04)
+  let deviceScope = null, remember = true, memoryDevice = null;
+  const deviceKey = () => `iolDealerDevice.${deviceScope}`;
   const device = {
-    get: () => { if (!uid) return null; if (memoryDevice && memoryDevice.uid === uid) return memoryDevice.token; try { return window.localStorage.getItem(deviceKey()); } catch (e) { return null; } },
-    /** @returns {boolean} 端末に保存できたか */
+    get: () => {
+      if (!deviceScope) return null;
+      if (memoryDevice && memoryDevice.scope === deviceScope) return memoryDevice.token;
+      try { return storage ? storage.getItem(deviceKey()) : null; } catch (e) { return null; }
+    },
+    /** @returns {boolean} 端末に保存できたか(記憶しない選択のときは保存せず、前の値も消す) */
     set: (t) => {
-      if (!uid) return false;
-      memoryDevice = { uid, token: t };
-      try { window.localStorage.setItem(deviceKey(), t); return window.localStorage.getItem(deviceKey()) === t; } catch (e) { return false; }
+      if (!deviceScope) return false;
+      memoryDevice = { scope: deviceScope, token: t };
+      if (!storage) return false;
+      try {
+        if (!remember) { storage.removeItem(deviceKey()); return false; }
+        storage.setItem(deviceKey(), t); return storage.getItem(deviceKey()) === t;
+      } catch (e) { return false; }
     }
   };
+  /** 今回のログインの方式と主体(固有IDのハッシュ)。端末の値の保存の単位にする(値そのものは画面に出さない) */
+  async function scopeOf(user) {
+    let provider = "unknown", id = "";
+    try {
+      const r = await user.getIdTokenResult();
+      provider = String(r.signInProvider || (r.claims && r.claims.firebase && r.claims.firebase.sign_in_provider) || "unknown");
+      const ids = (r.claims && r.claims.firebase && r.claims.firebase.identities) || {};
+      id = Array.isArray(ids[provider]) ? String(ids[provider][0] || "") : "";
+    } catch (e) { /* 取れなければ方式不明として扱う(サーバーが判定する) */ }
+    let digest = id;
+    try { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)); digest = [...new Uint8Array(b)].slice(0, 8).map(x => x.toString(16).padStart(2, "0")).join(""); }
+    catch (e) { digest = String(id.length); }
+    return `${user.uid}.${provider}.${digest}`;
+  }
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
   const ui = createDealerApp({
     mount, api, setSubtitle,
-    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } }   // 表示中のデータもメモリごと破棄する
+    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
+    setRememberDevice: (v) => { remember = v !== false; }   // 本人確認の画面の「この端末を記憶する」
   });
 
   let error = "";
@@ -66,6 +92,7 @@ async function bootstrap() {
       return;
     }
     uid = user.uid;
+    deviceScope = await scopeOf(user);
     await ui.enter();
   });
 }

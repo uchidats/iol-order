@@ -48,8 +48,14 @@ async function api(uid, action, data = {}) {
   const dev = "deviceToken" in data ? deviceToken : devices.get(a.uid);
   const r = await portal.portal({ auth: a, data: { action, ...rest, ...(dev ? { deviceToken: dev } : {}) } });
   if (r && typeof r.deviceToken === "string") devices.set(a.uid, r.deviceToken);
+  if (action === "sendCode") await deliverJobs();   // 確認コードの送信は別の処理(本番はトリガー)。テストでは要求の後にここで行う
   return r;
 }
+/** 送信の依頼を処理する(本番の deliverDealerAuthCode トリガーの代わり) */
+async function deliverJobs(service = portal) {
+  for (const j of (await db.collection("dealerAuthCodeJobs").get()).docs) await service.deliverCodeJob(j.id);
+}
+const challengeOf = async (uid) => (await db.collection("dealerAuthChallenges").where("uid", "==", uid).get()).docs[0];
 const fac = (uid, action, data = {}) => portal.facility({ auth: auth(uid), data: { action, ...data } });
 const today = () => jstDateOf(Date.now());
 const surgery = () => jstDateOf(Date.now() + 10 * 24 * 3600 * 1000);
@@ -817,7 +823,8 @@ test("MS-01・G-02 の経路(ホワイトリスト): 未登録の Microsoft・�
   await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
   const email = "x1@corp.example.jp";
   const rid = (await list("x1")).items[0].receiptId;   // 本人(メールリンク・確認済みの端末)
-  await verifyAs(googleAuth("x1", email, "g-x1"));       // 本人の Google も紐付け済み(同じブラウザ)
+  const emailDevice = devices.get("x1");   // メールリンクで発行した値(方式ごとに別)
+  await verifyAs(googleAuth("x1", email, "g-x1"));       // 本人の Google も紐付け済み(同じブラウザ。Google に発行した値は Google のログインだけ)
   const bound = await providersOf(sid(C.X, "x1"));
   const intruders = [
     msAuth("x1", email, "m-evil"),
@@ -842,7 +849,7 @@ test("MS-01・G-02 の経路(ホワイトリスト): 未登録の Microsoft・�
   for (let i = 0; i < 5; i++) await assert.rejects(api(evil, "verifyCode", { code: code === "00000000" ? "11111111" : "00000000", deviceToken: null }), (e) => /確認コードが違います/.test(e.message));
   await assert.rejects(api(evil, "verifyCode", { code, deviceToken: null }), (e) => /無効/.test(e.message), "5回の誤りの後は正しいコードも無効");
   assert.deepEqual(await providersOf(sid(C.X, "x1")), bound, "紐付けは増えない");
-  assert.equal((await api("x1", "get", { receiptId: rid })).facilityId, "fA");
+  assert.equal((await api("x1", "get", { receiptId: rid, deviceToken: emailDevice })).facilityId, "fA");
   assert.equal((await api(googleAuth("x1", email, "g-x1"), "context")).company.id, C.X, "本人の Google(確認したブラウザ)");
 });
 
@@ -882,6 +889,84 @@ test("AB-01: 確認コードは送った時点の対象(会社・担当者・世
   assert.deepEqual([r.companies, r.joined], [1, 0]);
   assert.equal((await db.doc(`dealerStaff/${sid(C.Y, "x1")}`).get()).get("status"), "invited");
   assert.equal((await api(p, "companies")).pendingInvitation, true, "新しい案内は、改めて確認コードで参加");
+});
+
+test("AB-02(再レビュー): 端末の値は発行したときの認証主体・方式に結び付く。置き換えた旧 Microsoft B に発行した値で、A に置き換えた後の更新セッション(identities は A)から閲覧できない。方式をまたいだ転用もできない", async () => {
+  await grant("adminA", "fA", "dA1");
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  const email = "x1@corp.example.jp", x1 = sid(C.X, "x1");
+  // 再現A: Microsoft B が確認コードを通し、B のブラウザに値 D_B が発行される
+  const b = msAuth("x1", email, "m-B");
+  const dB = (await verifyAs(b)).deviceToken;
+  assert.equal((await api(b, "context", { deviceToken: dB })).company.id, C.X);
+  // 本人が B を外し、Microsoft A で確認コードを通す(B の紐付けと、B に発行した値は消える)
+  clock.t = Date.now() + 2 * 60 * 1000;
+  const a = msAuth("x1", email, "m-A");
+  const dA = (await verifyAs(a)).deviceToken;
+  clock.t = null;
+  const binds = await bindingsOf(x1);
+  assert.ok(!binds.some(x => x.principalKey === "microsoft:m-B" || x.issuedFor === "microsoft:m-B"), "置き換えた主体の紐付け・端末の値は残さない");
+  // B の古い更新トークンで更新したセッション(sign_in_provider は microsoft.com・identities は A)が、旧 D_B を付けても閲覧できない
+  const bRefreshed = msAuth("x1", email, "m-A");
+  for (const [action, data] of [["context", {}], ["companies", {}], ["list", range()], ["setAssignments", { facilityIds: ["fA"] }]]) {
+    await assert.rejects(api(bRefreshed, action, { ...data, deviceToken: dB }), needsVerify, action);
+  }
+  assert.equal((await api(a, "context", { deviceToken: dA })).company.id, C.X, "本人(A・A に発行した値)は使える");
+  // 置き換えの削除が漏れても(古いデータ)、発行した主体が違えば使えない
+  await db.doc(`dealerAuthBindings/legacy-B`).set({ companyId: C.X, staffId: x1, principalKey: "device:legacy", provider: "device", issuedFor: "microsoft:m-B", uid: "x1", authRevision: 1, verifiedAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 3600e3) });
+  // 再現B: 方式をまたいだ転用(同じ担当者)。Google G・Microsoft A・メールリンクで、それぞれ発行した値を別の方式・主体に付けても拒否
+  clock.t = Date.now() + 4 * 60 * 1000;
+  const g = googleAuth("x1", email, "g-G");
+  const dG = (await verifyAs(g)).deviceToken;
+  clock.t = null;
+  const dP = devices.get("x1") === dG ? null : null;   // (メールリンクで参加したときの値は devices に上書きされたため、改めて取る)
+  clock.t = Date.now() + 6 * 60 * 1000;
+  const p = pwAuth("x1", email);
+  const dPw = (await verifyAs(p)).deviceToken;
+  clock.t = null;
+  assert.equal(dP, null);
+  const cases = [
+    [g, dA, "Google に Microsoft の値"], [a, dG, "Microsoft に Google の値"],
+    [p, dG, "password に Google の値"], [p, dA, "password に Microsoft の値"],
+    [g, dPw, "Google にメールリンクの値"], [a, dPw, "Microsoft にメールリンクの値"],
+    [googleAuth("x1", email, "g-other"), dG, "未登録の Google に登録済みの Google の値"],
+    [pwAuth("x1-other-uid", email), dG, "別の UID の password に Google の値"]
+  ];
+  for (const [who, dev, label] of cases) await assert.rejects(api(who, "context", { deviceToken: dev }), needsVerify, label);
+  // 同じ主体・方式なら使える(別の UID でも同じ主体なら設計どおり)
+  for (const [who, dev] of [[g, dG], [a, dA], [p, dPw], [pwAuth("x1-other-uid", email), dPw]]) assert.equal((await api(who, "context", { deviceToken: dev })).company.id, C.X);
+  // 担当者の無効化で、すべて失効
+  await op("updateStaff", { companyId: C.X, staffId: x1, status: "disabled" });
+  for (const [who, dev] of [[g, dG], [a, dA], [p, dPw]]) await assert.rejects(api(who, "context", { deviceToken: dev }), needsVerify);
+});
+
+test("AB-03(再レビュー): 確認コードの要求への応答は、登録の有無・送信の成否・送信の待ち時間に関係なく同じ。送信は要求の後の別の処理で行う", async () => {
+  await op("inviteStaff", { companyId: C.X, email: "reg@corp.example.jp", name: "", role: "reader" });
+  let slow = 0;
+  const slowSender = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => true, now: () => Date.now(),
+    sendJoinCode: async (m) => { slow++; await new Promise(r => setTimeout(r, 300)); sentCodes.push(m); return { ok: false, error: "provider-down" }; } });
+  const call = (who) => slowSender.portal({ auth: who, data: { action: "sendCode" } });
+  const before = sentCodes.length;
+  const t0 = Date.now();
+  const reg = await call(msAuth("u-reg", "reg@corp.example.jp", "m-reg"));
+  const t1 = Date.now();
+  const unreg = await call(msAuth("u-unreg", "nobody@corp.example.jp", "m-unreg"));
+  const t2 = Date.now();
+  assert.deepEqual(reg, unreg, "同じ応答");
+  assert.equal(slow, 0, "要求の中では送らない(送信の待ち時間・失敗が応答に出ない)");
+  assert.ok(t1 - t0 < 300 && t2 - t1 < 300, `応答は送信を待たない: ${t1 - t0}ms / ${t2 - t1}ms`);
+  // 送信の処理: 登録のあるメールだけ送る。失敗は記録だけ
+  await deliverJobs(slowSender);
+  assert.equal(slow, 1);
+  assert.equal(sentCodes.length, before + 1);
+  assert.deepEqual([(await challengeOf("u-reg")).get("deliveryStatus"), (await challengeOf("u-unreg")).get("deliveryStatus")], ["failed", "no-target"]);
+  // どちらも照合の結果は同じ(違うコード)。送信の依頼は1回だけ処理(再処理しても送らない)
+  for (const who of [msAuth("u-reg", "reg@corp.example.jp", "m-reg"), msAuth("u-unreg", "nobody@corp.example.jp", "m-unreg")]) {
+    await assert.rejects(slowSender.portal({ auth: who, data: { action: "verifyCode", code: "00000000" } }), (e) => /確認コードが違います/.test(e.message));
+  }
+  await deliverJobs(slowSender);
+  assert.equal(slow, 1);
+  assert.equal((await db.collection("dealerAuthCodeJobs").get()).size, 0);
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
@@ -1008,11 +1093,15 @@ test("確認コード: 一度だけ・10分・誤り5回・送り直しは1分�
   }
   await assert.rejects(api(googleAuth("u-qq", email, "g-qq"), "sendCode"), (e) => /このメールアドレスへの確認コードの送信回数の上限/.test(e.message));
   at(3 * 24 * 60);
+  // 送れないとき(送信の失敗・送信手段なし)も、要求への応答は同じ(AB-03)。結果は記録だけ。照合はできない
   sendResult.v = { ok: false, error: "mail-disabled" };
-  await assert.rejects(api(googleAuth("u-f", email, "g-f"), "sendCode"), (e) => /送れませんでした/.test(e.message));
+  assert.deepEqual(await api(googleAuth("u-f", email, "g-f"), "sendCode"), UNIFORM, "送信の失敗は応答に出さない");
+  assert.equal((await challengeOf("u-f")).get("deliveryStatus"), "failed");
   sendResult.v = { ok: true };
   const noSender = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => true });
-  await assert.rejects(noSender.portal({ auth: googleAuth("u-f2", email, "g-f2"), data: { action: "sendCode" } }), (e) => e.code === "failed-precondition");
+  assert.deepEqual(await noSender.portal({ auth: googleAuth("u-f2", email, "g-f2"), data: { action: "sendCode" } }), UNIFORM);
+  await deliverJobs(noSender);
+  assert.equal((await challengeOf("u-f2")).get("deliveryStatus"), "not-sent");
   enabled.v = false;
   await rejects(api(g, "sendCode"), "failed-precondition");
   await rejects(api(g, "verifyCode", { code: "12345678" }), "failed-precondition");

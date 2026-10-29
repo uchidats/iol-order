@@ -77,7 +77,7 @@ test("サーバーの抽出(純粋関数): 自社宛ての明細だけ・番号�
 
 test("Firestore Rules: ディーラー専用画面の新しい領域は明示的にすべて拒否(読み書き)", () => {
   const rules = fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
-  for (const m of ["match /dealerCompanies/{document=**}", "match /dealerStaff/{staffId}", "match /dealerPortalGrants/{id}", "match /dealerPortalAuditLogs/{id}", "match /dealerAuthBindings/{id}", "match /dealerAuthChallenges/{id}", "match /dealerPortalLinks/{localDealerId}"]) {
+  for (const m of ["match /dealerCompanies/{document=**}", "match /dealerStaff/{staffId}", "match /dealerPortalGrants/{id}", "match /dealerPortalAuditLogs/{id}", "match /dealerAuthBindings/{id}", "match /dealerAuthChallenges/{id}", "match /dealerAuthCodeJobs/{id}", "match /dealerPortalLinks/{localDealerId}"]) {
     const i = rules.indexOf(m);
     assert.ok(i > 0, m);
     assert.match(rules.slice(i, i + 120), /allow read, write: if false;/, m);

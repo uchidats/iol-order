@@ -62,11 +62,18 @@ const getDoc = async (p) => {
 let verified, unverified, operator;
 /** ディーラー画面の本人確認: 確認コードを送り(エミュレータではテスト用の文書 v-{uid} に書かれる)、そのコードで確認する(参加を含む) */
 async function dealerVerifyE2E(idToken) {
+  const path = `dealerJoinCodeTestSink/v-${uidOfToken(idToken)}`;
+  const atOf = (d) => (d && d.fields && d.fields.at && d.fields.at.timestampValue) || null;
+  const before = atOf(await getDoc(path));
   const sent = await call("dealerPortalApi", { action: "sendCode", deviceToken: null }, idToken);
   if (!sent.body.result) return sent;
-  const sink = await getDoc(`dealerJoinCodeTestSink/v-${uidOfToken(idToken)}`);
+  // 送信は要求の後の別の処理(トリガー)。新しいコードが書かれるまで待つ(最大15秒)
+  let sink = null;
+  for (let i = 0; i < 60; i++) { sink = await getDoc(path); if (atOf(sink) && atOf(sink) !== before) break; sink = null; await new Promise(r => setTimeout(r, 250)); }
+  assert.ok(sink, "確認コードが送られていない");
   return call("dealerPortalApi", { action: "verifyCode", code: sink.fields.code.stringValue, deviceToken: null }, idToken);
 }
+const waitE2E = (ms) => new Promise(r => setTimeout(r, ms));
 /** 運営者(カスタムクレーム platformAdmin。エミュレータの管理APIで設定) */
 async function createOperator(email) {
   const u = await createUser(email, { verified: true });
@@ -368,6 +375,7 @@ test("ディーラー専用画面: 運営者の会社登録・招待 → 本人�
   const cid = (await op({ action: "createCompany", name: "エックス商事", requestId: "portal-e2e-company-1" })).body.result.companyId;
   await op({ action: "inviteStaff", companyId: cid, email: "staff@dealer-x.example.jp", name: "担当", role: "reader" });
   assert.deepEqual((await call("dealerPortalApi", { action: "sendCode" }, outsider.idToken)).body.result, { ok: true, expiresInMinutes: 10 }, "応答は登録の有無で変えない");
+  await waitE2E(1500);   // 送信の処理(トリガー)の後も
   assert.equal(await getDoc(`dealerJoinCodeTestSink/v-${uidOfToken(outsider.idToken)}`), null, "別のメールの人には送らない(参加できない)");
   assert.equal((await call("dealerPortalApi", { action: "context" }, staff.idToken)).body.error.status, "PERMISSION_DENIED", "確認コードなしでは参加・閲覧できない(パスワードのログイン)");
   assert.equal((await dealerVerifyE2E(staff.idToken)).body.result.joined, 1);
@@ -507,6 +515,7 @@ test("ディーラー専用画面の本人確認(MS-01・G-02 の経路): 未登
   const outsider = await signInWithIdpE2E("microsoft.com", "someone@outlook-like.example.com", { sub: "m-out" });
   assert.ok(needsVerifyE2E(await api({ action: "context" }, outsider.idToken)));
   assert.equal((await api({ action: "sendCode" }, outsider.idToken)).body.result.ok, true, "応答は登録の有無で変えない");
+  await waitE2E(1500);
   assert.equal(await getDoc(`dealerJoinCodeTestSink/v-${outsider.uid}`), null, "未招待には送らない");
   const unv = await signInWithIdpE2E("google.com", "unverified-g@dealer-m.example.jp", { sub: "g-unv", verified: false });
   assert.equal(decodeToken(unv.idToken).email_verified, false);
@@ -515,7 +524,7 @@ test("ディーラー専用画面の本人確認(MS-01・G-02 の経路): 未登
 
 // AB-02(Codex の再現手順): 未登録の Microsoft B の更新トークンを残したまま、本人が B を外し、Microsoft A で紐付けた後に、B の更新トークンで更新したトークン。
 // エミュレータでは sign_in_provider は microsoft.com のまま、identities は A になる。B の側には確認したブラウザの値がないので閲覧できない
-test("ディーラー専用画面の本人確認(AB-02): 旧 Microsoft B の更新トークンを、解除・A の紐付けの後に更新しても、A として閲覧できない。本人(A・確認したブラウザ)は使える", async () => {
+test("ディーラー専用画面の本人確認(AB-02): 旧 Microsoft B の更新トークンを、解除・A の紐付けの後に更新しても、A として閲覧できない(B に正規に発行した端末の値を付けても)。本人(A・確認したブラウザ)は使える", async () => {
   const op = (data) => call("dealerPortalOperator", data, operator.idToken);
   const api = (data, token) => call("dealerPortalApi", data, token);
   const cid = (await op({ action: "createCompany", name: "ビー商事", requestId: "portal-e2e-auth-company-3" })).body.result.companyId;
@@ -523,10 +532,12 @@ test("ディーラー専用画面の本人確認(AB-02): 旧 Microsoft B の更�
   await op({ action: "inviteStaff", companyId: cid, email, name: "担当B", role: "reader" });
   const link = await signInWithEmailLinkE2E(email);
   assert.equal((await dealerVerifyE2E(link.idToken)).body.result.joined, 1);
-  // 未登録の Microsoft B が同じ UID に入り、B の更新トークンを保持する
+  // Microsoft B が同じ UID に入り、確認コードを通して B のブラウザに端末の値 D_B を得る。B の更新トークンも保持する(Codex の再現A)
   const b = await signInWithIdpE2E("microsoft.com", email, { sub: "m-old-B" });
   assert.equal(b.uid, link.uid);
   assert.ok(needsVerifyE2E(await api({ action: "context", deviceToken: null }, b.idToken)));
+  const bDevice = (await dealerVerifyE2E(b.idToken)).body.result.deviceToken;
+  assert.equal((await api({ action: "context", deviceToken: bDevice }, b.idToken)).body.result.company.id, cid);
   // 本人が B を外し、Microsoft A でログインして確認コードで紐付ける(A のブラウザに値が発行される)
   const linkNow = await signInWithEmailLinkE2E(email);
   assert.ok(!(await post(`${AUTH_API}/accounts:update?key=fake`, { idToken: linkNow.idToken, deleteProvider: ["microsoft.com"], returnSecureToken: true })).error);
@@ -543,7 +554,13 @@ test("ディーラー専用画面の本人確認(AB-02): 旧 Microsoft B の更�
   assert.equal(tok.firebase.identities["microsoft.com"][0], aId, "エミュレータでは、旧 B の更新トークンでも identities は A(Codex の観測と同じ)");
   for (const [action, data] of [["context", {}], ["companies", {}], ["list", { from: "2026-01-01", to: "2026-12-31", facilityFilter: { mode: "all" } }]]) {
     assert.ok(needsVerifyE2E(await api({ action, ...data, deviceToken: null }, bRefreshed)), action);
+    assert.ok(needsVerifyE2E(await api({ action, ...data, deviceToken: bDevice }, bRefreshed)), `${action}(B に発行した値)`);
   }
+  // Google・Microsoft に発行した値は password のログインに使えない(同じ UID でパスワードを設定して入り直しても)
+  await post(`${AUTH_API}/accounts:update?key=fake`, { idToken: a.idToken, password: "password-set-by-attacker-04", returnSecureToken: true });
+  const pw = await post(`${AUTH_API}/accounts:signInWithPassword?key=fake`, { email, password: "password-set-by-attacker-04", returnSecureToken: true });
+  assert.equal(decodeToken(pw.idToken).firebase.sign_in_provider, "password");
+  for (const dev of [aDevice, bDevice]) assert.ok(needsVerifyE2E(await api({ action: "context", deviceToken: dev }, pw.idToken)));
   // 本人(A・確認したブラウザ)は使える
   assert.equal((await api({ action: "context", deviceToken: aDevice }, a.idToken)).body.result.company.id, cid);
 });

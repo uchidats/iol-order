@@ -365,6 +365,10 @@ service cloud.firestore {
     match /dealerAuthChallenges/{id} {
       allow read, write: if false;
     }
+    // 確認コードの送信の依頼(コードは含まない。サーバーだけが扱う)
+    match /dealerAuthCodeJobs/{id} {
+      allow read, write: if false;
+    }
 
     // サービス紹介「IOL Orderについて」の本文(原稿 docs/introduction/service-introduction-web.md を、運営者が
     // scripts/publish-introduction.mjs で登録する。Admin 権限の書き込みのみ)。読めるのは platformAdmin だけ。
