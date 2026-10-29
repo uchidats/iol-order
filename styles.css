@@ -1993,7 +1993,14 @@ input[type="date"].form-control {
 [data-section="mail"] .settings-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
 @media (max-width: 480px) {
   .history-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .history-date { white-space: normal; overflow-wrap: anywhere; }   /* 列の幅を超えて隣(件数)に重ならない */
   .history-by { grid-column: 1 / -1; grid-row: 2; }
+  /* 手術日順: 1行目 手術日 / 2行目 件数・合計枚数(注文全体) / 3行目 発注者・注文日時 の縦積み(横に詰め込まない) */
+  .history-row-surgery { grid-template-columns: minmax(0, 1fr); }
+  .history-row-surgery .history-date { grid-row: 1; }
+  .history-row-surgery .history-count { grid-column: 1; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
+  .history-row-surgery .history-by { grid-row: 3; }
+  .history-row-surgery .lens-badge { grid-row: 4; justify-self: start; }
 }
 
 /* ディーラー(担当医と同じ行デザイン。編集時はメール欄を縦に並べる) */

@@ -125,7 +125,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   function rowView(r) {
     const o = r.order;
     const onDate = r.lineNos ? o.lines.filter(l => r.lineNos.includes(l.lineNo)) : o.lines;   // 手術日順: その手術日のレンズ
-    const btn = h("button", { type: "button", class: "history-row", "data-order": o.id, ...(r.surgeryDate !== undefined ? { "data-surgery": r.surgeryDate } : {}) },
+    const btn = h("button", { type: "button", class: r.surgeryDate !== undefined ? "history-row history-row-surgery" : "history-row", "data-order": o.id, ...(r.surgeryDate !== undefined ? { "data-surgery": r.surgeryDate } : {}) },
       r.surgeryDate !== undefined
         ? h("span", { class: "history-date" }, r.surgeryDate ? `手術日 ${formatSurgeryDate(r.surgeryDate)}` : "手術日の記録なし")
         : h("span", { class: "history-date" }, o.createdAtLabel),

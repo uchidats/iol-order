@@ -108,6 +108,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const w of [320, 390, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+        const overlap = await page.locator(".history-row").evaluateAll(rs => rs.some(r => {
+          const b = ["history-date", "history-count", "history-by"].map(c => r.querySelector("." + c).getBoundingClientRect());
+          const hit = (x, y) => x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
+          return hit(b[0], b[1]) || hit(b[0], b[2]) || hit(b[1], b[2]);
+        }));
+        assert.equal(overlap, false, `注文日順の行の文字が重ならない ${w}`);
       }
       // 詳細(現行形式・発注先が2社): 確認画面と同じく、ディーラーごとのまとまり。手術日・担当医は見出しにまとめ、レンズの行は「IOL名・度数・枚数」だけ
       await page.locator('[data-order="new"]').click();
@@ -325,6 +331,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const dates = shown.map(id => id.split("@")[1]);
       assert.deepEqual([...dates].sort().reverse(), dates, "手術日の新しい順");
       assert.match(await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText(), /手術日 2026年11月28日\(土\)[\s\S]*1件・合計1枚（注文全体 2件）/);
+      // スマホ幅(320・390)では、手術日 / 件数・合計枚数(注文全体) / 発注者・注文日 の縦積みで、文字が重ならない。PC幅は横並び
+      const boxes = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => ["history-date", "history-count", "history-by"].map(c => { const b = r.querySelector("." + c).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; })));
+      const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
+      for (const w of [320, 390]) {
+        await page.setViewportSize({ width: w, height: 900 });
+        for (const [d, c, by] of await boxes()) {
+          assert.ok(!hit(d, c) && !hit(d, by) && !hit(c, by), `${w}: 重なりなし ${JSON.stringify([d, c, by])}`);
+          assert.ok(d.b <= c.t + 0.5 && c.b <= by.t + 0.5, `${w}: 手術日 → 件数 → 発注者の順に縦積み`);
+        }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+      }
+      await page.setViewportSize({ width: 1100, height: 900 });
+      for (const [d, c] of await boxes()) assert.ok(Math.abs(d.t - c.t) < 4 && !hit(d, c), "PC幅は横並び");
+      await page.setViewportSize({ width: 390, height: 900 });
       for (let i = 0; i < 3 && await page.locator('[data-act="more"]').count(); i++) {
         const n = (await ids()).length;
         await page.click('[data-act="more"]');
