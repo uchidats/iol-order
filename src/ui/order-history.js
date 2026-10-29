@@ -1,7 +1,6 @@
 import { sortOrdersNewestFirst } from "../domain/order-history.js";
 import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer } from "../domain/order-history-view.js";
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
-import { lensBadgeElements } from "./lens-badges.js";
 import { summaryDateHead, summaryLineMain, formatSurgeryDate } from "./confirm-lines.js";
 import { confirmDialog } from "./confirm-dialog.js";
 
@@ -64,12 +63,13 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
 
   function close() { open = false; selectedId = null; seq++; root.hidden = true; }
 
-  /** 1行「[レンズN] メーカー モデル名 (トーリックなど) 度数 枚数」(確認画面と同じ部品)。手術日・担当医・発注先は見出しにまとめる */
+  /**
+   * 1行「メーカー 型番 度数 枚数」(確認画面と同じ部品。履歴ではレンズ番号・トーリック/多焦点のバッジは出さず、できるだけ1行に収める)。
+   * 手術日・担当医・発注先は見出しにまとめる。レンズ番号は表示しない属性(data-line)にだけ残す
+   */
   function lineView(l) {
-    const main = summaryLineMain({ manufacturer: l.maker, modelName: l.model, power: l.power, quantity: l.quantity }, h("span", { class: "lens-no-badge" }, `レンズ${l.lineNo}`));
-    const model = main.querySelector(".summary-model");
-    if (model) model.after(...lensBadgeElements({ isToric: l.isToric, isMultifocal: l.isMultifocal }));
-    return h("li", { class: "summary-line history-line" }, main);
+    const main = summaryLineMain({ manufacturer: l.maker, modelName: l.model, power: l.power, quantity: l.quantity });
+    return h("li", { class: "summary-line history-line", "data-line": String(l.lineNo) }, main);
   }
 
   /** 「手術日 + 担当医」ごとのまとまり(確認画面と同じ。手術日の早い順・同じ日は担当医の初出順)。手術日・担当医が違えば別の見出し */

@@ -112,7 +112,15 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 詳細(現行形式・発注先が2社): 確認画面と同じく、ディーラーごとのまとまり。手術日・担当医は見出しにまとめ、レンズの行は「IOL名・度数・枚数」だけ
       await page.locator('[data-order="new"]').click();
       const lines = await page.locator(".history-line").evaluateAll(ls => ls.map(l => l.innerText.replace(/\s+/g, " ").trim()));
-      assert.deepEqual(lines, ["レンズ1 J&J DIB00V +20.0D 1枚", "レンズ2 J&J DIW300 トーリック +18.5D 2枚"]);
+      assert.deepEqual(lines, ["J&J DIB00V +20.0D 1枚", "J&J DIW300 +18.5D 2枚"], "レンズ番号・トーリック/多焦点のバッジは出さない");
+      assert.equal(await page.locator(".history-line .lens-no-badge, .history-line .lens-badge").count(), 0);
+      // スマホ幅(320・390)でも、各レンズは1行に収まる
+      for (const w of [320, 390]) {
+        await page.setViewportSize({ width: w, height: 900 });
+        const rows = await page.locator(".history-line .summary-line-main").evaluateAll(ms => ms.map(m => { const t = [...m.children].map(c => c.getBoundingClientRect().top); return Math.max(...t) - Math.min(...t); }));
+        assert.ok(rows.every(d => d < 4), `${w}: 1行に収まる ${rows}`);
+      }
+      await page.setViewportSize({ width: 390, height: 900 });
       const blocks = await page.locator(".history-dealer-block").evaluateAll(bs => bs.map(b => ({
         dealer: b.querySelector(".history-dealer").innerText, heads: [...b.querySelectorAll(".summary-date-head")].map(x => x.innerText.replace(/\s+/g, " ").trim()),
         subtotal: b.querySelector(".history-subtotal").innerText })));
@@ -216,8 +224,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator('[data-order="s3"]').click();
       // 発注先1社: 発注先は1回。手術日・担当医の見出しは2つ(11/10 にレンズ1・3、11/20 にレンズ2)
       assert.deepEqual(await page.locator(".history-dealer").allInnerTexts(), ["A商会"]);
-      const groups = await page.locator(".summary-date-group").evaluateAll(gs => gs.map(g => [g.querySelector(".summary-date-head").innerText.replace(/\s+/g, " ").trim(), [...g.querySelectorAll(".history-line .lens-no-badge")].map(b => b.innerText)]));
-      assert.deepEqual(groups, [["手術日 2026年11月10日(火) 山田Dr", ["レンズ1", "レンズ3"]], ["手術日 2026年11月20日(金) 山田Dr", ["レンズ2"]]]);
+      const groups = await page.locator(".summary-date-group").evaluateAll(gs => gs.map(g => [g.querySelector(".summary-date-head").innerText.replace(/\s+/g, " ").trim(), [...g.querySelectorAll(".history-line")].map(b => b.dataset.line)]));
+      assert.deepEqual(groups, [["手術日 2026年11月10日(火) 山田Dr", ["1", "3"]], ["手術日 2026年11月20日(金) 山田Dr", ["2"]]]);
       assert.equal(await page.locator(".history-total").innerText(), "3件・合計4枚");
       for (const w of [320, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });

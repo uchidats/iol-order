@@ -1980,6 +1980,9 @@ input[type="date"].form-control {
 .history-count { font-weight: 600; white-space: nowrap; }
 .history-detail-head { margin: 12px 0 8px; }
 .history-notes { font-weight: 500; }
+/* 注文履歴の詳細のレンズ: メーカー・型番・度数・枚数を横並びで詰めて、スマホでもできるだけ1行に(長いときだけ折り返す) */
+.history-line .summary-line-main { gap: 2px 8px; }
+.history-line .summary-maker { font-size: 0.85rem; }
 .history-notifications { margin-top: 12px; }
 /* 削除は詳細の一番下に、区切り線の下で離して置く(誤操作を防ぐ。実行の前に確認ダイアログ) */
 .history-delete { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
