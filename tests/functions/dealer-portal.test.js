@@ -980,6 +980,13 @@ test("確認コードの送信の直前の読み直し: 依頼の後に担当者
   const inv = await op("inviteStaff", { companyId: C.Y, email: "nd2@corp.example.jp", name: "", role: "reader" });
   await request(msAuth("u-d2", "nd2@corp.example.jp", "m-d2"));
   await op("cancelInvitation", { companyId: C.Y, staffId: inv.staffId });
+  // 取消だけの効果を独立して確認(会社はまだ active)。会社停止と重ねない。
+  await deliverJobs();
+  assert.equal(sentCodes.length, before, "招待取消だけで配送されない");
+  {
+    const canceled = (await challengeOf("u-d2")).data();
+    assert.deepEqual([canceled.deliveryStatus, canceled.targets.length, typeof canceled.hash], ["target-changed", 0, "string"]);
+  }
   // 3) 有効な担当者 → 依頼の後に会社を停止
   await request(msAuth("u-d3", "y1@corp.example.jp", "m-d3"));
   await op("updateCompany", { companyId: C.Y, status: "suspended" });
