@@ -31,6 +31,26 @@ export function createFirestoreRepository(db, fs) {
       const snap = await fs.getDocs(q);
       return snap.docs.map(d => ({ id: d.id, facilityId, ...d.data() }));
     },
+    /**
+     * 注文履歴の1ページ(注文日の新しい順)。cursor は前のページの最後の文書(続きから読む)。論理削除した注文も含む(除くのは画面)
+     * @returns {Promise<{orders:Array<object>, cursor:object|null, hasMore:boolean}>}
+     */
+    async listOrdersPage(facilityId, { limit = 20, cursor = null } = {}) {
+      const q = fs.query(fs.collection(db, "facilities", facilityId, "orders"), fs.orderBy("createdAt", "desc"), ...(cursor ? [fs.startAfter(cursor)] : []), fs.limit(limit));
+      const snap = await fs.getDocs(q);
+      return { orders: snap.docs.map(d => ({ id: d.id, facilityId, ...d.data() })), cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor, hasMore: snap.docs.length === limit };
+    },
+    /**
+     * 手術日順の1ページ(手術日の新しい順、同じ日は注文日の新しい順)。索引(orderSurgeryIndex)は注文ID×手術日なので、手術日が複数の注文は日ごとに出る。
+     * 論理削除した注文の索引は除く(削除済みで枠が埋まらない)
+     * @returns {Promise<{entries:Array<{orderId:string, surgeryDate:string, lineNos:number[]}>, cursor:object|null, hasMore:boolean}>}
+     */
+    async listSurgeryIndexPage(facilityId, { limit = 20, cursor = null } = {}) {
+      const q = fs.query(fs.collection(db, "facilities", facilityId, "orderSurgeryIndex"), fs.where("deleted", "==", false),
+        fs.orderBy("surgeryDate", "desc"), fs.orderBy("createdAt", "desc"), ...(cursor ? [fs.startAfter(cursor)] : []), fs.limit(limit));
+      const snap = await fs.getDocs(q);
+      return { entries: snap.docs.map(d => ({ id: d.id, ...d.data() })), cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor, hasMore: snap.docs.length === limit };
+    },
     /** 注文1件(サーバーが保存した内容)。なければ null。完了画面と、受付結果が未確定の注文の照会に使う */
     async getOrder(facilityId, orderId) {
       const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "orders", orderId));

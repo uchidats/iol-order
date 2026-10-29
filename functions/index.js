@@ -16,6 +16,7 @@ import { createFacilityApplicationService, createApplicationNotifier, createAppl
 import { createFacilityPreregistrationService } from "./src/facility-preregistrations.js";
 import { createOrderService } from "./src/orders.js";
 import { createOrderDeletionService } from "./src/order-deletion.js";
+import { createOrderSurgeryIndexService } from "./src/order-surgery-index.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
 import { onDocumentWrittenWithAuthContext, onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
@@ -97,8 +98,15 @@ export const deleteFacility = onCall(options, wrap(service.deleteFacility));   /
 export const renameFacility = onCall(options, wrap(service.renameFacility));   // 施設名の変更(施設管理者のみ・重複確認つき)
 export const checkFacilityName = onCall(options, wrap(service.checkFacilityName));   // 施設名の重複候補の確認(読み取りのみ・件数だけを返す)
 export const createOrder = onCall(options, wrap(orderService.createOrder));
-// 注文の削除(論理削除。施設の管理者・副管理者のみ)。注文受付のスイッチとは独立。メールの送信待ち・発注には触れない
+// 注文の削除(論理削除。施設の管理者・副管理者のみ)。注文受付のスイッチとは独立。未送信のメールは送信を中止し(送信中なら削除しない)、送信済みは残す
 export const deleteOrder = onCall(options, wrap(createOrderDeletionService({ db: getFirestore(), FieldValue }).deleteOrder));
+// 注文履歴の手術日順の索引(注文の作成をきっかけに別の処理で作る。冪等なので再試行してよい。注文の受付・メール送信には関与しない)
+const orderSurgeryIndex = createOrderSurgeryIndexService({ db: getFirestore() });
+export const indexOrderSurgeryDates = onDocumentCreated({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, retry: true, document: "facilities/{facilityId}/orders/{orderId}" },
+  async (event) => {
+    try { await orderSurgeryIndex.indexOrder(event.params.facilityId, event.params.orderId); }
+    catch (e) { console.error("order surgery index failed (will retry):", event.params.facilityId, event.params.orderId, e); throw e; }
+  });
 
 // 利用者の所属削除(施設管理者のみ)。所属の削除と操作履歴の記録を1つのトランザクションで行う
 const memberService = createMemberService({

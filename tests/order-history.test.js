@@ -133,3 +133,14 @@ test("詳細の表示用のまとめ: 担当医・発注先のキー(ID、なけ
   assert.deepEqual(groupHistoryLinesByDealer(lines).map(g => [g.dealerName, g.lines.map(l => l.lineNo)]), [["B商会", [1, 3]], [null, [2]], ["旧名称", [4]]]);
   assert.equal(groupHistoryLinesByDealer(summarizeHistoryOrder(v2).lines).length, 1);
 });
+
+test("削除の確認に使うメールの件数(送信済み・未送信・送信中)と、送信を中止したメールの表示", () => {
+  const o = summarizeHistoryOrder({ ...v3, notifications: [
+    { id: "d_d1", kind: "dealer", dealerName: "A商会", status: "accepted" }, { id: "d_d2", kind: "dealer", dealerName: "B医療", status: "retry" },
+    { id: "d_d3", kind: "dealer", dealerName: "C社", status: "held" }, { id: "copy", kind: "copy", dealerName: "注文控え", status: "waiting" },
+    { id: "d_d4", kind: "dealer", dealerName: "D社", status: "sending" }, { id: "unrouted", kind: "dealer", status: "not_sent", reason: "dealer-unset" }] });
+  assert.deepEqual(o.mailCounts, { sent: 1, unsent: 3, sending: 1 });
+  const c = summarizeHistoryOrder({ ...v3, deleted: true, notifications: [{ id: "d_d1", kind: "dealer", dealerName: "A商会", status: "cancelled" }] });
+  assert.equal(c.notifications[0].statusLabel, "未送信（注文の削除により送信を中止）");
+  assert.deepEqual(summarizeHistoryOrder(v1).mailCounts, { sent: 0, unsent: 0, sending: 0 });
+});

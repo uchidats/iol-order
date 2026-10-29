@@ -300,6 +300,12 @@ service cloud.firestore {
         }
       }
 
+      // 注文履歴の手術日順の索引(注文ID_手術日。サーバーが作り、論理削除の印もサーバーが付ける)。読めるのは注文と同じ(所属メンバーと運営者)
+      match /orderSurgeryIndex/{entryId} {
+        allow read: if isPlatformAdmin() || isMember(fid);
+        allow write: if false;
+      }
+
       // 施設のメール設定(docId = 'mail'): 注文控えメール(ON/OFF・送信先1件)と署名。管理者・副管理者が読み書きできる
       match /settings/{docId} {
         allow read: if isPlatformAdmin() || isFacilityManager(fid);

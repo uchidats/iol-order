@@ -11,9 +11,14 @@ import { orderLinesOf, summarizeOrder } from "./order-history.js";
 export function summarizeHistoryOrder(order) {
   const s = summarizeOrder(order);
   const raw = orderLinesOf(order);
+  const notes = Array.isArray(order.notifications) ? order.notifications : [];
+  const count = (sts) => notes.filter(n => n && sts.includes(n.status)).length;
   return {
     ...s,
     deleted: order.deleted === true,   // 論理削除(施設の管理者・副管理者が削除した注文。通常の一覧には出さない)
+    // 削除の確認に使う件数(送信済みは取り消せない・未送信は送信を中止する。実際の判定はサーバーがメールの状態で行う)
+    mailCounts: { sent: count(["accepted"]), unsent: count(UNSENT), sending: count(["sending"]) },
+    notifications: s.notifications.map((n, i) => (notes[i] && notes[i].status === "cancelled" ? { ...n, statusLabel: "未送信（注文の削除により送信を中止）" } : n)),
     lines: s.lines.map((l, i) => {
       const r = raw[i] || {};
       return { ...l, doctorKey: (r.doctor && (r.doctor.id || r.doctor.name)) || "", dealerKey: (r.dealer && r.dealer.id) || r.dealerId || "" };
@@ -22,6 +27,7 @@ export function summarizeHistoryOrder(order) {
 }
 
 /** 通常の注文履歴に出す注文(論理削除したものを除く) */
+const UNSENT = ["pending", "retry", "waiting", "held"];
 export const visibleOrders = (orders) => (orders || []).filter(o => o && o.deleted !== true);
 
 /**
