@@ -22,6 +22,7 @@ export const STAFF_ROLES = Object.freeze(["reader", "companyAdmin"]);
 export const PORTAL_LIMITS = Object.freeze({
   nameMax: 100, staffNameMax: 50, assignmentsMax: 100, facilityFilterMax: 100,
   pageDefault: 50, pageMax: 100, scanBatch: 100, scanMax: 500, rangeDaysMax: 366,
+  weekMax: 100,   // 週表示で1週に読む受信の上限(超えたら truncated で知らせる)
   invitationTtlMs: 30 * 24 * 60 * 60 * 1000, cursorTtlMs: 60 * 60 * 1000, reindexMax: 2000,
   // 認証主体の紐付けの確認は20件ずつ全件(無効な旧所属が多く残っていても、有効な所属を見落とさない)
   affiliationsBatch: 20,
@@ -112,6 +113,16 @@ export function jstDayStartMs(date) {
   return ms - JST_MS;
 }
 export const jstDateOf = (ms) => new Date(ms + JST_MS).toISOString().slice(0, 10);
+
+/** 週表示の7日間(月曜〜日曜の "YYYY-MM-DD")。weekStart が月曜の正しい日付でなければ null */
+export function weekDatesOf(weekStart) {
+  if (typeof weekStart !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
+  const t = Date.parse(`${weekStart}T00:00:00Z`);
+  if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== weekStart || new Date(t).getUTCDay() !== 1) return null;
+  return Array.from({ length: 7 }, (_, i) => new Date(t + i * DAY_MS).toISOString().slice(0, 10));
+}
+/** 自社宛ての明細の手術日(重複なし・昇順)。受信の索引に持ち、週表示の問い合わせに使う */
+export const surgeryDatesOf = (lines) => [...new Set((lines || []).map(l => l && l.surgeryDate).filter(d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort();
 
 /**
  * 注文から、指定の施設別発注先(localDealerId)宛ての明細を取り出す。
@@ -587,7 +598,19 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     if (fromMs === null || toStart === null) throw badInput("期間を確認してください");
     const toMs = toStart + DAY_MS;
     if (toMs <= fromMs || (toMs - fromMs) / DAY_MS > PORTAL_LIMITS.rangeDaysMax) throw badInput(`期間は${PORTAL_LIMITS.rangeDaysMax}日以内で指定してください`);
-    const ff = data.facilityFilter;
+    const { facilities, mode } = parseFacilityFilter(data.facilityFilter, scope);
+    let orderNumber = null;
+    if (data.orderNumber !== undefined && data.orderNumber !== null && data.orderNumber !== "") {
+      if (typeof data.orderNumber !== "string" || data.orderNumber.trim().length > 40) throw badInput("注文番号を確認してください");
+      orderNumber = data.orderNumber.trim();
+    }
+    const limit = data.limit === undefined ? PORTAL_LIMITS.pageDefault : data.limit;
+    if (!Number.isInteger(limit) || limit < 1 || limit > PORTAL_LIMITS.pageMax) throw badInput();
+    return { fromMs, toMs, facilities: facilities.sort(), orderNumber, limit, mode };
+  }
+
+  /** 施設の絞り込み(選択した施設 / 閲覧可能な全施設)。許可されていない施設は選べない */
+  function parseFacilityFilter(ff, scope) {
     if (!ff || typeof ff !== "object" || Array.isArray(ff)) throw badInput("施設を選択してください");
     strict(ff, ["mode", "facilityIds"]);
     let facilities;
@@ -596,14 +619,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       facilities = [...new Set(ff.facilityIds)];
       if (facilities.some(id => !scope.has(id))) throw badInput("選択できない施設が含まれています。施設を選び直してください");
     } else throw badInput("施設を選択してください");
-    let orderNumber = null;
-    if (data.orderNumber !== undefined && data.orderNumber !== null && data.orderNumber !== "") {
-      if (typeof data.orderNumber !== "string" || data.orderNumber.trim().length > 40) throw badInput("注文番号を確認してください");
-      orderNumber = data.orderNumber.trim();
-    }
-    const limit = data.limit === undefined ? PORTAL_LIMITS.pageDefault : data.limit;
-    if (!Number.isInteger(limit) || limit < 1 || limit > PORTAL_LIMITS.pageMax) throw badInput();
-    return { fromMs, toMs, facilities: facilities.sort(), orderNumber, limit, mode: ff.mode };
+    return { facilities, mode: ff.mode };
   }
 
   // 継続カーソル: 会社・担当者・検索条件に結び付け、有効期限を付ける(位置は改ざんされても、各行を毎回認可するので範囲は広がらない)。
@@ -697,22 +713,65 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const a = await authorizeStaff(auth, data.companyId);
     const rs = await db.doc(`dealerCompanies/${a.companyId}/receipts/${data.receiptId}`).get();
     if (!rs.exists) throw notVisible();
-    const r = rs.data();
-    const scope = await allowedScope(a.companyId);
+    const view = await verifiedView(rs.id, rs.data(), await allowedScope(a.companyId));
+    if (!view) throw notVisible();
+    return view;
+  }
+
+  /**
+   * 受信1件の表示データ(自社宛ての明細だけ)。許可・関連付け・施設・元注文・注文時点の発注先を毎回確認する(詳細・週表示で共通)。
+   * 見せてよいものでなければ null
+   */
+  async function verifiedView(receiptId, r, scope) {
     const s = scope.get(r.facilityId);
-    if (!s || r.grantId !== s.grantId || r.localDealerId !== s.localDealerId || !isId(r.sourceOrderId)) throw notVisible();
-    const os = await db.doc(`facilities/${r.facilityId}/orders/${r.sourceOrderId}`).get();
-    if (!os.exists) throw notVisible();
+    if (!s || r.grantId !== s.grantId || r.localDealerId !== s.localDealerId || !isId(r.sourceOrderId)) return null;
+    const [os, mail] = await Promise.all([db.doc(`facilities/${r.facilityId}/orders/${r.sourceOrderId}`).get(),
+      db.doc(`facilities/${r.facilityId}/orders/${r.sourceOrderId}/mails/d_${s.localDealerId}`).get()]);
+    if (!os.exists) return null;
     const order = os.data();
     const orderedMs = millisOf(order.createdAt);
-    if (order.testOrder === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) throw notVisible();
+    if (order.testOrder === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) return null;
     // 注文時点の発注先が、許可した時点と同じか(現在の発注先の値が同じでも、途中で別の会社宛てだった注文は返さない)
-    const mail = await db.doc(`facilities/${r.facilityId}/orders/${r.sourceOrderId}/mails/d_${s.localDealerId}`).get();
-    if (!orderMatchesGrant(order, mail, s.localDealerId, s.grant)) throw notVisible();
-    const view = buildDealerOrderView(order, s.localDealerId, { receiptId: rs.id, facilityId: r.facilityId });
-    if (!view) throw notVisible();
+    if (!orderMatchesGrant(order, mail, s.localDealerId, s.grant)) return null;
+    const view = buildDealerOrderView(order, s.localDealerId, { receiptId, facilityId: r.facilityId });
+    if (!view) return null;
     view.facilityName = s.facilityName || view.facilityName;
     return view;
+  }
+
+  /**
+   * 手術日の週表示(月曜〜日曜)。手術日がその週に入る自社宛ての明細だけを、手術日ごとにまとめて返す。
+   * 1つの注文に手術日が複数あれば、その週の明細だけ(注文番号は同じ。ほかの手術日は otherDates で示し、別の注文と誤認しないようにする)。
+   * 受信の索引の surgeryDates(自社宛ての明細の手術日)で候補を絞り、各注文は詳細と同じ確認(verifiedView)を通ったものだけ
+   */
+  async function listWeek(auth, data) {
+    strict(data, ["companyId", "weekStart", "facilityFilter"]);
+    const dates = weekDatesOf(data.weekStart);
+    if (!dates) throw badInput("週の指定を確認してください");
+    const a = await authorizeStaff(auth, data.companyId);
+    const scope = await allowedScope(a.companyId);
+    const { facilities } = parseFacilityFilter(data.facilityFilter, scope);
+    const selected = new Set(facilities);
+    const out = { weekStart: dates[0], weekEnd: dates[6], days: dates.map(date => ({ date, orders: [] })), truncated: false };
+    if (!selected.size) return out;
+    const snap = await db.collection(`dealerCompanies/${a.companyId}/receipts`).where("surgeryDates", "array-contains-any", dates).limit(PORTAL_LIMITS.weekMax + 1).get();
+    out.truncated = snap.size > PORTAL_LIMITS.weekMax;
+    const docs = snap.docs.slice(0, PORTAL_LIMITS.weekMax).filter(d => selected.has(d.get("facilityId")));
+    const views = await Promise.all(docs.map(d => verifiedView(d.id, d.data(), scope)));
+    const byDate = new Map(out.days.map(d => [d.date, d.orders]));
+    for (const v of views) {
+      if (!v) continue;
+      const allDates = surgeryDatesOf(v.lines);   // この注文の自社宛ての手術日(週の外も含む)
+      for (const date of dates) {
+        const lines = v.lines.filter(l => l.surgeryDate === date)
+          .map(l => ({ no: l.no, manufacturer: l.manufacturer, model: l.model, toricModel: l.toricModel, power: l.power, quantity: l.quantity }));
+        if (!lines.length) continue;
+        byDate.get(date).push({ receiptId: v.receiptId, facilityId: v.facilityId, facilityName: v.facilityName, orderNumber: v.orderNumber, orderedAt: v.orderedAt,
+          ownLineCount: v.lineCount, otherDates: allDates.filter(d => d !== date), lines });
+      }
+    }
+    for (const d of out.days) d.orders.sort((x, y) => x.facilityName.localeCompare(y.facilityName, "ja") || String(x.orderedAt).localeCompare(String(y.orderedAt)) || x.orderNumber.localeCompare(y.orderNumber));
+    return out;
   }
 
   /** ディーラー画面の呼び出し(担当者・招待先本人) */
@@ -726,6 +785,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "context": return getContext(auth, rest);
       case "setAssignments": return setMyAssignments(auth, rest);
       case "list": return listOrders(auth, rest);
+      case "week": return listWeek(auth, rest);
       case "get": return getOrder(auth, rest);
       case "companies": return myCompanies(auth, rest);
       case "sendCode": return sendCode(auth, rest);
@@ -1089,13 +1149,17 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         const rid = receiptIdOf(g.id, facilityId, orderId);
         const ref = db.doc(`dealerCompanies/${cid}/receipts/${rid}`);
         const r = await tx.get(ref);
-        if (r.exists) return false;
+        const surgeryDates = surgeryDatesOf(own);
+        if (r.exists) {
+          if (!Array.isArray(r.get("surgeryDates"))) tx.update(ref, { surgeryDates });   // 週表示より前に作った索引に手術日を補う
+          return false;
+        }
         tx.create(ref, {
           grantId: g.id, facilityId, localDealerId: lid, sourceOrderId: orderId,
           orderNumber: String(order.orderNumber || ""), orderedAt: order.createdAt,
           lineNos: own.map(l => l.lineNo).filter(n => Number.isInteger(n)),
           lineCount: own.length, totalQuantity: own.reduce((s, l) => s + (Number(l.item && l.item.quantity) || 0), 0),
-          projectionVersion: 1, createdAt: FieldValue.serverTimestamp()
+          surgeryDates, projectionVersion: 1, createdAt: FieldValue.serverTimestamp()
         });
         return true;
       }).catch((e) => { errors.push(e); return null; });

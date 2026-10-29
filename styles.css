@@ -2421,7 +2421,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-filter-row .form-control { width: auto; flex: 1 1 140px; min-width: 0; }
 .dealer-select-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dealer-facility-list { display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; }   /* 長い施設名は折り返す(スマホ幅で横にはみ出さない) */
 .dealer-facility span, .dealer-row-facility, .dealer-row-number { overflow-wrap: anywhere; min-width: 0; }
 .dealer-scope { margin: 0; font-weight: 600; color: var(--text-main); }
 .dealer-fetched { margin: 0; }
@@ -2432,6 +2432,24 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 }
 .dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }
 .dealer-row-facility { font-weight: 600; }
+.dealer-search-area, .dealer-week-area, .dealer-ordered-area { display: flex; flex-direction: column; gap: 10px; }
+/* 手術日の週表示: 週の移動(スマホは週の表示を上の行に)、手術日ごとの見出し、注文ごとのカード(文字は折り返し、重ねない) */
+.dealer-view { margin: 0; }
+.dealer-week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.dealer-week-label { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .dealer-week-label { flex-basis: 100%; } }
+.dealer-week { display: flex; flex-direction: column; gap: 14px; }
+.dealer-day-head { margin: 0 0 6px; padding-bottom: 2px; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; font-weight: 700; color: #334155; }
+.dealer-week-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dealer-week-order { display: block; width: 100%; padding: 10px 12px; background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-sm); text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.dealer-week-order:hover { background: #f8fafc; }
+.dealer-week-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.dealer-week-facility { font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
+.dealer-week-number { font-size: 0.85rem; color: #475569; overflow-wrap: anywhere; min-width: 0; }
+.dealer-week-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.dealer-week-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.dealer-week-lines .summary-model { overflow-wrap: anywhere; min-width: 0; }
+.dealer-week-note { margin: 6px 0 0; font-size: 0.8rem; color: #64748b; overflow-wrap: anywhere; }
 .dealer-row-number { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .dealer-detail { display: flex; flex-direction: column; gap: 10px; }
 .dealer-detail > .btn { align-self: flex-start; }

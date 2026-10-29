@@ -11,7 +11,7 @@ import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/f
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { doc, getDoc, getDocs, collection, collectionGroup, query, where } from "firebase/firestore";
 import { createOrderService } from "../../functions/src/orders.js";
-import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf } from "../../functions/src/dealer-portal.js";
+import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf, weekDatesOf, surgeryDatesOf } from "../../functions/src/dealer-portal.js";
 
 const PROJECT = "demo-iol-functions";
 const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").split(":");
@@ -1019,6 +1019,56 @@ test("確認コードの送信の直前の読み直し: 依頼の後に担当者
   clock.t = null;
   assert.equal(sentCodes.length, before + 1);
   assert.equal((await challengeOf("u-d4")).get("deliveryStatus"), "sent");
+});
+
+test("週表示(手術日): 月曜〜日曜の自社宛ての明細を手術日ごとに。複数の手術日の注文は各週にその週の明細だけ(注文番号は同じ・ほかの手術日を示す)。他社・未許可の施設・取消後は出ない", async () => {
+  // 来週以降の月曜(注文できる手術日の範囲内)。W1 の火曜と、翌週 W2 の火曜
+  const base = Date.now() + 8 * 24 * 3600e3;
+  let mon = jstDateOf(base);
+  while (!weekDatesOf(mon)) mon = jstDateOf(Date.parse(`${mon}T00:00:00Z`) + 24 * 3600e3 - 9 * 3600e3);
+  const W1 = weekDatesOf(mon), W2 = weekDatesOf(jstDateOf(Date.parse(`${mon}T00:00:00Z`) + 7 * 24 * 3600e3 - 9 * 3600e3 + 12 * 3600e3));
+  assert.equal(W1.length, 7); assert.equal(W2[0] > W1[6], true);
+  await grant("adminA", "fA", "dA1");
+  await grant("adminA", "fA", "dA2");
+  const o = await placeOrder("fA", "ordA", [
+    line({ dealerId: "dA1", surgeryDate: W1[1] }), line({ dealerId: "dA1", surgeryDate: W2[1], power: "+21.0D" }),
+    line({ dealerId: "dA2", surgeryDate: W1[1], power: "+19.0D" }), line({ dealerId: "dA1", surgeryDate: W1[1], power: "+22.0D", quantity: 2 })]);
+  await placeOrder("fB", "ordB", [line({ dealerId: "dB1", surgeryDate: W1[2] })]);   // 未許可の施設(fB)
+  const week = (uid, weekStart, over = {}) => api(uid, "week", { weekStart, facilityFilter: { mode: "all" }, ...over });
+  const flat = (r) => r.days.flatMap(d => d.orders.map(x => [d.date, x.orderNumber, x.lines.map(l => `${l.power}x${l.quantity}`).join(","), x.otherDates.join(",")]));
+  const x1 = await week("x1", W1[0]);
+  assert.deepEqual([x1.weekStart, x1.weekEnd, x1.days.length, x1.truncated], [W1[0], W1[6], 7, false]);
+  assert.deepEqual(flat(x1), [[W1[1], o.orderNumber, "+20.0Dx1,+22.0Dx2", W2[1]]], "W1 は W1 の自社宛ての明細だけ(ほかの手術日を示す)");
+  const item = x1.days[1].orders[0];
+  assert.deepEqual(Object.keys(item).sort(), ["facilityId", "facilityName", "lines", "orderNumber", "orderedAt", "otherDates", "ownLineCount", "receiptId"]);
+  assert.deepEqual([item.facilityName, item.ownLineCount, Object.keys(item.lines[0]).sort()], ["A眼科", 3, ["manufacturer", "model", "no", "power", "quantity", "toricModel"]], "返す項目は列挙したものだけ(担当医・他社・備考は返さない)");
+  assert.deepEqual(flat(await week("x1", W2[0])), [[W2[1], o.orderNumber, "+21.0Dx1", W1[1]]], "W2 は同じ注文番号で W2 の明細だけ");
+  assert.deepEqual(flat(await week("y1", W1[0])).map(x => x.slice(0, 3)), [[W1[1], o.orderNumber, "+19.0Dx1"]], "他社(Y)は自社宛ての明細だけ");
+  assert.deepEqual(flat(await week("y1", W2[0])), []);
+  // 施設の絞り込み(選択した施設だけ)・選択なし・未許可の施設は選べない
+  assert.deepEqual(flat(await week("x1", W1[0], { facilityFilter: { mode: "selected", facilityIds: [] } })), []);
+  await assert.rejects(week("x1", W1[0], { facilityFilter: { mode: "selected", facilityIds: ["fB"] } }), (e) => e.code === "invalid-argument");
+  // 入力: 月曜でない・形式が違う・余分な項目
+  for (const ws of [W1[1], "2026/11/02", "2026-02-30", undefined]) await assert.rejects(week("x1", ws), (e) => e.code === "invalid-argument", String(ws));
+  await assert.rejects(api("x1", "week", { weekStart: W1[0], facilityFilter: { mode: "all" }, from: "x" }), (e) => e.code === "invalid-argument");
+  // 許可の取消の後は出ない(索引が残っていても、毎回認可する)
+  await revoke("adminA", "fA", "dA1");
+  assert.deepEqual(flat(await week("x1", W1[0])), []);
+  // 機能の停止中は拒否
+  enabled.v = false;
+  await assert.rejects(week("x1", W1[0]), (e) => e.code === "failed-precondition");
+  enabled.v = true;
+  // 週表示より前に作った受信の索引(手術日なし)は、作り直し(索引の再処理)で補う
+  await grant("adminA", "fA", "dA1");
+  const o2 = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", surgeryDate: W1[3] })]);
+  const rref = (await db.collection(`dealerCompanies/${C.X}/receipts`).where("sourceOrderId", "==", o2.orderId).get()).docs[0].ref;
+  assert.deepEqual((await rref.get()).get("surgeryDates"), [W1[3]]);
+  await rref.update({ surgeryDates: FieldValue.delete() });
+  assert.deepEqual(flat(await week("x1", W1[0])), [], "手術日のない索引は週表示に出ない");
+  await portal.indexOrder("fA", o2.orderId);
+  assert.deepEqual((await rref.get()).get("surgeryDates"), [W1[3]]);
+  assert.deepEqual(flat(await week("x1", W1[0])).map(x => x[1]), [o2.orderNumber]);
+  assert.deepEqual(surgeryDatesOf([{ surgeryDate: "2026-11-03" }, { surgeryDate: "2026-11-02" }, { surgeryDate: "2026-11-03" }, { surgeryDate: "bad" }, null]), ["2026-11-02", "2026-11-03"]);
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
