@@ -15,7 +15,7 @@
  * 宛先は3種類の別の概念: ①ディーラー(発注用メール) ②固定の確認先(設定から渡す。コードに書かない) ③発注者(ログインしたユーザー)。
  * すべて To に指定し、CC・BCC は使わない(常に空)。①が1件もなければ、②③があっても送信不可。担当医への確認メールは対象外。
  */
-import { GENERIC_DRAFT_PROFILE } from "./order-mail-profiles.js";
+import { GENERIC_DRAFT_PROFILE, subjectPrefixOf } from "./order-mail-profiles.js";
 import { orderLinesOf, describeLine, formatDateTimeJst, orderedByLabel } from "./order-history.js";
 import { isValidEmail } from "./order-validation.js";
 
@@ -131,7 +131,8 @@ export function buildOrderMailPreview(order, { facilityName = order.facilityName
     if (profile.sendToOrderer && !ordererTo.length) warnings.push("発注者のメールアドレスが記録されていないため、発注者宛の確認は含まれません");
     if (profile.format === "gas-questions" && !profile.signatureConfigured) warnings.push("この施設の住所・署名が設定されていないため、署名なしで生成しています");
     const gas = profile.format === "gas-questions";
-    const subject = gas ? oneLine(profile.subjectTemplate.replace("{facility}", oneLine(facilityName))) : buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity });
+    // 件名: 従来の件名の先頭に、発注先ごとの「件名の先頭に付ける文字」(任意。生成時点の発注先の設定)をそのまま付ける。未設定なら従来どおり
+    const subject = subjectPrefixOf(current) + (gas ? oneLine(profile.subjectTemplate.replace("{facility}", oneLine(facilityName))) : buildSubject({ facilityName, orderNumber, dealerName, lineCount: lineViews.length, totalQuantity }));
     const body = gas ? buildGasStyleBody({ dealerName, lines: lineViews, ordererName: orderedByLabel(order), ordererEmail: ordererTo[0] || ordererEmail, notes: order.notes, profile }) : buildBody({
       facilityName, orderNumber, orderedAtLabel: formatDateTimeJst(order.createdAt), orderedBy: orderedByLabel(order),
       dealerName, lines: lineViews, totalQuantity, notes: order.notes

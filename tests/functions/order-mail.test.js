@@ -76,6 +76,22 @@ test("注文の保存と同時に、発注先ごとの送信待ちメールを�
   assert.ok(sent[0].text.startsWith("株式会社A商会御中") && !sent[0].text.includes("別の署名"));
 });
 
+test("件名の先頭に付ける文字: 注文の保存時に、発注先の設定(サーバーが読む)から件名の先頭に付ける。発注先ごとに別。注文の入力で件名・先頭の文字は指定できない", async () => {
+  await db.doc(`facilities/${F}/facilityDealers/dA`).update({ subjectPrefix: "@@@" });
+  const r = await place();
+  const mails = await mailsOf(r.orderId);
+  assert.equal(mails.d_dA.subject, "@@@【テスト眼科】IOL注文：ご確認のほどよろしくお願いします");
+  assert.equal(mails.d_dB.subject, "【テスト眼科】IOL注文：ご確認のほどよろしくお願いします", "設定のない発注先は従来どおり");
+  assert.ok(!mails.copy.subject || !mails.copy.subject.startsWith("@@@"), "注文控えには付けない");
+  await sendAll(r.orderId);
+  assert.deepEqual(sent.slice(0, 2).map(m => m.subject), [mails.d_dA.subject, mails.d_dB.subject], "保存した件名で送る");
+  // 注文の入力に件名・先頭の文字を足しても受け付けない(項目を限定)
+  for (const extra of [{ subject: "偽の件名" }, { subjectPrefix: "!!!" }]) {
+    await assert.rejects(place(undefined, extra), (e) => e.code === "invalid-argument", JSON.stringify(extra));
+  }
+  await assert.rejects(place([line({ subjectPrefix: "!!!" })]), (e) => e.code === "invalid-argument", "明細にも指定できない");
+});
+
 test("送信: 配信サービスが受け付けたら accepted。全発注先が決着してから注文控えを送り、控えに結果を書く。注文の状態は notified", async () => {
   const r = await place();
   await sendAll(r.orderId);

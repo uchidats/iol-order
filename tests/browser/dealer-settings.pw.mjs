@@ -103,7 +103,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
       // 3) 編集ボタンを押した行だけ入力欄になる。発注用・使用報告用メールは編集時に確認・変更できる
       await rows.nth(0).locator('[data-act="edit"]').click();
-      assert.deepEqual(await sec.locator("input:visible").evaluateAll(es => es.map(e => e.getAttribute("data-f"))), ["name", "mailName"], "名前と注文メールの宛名(正式表記・任意)");
+      assert.deepEqual(await sec.locator("input:visible").evaluateAll(es => es.map(e => e.getAttribute("data-f"))), ["name", "mailName", "subjectPrefix"], "名前・注文メールの宛名(正式表記・任意)・件名の先頭に付ける文字(任意)");
+      // 件名の先頭に付ける文字: 入力に合わせて件名の例を表示(入力どおり。空白は足さない)。20文字まで
+      const preview = rows.nth(0).locator('[data-v="subjectPreview"]');
+      assert.match(await preview.innerText(), /^件名の例: 【.+】IOL注文：ご確認のほどよろしくお願いします$/, "未入力は従来の件名");
+      await rows.nth(0).locator('[data-f="subjectPrefix"]').fill("@@@");
+      assert.match(await preview.innerText(), /^件名の例: @@@【.+】IOL注文：ご確認のほどよろしくお願いします$/);
+      assert.equal(await rows.nth(0).locator('[data-f="subjectPrefix"]').getAttribute("maxlength"), "20");
       assert.equal(await rows.nth(0).locator('[data-f="orderEmails"]').inputValue(), "a1@example.jp\na2@example.jp");
       assert.equal(await rows.nth(0).locator('[data-f="usageEmails"]').inputValue(), "ar@example.jp");
       await rows.nth(0).locator('[data-f="name"]').fill("A商会(新)");
@@ -117,6 +123,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const w1 = await page.evaluate(() => window.__saved[0]);
       assert.equal(w1.length, 1, "変更のあった行だけ保存");
       assert.deepEqual([w1[0].id, w1[0].data.name, w1[0].data.sortOrder, w1[0].data.orderEmails, w1[0].data.usageReportEmails], ["d1", "A商会(新)", 10, ["a1@example.jp", "new@example.jp"], ["ar@example.jp"]]);
+      assert.equal(w1[0].data.subjectPrefix, "@@@", "件名の先頭に付ける文字も保存");
+      assert.match(await rows.nth(0).locator('[data-v="info"]').innerText(), /件名の先頭「@@@」/, "一覧にも表示");
 
       // 4) 入力不正(重複した名前・不正なメール)は保存されず、編集中のまま入力を残す
       await rows.nth(1).locator('[data-act="edit"]').click();

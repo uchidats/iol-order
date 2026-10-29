@@ -388,6 +388,11 @@ test("ディーラー: 発注用と使用報告用のメールを別々に管理
   }
   await ng(db, "facilities/fA/facilityDealers/d-bad", { facilityId: "fA" }); // name 必須
   await ng(db, "facilities/fA/facilityDealers/d-bad", { ...base, secretNote: "x" });
+  // 件名の先頭に付ける文字(任意): 1〜20文字の文字列。改行・タブなどの制御文字・行/段落の区切りは不可
+  for (const v of ["@@@", "[IOL] ", "＠".repeat(20), "x".repeat(20)]) await ok(db, "facilities/fA/facilityDealers/d-prefix", { ...base, subjectPrefix: v });
+  for (const v of ["", "x".repeat(21), "@@@\n", "a\rb", "a\tb", "a\u0000b", "a\u007fb", "a\u2028b", 123, ["@@@"]]) {
+    await ng(db, "facilities/fA/facilityDealers/d-prefix", { ...base, subjectPrefix: v });
+  }
 });
 
 test("施設設定は所属先の施設管理者だけが変更できる", async () => {

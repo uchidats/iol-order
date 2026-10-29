@@ -5,7 +5,7 @@
  * 両者の制限値は同じにしてある（変更時は rules とテストも更新すること）。
  */
 import { isValidEmail } from "./order-validation.js";
-import { MAIL_SETTINGS_LIMITS } from "./order-mail-profiles.js";
+import { MAIL_SETTINGS_LIMITS, SUBJECT_PREFIX_FORBIDDEN } from "./order-mail-profiles.js";
 
 export const LIMITS = Object.freeze({
   ordererNameMax: 50,
@@ -138,6 +138,11 @@ export function validateDealers(rows) {
 
     const mailName = norm(r.mailName);   // 注文メールの宛名(正式表記。任意。未入力ならディーラー名)
     if (mailName.length > MAIL_SETTINGS_LIMITS.mailNameMax) errors.push({ index, field: "mailName", message: `メールの宛名は${MAIL_SETTINGS_LIMITS.mailNameMax}文字までです` });
+    // 件名の先頭に付ける文字(任意): 入力どおりに保存する(空白の追加・全角半角の変換はしない)。空白だけなら未設定
+    const rawPrefix = typeof r.subjectPrefix === "string" ? r.subjectPrefix : "";
+    const subjectPrefix = rawPrefix.trim() ? rawPrefix : "";
+    if (subjectPrefix.length > MAIL_SETTINGS_LIMITS.subjectPrefixMax) errors.push({ index, field: "subjectPrefix", message: `件名の先頭に付ける文字は${MAIL_SETTINGS_LIMITS.subjectPrefixMax}文字までです` });
+    else if (SUBJECT_PREFIX_FORBIDDEN.test(subjectPrefix)) errors.push({ index, field: "subjectPrefix", message: "件名の先頭に付ける文字に、改行・タブなどの制御文字は使えません" });
 
     const order = parseEmailList(r.orderEmailsText);
     const usage = parseEmailList(r.usageEmailsText);
@@ -145,7 +150,7 @@ export function validateDealers(rows) {
     usage.errors.forEach(message => errors.push({ index, field: "usageEmails", message: `使用報告用: ${message}` }));
 
     cleaned.push({
-      id: r.id || null, name, mailName,
+      id: r.id || null, name, mailName, subjectPrefix,
       orderEmails: order.emails, usageReportEmails: usage.emails
     });
   });
@@ -166,7 +171,8 @@ export function planDealerWrites(original, cleaned, facilityId) {
     };
     if (o && o.dealerId) data.dealerId = o.dealerId; // 将来のグローバルディーラー連携用IDは保持
     if (c.mailName) data.mailName = c.mailName;      // 宛名の正式表記(空なら保存しない = ディーラー名を使う)
-    const changed = !o || o.name !== c.name || o.sortOrder !== sortOrder || (o.mailName || "") !== (c.mailName || "")
+    if (c.subjectPrefix) data.subjectPrefix = c.subjectPrefix;   // 件名の先頭に付ける文字(空なら保存しない = 従来の件名)
+    const changed = !o || o.name !== c.name || o.sortOrder !== sortOrder || (o.mailName || "") !== (c.mailName || "") || (o.subjectPrefix || "") !== (c.subjectPrefix || "")
       || !sameList(o.orderEmails, c.orderEmails) || !sameList(o.usageReportEmails, c.usageReportEmails);
     if (changed) writes.push({ id: c.id, data });
   });

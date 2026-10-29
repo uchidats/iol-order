@@ -208,14 +208,19 @@ service cloud.firestore {
       }
 
       // 施設が使うディーラー（発注先設定）。発注用メール(orderEmails)と使用報告用メール(usageReportEmails)は別管理
+      // 注文メールの件名の先頭に付ける文字: 1〜20文字・改行・タブなどの制御文字と行/段落の区切りは不可(ヘッダーの注入を防ぐ)
+      function subjectPrefixOk(v) {
+        return stringIn(v, 1, 20) && v.matches('[^\\x00-\\x1F\\x7F\\x{2028}\\x{2029}]*');
+      }
       match /facilityDealers/{id} {
         allow read: if isPlatformAdmin() || isMember(fid);
         allow create, update: if (isPlatformAdmin() || isFacilityManager(fid))
-          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'mailName', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasOnly(['facilityId', 'dealerId', 'name', 'mailName', 'subjectPrefix', 'orderEmails', 'usageReportEmails', 'sortOrder', 'updatedAt', 'updatedBy'])
           && request.resource.data.keys().hasAll(['facilityId', 'name'])
           && request.resource.data.facilityId == fid
           && stringIn(request.resource.data.name, 1, 100)
           && (!('mailName' in request.resource.data) || stringIn(request.resource.data.mailName, 0, 100))   // 注文メールの宛名(正式表記。任意)
+          && (!('subjectPrefix' in request.resource.data) || subjectPrefixOk(request.resource.data.subjectPrefix))   // 件名の先頭に付ける文字(任意)
           && (!('dealerId' in request.resource.data) || stringIn(request.resource.data.dealerId, 1, 100))
           && (!('orderEmails' in request.resource.data) || validEmailList(request.resource.data.orderEmails))
           && (!('usageReportEmails' in request.resource.data) || validEmailList(request.resource.data.usageReportEmails))
