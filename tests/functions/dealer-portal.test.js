@@ -969,6 +969,47 @@ test("AB-03(再レビュー): 確認コードの要求への応答は、登録�
   assert.equal((await db.collection("dealerAuthCodeJobs").get()).size, 0);
 });
 
+test("確認コードの送信の直前の読み直し: 依頼の後に担当者の無効化・招待の取消・会社の停止があれば送らない。期限切れの依頼からはコードを作らない", async () => {
+  // 要求だけ(送信の処理はまだ)を行う
+  const request = (who) => portal.portal({ auth: who, data: { action: "sendCode" } });
+  const before = sentCodes.length;
+  // 1) 有効な担当者 → 依頼の後に無効化
+  await request(msAuth("u-d1", "x1@corp.example.jp", "m-d1"));
+  await op("updateStaff", { companyId: C.X, staffId: sid(C.X, "x1"), status: "disabled" });
+  // 2) 招待中 → 依頼の後に取消
+  const inv = await op("inviteStaff", { companyId: C.Y, email: "nd2@corp.example.jp", name: "", role: "reader" });
+  await request(msAuth("u-d2", "nd2@corp.example.jp", "m-d2"));
+  await op("cancelInvitation", { companyId: C.Y, staffId: inv.staffId });
+  // 3) 有効な担当者 → 依頼の後に会社を停止
+  await request(msAuth("u-d3", "y1@corp.example.jp", "m-d3"));
+  await op("updateCompany", { companyId: C.Y, status: "suspended" });
+  await deliverJobs();
+  assert.equal(sentCodes.length, before, "取消・無効化・会社の停止の後は送らない");
+  for (const u of ["u-d1", "u-d2", "u-d3"]) {
+    const ch = (await challengeOf(u)).data();
+    assert.deepEqual([ch.deliveryStatus, ch.targets.length, typeof ch.hash], ["target-changed", 0, "string"], u);
+  }
+  // 照合の結果は送った場合と同じ形(違うコード)。紐付けはできない
+  await assert.rejects(portal.portal({ auth: msAuth("u-d1", "x1@corp.example.jp", "m-d1"), data: { action: "verifyCode", code: "00000000" } }), (e) => /確認コードが違います/.test(e.message));
+  // 4) 期限切れの依頼(5分を過ぎて処理された)からはコードを作らない
+  await op("updateCompany", { companyId: C.Y, status: "active" });
+  await request(msAuth("u-d4", "y1@corp.example.jp", "m-d4"));
+  clock.t = Date.now() + 6 * 60 * 1000;
+  await deliverJobs();
+  clock.t = null;
+  const ch4 = (await challengeOf("u-d4")).data();
+  assert.deepEqual([ch4.deliveryStatus, ch4.hash], ["expired", undefined], "期限切れの依頼: コードなし");
+  assert.equal(sentCodes.length, before);
+  assert.equal((await db.collection("dealerAuthCodeJobs").get()).size, 0, "依頼は残さない");
+  // 期限内・対象が有効なら従来どおり送る
+  clock.t = Date.now() + 8 * 60 * 1000;
+  await request(msAuth("u-d4", "y1@corp.example.jp", "m-d4"));
+  await deliverJobs();
+  clock.t = null;
+  assert.equal(sentCodes.length, before + 1);
+  assert.equal((await challengeOf("u-d4")).get("deliveryStatus"), "sent");
+});
+
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
   const email = "x1@corp.example.jp", staffId = sid(C.X, "x1");
   const g = googleAuth("ug1", email, "g-x1"), m = msAuth("um1", email, "m-x1");

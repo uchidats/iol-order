@@ -28,7 +28,7 @@ export const PORTAL_LIMITS = Object.freeze({
   // 検索時点に固定した読み取り(readTime)ができる時間(Firestore は過去1時間以内)。時刻差の余裕を引く。続きのカーソルはこれを超えて使えない
   pinnedReadWindowMs: 59.5 * 60 * 1000,
   // 確認コード(承認済みのメールに送る。一度だけ・短時間。認証主体・UID・メールに結び付ける)。送り直しは認証主体ごと・メールごとに数える
-  codeTtlMs: 10 * 60 * 1000, codeMaxAttempts: 5, codeResendMs: 60 * 1000, codeMaxSends: 5, codeMaxSendsPerEmail: 10, codeWindowMs: 24 * 60 * 60 * 1000,
+  codeTtlMs: 10 * 60 * 1000, codeJobTtlMs: 5 * 60 * 1000, codeMaxAttempts: 5, codeResendMs: 60 * 1000, codeMaxSends: 5, codeMaxSendsPerEmail: 10, codeWindowMs: 24 * 60 * 60 * 1000,
   // 確認済みの端末(メールリンクのログイン用)の期限と、担当者ごとの上限
   deviceTtlMs: 180 * 24 * 60 * 60 * 1000, devicesMax: 10,
   lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
@@ -385,7 +385,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         companyName: [...new Set(eligible.map(e => String(e.c.get("name") || "")))].join("、"),
         sentAtMs: now(), sends: sends + 1, windowStartMs: fresh ? p.windowStartMs : now(), deliveryStatus: "queued" });
       tx.set(qref, { windowStartMs: qFresh ? q.windowStartMs : now(), sends: qSends + 1 });
-      tx.create(db.collection("dealerAuthCodeJobs").doc(), { challengeId: cref.id, requestId, createdAt: FieldValue.serverTimestamp() });
+      tx.create(db.collection("dealerAuthCodeJobs").doc(), { challengeId: cref.id, requestId, createdAt: FieldValue.serverTimestamp(), expiresAtMs: now() + PORTAL_LIMITS.codeJobTtlMs });   // 依頼は短い期限付き
       audit(tx, { action: "staff.codeRequested", actorUid: pr.uid, provider: pr.kind, targets: targets.length });
     });
     return { ok: true, expiresInMinutes: Math.round(PORTAL_LIMITS.codeTtlMs / 60000) };
@@ -394,7 +394,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   /**
    * 確認コードの送信(送信の依頼をきっかけに呼ぶ。要求の応答とは別)。依頼が最新の要求のときだけ、コードを作ってハッシュを保存し、
    * 対象があれば承認済みのメールに送る(対象がなければ送らない。照合の結果は対象がある場合と同じ「違います/無効」になる)。
-   * 送信の成否は記録だけする(利用者への応答には出さない)。機能の停止中・送信手段がないときは送らない
+   * 送信の成否は記録だけする(利用者への応答には出さない)。機能の停止中・送信手段がないときは送らない。
+   * 送る直前に、対象の担当者(状態・世代・承認済みのメール・招待の期限)と会社の状態を読み直し、取消・無効化・会社の停止の後は送らない。
+   * 依頼には短い期限があり、期限を過ぎた依頼からはコードを作らない
    * @returns {Promise<{sent:boolean, reason?:string}>}
    */
   async function deliverCodeJob(jobId) {
@@ -406,13 +408,28 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!j.exists || !isId(j.get("challengeId"))) return null;
       const cref = db.doc(`dealerAuthChallenges/${j.get("challengeId")}`);
       const c = await tx.get(cref);
+      // 送る直前の対象の読み直し(書き込みの前にすべて読む)
+      const requested = c.exists && Array.isArray(c.get("targets")) ? c.get("targets") : [];
+      const email = c.exists ? normEmail(c.get("email")) : "";
+      const current = await Promise.all(requested.map(async (t) => {
+        if (!t || !isId(t.staffId) || !isId(t.companyId)) return null;
+        const [st, co] = await Promise.all([tx.get(staffRef(t.staffId)), tx.get(companyRef(t.companyId))]);
+        const rev = Number.isInteger(st.exists && st.get("authRevision")) ? st.get("authRevision") : 1;
+        const still = st.exists && st.get("companyId") === t.companyId && rev === t.authRevision
+          && (t.status === "invited" ? inviteOpen(st, co, email) : t.status === "active" && staffActive(st, co, email));
+        return still ? { t, name: String(co.get("name") || "") } : null;
+      }));
       tx.delete(jref);   // 依頼は1回だけ処理する
       if (!c.exists || c.get("requestId") !== j.get("requestId") || c.get("deliveryStatus") !== "queued") return null;   // 新しい要求がある・処理済み
+      const jobExp = j.get("expiresAtMs");
+      if (typeof jobExp !== "number" || !(jobExp > now())) { tx.update(cref, { deliveryStatus: "expired" }); return { skipped: true }; }   // 期限切れの依頼からはコードを作らない
+      const live = current.filter(Boolean);
       const expiresAtMs = now() + PORTAL_LIMITS.codeTtlMs;
-      const targets = Array.isArray(c.get("targets")) ? c.get("targets") : [];
-      const willSend = targets.length > 0 && isEnabled() && typeof sendJoinCode === "function";
-      tx.update(cref, { hash: codeHash(code, salt), salt, expiresAtMs, attempts: 0, deliveryStatus: willSend ? "sending" : (targets.length ? "not-sent" : "no-target") });
-      return willSend ? { ref: cref, to: c.get("email"), uid: c.get("uid"), companyName: c.get("companyName") || "", expiresAtMs, requestId: c.get("requestId") } : { skipped: true };
+      const willSend = live.length > 0 && isEnabled() && typeof sendJoinCode === "function";
+      // 送る直前に対象がなくなった(取消・無効化・会社の停止など)ときも、照合の結果を同じにするためコードのハッシュは作る(送らない)
+      const status = willSend ? "sending" : !requested.length ? "no-target" : !live.length ? "target-changed" : "not-sent";
+      tx.update(cref, { hash: codeHash(code, salt), salt, expiresAtMs, attempts: 0, targets: live.map(x => x.t), deliveryStatus: status });
+      return willSend ? { ref: cref, to: c.get("email"), uid: c.get("uid"), companyName: [...new Set(live.map(x => x.name))].join("、"), expiresAtMs, requestId: c.get("requestId") } : { skipped: true };
     });
     if (!job || job.skipped) return { sent: false, reason: job ? "skipped" : "stale" };
     let r;
