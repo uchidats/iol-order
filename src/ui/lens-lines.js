@@ -115,6 +115,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
     enhanceSelect(line.power, { ariaLabel: "IOLパワー", matchWidth: true });
     enhanceSelect(line.doctor, { ariaLabel: "担当医", matchWidth: true, wrapText: true });   // 担当医: 幅の狭い選択ボックス。展開メニューも同じ幅。長い名前は折り返す   // 度数は幅の狭い選択ボックス。展開メニューも同じ幅
+    enhanceSelect(line.dealer, { ariaLabel: "発注先", matchWidth: true, wrapText: true });   // 発注先も同じ(長い名前は折り返す。値・選択の処理は select のまま)
     line.dealerGroup = line.root.querySelector('[data-group="dealer"]');
     syncDealerGroup(line);
 

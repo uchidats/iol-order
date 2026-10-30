@@ -79,7 +79,9 @@ const overlapScript = () => {
     hit, qWidth: qr.width, btnWidths: btns.map(b => Math.round(b.width)), btnHeights: btns.map(b => Math.round(b.height)),
     btnGap: Math.round(btns[1].left - btns[0].right), sameRow: Math.abs(qr.top - dr.top) < 2, rowGap: Math.round(dr.left - qr.right),
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    btnsInsideGroup: btns.every(b => b.left >= qr.left - 0.5 && b.right <= qr.right + 0.5)
+    btnsInsideGroup: btns.every(b => b.left >= qr.left - 0.5 && b.right <= qr.right + 0.5),
+    // 項目名を左・ボタンを右(縦の中央揃え)になっているか
+    labelBeside: (() => { const l = q.querySelector(".form-label").getBoundingClientRect(); return l.right <= btns[0].left && Math.abs((l.top + l.bottom) / 2 - (btns[0].top + btns[0].bottom) / 2) < 3; })()
   };
 };
 
@@ -104,7 +106,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(r.btnsInsideGroup, "ボタンが枚数の欄からはみ出している: " + ctx);
         assert.equal(r.overflowX, false, "横スクロールが出ている: " + ctx);
         if (r.sameRow) assert.equal(r.rowGap, 20, "同じ行のときの間隔は20px: " + ctx);
-        if (w >= 600) assert.ok(r.sameRow, "十分な幅では同じ行に並ぶ: " + ctx);
+        // 項目名を左・入力欄を右の配置(スマホ 360px 以上・PC): 枚数の項目名とボタンが同じ行。枚数と手術日は別の行
+        if (w >= 360) assert.ok(r.labelBeside && !r.sameRow, "項目名の右にボタン(手術日は次の行): " + ctx);
       }
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }

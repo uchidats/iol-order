@@ -486,20 +486,23 @@ body {
 .lens-line [data-group="power"] { max-width: 8rem; }
 .lens-line [data-group="quantity"] { max-width: 16rem; }
 .lens-line .date-input-wrapper { max-width: 14rem; }
-/* 試行(trial/lens-inline-labels): IOLモデル・IOLパワー・枚数・手術日・担当医は、項目名を左・入力欄を右(縦の中央揃え)。
+/* 試行(trial/lens-inline-labels): IOLモデル・IOLパワー・枚数・手術日・担当医・発注先は、項目名を左・入力欄を右(縦の中央揃え)。
    レンズの欄の幅が足りないとき(290px未満)は従来の縦並び。入力欄の幅・枚数のボタン・入力の処理は従来どおり */
 .lens-line-body { container-type: inline-size; }
 @container (min-width: 290px) {
   .lens-line .lens-row { display: block; }
-  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"]) {
+  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"], [data-group="dealer"]) {
     display: grid; grid-template-columns: 6.5em minmax(0, 1fr); column-gap: 10px; align-items: center;
     max-width: none; margin-bottom: 12px;
   }
-  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"]) > .form-label { margin: 0; min-height: 0; }
-  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"]) > :not(.form-label) { grid-column: 2; min-width: 0; }
+  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"], [data-group="dealer"]) > .form-label { margin: 0; min-height: 0; }
+  .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"], [data-group="dealer"]) > :not(.form-label) { grid-column: 2; min-width: 0; }
   .lens-line [data-group="model"] > .select-wrapper { max-width: 220px; }
   .lens-line [data-group="power"] > .select-wrapper { max-width: 8rem; }
-  .lens-line [data-group="doctor"] > .select-wrapper { max-width: 150px; }
+  .lens-line [data-group="doctor"] > .select-wrapper, .lens-line [data-group="dealer"] > .select-wrapper { max-width: 220px; }   /* 長い担当医名・発注先名(IOLモデルと同じ幅) */
+}
+@container (min-width: 520px) {
+  .lens-line [data-group="doctor"] > .select-wrapper, .lens-line [data-group="dealer"] > .select-wrapper { max-width: 400px; }   /* PC: 長い担当医名・発注先名も選択欄に全文(スマホは折り返し) */
 }
 .lens-lines-actions { margin: 4px 0 14px; }
 .lens-line [hidden] { display: none !important; }
