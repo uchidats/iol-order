@@ -1723,6 +1723,7 @@ input[type="date"].form-control {
 }
 
 .info-tip-pop[hidden] { display: none; }
+.dealer-link-heading .info-tip-pop { white-space: pre-line; }   /* 関連付けの説明: 用語ごとに改行 */
 
 /* 注文者の一覧: 通常は入力ボックスなしの一覧表示。鉛筆を押した行だけ入力欄になる */
 .orderer-item {

@@ -239,7 +239,17 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       await page.click('[data-act="proposeLink"]');
       await page.waitForFunction(() => window.__calls.some(c => c[0] === "proposeLink"));
       assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c[0] === "proposeLink")[1]), { facilityId: "fA", localDealerId: "dA2", companyId: "dco-x" });
-      assert.match(await page.locator(".dealer-operator").innerText(), /関連付けだけでは閲覧は始まりません/);
+      // 関連付けの欄: 見出し・項目名。説明は見出しの右のⓘ(常時は表示しない。従来の注意も含む)
+      const link = page.locator(".dealer-link-heading");
+      assert.equal(await link.locator("h3").innerText(), "発注先とディーラー会社の関連付け");
+      assert.deepEqual(await page.locator(".settings-section:has(> .dealer-link-heading) .dealer-operator-grid .form-label > span").allInnerTexts(), ["施設", "発注先", "ディーラー会社"]);
+      assert.ok(!(await page.locator(".dealer-operator").innerText()).includes("関連付けだけでは閲覧は始まりません"), "説明は常時表示しない");
+      await link.locator(".info-tip-btn").click();
+      await link.locator(".info-tip-pop").waitFor();
+      const help = await link.locator(".info-tip-pop").innerText();
+      assert.match(help, /^発注先: 各施設が施設設定の「ディーラー」に登録した、注文メールの送信先です。\nディーラー会社: ディーラーの担当者のログインと、注文を閲覧できる範囲を管理する単位です。/);
+      assert.match(help, /関連付けだけでは閲覧は始まりません。施設の管理者・副管理者の許可が必要です。閲覧を許可中の関連付けは変更できません\(施設で取消してから変更します\)。$/);
+      await page.keyboard.press("Escape");
       assert.equal(await page.locator(".dealer-operator b").count(), 0, "名称の HTML は要素にしない");
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
       assert.deepEqual(errors, []);
