@@ -59,14 +59,14 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
 
   /**
    * ログイン画面。上段に「Googleでログイン」「Microsoftでログイン」(横に並べる。スマホ幅では縦)、下段にメールリンク(パスワード不要)。
-   * どれでも、招待された企業メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
+   * どれでも、招待された勤務先メールアドレスのアカウントでログインする(所属・閲覧の範囲はサーバーが確認する)。
    * 初めて使うログイン方法(参加を含む)・新しい端末(ブラウザ)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
    */
   function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
     const microsoft = onMicrosoft ? h("button", { type: "button", class: "btn btn-primary dealer-login-microsoft", id: "btnDealerMicrosoft" }, "Microsoftでログイン") : null;
     const providers = google || microsoft;
-    const email = h("input", { class: "form-control", type: "email", id: "dealerEmail", autocomplete: "email", "aria-label": "企業メールアドレス", maxlength: "254" });
+    const email = h("input", { class: "form-control", type: "email", id: "dealerEmail", autocomplete: "email", "aria-label": "勤務先メールアドレス", maxlength: "254" });
     const send = h("button", { type: "button", class: providers ? "btn btn-secondary" : "btn btn-primary", id: "btnDealerSendLink" }, "ログインリンクを送信");
     const msg = h("p", { class: notice ? "form-hint" : "error-message", role: "status" }, notice || error);
     const busy = (v) => { send.disabled = v; if (google) google.disabled = v; if (microsoft) microsoft.disabled = v; };
@@ -86,14 +86,14 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     });
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー用 受注一覧")),
-      h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された企業メールアドレスのアカウントでログインしてください。"),
+      h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された勤務先メールアドレスのアカウントでログインしてください。"),
       providers ? h("div", { class: "dealer-login-block", "data-login": "accounts" },
         h("div", { class: "form-label" }, "会社のアカウントでログイン(推奨)"),
         h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときと、新しい端末(ブラウザ)では、招待されたメールアドレスに届く確認コードで本人確認をします。"),
         h("div", { class: "dealer-login-providers" }, google, microsoft)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
-        h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "企業メールアドレス"),
-        h("p", { class: "form-hint" }, "招待された企業メールアドレスを入力すると、ログイン用のリンクが届きます。"),
+        h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "勤務先メールアドレス"),
+        h("p", { class: "form-hint" }, "招待された勤務先メールアドレスを入力すると、ログイン用のリンクが届きます。"),
         email,
         h("div", { class: "onboarding-actions" }, send)),
       msg].filter(Boolean));
