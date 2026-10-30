@@ -440,7 +440,7 @@ body {
   border-radius: var(--radius-md);
 }
 
-/* 「レンズ1」「レンズ2」… ヘッダーの状態表示と同じピル型。文字の長さに合わせた小さなサイズ */
+/* 「レンズ1」「レンズ2」… ヘッダーの状態表示と同じピル型。文字の長さに合わせた小さなサイズ。入力欄のバッジはタップで開閉(中に ▲/▼) */
 .lens-line-title,
 .lens-no-badge {
   display: inline-block;
@@ -1620,12 +1620,12 @@ input[type="date"].form-control {
   font-size: 1rem;
 }
 
-/* 施設設定の折りたたみ: 見出しをタップして開閉。見出しの右に小さな矢印(閉じると右向き)。閉じたときは見出しだけ(「追加」も隠す) */
+/* 施設設定の折りたたみ: 見出しをタップして開閉。見出しの文字の中に小さな ▲(開いている)/ ▼(閉じている)。閉じたときは見出しだけ(「追加」も隠す) */
 .settings-heading.is-collapsible { cursor: pointer; }
-.settings-collapse-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; margin-left: 2px; border: 0; border-radius: 4px; background: none; color: #6b7280; cursor: pointer; flex: none; }
+.settings-collapse-btn { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.settings-collapse-btn::after { content: "▲"; margin-left: 6px; font-size: 0.7em; color: #6b7280; }
+.settings-collapse-btn[aria-expanded="false"]::after { content: "▼"; }
 .settings-collapse-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-.settings-collapse-btn svg { transition: transform 0.15s ease; }
-.settings-section.is-collapsed .settings-collapse-btn svg { transform: rotate(-90deg); }
 .settings-section.is-collapsed > :not(.settings-heading) { display: none !important; }
 .settings-section.is-collapsed > .settings-heading { margin-bottom: 0; }
 .settings-section.is-collapsed > .settings-heading > .settings-actions { display: none; }
@@ -2107,17 +2107,12 @@ input[type="date"].form-control {
 
 /* レンズの折りたたみ: 最上部の [レンズN] は展開・折りたたみで位置を変えない。矢印はバッジのすぐ右、ゴミ箱は右端(スマホで押し間違えないよう離す。折りたたみ中はゴミ箱なし)。
    折りたたみ中はバッジの下に、確認画面と同じ表示の2行(手術日・担当医 / メーカー モデル 度数 枚数) */
-.lens-line-head-start { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.lens-line-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; margin: -6px 0; padding: 0;
-  background: transparent; border: 0; border-radius: 10px; color: #64748b; cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.lens-line-toggle svg { transition: transform 0.15s ease; }
-.lens-line-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }   /* 展開中: 上向き(折りたたむ) / 折りたたみ中: 下向き(展開) */
-.lens-line-toggle:hover { color: var(--primary, #1d4ed8); background: #eef3fd; }
-.lens-line-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.lens-line-head-start { display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 28px; }   /* 行の高さはゴミ箱(28px)と同じ。折りたたみ中もバッジの位置を変えない */
+button.lens-line-title { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button.lens-line-title::after { content: "▲"; margin-left: 4px; font-size: 0.7em; }   /* 展開中: ▲(タップで折りたたむ) / 折りたたみ中: ▼(タップで展開) */
+button.lens-line-title[aria-expanded="false"]::after { content: "▼"; }
+button.lens-line-title:hover { background-color: #e0eafc; }
+button.lens-line-title:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .lens-line.is-collapsed { padding-bottom: 10px; cursor: pointer; }
 .lens-line.is-collapsed .lens-line-head { margin-bottom: 4px; }
 .lens-line-summary {

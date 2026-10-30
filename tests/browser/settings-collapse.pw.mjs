@@ -81,6 +81,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 初回: 6セクションすべて開く。見出しの右に開閉の矢印
         assert.deepEqual(await state(page), ["open", "open", "open", "open", "open", "open"]);
         for (const k of KEYS) assert.equal(await sec(page, k).locator(".settings-collapse-btn").getAttribute("aria-expanded"), "true", k);
+        // 開閉は見出しの文字(独立した矢印はない)。見出しの中に ▲(開いている)/ ▼(閉じている)
+        const iolBtn = sec(page, "iols").locator(".settings-heading h3 > .settings-collapse-btn");
+        assert.equal(await iolBtn.innerText(), "採用IOL");
+        assert.equal(await page.locator(".settings-heading svg").count(), 0, "見出しに矢印のアイコンはない");
+        assert.equal(await iolBtn.evaluate(b => getComputedStyle(b, "::after").content), '"▲"');
+        await iolBtn.click();
+        assert.equal(await iolBtn.getAttribute("aria-expanded"), "false");
+        assert.equal(await iolBtn.evaluate(b => getComputedStyle(b, "::after").content), '"▼"');
+        await iolBtn.click();
+        assert.equal(await iolBtn.getAttribute("aria-expanded"), "true");
 
         // 見出しのタップで閉じる(中身は隠れる)。他のセクションは開いたまま(複数同時に開ける)
         await sec(page, "dealers").locator(".settings-heading h3").click();

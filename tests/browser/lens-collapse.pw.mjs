@@ -91,12 +91,14 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await fill(c1, { model: "alcon-cna0t0", power: "+7.5D" });
         const badgeBefore = await box(c1.locator(".lens-line-title"));
         const cardBefore = await box(c1);
-        // 矢印はバッジのすぐ右、ゴミ箱は右端(押し間違えないよう離す)
+        // 開閉はバッジ自体(独立した矢印はない)。バッジの中に ▲(展開中)。ゴミ箱は右端(押し間違えないよう離す)
+        assert.equal(await c1.locator(".lens-line-toggle, .lens-line-head svg:not(.lens-line-trash svg)").count(), 0, "独立した矢印はない");
+        assert.equal(await c1.locator('[data-act="toggle"]').evaluate(b => b.classList.contains("lens-line-title")), true, "バッジが開閉のボタン");
+        const mark = (loc) => loc.evaluate(b => getComputedStyle(b, "::after").content);
+        assert.equal(await mark(c1.locator(".lens-line-title")), '"▲"');
         const tg = await box(c1.locator('[data-act="toggle"]')), tr = await box(c1.locator('[data-act="remove"]'));
-        assert.ok(tg.x - (badgeBefore.x + badgeBefore.width) < 12, `${width}: 矢印はバッジのすぐ右`);
         assert.ok(cardBefore.x + cardBefore.width - (tr.x + tr.width) < 16, `${width}: ゴミ箱は右端`);
-        assert.ok(tr.x - (tg.x + tg.width) >= 120, `${width}: 矢印とゴミ箱は十分に離れる(${tr.x - (tg.x + tg.width)}px)`);
-        assert.ok(Math.abs((tg.y + tg.height / 2) - (badgeBefore.y + badgeBefore.height / 2)) < 3, "矢印はバッジと同じ高さ");
+        assert.ok(tr.x - (tg.x + tg.width) >= 120, `${width}: バッジとゴミ箱は十分に離れる(${tr.x - (tg.x + tg.width)}px)`);
         // 「レンズを追加」: 入力済みのレンズ1は自動で折りたたみ、レンズ2は展開して追加
         await page.click("#btnAddLine");
         assert.deepEqual(await page.evaluate(() => window.__lines.collapsedLineNos()), [1]);
@@ -118,7 +120,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await c1.locator('[data-act="remove"]').isVisible(), false);
         assert.equal(await c1.locator('[data-act="toggle"]').isVisible(), true);
         assert.equal(await c1.locator('[data-act="toggle"]').getAttribute("aria-expanded"), "false");
+        assert.equal(await mark(c1.locator(".lens-line-title")), '"▼"', "折りたたみ中はバッジに ▼");
         assert.equal(await c1.locator("[data-f=power]").isVisible(), false);
+        assert.equal(await c1.locator("[data-f=power]").inputValue(), "+7.5D", "折りたたんでも入力は消えない");
         // レンズ2: 展開・手術日/担当医/発注先は引き継ぎ、モデルは未選択
         const c2 = card(page, 1);
         assert.equal(await c2.locator("[data-f=model]").inputValue(), "");
@@ -193,7 +197,7 @@ test("レンズの折りたたみ: キーボードで折りたたみ・展開で
     await c1.locator(".lens-line-summary").focus();
     await page.keyboard.press("Enter");
     assert.equal(await toggle.getAttribute("aria-expanded"), "true");
-    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.dataset.act), "toggle", "展開後は矢印にフォーカス");
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.dataset.act), "toggle", "展開後はバッジにフォーカス");
   } finally { await browser.close(); }
 });
 

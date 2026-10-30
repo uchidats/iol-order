@@ -1150,13 +1150,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   };
   for (const section of Object.values(sections)) {
     const heading = section.querySelector(":scope > .settings-heading");
-    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "2.5", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) chevron.setAttribute(k, v);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-    path.setAttribute("points", "6 9 12 15 18 9");
-    chevron.appendChild(path);
-    const btn = h("button", { type: "button", class: "settings-collapse-btn", "aria-expanded": "true", "aria-label": `${heading.querySelector("h3").textContent}を開閉` }, chevron);
-    heading.insertBefore(btn, heading.querySelector(":scope > .settings-actions"));   // 見出し(とⓘ)の右。「追加」はさらに右端
+    // 見出しの文字自体が開閉のボタン(独立した矢印はない。▼/▲ は見出しの中に CSS で表示)
+    const h3 = heading.querySelector("h3");
+    const btn = h("button", { type: "button", class: "settings-collapse-btn", "aria-expanded": "true" }, h3.textContent);
+    h3.replaceChildren(btn);
     heading.classList.add("is-collapsible");
     section._collapseBtn = btn;
     heading.addEventListener("click", (e) => {

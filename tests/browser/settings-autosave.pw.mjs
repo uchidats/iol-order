@@ -474,7 +474,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const notes = sec.locator('.dealer-item.is-editing .form-label:has([data-f$="Emails"]) .field-note');
       assert.deepEqual(await notes.allInnerTexts(), ["（1行に1件・最大5件）", "（1行に1件・最大5件）"]);
       const labels = await sec.locator(".dealer-item.is-editing .form-label").evaluateAll(ls => ls.map(l => l.firstChild.textContent.trim()));
-      assert.deepEqual(labels, ["注文メールの宛名", "発注用メールアドレス", "使用報告用メールアドレス"]);
+      assert.deepEqual(labels, ["注文メールの宛名", "件名の先頭に付ける文字", "発注用メールアドレス", "使用報告用メールアドレス"]);
       const ns = await notes.evaluateAll(es => es.map(e => { const s = getComputedStyle(e); return [s.fontSize, s.fontWeight, s.color]; }));
       assert.deepEqual(ns[0], ns[1], "2つの補足説明は同じ書式");
       assert.equal(ns[0][2], "rgb(107, 114, 128)", "グレー");

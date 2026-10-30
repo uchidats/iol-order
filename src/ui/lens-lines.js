@@ -30,14 +30,6 @@ function trashIcon() {
   return svg;
 }
 
-/** 折りたたみ・展開の小さな矢印(装飾。向きは CSS で aria-expanded に合わせて変える) */
-function chevronIcon() {
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(NS, "svg");
-  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "18", height: "18", fill: "none", stroke: "currentColor", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
-  const p = document.createElementNS(NS, "path"); p.setAttribute("d", "M6 9l6 6 6-6"); svg.appendChild(p);
-  return svg;
-}
 
 
 let seq = 0; // ラベルの for / radio の name を明細ごとに一意にする
@@ -83,12 +75,12 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.qtyManual = false;   // 利用者が枚数を変えたら true(以後はトーリック・多焦点のチェックで枚数を変えない)
     line.errs = {};
     const err = (k) => (line.errs[k] = h("p", { class: "error-message", "data-err": k }));
-    line.title = h("strong", { class: "lens-line-title" });
+    line.title = h("button", { type: "button", class: "lens-line-title", "data-act": "toggle", "aria-expanded": "true" });   // バッジをタップして開閉
     // 各レンズカードの右上の、控えめなゴミ箱アイコン(確認ダイアログなし。削除すると「元に戻す」付きの通知が出る)
     line.removeBtn = h("button", { type: "button", class: "lens-line-trash", "data-act": "remove", title: "このレンズを削除", "aria-label": "このレンズを削除" }, trashIcon());
     // 折りたたみ・展開(画面の表示だけ。注文データ・下書き・Firestore には保存しない)。入力が揃い、値が正しいレンズだけ折りたためる
     line.collapsed = false;
-    line.toggleBtn = h("button", { type: "button", class: "lens-line-toggle", "data-act": "toggle", "aria-expanded": "true" }, chevronIcon());
+    line.toggleBtn = line.title;   // 開閉はバッジ(独立した矢印はない)
     line.summary = h("button", { type: "button", class: "lens-line-summary", "data-act": "expand", hidden: true });
 
     // 必須の印: 項目名の右に小さな赤い「*」(読み上げでは「必須」)
@@ -117,7 +109,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       // 発注先: 施設の登録ディーラーが2社以上のときだけ表示(選択必須)。1社は自動、0社は「発注先未設定」
       group("発注先", h("div", { class: "select-wrapper" }, line.dealer), "dealer", id("lensDealer")));
     line.root = h("fieldset", { class: "lens-line", "data-line": String(n) },
-      h("div", { class: "lens-line-head" }, h("div", { class: "lens-line-head-start" }, line.title, line.toggleBtn), line.removeBtn),
+      h("div", { class: "lens-line-head" }, h("div", { class: "lens-line-head-start" }, line.title), line.removeBtn),
       line.summary, line.body);
     // スマホ幅では、モデルと度数の選択をカスタムドロップダウンで行う(select は値の保持用に残る。PC幅は従来のselect)
     enhanceSelect(line.model, { ariaLabel: "IOLモデル" });
@@ -142,7 +134,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     line.chkMf.addEventListener("change", onFilter);
     line.chkToric.addEventListener("change", onFilter);
     line.removeBtn.addEventListener("click", () => removeLine(line));
-    // 矢印: 展開中は折りたたむ(入力に不備があれば折りたたまず、そのレンズの不備を表示)。折りたたみ中は展開
+    // バッジ: 展開中は折りたたむ(入力に不備があれば折りたたまず、そのレンズの不備を表示)。折りたたみ中は展開。入力内容は消えない(表示だけ)
     line.toggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (line.collapsed) { expand(line); return; }
@@ -153,7 +145,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       if (!line.collapsed) return;
       const fromSummary = document.activeElement === line.summary;
       expand(line);
-      if (fromSummary) line.toggleBtn.focus({ preventScroll: true });   // 要約が隠れるので、操作の位置を矢印へ移す
+      if (fromSummary) line.toggleBtn.focus({ preventScroll: true });   // 要約が隠れるので、操作の位置をバッジへ移す
     });
     return line;
   }
