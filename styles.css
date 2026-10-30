@@ -499,7 +499,8 @@ body {
   .lens-line :is([data-group="model"], [data-group="power"], [data-group="quantity"], [data-group="date"], [data-group="doctor"], [data-group="dealer"]) > :not(.form-label) { grid-column: 2; min-width: 0; }
   .lens-line [data-group="model"] > .select-wrapper { max-width: 220px; }
   .lens-line [data-group="power"] > .select-wrapper { max-width: 8rem; }
-  .lens-line [data-group="doctor"] > .select-wrapper, .lens-line [data-group="dealer"] > .select-wrapper { max-width: 220px; }   /* 長い担当医名・発注先名(IOLモデルと同じ幅) */
+  .lens-line [data-group="dealer"] > .select-wrapper { max-width: 220px; }   /* 長い発注先名(IOLモデルと同じ幅) */
+  .lens-line [data-group="date"] > .date-input-wrapper, .lens-line [data-group="doctor"] > .select-wrapper { max-width: 190px; }   /* 手術日と担当医は同じ幅(長い氏名は折り返す) */
 }
 .lens-lines-actions { margin: 4px 0 14px; }
 .lens-line [hidden] { display: none !important; }
@@ -2083,7 +2084,7 @@ input[type="date"].form-control {
   .select-wrapper.cs-enhanced .cs-trigger.is-placeholder { color: var(--text-main); }
   .select-wrapper.cs-enhanced .cs-trigger-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* 担当医: 名前が長いときは、切らずに折り返す */
-  .select-wrapper.cs-enhanced .cs-trigger.cs-wrap .cs-trigger-text { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; line-height: 1.35; }
+  .select-wrapper.cs-enhanced .cs-trigger.cs-wrap .cs-trigger-text { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; line-height: 1.35; padding-block: 1px; }   /* 上下1px: 行の高さの端数で最終行が欠けない(Firefox) */
   /* 元の select は値の保持用に残す(表示せず、タップも受けない) */
   .select-wrapper.cs-enhanced select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 }

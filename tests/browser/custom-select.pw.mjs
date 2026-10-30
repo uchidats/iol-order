@@ -158,11 +158,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await modelTrigger.innerText()).trim(), "CNA0T0");
       assert.equal((await powerTrigger.innerText()).trim(), "+20.0D", "度数は維持");
 
-      // 担当医: 項目名を左・入力欄を右の配置では、IOLモデルと同じ幅(220px まで。欄の幅に収める)・展開メニューも同じ幅。長い名前は切れずに折り返す
+      // 担当医: 項目名を左・入力欄を右の配置では、手術日と同じ幅(約190px。左端もそろう)・展開メニューも同じ幅。長い名前は切れずに折り返す
       const doctorTrigger = line.locator('[data-group="doctor"] .cs-trigger'), doctorSelect = line.locator("[data-f=doctor]");
       const dt = await rect(doctorTrigger);
-      const mt = await rect(modelTrigger);
-      assert.ok(Math.abs(dt.width - mt.width) <= 1 && dt.width <= 220.5, `担当医の幅 ${dt.width}(IOLモデル ${mt.width})`);
+      const dd = await rect(line.locator(".date-input-wrapper"));
+      assert.ok(Math.abs(dt.width - dd.width) <= 1 && Math.abs(dt.left - dd.left) <= 1 && dt.width <= 190.5, `担当医の幅 ${dt.width}(手術日 ${dd.width})`);
       await doctorTrigger.click(); await panel.waitFor();
       const dp = await rect(panel);
       assert.ok(Math.abs(dp.width - dt.width) <= 1 && Math.abs(dp.left - dt.left) <= 1 && dp.right <= 390 - 7.5, `メニューの幅・位置: ${JSON.stringify({ dp, dt })}`);
