@@ -278,6 +278,30 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
   const setErr = (line, k, msg, ctl) => { line.errs[k].textContent = msg; ctl?.classList.add("is-invalid"); };
 
+  /**
+   * スマホの横並びの担当医の欄の幅: 候補(「選択」と登録済みの担当医)のうち、最も長い氏名の実際の表示幅 + 左右の余白(矢印を含む)・枠線。
+   * 候補が変わったときだけ計算し(選択の変更では変えない)、CSS の変数 --doctor-select-w に入れる(最小・最大の幅と折り返しは CSS。PC・320px は使わない)
+   */
+  let doctorWidthKey = null;
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  function syncDoctorWidth(force = false) {
+    const ref = container.querySelector('[data-group="doctor"] .cs-trigger') || container.querySelector('[data-f="doctor"]');
+    if (!ref || !ref.isConnected || !measureCtx) return;
+    const names = ["選択", ...getDoctors().map(d => String(d.name || ""))];
+    const key = names.join("\n");
+    if (!force && key === doctorWidthKey) return;
+    const cs = getComputedStyle(ref);
+    if (!cs.fontSize) return;
+    measureCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const text = Math.max(...names.map(n => measureCtx.measureText(n).width));
+    const px = (v) => parseFloat(v) || 0;
+    const width = Math.ceil(text + px(cs.paddingLeft) + px(cs.paddingRight) + px(cs.borderLeftWidth) + px(cs.borderRightWidth)) + 2;   // +2: 端数の余裕
+    container.style.setProperty("--doctor-select-w", `${width}px`);
+    doctorWidthKey = key;
+  }
+  // Web フォントの読み込みの後に計り直す(読み込み前の代替フォントの幅で決めない)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => syncDoctorWidth(true)).catch(() => {});
+
   /** 枚数の初期値: トーリック・多焦点のどちらかにチェックがあれば2枚、どちらもなければ1枚 */
   const defaultQuantity = (line) => (line.chkToric.checked || line.chkMf.checked ? 2 : 1);
   const setQuantity = (line, q) => line.qty.forEach(r => { r.checked = r.value === String(q); });
@@ -323,6 +347,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   }
 
   function renumber() {
+    syncDoctorWidth();   // 明細の追加・削除・復元(担当医の候補が変わっていれば幅を計り直す)
     lines.forEach((l, i) => { l.title.textContent = `レンズ${i + 1}`; l.removeBtn.setAttribute("aria-label", `レンズ${i + 1}を削除`); l.removeBtn.title = `レンズ${i + 1}を削除`; syncCollapsed(l); });
     addButton.disabled = lines.length >= MAX_LINES;
   }
@@ -379,6 +404,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
     container.insertBefore(line.root, container.children[index] || null);
     rebuildModels(line, "");
     writeState(line, state);
+    syncDoctorWidth();
   }
 
   /**
@@ -432,7 +458,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
       // 同じ条件の明細の重複は、入力の誤りにしない(確認画面で「重複を確認しました」にチェックすれば注文できる。order-form.js)
       return { ok: !first, firstInvalid: first };
     },
-    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); recheckCollapsed(l); }); },
+    refresh() { lines.forEach(l => { rebuildModels(l, l.model.value); fillDoctors(l, l.doctor.value); fillDealers(l, l.dealer.value); syncDealerGroup(l); recheckCollapsed(l); }); syncDoctorWidth(); },   // 担当医の追加・削除の後は幅を計り直す
     /** 折りたたみ中のレンズ番号(表示の確認・テスト用。注文データには含めない) */
     collapsedLineNos: () => lines.map((l, i) => (l.collapsed ? i + 1 : 0)).filter(Boolean),
     /** 全明細の入力状態(下書きの保存用) */

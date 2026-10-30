@@ -158,11 +158,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await modelTrigger.innerText()).trim(), "CNA0T0");
       assert.equal((await powerTrigger.innerText()).trim(), "+20.0D", "度数は維持");
 
-      // 担当医: 項目名を左・入力欄を右の配置では、手術日と同じ幅(約190px。左端もそろう)・展開メニューも同じ幅。長い名前は切れずに折り返す
+      // 担当医: 項目名を左・入力欄を右の配置では、左端は手術日(160px)とそろう。幅は候補の最も長い氏名が収まる幅(この候補では欄の幅の上限 = IOLモデルと右端がそろう)。
+      // 展開メニューも同じ幅。長い名前は切れずに折り返す
       const doctorTrigger = line.locator('[data-group="doctor"] .cs-trigger'), doctorSelect = line.locator("[data-f=doctor]");
       const dt = await rect(doctorTrigger);
       const dd = await rect(line.locator(".date-input-wrapper"));
-      assert.ok(Math.abs(dt.width - dd.width) <= 1 && Math.abs(dt.left - dd.left) <= 1 && dt.width <= 190.5, `担当医の幅 ${dt.width}(手術日 ${dd.width})`);
+      const mt = await rect(modelTrigger);
+      assert.ok(Math.abs(dd.width - 160) <= 1 && Math.abs(dt.left - dd.left) <= 1 && Math.abs(dt.right - mt.right) <= 1, `担当医の幅 ${JSON.stringify({ dt, dd, mt })}`);
       await doctorTrigger.click(); await panel.waitFor();
       const dp = await rect(panel);
       assert.ok(Math.abs(dp.width - dt.width) <= 1 && Math.abs(dp.left - dt.left) <= 1 && dp.right <= 390 - 7.5, `メニューの幅・位置: ${JSON.stringify({ dp, dt })}`);
@@ -171,7 +173,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await panel.locator('.cs-option[data-value="o9"]').click();
       assert.equal(await doctorSelect.inputValue(), "o9");
       const clip = await doctorTrigger.evaluate(b => { const s = b.querySelector(".cs-trigger-text"); const r = b.getBoundingClientRect(); return { clipped: s.scrollWidth > s.clientWidth + 1 || s.scrollHeight > s.clientHeight + 1, w: Math.round(r.width) }; });
-      assert.deepEqual(clip, { clipped: false, w: Math.round(dt.width) }, "長い名前もボタンの中で切れずに折り返す(幅は同じ)");
+      assert.deepEqual(clip, { clipped: false, w: Math.round(dt.width) }, "長い名前もボタンの中で切れずに折り返す(選択を変えても幅は同じ)");
       assert.equal(await doctorSelect.evaluate(s => s.title), "国家公務員共済組合連合会立川病院 眼科部長 山田太郎左衛門", "全文はホバーでも確認できる");
       // 担当医のメニュー: 白背景・選択中は薄い青の背景と青いチェック(ダークモードでも)
       await doctorTrigger.click(); await panel.waitFor();

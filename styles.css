@@ -500,7 +500,9 @@ body {
   .lens-line [data-group="model"] > .select-wrapper { max-width: 220px; }
   .lens-line [data-group="power"] > .select-wrapper { max-width: 8rem; }
   .lens-line [data-group="dealer"] > .select-wrapper { max-width: 220px; }   /* 長い発注先名(IOLモデルと同じ幅) */
-  .lens-line [data-group="date"] > .date-input-wrapper, .lens-line [data-group="doctor"] > .select-wrapper { max-width: 190px; }   /* 手術日と担当医は同じ幅(長い氏名は折り返す) */
+  .lens-line [data-group="date"] > .date-input-wrapper { max-width: 160px; }   /* 手術日: 日付の全文と日付選択のアイコンが収まる幅 */
+  /* 担当医: 登録済みの担当医の最も長い氏名が収まる幅(lens-lines.js が --doctor-select-w に計算)。最小 120px・最大は欄の幅。それを超える氏名は折り返す */
+  .lens-line [data-group="doctor"] > .select-wrapper { width: clamp(120px, var(--doctor-select-w, 190px), 100%); max-width: 100%; }
 }
 .lens-lines-actions { margin: 4px 0 14px; }
 .lens-line [hidden] { display: none !important; }
