@@ -53,6 +53,18 @@ function installFakeServer(page, scenario) {
       { receiptId: "rcp-b", facilityId: "fB", facilityName: "B眼科", orderNumber: "IOL-20261027-02", orderedAt: "2026-10-27T02:00:00.000Z", lineCount: 1, totalQuantity: 1 }
     ];
     let verified = !["unverified", "none"].includes(scenario);
+    // 役割: "companyAdmin" / "branchAdmin" のシナリオは、確認済みの会社管理者・支店管理者(ほかは閲覧者)
+    const myRole = ["companyAdmin", "branchAdmin"].includes(scenario) ? scenario : "reader";
+    const manageDb = {
+      branches: [{ branchId: "b-tokyo", name: "東京支店", status: "active" }, { branchId: "b-osaka", name: "大阪支店", status: "active" }],
+      staff: [
+        { staffId: "s-me", name: "担当x1", email: "x1@corp.example.jp", role: myRole, branchId: "b-tokyo", status: "active", verified: true },
+        { staffId: "s-adm2", name: "大阪の会社管理者", email: "adm2@corp.example.jp", role: "companyAdmin", branchId: "b-osaka", status: "active", verified: true },
+        { staffId: "s-badm", name: "大阪の支店管理者", email: "badm@corp.example.jp", role: "branchAdmin", branchId: "b-osaka", status: "active", verified: true },
+        { staffId: "s-r1", name: "東京の閲覧者", email: "r1@corp.example.jp", role: "reader", branchId: "b-tokyo", status: "active", verified: false },
+        { staffId: "s-r2", name: "", email: "r2-very-long-address-for-wrapping@corp.example.jp", role: "reader", branchId: null, status: "disabled", verified: false },
+        { staffId: "s-inv", name: "招待中", email: "inv@corp.example.jp", role: "reader", branchId: "b-tokyo", status: "invited", inviteExpiresAt: "2026-11-30T00:00:00.000Z", verified: false }]
+    };
     const needDevice = scenario === "unverified";   // 確認した後は、実際のサーバーと同じく端末の値がないと閲覧できない(紛失を検出する)
     let pending = scenario === "pendingInvite";
     window.__fakeCallables = {
@@ -69,6 +81,17 @@ function installFakeServer(page, scenario) {
         // 有効な所属だけ(multi は2社)と、未確認の参加の案内があるか
         if (d.action === "companies") return { companies: [{ companyId: "dco-x", name: "エックス商事" }, ...(scenario === "multi" ? [{ companyId: "dco-y", name: "ワイ医療" }] : [])], pendingInvitation: pending };
         if (d.action === "list" && window.__listOverride) return window.__listOverride(d);
+        if (d.action.startsWith("manage")) {
+          if (myRole === "reader") throw deny("会社管理者・支店管理者のみ操作できます");
+          if (d.action === "manageInvite") manageDb.staff.push({ staffId: "s-new", name: d.name, email: d.email, role: d.role, branchId: d.branchId || null, status: "invited", inviteExpiresAt: "2026-11-30T00:00:00.000Z", verified: false });
+          if (d.action === "manageUpdateStaff") Object.assign(manageDb.staff.find(x => x.staffId === d.staffId), Object.fromEntries(Object.entries(d).filter(([k]) => ["name", "role", "branchId", "status"].includes(k))));
+          if (d.action === "manageCancelInvite") manageDb.staff = manageDb.staff.filter(x => x.staffId !== d.staffId);
+          if (d.action === "manageBranch") {
+            const b = manageDb.branches.find(x => x.branchId === d.branchId);
+            if (b) Object.assign(b, { name: d.name, ...(d.status ? { status: d.status } : {}) }); else manageDb.branches.push({ branchId: "b-" + d.name, name: d.name, status: "active" });
+          }
+          return d.action === "manage" ? JSON.parse(JSON.stringify({ me: { staffId: "s-me", role: myRole }, ...manageDb })) : { ok: true };
+        }
         if (d.action === "week") {
           const day = (n) => new Date(Date.parse(d.weekStart + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
           const sel = new Set(d.facilityFilter.facilityIds);
@@ -83,7 +106,7 @@ function installFakeServer(page, scenario) {
             days: Array.from({ length: 7 }, (_, i) => ({ date: day(i), orders: (byDate[day(i)] || []).filter(o => sel.has(o.facilityId)) })) };
         }
         if (d.action === "context") return {
-          company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: "reader", branch: { id: "br-1", name: "東京支店" } },
+          company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: myRole, branch: { id: "br-1", name: "東京支店" } },
           facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
           defaultRange: { from: "2026-09-28", to: "2026-10-27" }, limits: { rangeDaysMax: 366, pageMax: 100 }
         };
@@ -536,6 +559,120 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(errors, []);
         await context.close();
       }
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面の「担当者・支店」: 会社管理者・支店管理者だけに表示。支店の絞り込み・役割に合わせた操作・招待・編集・支店の追加/名称変更/無効化。ⓘで説明。320/390/PCで重ならない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      // 閲覧者: タブを出さない
+      let context = await newFakeContext(browser, base, 390, STAFF);
+      let page = await context.newPage();
+      await installFakeServer(page, "staff");
+      await page.goto(`${base}dealer.html`);
+      await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+      assert.equal(await page.locator("[data-tab]").count(), 0, "閲覧者には管理の画面を出さない");
+      await context.close();
+
+      for (const width of [320, 390, 1100]) {
+        context = await newFakeContext(browser, base, width, STAFF);
+        page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        page.on("dialog", d => d.accept());
+        await installFakeServer(page, "companyAdmin");
+        await page.goto(`${base}dealer.html`);
+        await page.locator('[data-tab="manage"]').waitFor();
+        await page.click('[data-tab="manage"]');
+        await page.locator(".dealer-manage-staff").first().waitFor();
+        assert.equal(await page.locator("#dealerWeekArea").isVisible(), false, "受注一覧は隠す");
+        const names = () => page.locator(".dealer-manage-staff .dealer-manage-name").allInnerTexts();
+        const filter = page.locator('[data-f="branchFilter"]');
+        assert.deepEqual(await filter.locator("option").allInnerTexts(), ["すべての支店", "支店未設定", "東京支店", "大阪支店"]);
+        assert.equal(await filter.inputValue(), "all");
+        assert.equal((await names()).length, 6);
+        await filter.selectOption("b-osaka");
+        assert.deepEqual(await names(), ["大阪の会社管理者", "大阪の支店管理者"]);
+        await filter.selectOption("none");
+        assert.deepEqual(await names(), ["r2-very-long-address-for-wrapping@corp.example.jp"]);
+        await filter.selectOption("all");
+        // 説明はⓘ(常時は表示しない)
+        assert.equal(await page.locator('.dealer-manage [data-section="staff"] .settings-heading .info-tip-btn').count(), 1);
+        assert.ok(!(await page.locator(".dealer-manage").innerText()).includes("注文を閲覧できる範囲は会社単位"), "説明は常時表示しない");
+        // 会社管理者の操作: 自分は編集だけ(役割・無効化なし)。他の支店管理者は無効化・役割の変更(会社管理者を含む)ができる
+        const row = (id) => page.locator(`.dealer-manage-staff[data-staff="${id}"]`);
+        assert.ok(!(await page.locator(".dealer-manage").innerText()).includes("active"), "有効の状態は表示しない");
+        assert.deepEqual(await row("s-me").locator("button").allInnerTexts(), ["編集"]);
+        assert.deepEqual(await row("s-badm").locator("button").allInnerTexts(), ["編集", "無効にする"]);
+        assert.deepEqual(await row("s-inv").locator("button").allInnerTexts(), ["招待を取り消す"]);
+        await row("s-badm").locator('[data-act="edit"]').click();
+        assert.deepEqual(await row("s-badm").locator('[data-f="editRole"] option').allInnerTexts(), ["閲覧者", "支店管理者", "会社管理者"]);
+        await row("s-badm").locator('[data-act="cancelEdit"]').click();
+        await row("s-me").locator('[data-act="edit"]').click();
+        assert.equal(await row("s-me").locator('[data-f="editRole"]').count(), 0, "自分の役割は変えられない");
+        await row("s-me").locator('[data-act="cancelEdit"]').click();
+        // 所属支店の変更(閲覧者を大阪へ)
+        await row("s-r1").locator('[data-act="edit"]').click();
+        await row("s-r1").locator('[data-f="editBranch"]').selectOption("b-osaka");
+        await row("s-r1").locator('[data-act="saveStaff"]').click();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "manageUpdateStaff"));
+        const upd = (await calls(page, "manageUpdateStaff")).at(-1);
+        assert.deepEqual([upd.staffId, upd.branchId, upd.role, upd.companyId], ["s-r1", "b-osaka", undefined, "dco-x"]);
+        // 招待(支店管理者・大阪支店)
+        await page.locator(".dealer-manage-invite summary").click();
+        await page.fill('[data-f="inviteEmail"]', "new@corp.example.jp");
+        await page.selectOption('[data-f="inviteRole"]', "branchAdmin");
+        await page.selectOption('[data-f="inviteBranch"]', "b-osaka");
+        await page.click('[data-act="invite"]');
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "manageInvite"));
+        const inv = (await calls(page, "manageInvite")).at(-1);
+        assert.deepEqual([inv.email, inv.role, inv.branchId], ["new@corp.example.jp", "branchAdmin", "b-osaka"]);
+        // 支店: 追加・名称変更・無効化
+        await page.fill('[data-f="newBranch"]', "名古屋支店");
+        await page.click('[data-act="addBranch"]');
+        await page.locator('.dealer-manage-branch[data-branch="b-名古屋支店"]').waitFor();
+        await page.locator('.dealer-manage-branch[data-branch="b-osaka"] [data-act="renameBranch"]').click();
+        await page.fill('.dealer-manage-branch[data-branch="b-osaka"] [data-f="branchName"]', "大阪支社");
+        await page.click('.dealer-manage-branch[data-branch="b-osaka"] [data-act="saveBranch"]');
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "manageBranch" && d.name === "大阪支社"));
+        await page.locator('.dealer-manage-branch[data-branch="b-名古屋支店"] [data-act="toggleBranch"]').click();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "manageBranch" && d.status === "inactive"));
+        // 重ならない・はみ出さない
+        const overlap = await page.locator(".dealer-manage-staff").evaluateAll(rs => rs.some(r => {
+          const els = [...r.querySelectorAll(".dealer-manage-head > *, .dealer-manage-sub, .dealer-manage-actions > *")].map(e => e.getBoundingClientRect());
+          return els.some((a, i) => els.some((b, j) => j > i && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5));
+        }));
+        assert.equal(overlap, false, `${width}: 文字が重ならない`);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+        // 受注一覧に戻る
+        await page.click('[data-tab="orders"]');
+        assert.equal(await page.locator("#dealerWeekArea").isVisible(), true);
+        assert.equal(await page.locator(".dealer-manage").isVisible(), false);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+
+      // 支店管理者: 会社管理者の行は操作なし、他の支店管理者は編集だけ(役割・無効化なし)。招待の役割に会社管理者は出さない
+      context = await newFakeContext(browser, base, 390, STAFF);
+      page = await context.newPage();
+      await installFakeServer(page, "branchAdmin");
+      await page.goto(`${base}dealer.html`);
+      await page.locator('[data-tab="manage"]').waitFor();
+      await page.click('[data-tab="manage"]');
+      await page.locator(".dealer-manage-staff").first().waitFor();
+      const row = (id) => page.locator(`.dealer-manage-staff[data-staff="${id}"]`);
+      assert.equal(await row("s-adm2").locator("button").count(), 0);
+      assert.deepEqual(await row("s-badm").locator("button").allInnerTexts(), ["編集"]);
+      assert.deepEqual(await row("s-r1").locator("button").allInnerTexts(), ["編集", "無効にする"]);
+      await row("s-r1").locator('[data-act="edit"]').click();
+      assert.deepEqual(await row("s-r1").locator('[data-f="editRole"] option').allInnerTexts(), ["閲覧者", "支店管理者"]);
+      await page.locator(".dealer-manage-invite summary").click();
+      assert.deepEqual(await page.locator('[data-f="inviteRole"] option').allInnerTexts(), ["閲覧者", "支店管理者"]);
+      await context.close();
     } finally { await browser.close(); }
   });
 }

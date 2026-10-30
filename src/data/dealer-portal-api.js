@@ -37,6 +37,12 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     setMyAssignments: (a) => portal({ action: "setAssignments", ...pick(a, ["companyId", "facilityIds"]) }),
     listOrders: (a) => portal({ action: "list", ...pick(a, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]) }),
     getOrder: (a) => portal({ action: "get", ...pick(a, ["companyId", "receiptId"]) }),
+    // 会社管理者・支店管理者: 自社の担当者・支店(会社はサーバーが本人の所属で決める)
+    manage: (a = {}) => portal({ action: "manage", ...pick(a, ["companyId"]) }),
+    manageInvite: (a) => portal({ action: "manageInvite", ...pick(a, ["companyId", "email", "name", "role", "branchId"]) }),
+    manageCancelInvite: (a) => portal({ action: "manageCancelInvite", ...pick(a, ["companyId", "staffId"]) }),
+    manageUpdateStaff: (a) => portal({ action: "manageUpdateStaff", ...pick(a, ["companyId", "staffId", "name", "role", "branchId", "status"]) }),
+    manageBranch: (a) => portal({ action: "manageBranch", ...pick(a, ["companyId", "branchId", "name", "status"]) }),
     listWeek: (a) => portal({ action: "week", ...pick(a, ["companyId", "weekStart", "facilityFilter"]) }),   // 手術日の週表示(月曜〜日曜)
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),

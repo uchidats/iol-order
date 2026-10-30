@@ -45,6 +45,28 @@ export function weekLabel(weekStart) {
 /** 「11/12」(ほかの手術日の案内) */
 export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
+// ---- 担当者・支店の管理(会社管理者・支店管理者)。画面の表示だけの判定(実行の可否はサーバーが確認する) ----
+export const DEALER_ROLE_LABELS = Object.freeze({ companyAdmin: "会社管理者", branchAdmin: "支店管理者", reader: "閲覧者" });
+export const isDealerManager = (role) => role === "companyAdmin" || role === "branchAdmin";
+/** 招待・役割の変更で選べる役割(会社管理者はすべて、支店管理者は支店管理者・閲覧者) */
+export const assignableRoles = (actorRole) => (actorRole === "companyAdmin" ? ["reader", "branchAdmin", "companyAdmin"] : actorRole === "branchAdmin" ? ["reader", "branchAdmin"] : []);
+/**
+ * 担当者の行で出す操作(サーバーの規則 managerPolicyError と同じ考え方)。
+ * @returns {{edit:boolean, roleOptions:string[], toggle:boolean, cancel:boolean}}
+ */
+export function staffActions(actorRole, meId, t) {
+  const none = { edit: false, roleOptions: [], toggle: false, cancel: false };
+  if (!isDealerManager(actorRole)) return none;
+  const ca = actorRole === "companyAdmin";
+  if (t.status === "invited" || t.status === "expired") return { ...none, cancel: ca || t.role !== "companyAdmin" };
+  if (!ca && t.role === "companyAdmin") return none;
+  const self = t.staffId === meId;
+  const fixedRole = self || (!ca && t.role === "branchAdmin");   // 自分自身・他の支店管理者(支店管理者から)は役割と有効/無効を変えない
+  return { edit: true, roleOptions: fixedRole ? [] : assignableRoles(actorRole), toggle: !fixedRole, cancel: false };
+}
+/** 担当者の一覧の支店の絞り込み: "all"(すべての支店)/ "none"(支店未設定)/ 支店 ID */
+export const filterStaffByBranch = (staff, key) => (staff || []).filter(x => key === "all" || (key === "none" ? !x.branchId : x.branchId === key));
+
 /** YYYY-MM-DD → 「YYYY/MM/DD」 */
 export const formatDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.replace(/-/g, "/") : "—");
 

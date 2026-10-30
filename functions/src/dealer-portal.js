@@ -18,12 +18,34 @@ import { isManagerRole } from "./roles.js";
 import { isValidEmail } from "./shared/order-validation.js";
 
 export const PORTAL_POLICY = Object.freeze({ accessMode: "companyWide", policyVersion: 1 });
-export const STAFF_ROLES = Object.freeze(["reader", "companyAdmin"]);
+export const STAFF_ROLES = Object.freeze(["reader", "branchAdmin", "companyAdmin"]);
+/** 自社の担当者・支店を管理できる役割(会社管理者は支店管理者のすべての権限を含む)。閲覧の範囲は役割に関係なく会社単位 */
+export const MANAGER_ROLES = Object.freeze(["companyAdmin", "branchAdmin"]);
+
+/**
+ * ディーラー画面での担当者の管理の可否(純粋関数)。null なら可。運営者の操作には使わない(復旧などの例外を認める)。
+ *  - 会社管理者の任命・変更(会社管理者への変更、会社管理者の編集・無効化・招待の取消)は、会社管理者だけ
+ *  - 自分自身の役割の変更・無効化はできない(誤って権限を失わない)
+ *  - 支店管理者は、他の支店管理者の無効化・再有効化・降格はできない(閲覧者の昇格・氏名・支店の変更はできる)
+ * @param {string} actorRole 操作する本人の役割
+ * @param {{self?:boolean, targetRole:string, nextRole?:string, statusChange?:boolean}} t 対象(変更前の役割・変更後の役割・有効/無効の変更か)
+ */
+export function managerPolicyError(actorRole, { self = false, targetRole, nextRole = targetRole, statusChange = false }) {
+  if (!MANAGER_ROLES.includes(actorRole)) return "会社管理者・支店管理者のみ操作できます";
+  const companyAdmin = actorRole === "companyAdmin";
+  if (!companyAdmin && (targetRole === "companyAdmin" || nextRole === "companyAdmin")) return "会社管理者の任命・変更は、会社管理者のみ行えます";
+  const roleChange = nextRole !== targetRole;
+  if (self && (statusChange || roleChange)) return "自分自身の役割の変更・無効化はできません";
+  if (!companyAdmin && targetRole === "branchAdmin" && (statusChange || roleChange)) return "支店管理者の無効化・再有効化・降格は、会社管理者のみ行えます";
+  return null;
+}
 export const PORTAL_LIMITS = Object.freeze({
   nameMax: 100, staffNameMax: 50, assignmentsMax: 100, facilityFilterMax: 100,
   pageDefault: 50, pageMax: 100, scanBatch: 100, scanMax: 500, rangeDaysMax: 366,
   weekMax: 100,   // 週表示で1週に読む受信の上限(超えたら truncated で知らせる)
   invitationTtlMs: 30 * 24 * 60 * 60 * 1000, cursorTtlMs: 60 * 60 * 1000, reindexMax: 2000,
+  // 会社管理者・支店管理者の招待の上限(会社ごと): 参加待ちの数と、24時間の招待の数(運営者の招待には使わない)
+  pendingInvitesMax: 50, invitesPerDayMax: 30,
   // 認証主体の紐付けの確認は20件ずつ全件(無効な旧所属が多く残っていても、有効な所属を見落とさない)
   affiliationsBatch: 20,
   // 検索時点に固定した読み取り(readTime)ができる時間(Firestore は過去1時間以内)。時刻差の余裕を引く。続きのカーソルはこれを超えて使えない
@@ -221,6 +243,10 @@ export function initialFacilitySelection(allowedFacilities, assignedIds) {
  */
 export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, now = Date.now, sendJoinCode = null }) {
   const audit = (tx, entry) => tx.create(db.collection("dealerPortalAuditLogs").doc(), { ...entry, at: FieldValue.serverTimestamp() });
+  /** 監査の記録の操作者: 運営者(operator: true)か、ディーラーの会社管理者・支店管理者(担当者 ID と役割) */
+  const actorOf = (user) => (user && user.staffId
+    ? { actorUid: user.uid, actorStaffId: user.staffId, actorRole: user.role, operator: false }
+    : { actorUid: user.uid, operator: true });
   const companyRef = (cid) => db.doc(`dealerCompanies/${cid}`);
   const linkRef = (fid, lid) => db.doc(`facilities/${fid}/dealerPortalLinks/${lid}`);
   const grantRef = (gid) => db.doc(`dealerPortalGrants/${gid}`);
@@ -774,6 +800,114 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return out;
   }
 
+  // ======================= ディーラーの会社管理者・支店管理者: 自社の担当者・支店の管理 =======================
+  // 対象は、本人が確認済みの会社だけ(画面から送られた会社 ID は、本人の所属の確認にだけ使う)。運営者の処理(招待・変更・取消・支店)を再利用し、
+  // トランザクションの中で、本人の状態(有効・役割・世代)、対象の所属、役割の規則、最後の会社管理者、招待の上限、支店の無効化の条件を確かめる。
+  // 施設と会社の関連付け・施設の閲覧の許可には触れない(閲覧の範囲は会社単位のまま。招待・支店の追加だけでは新しい施設の注文は見えない)。
+  const managerOnly = () => new RegistrationError("permission-denied", "会社管理者・支店管理者のみ操作できます");
+
+  /** 操作する本人(会社管理者・支店管理者)。ログイン・本人確認・会社の有効は authorizeStaff が確かめる */
+  async function managerActor(auth, companyId) {
+    const a = await authorizeStaff(auth, companyId);
+    if (!MANAGER_ROLES.includes(a.staff.role)) throw managerOnly();
+    return { uid: a.principal.uid, staffId: a.staffId, companyId: a.companyId, role: a.staff.role, authRevision: a.staff.authRevision };
+  }
+  /** トランザクションの中で本人を読み直す(途中で無効化・降格・世代の変更があれば操作しない)。会社の担当者の一覧も返す */
+  async function recheck(tx, actor) {
+    const [me, company, staff] = await Promise.all([tx.get(staffRef(actor.staffId)), tx.get(companyRef(actor.companyId)),
+      tx.get(db.collection("dealerStaff").where("companyId", "==", actor.companyId))]);
+    if (!me.exists || me.get("companyId") !== actor.companyId || me.get("status") !== "active" || me.get("role") !== actor.role
+      || me.get("authRevision") !== actor.authRevision || !company.exists || company.get("status") !== "active") throw managerOnly();
+    return staff.docs;
+  }
+  const deny = (msg) => { if (msg) throw new RegistrationError("permission-denied", msg); };
+  /** 変更の後も、有効な会社管理者が1人以上残るか(ディーラーの操作では最後の会社管理者を失う変更を断る) */
+  function assertAdminRemains(staffDocs, targetId, next) {
+    const remaining = staffDocs.filter(d => {
+      const role = d.id === targetId && next.role !== undefined ? next.role : d.get("role");
+      const status = d.id === targetId && next.status !== undefined ? next.status : d.get("status");
+      return role === "companyAdmin" && status === "active";
+    });
+    if (!remaining.length) throw new RegistrationError("failed-precondition", "有効な会社管理者が1人以上必要です(最後の会社管理者は変更・無効化できません)");
+  }
+
+  /** 管理の画面の内容: 自社の支店と担当者(参加待ちを含む。ログイン方法の内部の ID は返さない) */
+  async function manageOverview(auth, data) {
+    strict(data, ["companyId"]);
+    const actor = await managerActor(auth, data.companyId);
+    const [branches, staff, binds] = await Promise.all([companyRef(actor.companyId).collection("branches").get(),
+      db.collection("dealerStaff").where("companyId", "==", actor.companyId).get(),
+      db.collection("dealerAuthBindings").where("companyId", "==", actor.companyId).get()]);
+    const verified = new Set();
+    for (const b of binds.docs) {
+      const st = staff.docs.find(x => x.id === b.get("staffId"));
+      if (st && st.get("authRevision") === b.get("authRevision") && (b.get("expiresAt") === undefined || millisOf(b.get("expiresAt")) > now())) verified.add(st.id);
+    }
+    const t = now();
+    return {
+      me: { staffId: actor.staffId, role: actor.role },
+      branches: branches.docs.map(b => ({ branchId: b.id, name: String(b.get("name") || ""), status: b.get("status") === "inactive" ? "inactive" : "active" }))
+        .sort((x, y) => x.name.localeCompare(y.name, "ja")),
+      staff: staff.docs.filter(d => ["active", "disabled", "invited"].includes(d.get("status"))).map(d => {
+        const invited = d.get("status") === "invited";
+        return { staffId: d.id, name: String(d.get("name") || ""), email: d.get("approvedEmail"), role: d.get("role"), branchId: d.get("branchId") || null,
+          status: invited && !(millisOf(d.get("inviteExpiresAt")) > t) ? "expired" : d.get("status"),
+          ...(invited ? { inviteExpiresAt: isoOf(d.get("inviteExpiresAt")) } : {}), verified: verified.has(d.id) };
+      }).sort((x, y) => (x.name || x.email).localeCompare(y.name || y.email, "ja")),
+      limits: { pendingInvitesMax: PORTAL_LIMITS.pendingInvitesMax, invitesPerDayMax: PORTAL_LIMITS.invitesPerDayMax }
+    };
+  }
+
+  async function manageInvite(auth, data) {
+    strict(data, ["companyId", "email", "name", "role", "branchId"]);
+    const actor = await managerActor(auth, data.companyId);
+    const { companyId: _c, ...rest } = data;
+    return inviteStaff(actor, { ...rest, companyId: actor.companyId }, async (tx, { existing, role }) => {
+      const staff = await recheck(tx, actor);
+      deny(managerPolicyError(actor.role, { targetRole: existing.exists ? existing.get("role") : role, nextRole: role,
+        statusChange: existing.exists && existing.get("status") === "disabled" }));   // 無効の担当者の再招待は、再有効化と同じ扱い
+      const t = now();
+      const pending = staff.filter(d => d.get("status") === "invited" && millisOf(d.get("inviteExpiresAt")) > t).length;
+      if (pending >= PORTAL_LIMITS.pendingInvitesMax) throw new RegistrationError("resource-exhausted", `参加待ちが上限(${PORTAL_LIMITS.pendingInvitesMax}件)に達しています。不要な招待を取り消してください`);
+      const recent = staff.filter(d => millisOf(d.get("invitedAt")) > t - DAY_MS).length;
+      if (recent >= PORTAL_LIMITS.invitesPerDayMax) throw new RegistrationError("resource-exhausted", `招待の数が上限(24時間で${PORTAL_LIMITS.invitesPerDayMax}件)に達しています。時間をおいてください`);
+    });
+  }
+
+  async function manageCancelInvite(auth, data) {
+    strict(data, ["companyId", "staffId"]);
+    const actor = await managerActor(auth, data.companyId);
+    return cancelInvitation(actor, { companyId: actor.companyId, staffId: data.staffId }, async (tx, { target }) => {
+      await recheck(tx, actor);
+      deny(managerPolicyError(actor.role, { targetRole: target.get("role") }));
+    });
+  }
+
+  async function manageUpdateStaff(auth, data) {
+    strict(data, ["companyId", "staffId", "name", "role", "branchId", "status"]);   // 担当施設(表示用)は本人・運営者が設定する
+    const actor = await managerActor(auth, data.companyId);
+    const { companyId: _c, ...rest } = data;
+    return updateStaff(actor, { ...rest, companyId: actor.companyId }, async (tx, { target, patch }) => {
+      const staff = await recheck(tx, actor);
+      deny(managerPolicyError(actor.role, { self: target.id === actor.staffId, targetRole: target.get("role"), nextRole: patch.role ?? target.get("role"),
+        statusChange: patch.status !== undefined && patch.status !== target.get("status") }));
+      assertAdminRemains(staff, target.id, { role: patch.role, status: patch.status });
+    });
+  }
+
+  async function manageBranch(auth, data) {
+    strict(data, ["companyId", "branchId", "name", "status"]);
+    const actor = await managerActor(auth, data.companyId);
+    const { companyId: _c, ...rest } = data;
+    return upsertBranch(actor, { ...rest, companyId: actor.companyId }, async (tx, { branchId, status }) => {
+      const staff = await recheck(tx, actor);
+      // 支店の無効化: 所属する担当者(有効・無効・参加待ち。管理者を含む)が残っていれば断る(先に所属支店を変える)
+      if (status === "inactive" && staff.some(d => d.get("branchId") === branchId && ["active", "disabled", "invited"].includes(d.get("status")))) {
+        throw new RegistrationError("failed-precondition", "この支店に所属する担当者がいるため、無効にできません。先に担当者の所属支店を変更してください");
+      }
+    });
+  }
+
   /** ディーラー画面の呼び出し(担当者・招待先本人) */
   async function portal({ auth, data }) {
     assertOn();
@@ -790,6 +924,11 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "companies": return myCompanies(auth, rest);
       case "sendCode": return sendCode(auth, rest);
       case "verifyCode": return verifyCode(auth, rest);
+      case "manage": return manageOverview(auth, rest);              // 会社管理者・支店管理者: 自社の担当者・支店
+      case "manageInvite": return manageInvite(auth, rest);
+      case "manageCancelInvite": return manageCancelInvite(auth, rest);
+      case "manageUpdateStaff": return manageUpdateStaff(auth, rest);
+      case "manageBranch": return manageBranch(auth, rest);
       default: throw badInput();
     }
   }
@@ -927,7 +1066,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     });
   }
 
-  async function upsertBranch(user, data) {
+  async function upsertBranch(user, data, guard = null) {
     strict(data, ["companyId", "branchId", "name", "status"]);
     if (!isId(data.companyId) || (data.branchId !== undefined && !isId(data.branchId))) throw badInput();
     const name = typeof data.name === "string" ? normalizeName(data.name) : "";
@@ -940,8 +1079,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const ref = db.doc(`dealerCompanies/${data.companyId}/branches/${bid}`);
       const b = await tx.get(ref);
       if (data.branchId && !b.exists) throw notVisible();
+      if (guard) await guard(tx, { company: c, branch: b, branchId: bid, status: data.status });
       tx.set(ref, { name, status: data.status || (b.exists ? b.get("status") : "active"), updatedAt: FieldValue.serverTimestamp(), ...(b.exists ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
-      audit(tx, { action: "branch.upsert", companyId: data.companyId, branchId: bid, actorUid: user.uid, operator: true });
+      audit(tx, { action: "branch.upsert", companyId: data.companyId, branchId: bid, ...actorOf(user), ...(data.status ? { status: data.status } : {}) });
       return { branchId: bid };
     });
   }
@@ -959,7 +1099,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
    * 担当者の招待(運営者)。担当者の文書(会社×メール)を「招待中」にする。参加済み(有効)なら招待しない(設定の変更は updateStaff)。
    * 無効化・取り消し・期限切れからの再招待では世代を進める(前の紐付けはすべて使えない)。担当施設は残す
    */
-  async function inviteStaff(user, data) {
+  async function inviteStaff(user, data, guard = null) {
     strict(data, ["companyId", "email", "name", "role", "branchId"]);
     const email = normEmail(data.email);
     const name = typeof data.name === "string" ? normalizeName(data.name) : "";
@@ -971,6 +1111,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const branchId = await checkBranch(tx, data.companyId, data.branchId);
       const s = await tx.get(staffRef(sid));
       if (s.exists && s.get("status") === "active") throw new RegistrationError("failed-precondition", "この担当者はすでに参加しています(役割・支店は担当者の設定で変更します)");
+      if (guard) await guard(tx, { company: c, existing: s, role: data.role });
       tx.set(staffRef(sid), {
         staffId: sid, companyId: data.companyId, approvedEmail: email, name, role: data.role, branchId, status: "invited",
         authRevision: (s.exists && Number.isInteger(s.get("authRevision")) ? s.get("authRevision") : 0) + 1,
@@ -978,7 +1119,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         inviteExpiresAt: Timestamp.fromMillis(now() + PORTAL_LIMITS.invitationTtlMs), invitedBy: user.uid, invitedAt: FieldValue.serverTimestamp(),
         revision: (s.exists ? Number(s.get("revision")) || 0 : 0) + 1, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid
       });
-      audit(tx, { action: "staff.invite", companyId: data.companyId, staffId: sid, actorUid: user.uid, operator: true, role: data.role });
+      audit(tx, { action: "staff.invite", companyId: data.companyId, staffId: sid, ...actorOf(user), role: data.role });
       return { staffId: sid };
     });
   }
@@ -991,13 +1132,14 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return s;
   }
 
-  async function cancelInvitation(user, data) {
+  async function cancelInvitation(user, data, guard = null) {
     strict(data, ["companyId", "staffId"]);
     return db.runTransaction(async (tx) => {
       const s = await staffOfCompany(tx, data.companyId, data.staffId);
       if (s.get("status") !== "invited") throw new RegistrationError("failed-precondition", "取り消せる参加待ちではありません");
+      if (guard) await guard(tx, { target: s });
       tx.update(s.ref, { status: "cancelled", inviteExpiresAt: FieldValue.delete(), cancelledBy: user.uid, cancelledAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-      audit(tx, { action: "staff.inviteCancel", companyId: data.companyId, staffId: s.id, actorUid: user.uid, operator: true });
+      audit(tx, { action: "staff.inviteCancel", companyId: data.companyId, staffId: s.id, ...actorOf(user) });
       return { ok: true };
     });
   }
@@ -1006,7 +1148,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
    * 担当者の無効化・再有効化・役割・支店・氏名・担当施設(運営者の代行)。参加済み(有効・無効)の担当者だけ。所属会社・メールは変えない。
    * 無効化では世代を進め、Google・Microsoft・メールリンクのすべての紐付けを一度に失効させる(有効に戻した後は、確認コードで紐付け直す)
    */
-  async function updateStaff(user, data) {
+  async function updateStaff(user, data, guard = null) {
     strict(data, ["companyId", "staffId", "status", "role", "branchId", "name", "facilityIds"]);
     return db.runTransaction(async (tx) => {
       const s = await staffOfCompany(tx, data.companyId, data.staffId);
@@ -1018,13 +1160,15 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (data.name !== undefined) { const n = typeof data.name === "string" ? normalizeName(data.name) : null; if (n === null || n.length > PORTAL_LIMITS.staffNameMax) throw badInput(); patch.name = n; }
       if (data.facilityIds !== undefined) patch.facilityAssignments = parseFacilityIds(data.facilityIds);
       if (!Object.keys(patch).length) throw badInput();
+      if (guard) await guard(tx, { target: s, patch });
       const disabling = patch.status === "disabled" && s.get("status") !== "disabled";
       if (disabling) {
         patch.disabledAt = FieldValue.serverTimestamp();
         patch.authRevision = (Number.isInteger(s.get("authRevision")) ? s.get("authRevision") : 1) + 1;
       }
       tx.update(s.ref, { ...patch, revision: (Number(s.get("revision")) || 0) + 1, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid });
-      audit(tx, { action: "staff.update", companyId: data.companyId, staffId: s.id, actorUid: user.uid, operator: true, fields: Object.keys(patch).filter(k => k !== "disabledAt" && k !== "authRevision") });
+      audit(tx, { action: "staff.update", companyId: data.companyId, staffId: s.id, ...actorOf(user), fields: Object.keys(patch).filter(k => k !== "disabledAt" && k !== "authRevision"),
+        ...(patch.role ? { role: patch.role } : {}), ...(patch.status ? { status: patch.status } : {}) });
       return { ok: true };
     });
   }

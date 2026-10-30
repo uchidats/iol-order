@@ -1,6 +1,7 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager } from "../domain/dealer-portal.js";
+import { createDealerManage } from "./dealer-manage.js";
 
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
@@ -363,12 +364,36 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         h("div", { class: "dealer-select-actions" }, saveAssigned), assignMsg),
       weekArea, orderedArea);
     const noAssigned = ctx.selection === "all-unassigned" ? h("p", { class: "form-hint" }, "担当施設が未設定のため、閲覧可能な全施設を選択しています。") : null;
+    // 会社管理者・支店管理者: 「担当者・支店」タブ(閲覧者には出さない。操作の可否はサーバーが確認する)
+    let tabs = null;
+    if (isDealerManager(ctx.me.role)) {
+      const ordersArea = [noAssigned, searchArea].filter(Boolean);
+      let manage = null;
+      const tab = (k, label) => {
+        const b = h("button", { type: "button", class: "history-sort-btn", "data-tab": k, "aria-pressed": String(k === "orders") }, label);
+        b.addEventListener("click", () => {
+          tabs.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.tab === k)));
+          const onManage = k === "manage";
+          ordersArea.forEach(el => { el.hidden = onManage; });
+          if (onManage) { detail.hidden = true; detail.replaceChildren(); }
+          if (onManage && !manage) {
+            manage = createDealerManage({ api, companyId: ctx.company.id,
+              onAuthError: (e) => { if (String((e && e.code) || "").endsWith("permission-denied") && e.details && e.details.reason === "verification-required") showMessage("ディーラー画面", describeCallableError(e), { error: true }); } });
+            panel.append(manage.root);
+            manage.load();
+          }
+          if (manage) manage.root.hidden = !onManage;
+        });
+        return b;
+      };
+      tabs = h("div", { class: "history-sort dealer-tabs", role: "group", "aria-label": "画面" }, tab("orders", "受注一覧"), tab("manage", "担当者・支店"));
+    }
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "受注一覧"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
       h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
       h("p", { class: "form-hint" }, "医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。"),
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
-      noAssigned, searchArea, detail].filter(Boolean));
+      tabs, noAssigned, searchArea, detail].filter(Boolean));
     renderChecks();
     await loadWeek();   // 初期表示は今週の手術日(注文日順は切り替えて表示)
   }
