@@ -89,7 +89,7 @@ async function bootstrapWithFirebase(config) {
   let orderHistory = null;  // 注文履歴（所属メンバー全員が閲覧。管理者・副管理者は削除も・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
-  let dealerOperator = null;    // ディーラー画面の管理(運営者 = platformAdmin のみ。権限はサーバーが確認する)
+  let dealerOperator = null;    // ディーラー管理(運営者 = platformAdmin のみ。権限はサーバーが確認する)
   let manual = null;  // 使い方・ヘルプ(ログインの前後どちらでも。URL のハッシュ #help/… で開く)
   let about = null;   // IOL Orderについて(当面は運営者だけ。URL のハッシュ #about。本文は Rules で platformAdmin だけが読める)
   let isPlatformAdmin = false;   // メニューの表示だけに使う(ID トークンの platformAdmin)
@@ -241,7 +241,7 @@ async function bootstrapWithFirebase(config) {
     await preregistrations.open();
   }
 
-  /** ディーラー画面の管理を開く(運営者のみ。会社・担当者・関連付けの権限はサーバーが確認する) */
+  /** ディーラー管理を開く(運営者のみ。会社・担当者・関連付けの権限はサーバーが確認する) */
   async function openDealerOperator() {
     if (!isPlatformAdmin || !ctx || !ctx.dealerPortalApi) return;
     for (const v of [settings, orderHistory, applications, preregistrations]) if (v && v.isOpen()) v.close();

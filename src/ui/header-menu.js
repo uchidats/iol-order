@@ -52,7 +52,7 @@ export function createHeaderMenu(handlers) {
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
         ${info.canPreregister ? '<button type="button" role="menuitem" class="header-menu-item" id="menuPreregistrations">施設を事前登録</button>' : ""}
-        ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerOperator">ディーラー画面の管理</button>' : ""}
+        ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerOperator">ディーラー管理</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${info.canAbout ? '<button type="button" role="menuitem" class="header-menu-item" id="menuAbout">IOL Orderについて</button>' : ""}
         ${share}

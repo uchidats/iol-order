@@ -1,4 +1,4 @@
-// 回帰テスト(ブラウザ): 施設設定の「ディーラー画面での閲覧」(管理者・副管理者の許可・取消)と、運営者の「ディーラー画面の管理」。
+// 回帰テスト(ブラウザ): 施設設定の「ディーラー画面での閲覧」(管理者・副管理者の許可・取消)と、運営者の「ディーラー管理」。
 // 実際の facility-settings.js・dealer-portal-operator.js を、偽の API で動かす(ログイン・Firebase は使わない)。  npm run test:browser
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -201,7 +201,7 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       const op = page.locator(".dealer-operator");
       for (const [head, text] of [["h2", "ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。"], ["h3", "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"]]) {
         assert.ok(!(await op.locator(".form-hint").allInnerTexts()).includes(text), "説明文は常時表示しない");
-        const wrap = op.locator(`.settings-heading:has(> ${head}:text-is("${head === "h2" ? "ディーラー画面の管理" : "会社を登録"}"))`);
+        const wrap = op.locator(`.settings-heading:has(> ${head}:text-is("${head === "h2" ? "ディーラー管理" : "会社を登録"}"))`);
         const pos = await wrap.evaluate((w, hd) => { const t = w.querySelector(hd).getBoundingClientRect(), b = w.querySelector(".info-tip-btn").getBoundingClientRect(); return b.left >= t.right - 1 && Math.abs((b.top + b.bottom) / 2 - (t.top + t.bottom) / 2) < 14; }, head);
         assert.ok(pos, `${head}: ⓘ は見出しの右横`);
         await wrap.locator(".info-tip-btn").click();
@@ -225,6 +225,7 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       const cc = await page.evaluate(() => window.__calls.find(c => c[0] === "createCompany")[1]);
       assert.equal(cc.name, "ゼット商会");
       assert.match(cc.requestId, /^[A-Za-z0-9-]{16,64}$/);
+      assert.equal(await page.locator('.form-label:has([data-f="staffEmail"]) > span').innerText(), "勤務先メールアドレス");
       await page.fill('[data-f="staffEmail"]', "x2@corp.example.jp");
       await page.fill('[data-f="staffName"]', "担当x2");
       await page.click('[data-act="invite"]');
@@ -241,13 +242,13 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c[0] === "proposeLink")[1]), { facilityId: "fA", localDealerId: "dA2", companyId: "dco-x" });
       // 関連付けの欄: 見出し・項目名。説明は見出しの右のⓘ(常時は表示しない。従来の注意も含む)
       const link = page.locator(".dealer-link-heading");
-      assert.equal(await link.locator("h3").innerText(), "発注先とディーラー会社の関連付け");
-      assert.deepEqual(await page.locator(".settings-section:has(> .dealer-link-heading) .dealer-operator-grid .form-label > span").allInnerTexts(), ["施設", "発注先", "ディーラー会社"]);
+      assert.equal(await link.locator("h3").innerText(), "発注先と会社の関連付け");
+      assert.deepEqual(await page.locator(".settings-section:has(> .dealer-link-heading) .dealer-operator-grid .form-label > span").allInnerTexts(), ["施設", "発注先", "会社"]);
       assert.ok(!(await page.locator(".dealer-operator").innerText()).includes("関連付けだけでは閲覧は始まりません"), "説明は常時表示しない");
       await link.locator(".info-tip-btn").click();
       await link.locator(".info-tip-pop").waitFor();
       const help = await link.locator(".info-tip-pop").innerText();
-      assert.match(help, /^発注先: 各施設が施設設定の「ディーラー」に登録した、注文メールの送信先です。\nディーラー会社: ディーラーの担当者のログインと、注文を閲覧できる範囲を管理する単位です。/);
+      assert.match(help, /^発注先: 各施設が施設設定の「ディーラー」に登録した、注文メールの送信先です。\n会社: ディーラーの担当者のログインと、注文を閲覧できる範囲を管理する単位です。/);
       assert.match(help, /関連付けだけでは閲覧は始まりません。施設の管理者・副管理者の許可が必要です。閲覧を許可中の関連付けは変更できません\(施設で取消してから変更します\)。$/);
       await page.keyboard.press("Escape");
       assert.equal(await page.locator(".dealer-operator b").count(), 0, "名称の HTML は要素にしない");

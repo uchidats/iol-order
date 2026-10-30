@@ -7,11 +7,11 @@ import { createInfoTip, createSectionHeading } from "./info-tip.js";
 const ROLE_LABELS = { reader: "閲覧者", companyAdmin: "会社管理者" };
 const STAFF_STATUS = { active: "有効", disabled: "無効(退職など)" };
 const LOGIN_LABELS = { google: "Google", microsoft: "Microsoft", device: "確認済みの端末" };
-// 「発注先とディーラー会社の関連付け」の説明(ⓘ)。用語の説明の後に、従来の注意をそのまま
+// 「発注先と会社の関連付け」の説明(ⓘ)。用語の説明の後に、従来の注意をそのまま
 export const LINK_HELP = [
   "発注先: 各施設が施設設定の「ディーラー」に登録した、注文メールの送信先です。",
-  "ディーラー会社: ディーラーの担当者のログインと、注文を閲覧できる範囲を管理する単位です。",
-  "発注先をディーラー会社に関連付けると、施設の管理者・副管理者が許可した後の新規注文のうち、その発注先宛ての明細を、そのディーラー会社の担当者が閲覧できます。",
+  "会社: ディーラーの担当者のログインと、注文を閲覧できる範囲を管理する単位です。",
+  "発注先を会社に関連付けると、施設の管理者・副管理者が許可した後の新規注文のうち、その発注先宛ての明細を、その会社の担当者が閲覧できます。",
   "関連付けだけでは閲覧は始まりません。施設の管理者・副管理者の許可が必要です。閲覧を許可中の関連付けは変更できません(施設で取消してから変更します)。"
 ].join("\n");
 const LINK_LABELS = { proposed: "関連付け済み(施設の許可待ち)", active: "施設が閲覧を許可中", revoked: "施設が取消済み" };
@@ -20,7 +20,7 @@ const field = (label, input) => h("label", { class: "form-label" }, h("span", {}
 const select = (attrs, options) => h("select", { class: "form-control", ...attrs }, options.map(([v, t]) => h("option", { value: v }, t)));
 
 /**
- * ディーラー画面の管理(運営者 = platformAdmin のみ。権限はサーバーが確認する)。
+ * ディーラー管理(運営者 = platformAdmin のみ。権限はサーバーが確認する)。
  * 会社の登録・停止、任意の支店、担当者の招待・無効化・役割・支店・担当施設(代行)、施設別発注先と会社の関連付け案。
  * 関連付けだけでは閲覧は始まらない(施設の管理者・副管理者の許可が必要)。
  * @param {{mount:HTMLElement, api:object, onClose:()=>void}} deps
@@ -32,7 +32,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
   const status = h("p", { class: "form-hint", role: "status" });
   const body = h("div", { class: "dealer-operator-body" });
   root.append(h("div", { class: "settings-head" },
-    h("div", { class: "settings-heading" }, h("h2", {}, "ディーラー画面の管理"), createInfoTip("ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。", { label: "ディーラー画面の管理の説明" }).root),
+    h("div", { class: "settings-heading" }, h("h2", {}, "ディーラー管理"), createInfoTip("ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。", { label: "ディーラー管理の説明" }).root),
     h("span", { class: "settings-facility" }), closeBtn),
     status, body);
   let open = false, busy = false, data = null;
@@ -113,7 +113,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
       c.staff.length ? h("ul", { class: "dealer-operator-list" }, c.staff.map(s => staffRow(c, s))) : h("p", { class: "form-hint" }, "担当者はまだいません。"),
       invitations.length ? h("div", {}, h("h4", {}, "参加待ち"), h("ul", { class: "dealer-operator-list" }, invitations)) : null,
       h("h4", {}, "担当者を招待"),
-      h("div", { class: "dealer-operator-grid" }, field("企業メールアドレス", email), field("氏名", name), field("役割", role), field("支店(任意)", branch)),
+      h("div", { class: "dealer-operator-grid" }, field("勤務先メールアドレス", email), field("氏名", name), field("役割", role), field("支店(任意)", branch)),
       h("div", { class: "form-row" }, invite),
       h("h4", {}, "支店(任意)"),
       h("p", { class: "form-hint" }, c.branches.length ? c.branches.map(b => `${b.name}${b.status === "active" ? "" : "(無効)"}`).join("、") : "支店なし(支店がなくても利用できます)"),
@@ -127,7 +127,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     const err = h("p", { class: "error-message" });
     const facSel = select({ "data-f": "linkFacility" }, [["", "施設を選択"], ...data.facilities.map(f => [f.facilityId, f.name])]);
     const dealerSel = select({ "data-f": "linkDealer" }, [["", "発注先を選択"]]);
-    const companySel = select({ "data-f": "linkCompany" }, [["", "ディーラー会社を選択"], ...data.companies.filter(c => c.status === "active").map(c => [c.companyId, c.name])]);
+    const companySel = select({ "data-f": "linkCompany" }, [["", "会社を選択"], ...data.companies.filter(c => c.status === "active").map(c => [c.companyId, c.name])]);
     const companyName = (id) => (data.companies.find(c => c.companyId === id) || {}).name || "—";
     facSel.addEventListener("change", () => {
       const f = data.facilities.find(x => x.facilityId === facSel.value);
@@ -135,15 +135,15 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     });
     const btn = h("button", { type: "button", class: "btn btn-primary", "data-act": "proposeLink" }, "関連付ける");
     btn.addEventListener("click", () => {
-      if (!facSel.value || !dealerSel.value || !companySel.value) { err.textContent = "施設・発注先・ディーラー会社を選択してください"; return; }
+      if (!facSel.value || !dealerSel.value || !companySel.value) { err.textContent = "施設・発注先・会社を選択してください"; return; }
       run(() => api.proposeLink({ facilityId: facSel.value, localDealerId: dealerSel.value, companyId: companySel.value }),
         "関連付けました。施設の管理者・副管理者が「施設設定」で閲覧を許可すると、許可後の新規注文から表示されます。", err);
     });
     const rows = data.facilities.flatMap(f => f.dealers.filter(d => d.link).map(d => h("li", {}, `${f.name} / ${d.name} → ${companyName(d.link.companyId)}(${LINK_LABELS[d.link.status] || d.link.status})`)));
-    const heading = createSectionHeading("発注先とディーラー会社の関連付け", LINK_HELP);   // 説明は見出しの右のⓘ
+    const heading = createSectionHeading("発注先と会社の関連付け", LINK_HELP);   // 説明は見出しの右のⓘ
     heading.classList.add("dealer-link-heading");
     return h("div", { class: "settings-section" }, heading,
-      h("div", { class: "dealer-operator-grid" }, field("施設", facSel), field("発注先", dealerSel), field("ディーラー会社", companySel)),
+      h("div", { class: "dealer-operator-grid" }, field("施設", facSel), field("発注先", dealerSel), field("会社", companySel)),
       h("div", { class: "form-row" }, btn), err,
       rows.length ? h("ul", { class: "dealer-operator-list" }, rows) : h("p", { class: "form-hint" }, "関連付けはまだありません。"));
   }
