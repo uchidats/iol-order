@@ -429,7 +429,8 @@ async function bootstrapWithFirebase(config) {
         repository: ctx.repository,
         facilityId: access.facilityId,
         facility: { id: access.facilityId, name: facilityName(access.facilityId) },
-        user: { uid: state.user.uid, email: state.user.email || "", emailVerified: state.user.emailVerified }
+        user: { uid: state.user.uid, email: state.user.email || "", emailVerified: state.user.emailVerified },
+        role: access.role   // 代行入力者には、施設の「代行入力時の担当医」を初期選択する
       });
     }
     return access;

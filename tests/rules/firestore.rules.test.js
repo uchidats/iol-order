@@ -545,6 +545,40 @@ test("テーマカラー: 形式の検証(#rrggbb の小文字・グラデーシ
   await assertFails(setDoc(doc(as("ordA"), path), { color: "#fde047", gradient: false, darkText: true }), "注文者は変更できない");
 });
 
+// ---------- 代行入力時の担当医(displaySettings/proxyDoctor) ----------
+test("代行入力時の担当医: 管理者・副管理者だけが保存できる。所属メンバー(代行入力者を含む)は読める。他施設・未ログインは不可。ON はこの施設の担当医だけ", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "facilities/fA/members/subA"), member("subA", "subadmin"));
+    await setDoc(doc(db, "facilities/fA/members/proxyA"), member("proxyA", "proxy"));
+    await setDoc(doc(db, "facilities/fA/orderers/docA"), { facilityId: "fA", name: "高橋" });
+    await setDoc(doc(db, "facilities/fB/orderers/docB"), { facilityId: "fB", name: "他施設" });
+  });
+  const path = "facilities/fA/displaySettings/proxyDoctor";
+  await assertSucceeds(setDoc(doc(as("adminA"), path), { enabled: true, doctorId: "docA", updatedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(as("subA"), path), { enabled: false, doctorId: "" }));
+  for (const uid of ["ordA", "proxyA"]) {
+    await assertSucceeds(getDoc(doc(as(uid), path)));
+    await assertFails(setDoc(doc(as(uid), path), { enabled: true, doctorId: "docA" }), uid);
+  }
+  await assertFails(setDoc(doc(as("adminB"), path), { enabled: false, doctorId: "" }));
+  await assertFails(getDoc(doc(as("ordB"), path)));
+  await assertFails(getDoc(doc(anon(), path)));
+  // 形式: ON は担当医が必須・この施設の担当医マスターにいること。OFF は担当医なし。余計なキー・型違いは拒否
+  for (const bad of [{ enabled: true, doctorId: "" }, { enabled: true, doctorId: "docB" }, { enabled: true, doctorId: "nobody" }, { enabled: true, doctorId: "a/b" },
+    { enabled: false, doctorId: "docA" }, { enabled: "true", doctorId: "docA" }, { enabled: true }, { doctorId: "docA" }, { enabled: true, doctorId: "docA", note: "x" }]) {
+    await assertFails(setDoc(doc(as("adminA"), path), bad), JSON.stringify(bad));
+  }
+  // 担当医の削除と同時に解除(同じ一括書き込み)。施設設定の削除の権限で消せる
+  const adb = as("adminA");
+  const batch = writeBatch(adb);
+  batch.delete(doc(adb, "facilities/fA/orderers/docA"));
+  batch.set(doc(adb, "facilities/fA/deletionMarks/orderers_docA"), { collection: "orderers", docId: "docA", deletedBy: "adminA", deletedAt: serverTimestamp() });   // 実際の削除と同じ(削除の記録)
+  batch.set(doc(adb, path), { enabled: false, doctorId: "", updatedAt: serverTimestamp() });
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(deleteDoc(doc(as("subA"), path)));
+});
+
 // ---------- 役割の拡張(副管理者・代行入力者)と参加待ち ----------
 async function seedRoles() {
   await env.withSecurityRulesDisabled(async (ctx) => {

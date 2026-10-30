@@ -127,7 +127,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await row.locator('[data-f="name"]').inputValue(), "新任 医師");
         assert.equal(await row.locator('[data-f="email"]').inputValue(), "new.doc@example.jp");
         assert.equal(await check.isChecked(), true);
-        assert.match(await sec.locator("[data-msg]").innerText(), /担当医は保存していません/);
+        assert.match(await sec.locator(":scope > [data-msg]").innerText(), /担当医は保存していません/);
 
         // 事前登録の成功 → 担当医の保存(ここでは保存が失敗) → 再試行で保存。事前登録は1回だけ
         await page.evaluate(() => { window.__failAdd = null; window.__failSave = true; });
@@ -158,7 +158,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await d1.locator('[data-act="save-row"]').click();
         await page.waitForFunction(() => window.__calls.some(x => x[0] === "saveOrderers"));
         await idle();
-        assert.match(await sec.locator("[data-msg]").innerText(), /重複して登録しませんでした/);
+        assert.match(await sec.locator(":scope > [data-msg]").innerText(), /重複して登録しませんでした/);
         assert.ok((await calls()).find(x => x[0] === "saveOrderers")[1].some(w => w.id === "d1" && w.data.email === "other@example.jp"));
 
         // チェックなし: 従来どおり担当医だけ

@@ -35,11 +35,13 @@ const repository = {
   listOrderers: async () => load().orderers.slice().sort((a, b) => a.sortOrder - b.sortOrder).map(o => ({ ...o })),
   listAdoptedIols: async () => load().adopted.map(a => ({ ...a })),
   listDealers: async () => load().dealers.slice().sort((a, b) => a.sortOrder - b.sortOrder).map(d => ({ ...d })), listMembers: async () => [],
-  getIolOrder: async () => load().iolOrder
+  getIolOrder: async () => load().iolOrder,
+  getProxyDoctor: async () => load().proxyDoctor || null
 };
 const settingsApi = {
   saveOrderers: (fid, writes) => guarded("orderers", () => { const db = load(); for (const w of writes) { const id = w.id || ("n" + (++db.seq)); const i = db.orderers.findIndex(o => o.id === id); const rec = { id, ...w.data }; if (i >= 0) db.orderers[i] = rec; else db.orderers.push(rec); } store(db); }),
-  deleteOrderer: (fid, id) => guarded("delete", () => { const db = load(); db.orderers = db.orderers.filter(o => o.id !== id); store(db); }),
+  deleteOrderer: (fid, id, opts = {}) => guarded("delete", () => { const db = load(); db.orderers = db.orderers.filter(o => o.id !== id); if (opts.clearProxyDoctor) db.proxyDoctor = { enabled: false, doctorId: "" }; window.__deleteOpts = opts; store(db); }),
+  saveProxyDoctor: (fid, v) => guarded("proxyDoctor", () => { const db = load(); db.proxyDoctor = { enabled: v.enabled, doctorId: v.doctorId }; store(db); }),
   saveAdoptedIols: (fid, writes) => guarded("adopted", () => { const db = load(); for (const w of writes) { const i = db.adopted.findIndex(a => a.id === w.id); const rec = { id: w.id, ...w.data }; if (i >= 0) db.adopted[i] = rec; else db.adopted.push(rec); } store(db); }),
   saveIolOrder: (fid, o) => guarded("iolOrder", () => { const db = load(); db.iolOrder = { makerOrder: o.makerOrder, modelOrder: o.modelOrder }; store(db); }),
   saveDealers: (fid, writes) => guarded("dealers", () => { const db = load(); for (const w of writes) { const id = w.id || ("dn" + (++db.seq)); const i = db.dealers.findIndex(o => o.id === id); const rec = { id, ...w.data }; if (i >= 0) db.dealers[i] = rec; else db.dealers.push(rec); } store(db); }),
@@ -199,7 +201,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.evaluate(() => { window.__fail = 1; });
       await docs.locator(".orderer-item").last().locator('[data-act="up"]').click();
       await docs.locator('[data-act="retry-autosave"]').waitFor();
-      assert.match(await docs.locator("[data-msg]").innerText(), /保存できませんでした/);
+      assert.match(await docs.locator(":scope > [data-msg]").innerText(), /保存できませんでした/);   // 担当医の欄のメッセージ(代行入力時の担当医の欄とは別)
       await docs.locator('[data-act="retry-autosave"]').click();
       await docs.locator('[data-act="retry-autosave"]').waitFor({ state: "detached" });
       assert.deepEqual((await db()).orderers.sort((a, b) => a.sortOrder - b.sortOrder).map(o => o.name), await docs.locator('[data-v="name"]').allInnerTexts(), "再試行で、画面の並びが保存される");
@@ -452,7 +454,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(pos, { right: true, sameRow: true }, "「施設設定」の右横");
         // 各設定項目(担当医など)のⓘと、同じ見た目
         const a = await page.locator(".settings-head .info-tip-btn").evaluate(b => { const s = getComputedStyle(b); return [s.fontSize, s.color, s.backgroundColor, s.borderTopWidth, s.width, s.height]; });
-        const b2 = await page.locator('[data-section="orderers"] .info-tip-btn').evaluate(b => { const s = getComputedStyle(b); return [s.fontSize, s.color, s.backgroundColor, s.borderTopWidth, s.width, s.height]; });
+        const b2 = await page.locator('[data-section="orderers"] .settings-heading .info-tip-btn').evaluate(b => { const s = getComputedStyle(b); return [s.fontSize, s.color, s.backgroundColor, s.borderTopWidth, s.width, s.height]; });
         assert.deepEqual(a, b2, "ⓘのサイズ・色が各設定項目と同じ");
         // タップ(PC はホバー)で同じ説明文のツールチップ。外側で閉じる
         const pop = page.locator(".settings-head .info-tip-pop");
@@ -474,7 +476,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const notes = sec.locator('.dealer-item.is-editing .form-label:has([data-f$="Emails"]) .field-note');
       assert.deepEqual(await notes.allInnerTexts(), ["（1行に1件・最大5件）", "（1行に1件・最大5件）"]);
       const labels = await sec.locator(".dealer-item.is-editing .form-label").evaluateAll(ls => ls.map(l => l.firstChild.textContent.trim()));
-      assert.deepEqual(labels, ["注文メールの宛名", "発注用メールアドレス", "使用報告用メールアドレス"]);
+      assert.deepEqual(labels, ["注文メールの宛名", "件名の先頭に付ける文字", "発注用メールアドレス", "使用報告用メールアドレス"]);
       const ns = await notes.evaluateAll(es => es.map(e => { const s = getComputedStyle(e); return [s.fontSize, s.fontWeight, s.color]; }));
       assert.deepEqual(ns[0], ns[1], "2つの補足説明は同じ書式");
       assert.equal(ns[0][2], "rgb(107, 114, 128)", "グレー");
@@ -485,6 +487,66 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(await sec.locator(".dealer-item.is-editing [data-err]").innerText(), /使用報告用.*5件/);
       assert.deepEqual(errors, []);
       await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`担当医: 代行入力時の担当医の初期選択(初期は OFF・ON で1名を選ぶと自動保存・ⓘで説明・削除で解除): ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [390, 1100]) {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 1000 });   // スマホ幅はタップで ⓘ を開く
+        const page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        page.on("dialog", d => d.accept());   // 担当医の削除の確認
+        await page.goto(base);
+        await page.waitForFunction(() => window.__ready);
+        const block = page.locator('[data-section="orderers"] [data-proxy-doctor]');
+        const chk = block.locator('[data-f="proxyEnabled"]'), sel = block.locator('[data-f="proxyDoctorId"]');
+        const db = () => page.evaluate(() => JSON.parse(localStorage.getItem("__settingsDb") || "null"));
+        // 初期は OFF(未設定の既存施設も OFF)。担当医の選択は出さない。説明は常時は出さず、ⓘ で確認
+        assert.equal(await chk.isChecked(), false);
+        assert.equal(await sel.isVisible(), false);
+        assert.equal(await block.locator(".info-tip-pop").isVisible(), false);
+        assert.match(await block.innerText(), /^代行入力時の担当医を初期選択する\s*ⓘ$/, "説明文は常時表示しない(ⓘだけ)");
+        const tip = block.locator(".info-tip-btn");
+        const pos = await block.evaluate(b => { const l = b.querySelector(".settings-check").getBoundingClientRect(), i = b.querySelector(".info-tip-btn").getBoundingClientRect(); return { right: i.left >= l.right - 1, sameLine: Math.abs((i.top + i.bottom) / 2 - (l.top + l.bottom) / 2) < 12 }; });
+        assert.deepEqual(pos, { right: true, sameLine: true }, "ⓘ はチェックボックスの右");
+        if (width === 1100) await tip.hover(); else await tip.tap();
+        await block.locator(".info-tip-pop").waitFor();
+        assert.equal(await block.locator(".info-tip-pop").innerText(), "代行入力者（CO・Nsなど）が注文する際、指定した担当医があらかじめ選択されます。医師本人が注文する場合は本人が優先されます。注文時に変更することもできます。");
+        await page.mouse.click(5, 5);
+        // ON にしても、担当医を選ぶまでは保存しない
+        await chk.check();
+        assert.equal(await sel.isVisible(), true);
+        assert.deepEqual(await sel.locator("option").allInnerTexts(), ["担当医を選択", "山田", "佐藤"], "登録済みの担当医から選ぶ");
+        assert.equal((await db())?.proxyDoctor, undefined);
+        await sel.selectOption("d2");
+        await page.waitForFunction(() => (JSON.parse(localStorage.getItem("__settingsDb") || "{}").proxyDoctor || {}).doctorId === "d2");
+        assert.deepEqual((await db()).proxyDoctor, { enabled: true, doctorId: "d2" });
+        // 開き直すと保存した設定を表示
+        await page.reload(); await page.waitForFunction(() => window.__ready);
+        assert.deepEqual([await chk.isChecked(), await sel.inputValue()], [true, "d2"]);
+        // 選んでいる担当医(佐藤)を削除すると、設定も解除(OFF)
+        await page.locator('[data-section="orderers"] .orderer-item[data-id="d2"] [data-act="delete"]').click();
+        await page.waitForFunction(() => !document.querySelector('[data-section="orderers"] .orderer-item[data-id="d2"]'));
+        assert.deepEqual(await page.evaluate(() => window.__deleteOpts), { clearProxyDoctor: true });
+        assert.deepEqual((await db()).proxyDoctor, { enabled: false, doctorId: "" });
+        assert.deepEqual([await chk.isChecked(), await sel.isVisible()], [false, false]);
+        // OFF にすると保存(OFF・担当医なし)
+        await chk.check(); await sel.selectOption("d1");
+        await page.waitForFunction(() => (JSON.parse(localStorage.getItem("__settingsDb") || "{}").proxyDoctor || {}).enabled === true);
+        await chk.uncheck();
+        await page.waitForFunction(() => (JSON.parse(localStorage.getItem("__settingsDb") || "{}").proxyDoctor || {}).enabled === false);
+        assert.deepEqual((await db()).proxyDoctor, { enabled: false, doctorId: "" });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `${width}: 横スクロールなし`);
+        assert.deepEqual(errors, []);
+        await page.evaluate(() => localStorage.clear());
+        await context.close();
+      }
     } finally { await browser.close(); }
   });
 }

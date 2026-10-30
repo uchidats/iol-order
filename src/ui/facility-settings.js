@@ -7,6 +7,7 @@ import {
   pendingState, sortPending, formatExpiry, PENDING_STATE_LABELS
 } from "../domain/member-admin.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
+import { readProxyDoctor } from "../domain/self-doctor.js";
 import { createDealerPortalSection } from "./dealer-portal-grants.js";
 import { baseModelName } from "../domain/lens-labels.js";
 import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
@@ -126,8 +127,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   }
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
+  let proxySaver = null;   // 代行入力時の担当医の初期選択(担当医の欄の中)
   let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver].filter(Boolean);
+  const savers = () => [proxySaver, orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -146,7 +148,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const mailSettings = repository.getMailSettings ? await repository.getMailSettings(facility.id).catch((e) => { console.warn("メール設定を読み込めませんでした:", e); return null; }) : null;
     // ヘッダーのテーマカラー。読めない場合は未設定(標準の青)として表示する
     const headerTheme = repository.getHeaderTheme ? readHeaderTheme(await repository.getHeaderTheme(facility.id).catch((e) => { console.warn("テーマカラーを読み込めませんでした:", e); return null; })) : null;
-    data = { orderers, adopted, dealers, iolOrder, mailSettings, headerTheme, members: [], pending: [] };
+    // 代行入力時の担当医の初期選択。読めない場合は未設定(OFF)として表示し、他の設定の読み込みは止めない
+    const proxyDoctor = repository.getProxyDoctor ? await repository.getProxyDoctor(facility.id).catch((e) => { console.warn("代行入力時の担当医の設定を読み込めませんでした:", e); return null; }) : null;
+    data = { orderers, adopted, dealers, iolOrder, mailSettings, headerTheme, proxyDoctor, members: [], pending: [] };
     if (canManageMembers) await reloadMembers();
   }
 
@@ -318,6 +322,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       const saved = data.orderers.find(o => o.name === v.cleaned[i].name);
       if (saved) { r._state.id = saved.id; r.setAttribute("data-id", saved.id); }
     });
+    renderProxyDoctor(section);   // 代行入力時の担当医の選択肢(追加・名前の変更)を更新する
     await onSaved();
   }
 
@@ -337,9 +342,12 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     message(section, "削除しています…");
     try {
       await orderSaver.exclusive(async () => {   // 自動保存と同時に走らせない(削除した担当医を、保存が書き戻さないように)
-        await settingsApi.deleteOrderer(facility.id, id);
+        const clearProxyDoctor = readProxyDoctor(data.proxyDoctor, data.orderers).doctorId === id;   // 代行入力時の初期選択の担当医なら、設定も解除
+        await settingsApi.deleteOrderer(facility.id, id, { clearProxyDoctor });
         data.orderers = data.orderers.filter(o => o.id !== id);
+        if (clearProxyDoctor) data.proxyDoctor = { enabled: false, doctorId: "" };
         row.remove();
+        renderProxyDoctor(section);
       });
       await onSaved();
       message(section, `「${name}」を削除しました。`);
@@ -353,6 +361,54 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   function renderOrderers(section) {
     const list = section.querySelector("[data-list]");
     list.replaceChildren(...data.orderers.map(ordererRow));
+    renderProxyDoctor(section);
+  }
+
+  // ---------- 代行入力時の担当医(担当医の欄の下。初期は OFF。ON のときだけ登録済みの担当医から1名を選ぶ。自動保存) ----------
+  function proxyDoctorBlock() {
+    const chk = h("input", { type: "checkbox", "data-f": "proxyEnabled" });
+    const sel = h("select", { class: "form-control", "data-f": "proxyDoctorId", "aria-label": "代行入力時に初期選択する担当医" }, h("option", { value: "" }, "担当医を選択"));
+    const pick = h("div", { class: "select-wrapper proxy-doctor-select", hidden: true }, sel);
+    const block = h("div", { class: "proxy-doctor", "data-proxy-doctor": "" },
+      h("div", { class: "proxy-doctor-head" },
+        h("label", { class: "settings-check" }, chk, h("span", {}, "代行入力時の担当医を初期選択する")),
+        createInfoTip("代行入力者（CO・Nsなど）が注文する際、指定した担当医があらかじめ選択されます。医師本人が注文する場合は本人が優先されます。注文時に変更することもできます。", { label: "代行入力時の担当医の説明" }).root),
+      pick,
+      h("p", { class: "form-hint", "data-msg": "" }));
+    chk.addEventListener("change", () => {
+      pick.hidden = !chk.checked;
+      block._pendingOn = chk.checked;   // ON にして担当医を選んでいる途中(再表示でチェックを外さない)
+      if (chk.checked && !sel.value) { message(block, "初期選択する担当医を選ぶと保存されます。"); sel.focus(); return; }   // 担当医を選ぶまで保存しない
+      proxySaver.request();
+    });
+    sel.addEventListener("change", () => { if (chk.checked && sel.value) proxySaver.request(); });
+    proxySaver = createAutoSaver(block, async () => {
+      if (chk.checked && !sel.value) return;
+      const next = chk.checked ? { enabled: true, doctorId: sel.value } : { enabled: false, doctorId: "" };
+      const cur = readProxyDoctor(data.proxyDoctor, data.orderers);
+      message(block, "");
+      if (cur.enabled === next.enabled && cur.doctorId === next.doctorId) return;   // 変更なし(未設定の OFF も書かない)
+      await settingsApi.saveProxyDoctor(facility.id, next);
+      data.proxyDoctor = { ...next };
+      block._pendingOn = false;
+      await onSaved();
+    });
+    return block;
+  }
+
+  /** 表示: 担当医の選択肢(保存済みの担当医)と、現在の設定(削除済みの担当医は OFF として表示) */
+  function renderProxyDoctor(section) {
+    const block = section.querySelector("[data-proxy-doctor]");
+    if (!block) return;
+    const chk = block.querySelector('[data-f="proxyEnabled"]'), sel = block.querySelector('[data-f="proxyDoctorId"]');
+    const cur = readProxyDoctor(data.proxyDoctor, data.orderers);
+    const pending = block._pendingOn === true && !cur.enabled;   // ON にして選んでいる途中は、チェックと選択を保つ
+    const keepPick = pending ? sel.value : "";
+    sel.replaceChildren(h("option", { value: "" }, "担当医を選択"), ...data.orderers.filter(o => o.id).map(o => h("option", { value: o.id }, o.name || "（名前なし）")));
+    const want = cur.enabled ? cur.doctorId : keepPick;
+    sel.value = [...sel.options].some(o => o.value === want) ? want : "";
+    chk.checked = cur.enabled || pending;
+    block.querySelector(".proxy-doctor-select").hidden = !chk.checked;
   }
 
   const readOrdererRows = (section) => [...section.querySelectorAll(".orderer-item")].map(r => ({
@@ -401,7 +457,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("div", { "data-list": "" }),
       h("div", { class: "settings-actions" },
         h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加")),
-      h("p", { class: "form-hint", "data-msg": "" }));
+      h("p", { class: "form-hint", "data-msg": "" }),
+      proxyDoctorBlock());
     addButtonToHeading(section);
     section.querySelector('[data-act="add"]').addEventListener("click", () => {
       const row = ordererRow(); section.querySelector("[data-list]").appendChild(row);

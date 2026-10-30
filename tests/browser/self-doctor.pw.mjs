@@ -21,7 +21,7 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <script type="module">
 import { createLensLines } from "/src/ui/lens-lines.js";
 import { buildLensOptions } from "/src/domain/lens-options.js";
-import { findSelfDoctor } from "/src/domain/self-doctor.js";
+import { initialDoctorId } from "/src/domain/self-doctor.js";
 import { IOL_MODELS } from "/src/data/iol-models.js";
 const q = new URLSearchParams(location.search);
 const doctors = [{ id: "o1", name: "高橋", email: "takahashi@example.jp" }, { id: "o2", name: "佐藤", email: "sato@example.jp" }, { id: "o3", name: "山田" }];
@@ -29,7 +29,9 @@ const user = q.get("email") === null ? null : { uid: "u1", email: q.get("email")
 const options = buildLensOptions(IOL_MODELS);
 window.__lines = createLensLines({
   container: document.getElementById("lensLines"), addButton: document.getElementById("btnAddLine"),
-  getOptions: () => options, getDoctors: () => doctors, getDefaultDoctorId: () => findSelfDoctor(doctors, user), minDate: () => "2020-01-01"
+  getOptions: () => options, getDoctors: () => doctors, minDate: () => "2020-01-01",
+  // 注文フォームと同じ初期値: 本人 → 代行入力者(role=proxy)は施設の設定(proxy=担当医ID が ON) → 未選択
+  getDefaultDoctorId: () => initialDoctorId(doctors, user, { role: q.get("role") || "", proxyDoctor: q.get("proxy") ? { enabled: true, doctorId: q.get("proxy") } : null })
 });
 window.__ready = true;
 </script></body></html>`;
@@ -105,6 +107,52 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await open("email=yamada@example.jp&name=山田");
       assert.equal(await doctor(0).inputValue(), "");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`代行入力時の担当医: 代行入力者は施設の設定の担当医を初期選択(本人が優先・OFF/他の役割は未選択)。変更でき、追加・手動の選択は上書きしない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      const open = async (qs) => { await page.goto(`${base}?${qs}`); await page.waitForFunction(() => window.__ready); };
+      const doctor = (i) => page.locator(".lens-line").nth(i).locator("[data-f=doctor]");
+      // 代行入力者(CO・Nsなど。担当医に紐づかない)+ 設定 ON(佐藤): 佐藤を初期選択
+      await open("email=nurse@example.jp&name=高橋&role=proxy&proxy=o2");
+      assert.equal(await doctor(0).inputValue(), "o2");
+      // 変更できる。複数レンズでもそれぞれ変更でき、追加は現在の担当医を引き継ぐ(設定の担当医で上書きしない)
+      await doctor(0).selectOption("o3");
+      await page.click("#btnAddLine");
+      assert.equal(await doctor(1).inputValue(), "o3", "追加は引き継ぎ");
+      await doctor(1).selectOption("o1");
+      assert.deepEqual([await doctor(0).inputValue(), await doctor(1).inputValue()], ["o3", "o1"], "レンズごとに変更できる");
+      await doctor(1).selectOption("");
+      await page.click("#btnAddLine");
+      assert.equal(await doctor(2).inputValue(), "", "未選択に戻した後の追加も、設定の担当医に戻さない");
+      // 新しい注文(初期状態)では、また設定の担当医
+      await page.evaluate(() => window.__lines.reset());
+      assert.equal(await doctor(0).inputValue(), "o2");
+      // 下書きの復元: 保存されていた担当医(未選択を含む)を使い、設定の担当医で上書きしない
+      await page.evaluate(() => window.__lines.restore([{ doctorId: "o3" }, { doctorId: "" }]));
+      assert.deepEqual([await doctor(0).inputValue(), await doctor(1).inputValue()], ["o3", ""]);
+      // 医師本人(メールで紐づく)は本人が優先
+      await open("email=takahashi@example.jp&role=proxy&proxy=o2");
+      assert.equal(await doctor(0).inputValue(), "o1");
+      // 設定 OFF(未設定)・代行入力者以外の役割・削除された担当医: 未選択
+      for (const qs of ["email=nurse@example.jp&role=proxy", "email=nurse@example.jp&role=orderer&proxy=o2", "email=nurse@example.jp&role=subadmin&proxy=o2", "email=nurse@example.jp&role=proxy&proxy=gone"]) {
+        await open(qs);
+        assert.equal(await doctor(0).inputValue(), "", qs);
+      }
+      for (const w of [320, 390]) {
+        await open("email=nurse@example.jp&role=proxy&proxy=o2");
+        await page.setViewportSize({ width: w, height: 900 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+      }
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

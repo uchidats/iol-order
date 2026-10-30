@@ -69,6 +69,11 @@ export function createFirestoreRepository(db, fs) {
         return null;
       }
     },
+    /** 代行入力時の担当医の初期選択(所属者が読める)。未設定は null(OFF として扱う) */
+    async getProxyDoctor(facilityId) {
+      const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "proxyDoctor"));
+      return snap.exists() ? snap.data() : null;
+    },
     /** ヘッダーのテーマカラー(所属者が読める)。未設定は null */
     async getHeaderTheme(facilityId) {
       const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme"));
@@ -146,15 +151,18 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
     }
     await batch.commit();
   };
-  const remove = async (facilityId, sub, id) => {
+  // extra: 同じ一括書き込みで書く追加の内容 [[ref, data]](担当医の削除と同時に、代行入力時の担当医の設定を解除するなど)
+  const remove = async (facilityId, sub, id, extra = []) => {
     const ref = fs.doc(db, "facilities", facilityId, sub, id);
-    if (!trackActor) return fs.deleteDoc(ref);
+    if (!trackActor && !extra.length) return fs.deleteDoc(ref);
     const batch = fs.writeBatch(db);
     batch.delete(ref);
-    batch.set(fs.doc(db, "facilities", facilityId, "deletionMarks", `${sub}_${id}`),
+    if (trackActor) batch.set(fs.doc(db, "facilities", facilityId, "deletionMarks", `${sub}_${id}`),
       { collection: sub, docId: id, deletedBy: actorUid(), deletedAt: fs.serverTimestamp() });
+    for (const [r, data] of extra) batch.set(r, data);
     await batch.commit();
   };
+  const proxyDoctorRef = (facilityId) => fs.doc(db, "facilities", facilityId, "displaySettings", "proxyDoctor");
   return {
     saveOrderers: (facilityId, writes) => commit(facilityId, "orderers", writes),
     saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
@@ -178,7 +186,12 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
       const by = trackActor ? { updatedBy: actorUid() } : {};
       await fs.setDoc(fs.doc(db, "facilities", facilityId, "settings", "mail"), { ...data, updatedAt: fs.serverTimestamp(), ...by });
     },
-    deleteOrderer: (facilityId, id) => remove(facilityId, "orderers", id),
+    /** clearProxyDoctor: この担当医が代行入力時の初期選択なら、同じ一括書き込みで設定を解除(OFF)する */
+    deleteOrderer: (facilityId, id, { clearProxyDoctor = false } = {}) => remove(facilityId, "orderers", id,
+      clearProxyDoctor ? [[proxyDoctorRef(facilityId), { enabled: false, doctorId: "", updatedAt: fs.serverTimestamp() }]] : []),
+    /** 代行入力時の担当医の初期選択の保存(管理者・副管理者のみ。Rules が形式と担当医の存在を検証する) */
+    saveProxyDoctor: (facilityId, { enabled, doctorId }) => fs.setDoc(proxyDoctorRef(facilityId),
+      { enabled: enabled === true, doctorId: enabled === true ? doctorId : "", updatedAt: fs.serverTimestamp() }),
     /** ディーラーの削除(以後の注文の発注先として使えなくなる。過去の注文に保存されたディーラー情報には触れない) */
     deleteDealer: (facilityId, id) => remove(facilityId, "facilityDealers", id),
   };

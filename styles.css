@@ -1995,6 +1995,13 @@ input[type="date"].form-control {
 .history-delete-msg:empty { display: none; }
 .history-notifications ul { margin: 4px 0 0; padding-left: 1.2em; }
 .mail-copy-email[hidden] { display: none; }
+/* 担当医の欄の下: 代行入力時の担当医の初期選択(チェックの右にⓘ。ON のときだけ担当医を選ぶ) */
+.proxy-doctor { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-light); }
+.proxy-doctor-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.proxy-doctor-head .settings-check { white-space: normal; }
+.proxy-doctor-select { margin-top: 8px; max-width: 360px; }
+.proxy-doctor-select[hidden] { display: none; }
+.proxy-doctor [data-msg]:empty { display: none; }
 [data-section="mail"] .settings-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
 @media (max-width: 480px) {
   .history-row { grid-template-columns: minmax(0, 1fr) auto; }

@@ -284,7 +284,17 @@ service cloud.firestore {
               && request.resource.data.keys().hasAll(['color', 'gradient'])
               && request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-f]{6}$')
               && request.resource.data.gradient is bool
-              && (!('darkText' in request.resource.data) || request.resource.data.darkText is bool)));
+              && (!('darkText' in request.resource.data) || request.resource.data.darkText is bool))
+            // 代行入力時の担当医の初期選択(所属者が読める。注文フォームが使う)。ON のときは、この施設の担当医マスターにいる担当医だけ
+            || (docId == 'proxyDoctor'
+              && request.resource.data.keys().hasOnly(['enabled', 'doctorId', 'updatedAt'])
+              && request.resource.data.keys().hasAll(['enabled', 'doctorId'])
+              && request.resource.data.enabled is bool
+              && request.resource.data.doctorId is string
+              && (request.resource.data.enabled == false
+                ? request.resource.data.doctorId == ''
+                : (request.resource.data.doctorId.matches('^[A-Za-z0-9_-]{1,128}$')
+                  && exists(/databases/$(database)/documents/facilities/$(fid)/orderers/$(request.resource.data.doctorId))))));
         allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 

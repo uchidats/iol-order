@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findSelfDoctor } from "../src/domain/self-doctor.js";
+import { findSelfDoctor, initialDoctorId, readProxyDoctor } from "../src/domain/self-doctor.js";
 
 const docs = [
   { id: "o1", name: "高橋", email: "Takahashi@Example.jp" },
@@ -30,4 +30,24 @@ test("安全側: メール未確認のアカウント・同じメールの医師
   assert.equal(findSelfDoctor([], { email: "takahashi@example.jp" }), "");
   assert.equal(findSelfDoctor(undefined, { email: "takahashi@example.jp" }), "");
   assert.equal(findSelfDoctor([{ id: "x", name: "A" }], { email: "takahashi@example.jp" }), "", "メール未登録の医師だけ");
+});
+
+test("代行入力時の担当医: 本人(メールで紐づく)が最優先。代行入力者(proxy)だけ、設定が ON ならその担当医。OFF・未設定・ほかの役割は未選択", () => {
+  const on = { enabled: true, doctorId: "o2" };
+  const nurse = { email: "nurse@example.jp", emailVerified: true, displayName: "高橋" };
+  assert.equal(initialDoctorId(docs, { email: "takahashi@example.jp", emailVerified: true }, { role: "proxy", proxyDoctor: on }), "o1", "本人が優先");
+  assert.equal(initialDoctorId(docs, { email: "takahashi@example.jp", emailVerified: true }, { role: "orderer", proxyDoctor: on }), "o1");
+  assert.equal(initialDoctorId(docs, nurse, { role: "proxy", proxyDoctor: on }), "o2", "代行入力者は設定の担当医(氏名が同じでも本人とはしない)");
+  assert.equal(initialDoctorId(docs, nurse, { role: "proxy", proxyDoctor: { enabled: false, doctorId: "" } }), "", "OFF");
+  assert.equal(initialDoctorId(docs, nurse, { role: "proxy", proxyDoctor: null }), "", "未設定(既存の施設)は OFF");
+  for (const role of ["orderer", "admin", "subadmin", "", undefined]) assert.equal(initialDoctorId(docs, nurse, { role, proxyDoctor: on }), "", String(role));
+  assert.equal(initialDoctorId(docs, nurse, { role: "proxy", proxyDoctor: { enabled: true, doctorId: "deleted" } }), "", "削除された担当医は使わない");
+  assert.equal(initialDoctorId(docs, nurse), "");
+});
+
+test("代行入力時の担当医の設定の読み方: ON かつ担当医マスターにいるときだけ ON。形式が違う・削除済みは OFF", () => {
+  assert.deepEqual(readProxyDoctor({ enabled: true, doctorId: "o3" }, docs), { enabled: true, doctorId: "o3" });
+  for (const raw of [null, undefined, {}, { enabled: false, doctorId: "o3" }, { enabled: "true", doctorId: "o3" }, { enabled: true, doctorId: "x" }, { enabled: true, doctorId: 3 }, { enabled: true }]) {
+    assert.deepEqual(readProxyDoctor(raw, docs), { enabled: false, doctorId: "" }, JSON.stringify(raw));
+  }
 });

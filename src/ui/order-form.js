@@ -2,7 +2,7 @@ import { resolveAdoptedModels } from "../data/static-repository.js";
 import { buildLensOptions } from "../domain/lens-options.js";
 import { applyIolOrder } from "../domain/iol-order.js";
 import { renderConfirmLines, renderDealersCard, renderDealerSections } from "./confirm-lines.js";
-import { findSelfDoctor } from "../domain/self-doctor.js";
+import { initialDoctorId } from "../domain/self-doctor.js";
 import { draftKey } from "../domain/order-draft.js";
 import { createDraftStore } from "./draft-store.js";
 import { findPastOrderDuplicates } from "../domain/order-duplicates.js";
@@ -27,6 +27,8 @@ let lensLines = null;           // 複数明細の入力欄(lens-lines.js)
 let doctors = [];               // 担当医マスター(施設設定の「担当医」)
 let alconCalculatorUrl = null;  // ALCONのトーリックを選択中なら、計算ツールのURL(将来の連携用に保持。画面の表示は各レンズのリンク)
 let draft = null;               // 下書きの自動保存(createDraftStore)
+let loginRole = "";              // 施設での役割(代行入力時の担当医の初期選択に使う)
+let proxyDoctorSetting = null;    // 施設の「代行入力時の担当医」(displaySettings/proxyDoctor。未設定は null)
 let loginUser = null;            // ログインユーザー(認証情報のうち uid / email / emailVerified だけ。担当医の初期値の判定用。注文者とは別の情報)
 let dealers = [];               // 施設の登録ディーラー(0社=発注先なし / 1社=自動 / 2社以上=明細ごとに選択)
 let currentPendingOrderData = null;
@@ -83,20 +85,23 @@ export async function initOrderForm(args) {
   }
 }
 
-async function initOrderFormInner({ config, repository, facilityId, facility = null, orderApi: api = null, user = null }) {
+async function initOrderFormInner({ config, repository, facilityId, facility = null, orderApi: api = null, user = null, role = "" }) {
   loginUser = user;
+  loginRole = role || "";
   appConfig = config;
   orderApi = api;
   currentFacility = facility;
   facilityRepository = repository;
   facilityRepositoryId = facilityId;
 
-  const [adoptedIols, doctorList, dealerList, iolOrder] = await Promise.all([
+  const [adoptedIols, doctorList, dealerList, iolOrder, proxyDoctor] = await Promise.all([
     repository.listAdoptedIols(facilityId),
     repository.listOrderers(facilityId),   // 担当医マスター(コレクション名は互換性のため orderers のまま)
     repository.listDealers(facilityId),
-    repository.getIolOrder ? repository.getIolOrder(facilityId) : null   // 施設ごとのIOLの表示順(未設定は標準の順番)
+    repository.getIolOrder ? repository.getIolOrder(facilityId) : null,   // 施設ごとのIOLの表示順(未設定は標準の順番)
+    readProxyDoctorSetting(repository, facilityId)
   ]);
+  proxyDoctorSetting = proxyDoctor;
   availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
   dealers = dealerList;
@@ -108,8 +113,8 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
     getOptions: () => lensOptions,
     getDoctors: () => doctors,
     getDealers: () => dealers,
-    // 担当医の初期値: ログインユーザー本人が担当医マスター(メールアドレスで紐づけ)にいれば本人。いなければ未選択(従来どおり)
-    getDefaultDoctorId: () => findSelfDoctor(doctors, loginUser),
+    // 担当医の初期値: 本人が担当医マスター(メールアドレスで紐づけ)にいれば本人。代行入力者は施設の「代行入力時の担当医」が ON ならその担当医。ほかは未選択
+    getDefaultDoctorId: () => initialDoctorId(doctors, loginUser, { role: loginRole, proxyDoctor: proxyDoctorSetting }),
     minDate: () => surgeryDateRange().min,   // 日本時間の本日(サーバーと同じ基準)
     maxDate: () => surgeryDateRange().max,
     onChange: () => { updateAlconGuide(); if (draft) draft.save(); },   // モデル・絞り込み・レンズの追加/削除/元に戻すは、すぐ下書きに反映する
@@ -121,6 +126,13 @@ async function initOrderFormInner({ config, repository, facilityId, facility = n
   pendingStore = sendsOrders(appConfig.orderMode) && loginUser && loginUser.uid && facilityRepositoryId
     ? createPendingOrderStore(window.localStorage, pendingOrderKey(loginUser.uid, facilityRepositoryId)) : null;
   renderModeBadge();
+}
+
+/** 代行入力時の担当医の設定。読めない場合は未設定(OFF)として扱い、注文フォームは止めない */
+async function readProxyDoctorSetting(repository, facilityId) {
+  if (!repository.getProxyDoctor) return null;
+  try { return await repository.getProxyDoctor(facilityId); }
+  catch (e) { console.warn("代行入力時の担当医の設定を読み込めませんでした:", e); return null; }
 }
 
 /** 入力内容の自動保存・復元(localStorage の下書き。ログインユーザー・施設ごと)。注文が正常に完了したときだけ削除する */
@@ -470,12 +482,14 @@ export function isOrderFormDirty() {
  */
 export async function reloadFacilityOptions() {
   if (!facilityRepository || !el.form) return;
-  const [adoptedIols, doctorList, dealerList, iolOrder] = await Promise.all([
+  const [adoptedIols, doctorList, dealerList, iolOrder, proxyDoctor] = await Promise.all([
     facilityRepository.listAdoptedIols(facilityRepositoryId),
     facilityRepository.listOrderers(facilityRepositoryId),
     facilityRepository.listDealers(facilityRepositoryId),
-    facilityRepository.getIolOrder ? facilityRepository.getIolOrder(facilityRepositoryId) : null
+    facilityRepository.getIolOrder ? facilityRepository.getIolOrder(facilityRepositoryId) : null,
+    readProxyDoctorSetting(facilityRepository, facilityRepositoryId)
   ]);
+  proxyDoctorSetting = proxyDoctor;   // 以後に作る明細の初期値だけに使う(入力済みの担当医は変えない)
 
   availableModels = applyIolOrder(resolveAdoptedModels(adoptedIols), iolOrder);
   doctors = doctorList;
