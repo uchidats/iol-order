@@ -222,7 +222,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await modelSelect.evaluate(s => getComputedStyle(s).opacity), "1");
       // 幅: IOLパワーは約2/3(128px)、担当医は約3/4(150px)。IOLモデル(220px)は変更なし
       const ws = await page.evaluate(() => Object.fromEntries(["model", "power", "doctor"].map(k => [k, Math.round(document.querySelector(`.lens-line [data-f=${k}]`).getBoundingClientRect().width)])));
-      assert.deepEqual(ws, { model: 220, power: 128, doctor: 400 }, "PC幅の選択ボックスの幅(担当医は長い名前も全文が見える幅)");
+      assert.deepEqual(ws, { model: 220, power: 128, doctor: 150 }, "PC幅の選択ボックスの幅(従来どおり)");
       assert.deepEqual(errors, []);
       await context.close();
     } finally { await browser.close(); }

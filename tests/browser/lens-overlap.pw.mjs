@@ -106,8 +106,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(r.btnsInsideGroup, "ボタンが枚数の欄からはみ出している: " + ctx);
         assert.equal(r.overflowX, false, "横スクロールが出ている: " + ctx);
         if (r.sameRow) assert.equal(r.rowGap, 20, "同じ行のときの間隔は20px: " + ctx);
-        // 項目名を左・入力欄を右の配置(スマホ 360px 以上・PC): 枚数の項目名とボタンが同じ行。枚数と手術日は別の行
-        if (w >= 360) assert.ok(r.labelBeside && !r.sameRow, "項目名の右にボタン(手術日は次の行): " + ctx);
+        // スマホ(360px 以上): 項目名を左・ボタンを右(手術日は次の行)。PC(600px 以上): 従来どおり枚数と手術日が同じ行
+        if (w >= 360 && w < 600) assert.ok(r.labelBeside && !r.sameRow, "項目名の右にボタン(手術日は次の行): " + ctx);
+        if (w >= 600) assert.ok(r.sameRow && !r.labelBeside, "十分な幅では同じ行に並ぶ: " + ctx);
       }
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
