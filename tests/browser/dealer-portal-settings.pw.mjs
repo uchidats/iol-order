@@ -197,6 +197,18 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(`${base}operator`);
       await page.waitForFunction(() => window.__ready);
+      // 説明は見出しの右のⓘ(冒頭・「会社を登録」とも常時は表示しない。ⓘ を押すと同じ文を表示)
+      const op = page.locator(".dealer-operator");
+      for (const [head, text] of [["h2", "ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。"], ["h3", "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"]]) {
+        assert.ok(!(await op.locator(".form-hint").allInnerTexts()).includes(text), "説明文は常時表示しない");
+        const wrap = op.locator(`.settings-heading:has(> ${head}:text-is("${head === "h2" ? "ディーラー画面の管理" : "会社を登録"}"))`);
+        const pos = await wrap.evaluate((w, hd) => { const t = w.querySelector(hd).getBoundingClientRect(), b = w.querySelector(".info-tip-btn").getBoundingClientRect(); return b.left >= t.right - 1 && Math.abs((b.top + b.bottom) / 2 - (t.top + t.bottom) / 2) < 14; }, head);
+        assert.ok(pos, `${head}: ⓘ は見出しの右横`);
+        await wrap.locator(".info-tip-btn").click();
+        await wrap.locator(".info-tip-pop").waitFor();
+        assert.equal(await wrap.locator(".info-tip-pop").innerText(), text);
+        await page.keyboard.press("Escape");
+      }
       // 担当者は担当者 ID で扱い、確認コードで紐付け済みのログイン方法を表示する(UID は表示しない)
       assert.match(await page.locator('[data-staff="dstf_x1"]').innerText(), /ログイン方法 確認済みの端末・Google/);
       assert.match(await page.locator('[data-staff="dstf_x9"]').innerText(), /ログイン方法 未確認/);

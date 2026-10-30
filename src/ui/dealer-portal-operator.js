@@ -2,6 +2,7 @@ import { h } from "./markdown-view.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { formatJstDateTime } from "../domain/dealer-portal.js";
+import { createInfoTip, createSectionHeading } from "./info-tip.js";
 
 const ROLE_LABELS = { reader: "閲覧者", companyAdmin: "会社管理者" };
 const STAFF_STATUS = { active: "有効", disabled: "無効(退職など)" };
@@ -23,8 +24,9 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
   const body = h("div", { class: "dealer-operator-body" });
-  root.append(h("div", { class: "settings-head" }, h("h2", {}, "ディーラー画面の管理"), h("span", { class: "settings-facility" }), closeBtn),
-    h("p", { class: "form-hint" }, "ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。"),
+  root.append(h("div", { class: "settings-head" },
+    h("div", { class: "settings-heading" }, h("h2", {}, "ディーラー画面の管理"), createInfoTip("ディーラーの会社と担当者を登録し、施設の発注先と会社を関連付けます。注文を閲覧できるのは、施設の管理者・副管理者が許可した後の新規注文のうち、自社宛ての明細だけです。", { label: "ディーラー画面の管理の説明" }).root),
+    h("span", { class: "settings-facility" }), closeBtn),
     status, body);
   let open = false, busy = false, data = null;
   closeBtn.addEventListener("click", () => { close(); onClose(); });
@@ -49,8 +51,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
       if (!name.value.trim()) { err.textContent = "会社名を入力してください"; return; }
       run(() => api.createCompany({ name: name.value, requestId }), `「${name.value.trim()}」を登録しました。`, err);
     });
-    return h("div", { class: "settings-section" }, h("h3", {}, "会社を登録"),
-      h("p", { class: "form-hint" }, "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"),
+    return h("div", { class: "settings-section" }, createSectionHeading("会社を登録", "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"),   // 説明は見出しの右のⓘ
       field("会社名", name), h("div", { class: "form-row" }, btn), err);
   }
 
