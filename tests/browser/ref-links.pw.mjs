@@ -83,6 +83,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (let i = 0; i < 5; i++) {
         const a = links.nth(i);
         const st = await a.evaluate(e => { const s = getComputedStyle(e); return { deco: s.textDecorationLine, color: s.color }; });
+        if (i === 0) {
+          const box = await page.locator(".ref-links-accordion").evaluate(e => { const s = getComputedStyle(e); return [s.borderTopWidth, s.backgroundColor]; });
+          assert.deepEqual(box, ["0px", "rgba(0, 0, 0, 0)"], "外側の枠線・背景はない");
+        }
         assert.equal(st.deco, "none", `常時の下線なし: ${EXPECTED[i][0]}`);
         assert.equal(st.color, primary, "青色(既存の色)を維持");
         assert.equal(await a.locator("svg.ext-icon").count(), 1, "外部リンクアイコン");

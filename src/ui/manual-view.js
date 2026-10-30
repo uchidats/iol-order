@@ -29,7 +29,13 @@ export function resolveManualLink(url) {
 
 /** Markdown を表示用の要素にする(HTMLとして解釈しない。リンクは resolveManualLink で解決できるものだけ) */
 export function renderManualMarkdown(markdown) {
-  return renderMarkdown(markdown, { resolveLink: resolveManualLink });
+  const out = renderMarkdown(markdown, { resolveLink: resolveManualLink });
+  // 「注文者」と「代行入力者」の比較表(2. の冒頭): スマホで列幅を保って横にスクロールする(styles.css の .manual-table-roles。表示だけ)
+  for (const wrap of out.querySelectorAll(".manual-table-wrap")) {
+    const head = [...wrap.querySelectorAll("thead th")].map(th => th.textContent.trim());
+    if (head.length === 3 && head[0] === "項目" && head[1] === "注文者" && head[2].startsWith("代行入力者")) wrap.classList.add("manual-table-roles");
+  }
+  return out;
 }
 
 /** #help/<ページID> のページID(目次は "index") */

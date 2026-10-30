@@ -278,3 +278,30 @@ test("ヘルプ: Markdown の HTML・危険なリンクは要素にならない(
     await context.close();
   } finally { await browser.close(); }
 });
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ヘルプ: 「注文者」「代行入力者」の比較表は、スマホでは列幅の目安(120/240/300px)を保って表の中だけ横にスクロール。PCは従来どおり: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page2 = MANUAL_PAGES.find(p => p.id === "02-orderer");
+      for (const width of [320, 390, 1100]) {
+        const context = await newContext(browser, width, withRole("orderer", {}));
+        const page = await context.newPage();
+        await page.goto(`${base}#help/02-orderer`);
+        await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, page2.title);
+        const wrap = page.locator(".manual-table-roles");
+        assert.equal(await wrap.count(), 1, "比較表だけが対象");
+        const m = await wrap.evaluate(w => ({ cols: [...w.querySelectorAll("thead th")].map(th => Math.round(th.getBoundingClientRect().width)), scroll: w.scrollWidth > w.clientWidth + 1 }));
+        if (width < 560) {
+          assert.deepEqual(m.cols, [120, 240, 300], `${width}: 列幅の目安`);
+          assert.equal(m.scroll, true, `${width}: 表の中で横にスクロールできる`);
+        } else {
+          assert.equal(m.scroll, false, "PC: 横スクロールなし(自然な幅)");
+        }
+        assert.ok(await noOverflow(page), `${width}: ページ全体は横に動かない`);
+        await context.close();
+      }
+    } finally { await browser.close(); }
+  });
+}

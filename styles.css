@@ -625,13 +625,10 @@ input[type="date"].form-control {
   padding: 10px 14px;
 }
 
-/* 関連リンクアコーディオン */
+/* 関連リンクアコーディオン(枠線・背景なしで周囲になじませる。開閉はそのまま) */
 .ref-links-accordion {
   margin-top: 10px;
-  background: #f8fafc;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
+  padding: 8px 0;
   font-size: 0.8rem;
 }
 
@@ -2373,6 +2370,12 @@ input[type="date"], .lens-line select { color-scheme: light; }
   .manual-body { padding: 14px 14px; font-size: 0.92rem; }
   .manual-body h1 { font-size: 1.15rem; }
   .manual-body .is-wide table { min-width: 520px; }   /* 狭い画面では、列の多い表だけを横にスクロールする(ページは横にはみ出さない) */
+  /* 「注文者」と「代行入力者」の比較表: 列幅の目安(項目120px・注文者240px・代行入力者300px)を保ち、文章は折り返す。横スクロールは表の中だけ。PCは従来どおり */
+  .manual-body .manual-table-roles table { table-layout: fixed; width: 660px; min-width: 660px; }
+  .manual-body .manual-table-roles th:nth-child(1) { width: 120px; }
+  .manual-body .manual-table-roles th:nth-child(2) { width: 240px; }
+  .manual-body .manual-table-roles th:nth-child(3) { width: 300px; }
+  .manual-body .manual-table-roles td { overflow-wrap: anywhere; }
 }
 
 /* ==========================================================================
