@@ -155,7 +155,7 @@ export function createLensLines({ container, addButton, getOptions, getDoctors, 
   function lineProblems(l, v) {
     const out = [];
     if (!v.lens) out.push(["model", "IOLモデルを選択してください", l.model]);
-    if (!v.power) out.push(["power", "IOLパワー (ディオプター) を選択してください", l.power]);
+    if (!v.power) out.push(["power", "IOLパワーを選択してください", l.power]);
     if (!v.quantity) out.push(["quantity", "枚数を選択してください", l.qty[0]]);
     // 範囲はサーバーと同じ(日本時間の本日以降・1年以内。minDate / maxDate)
     if (!v.surgeryDate) out.push(["date", "手術日を選択してください", l.date]);
