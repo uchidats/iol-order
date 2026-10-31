@@ -2,6 +2,7 @@ import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager } from "../domain/dealer-portal.js";
 import { createDealerManage } from "./dealer-manage.js";
+import { createInfoTip } from "../ui/info-tip.js";
 
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
@@ -85,16 +86,19 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       catch (e) { msg.className = "error-message"; msg.textContent = describeLoginError(e, "email"); }
       finally { busy(false); }
     });
+    // 説明は見出し・各ログイン方法の見出しの右のⓘ(共通の info-tip。常時は 見出し・ボタン・入力欄 だけを表示し、スマホで縦に長くしない)。
+    // メールの見出しは入力欄の <label> のまま、ⓘ はその外に並べる(ⓘ を押しても入力欄に移らない)
+    const tip = (text, label) => createInfoTip(text, { label }).root;
     panel.replaceChildren(...[
-      h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー用 受注一覧")),
-      h("p", { class: "feature-desc" }, "医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された勤務先メールアドレスのアカウントでログインしてください。"),
+      h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, "ディーラー用 受注一覧"),
+        tip("医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された勤務先メールアドレスのアカウントでログインしてください。", "この画面の説明")),
       providers ? h("div", { class: "dealer-login-block", "data-login": "accounts" },
-        h("div", { class: "form-label" }, "会社のアカウントでログイン(推奨)"),
-        h("p", { class: "form-hint" }, "招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときと、新しい端末(ブラウザ)では、招待されたメールアドレスに届く確認コードで本人確認をします。"),
+        h("div", { class: "form-label dealer-login-head" }, h("span", {}, "会社のアカウントでログイン(推奨)"),
+          tip("招待されたメールアドレスの Google アカウント(Google Workspace など)または Microsoft アカウント(Microsoft 365 など)でログインできます。ほかのメールアドレスのアカウントは使えません。初めて使うときと、新しい端末(ブラウザ)では、招待されたメールアドレスに届く確認コードで本人確認をします。", "会社のアカウントでのログインの説明")),
         h("div", { class: "dealer-login-providers" }, google, microsoft)) : null,
       h("div", { class: "dealer-login-block", "data-login": "email" },
-        h("label", { class: "form-label", for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "勤務先メールアドレス"),
-        h("p", { class: "form-hint" }, "招待された勤務先メールアドレスを入力すると、ログイン用のリンクが届きます。"),
+        h("div", { class: "form-label dealer-login-head" }, h("label", { for: "dealerEmail" }, providers ? "メールアドレスでログイン(パスワード不要)" : "勤務先メールアドレス"),
+          tip("招待された勤務先メールアドレスを入力すると、ログイン用のリンクが届きます。", "メールアドレスでのログインの説明")),
         email,
         h("div", { class: "onboarding-actions" }, send)),
       msg].filter(Boolean));

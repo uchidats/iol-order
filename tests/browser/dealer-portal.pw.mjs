@@ -322,7 +322,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
-      for (const width of [390, 1100]) {
+      for (const width of [320, 390, 1100]) {
         const context = await newFakeContext(browser, base, width, null);
         const page = await context.newPage();
         await installFakeServer(page, "staff");
@@ -337,6 +337,30 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.match(await google.getAttribute("class"), /btn-primary/);
         assert.match(await send.getAttribute("class"), /btn-secondary/, "メールリンクは代替");
         assert.match(await page.locator('[data-login="accounts"]').innerText(), /推奨/);
+        // 説明は見出し・各ログイン方法の見出しの右のⓘ(常時は表示しない)。ⓘを押すと同じ文言を表示し、外側を押すと閉じる
+        const panelText = await page.locator("#dealerPanel").innerText();
+        for (const t of ["医療機関から閲覧を許可された", "Google アカウント(Google Workspace など)", "ログイン用のリンクが届きます"]) assert.ok(!panelText.includes(t), `${width}: 「${t}」は常時表示しない`);
+        assert.equal(await page.locator("#dealerPanel .feature-desc, #dealerPanel .dealer-login-block .form-hint").count(), 0, "見出しの下の説明文はない");
+        const tips = [["#dealerPanel .feature-title-row", /医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された勤務先メールアドレスのアカウントでログインしてください。/],
+          ['[data-login="accounts"] .dealer-login-head', /招待されたメールアドレスの Google アカウント.*確認コードで本人確認をします。/s],
+          ['[data-login="email"] .dealer-login-head', /招待された勤務先メールアドレスを入力すると、ログイン用のリンクが届きます。/]];
+        for (const [where, re] of tips) {
+          const btn = page.locator(`${where} .info-tip-btn`);
+          assert.equal(await btn.count(), 1, `${where}: ⓘ`);
+          await btn.click();
+          const pop = page.locator(`${where} .info-tip-pop`);
+          assert.equal(await pop.isVisible(), true);
+          assert.match(await pop.innerText(), re);
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 説明を開いても横にはみ出さない`);
+          await page.locator("#dealerPanel .feature-title").click();   // 外側で閉じる
+          assert.equal(await pop.isVisible(), false);
+        }
+        // メールの見出しは入力欄のラベルのまま(押すと入力欄へ)。ⓘを押しても入力欄には移らない
+        await page.locator('label[for="dealerEmail"]').click();
+        assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), "dealerEmail");
+        await page.locator('[data-login="email"] .info-tip-btn').click();
+        assert.notEqual(await page.evaluate(() => document.activeElement && document.activeElement.id), "dealerEmail");
+        await page.keyboard.press("Escape");
         // Microsoft: Google と並べる(PC は横、スマホは縦)。メールのリンクより上
         const msb = page.locator("#btnDealerMicrosoft");
         assert.equal(await msb.innerText(), "Microsoftでログイン");
