@@ -125,3 +125,32 @@ test("週表示の日付: 月曜の算出(日曜は前の月曜)・週の移動�
     assert.ok(w && w.includes(d) && w[0] === mondayOf(d) && w[6] === addDays(mondayOf(d), 6), d);
   }
 });
+
+test("担当者・支店の管理: 画面に出す操作(staffActions)は、サーバーの規則(managerPolicyError)で許される操作だけ。API は選んだ項目だけを送る", async () => {
+  const { staffActions, assignableRoles } = await import("../src/domain/dealer-portal.js");
+  const { managerPolicyError } = await import("../functions/src/dealer-portal.js");
+  const roles = ["reader", "branchAdmin", "companyAdmin"], branches = ["t", "o", null];
+  const mes = [{ role: "companyAdmin", staffId: "me", branchId: "t" }, { role: "branchAdmin", staffId: "me", branchId: "t" }, { role: "branchAdmin", staffId: "me", branchId: null }, { role: "reader", staffId: "me", branchId: "t" }];
+  for (const me of mes) {
+    const targets = [{ staffId: "me", role: me.role, branchId: me.branchId, status: "active" }];
+    for (const role of roles) for (const branchId of branches) for (const status of ["active", "disabled", "invited", "expired"]) targets.push({ staffId: `s-${role}-${branchId}-${status}`, role, branchId, status });
+    for (const t of targets) {
+      const can = staffActions(me, t);
+      const P = (over) => managerPolicyError(me, { self: t.staffId === "me", targetRole: t.role, targetBranchId: t.branchId, ...over });
+      const label = `${me.role}/${me.branchId} → ${t.staffId}`;
+      if (can.edit) assert.equal(P({}), null, `${label}: 氏名・担当施設`);
+      if (can.toggle) assert.equal(P({ statusChange: true }), null, `${label}: 有効/無効`);
+      if (can.cancel) assert.equal(P({}), null, `${label}: 招待の取消`);
+      for (const r of can.roleOptions) assert.equal(P({ nextRole: r }), null, `${label}: 役割 ${r}`);
+      if (can.branch) for (const b of branches) assert.equal(P({ nextBranchId: b }), null, `${label}: 支店 ${b}`);
+      if (me.role === "branchAdmin" && t.staffId !== "me") assert.equal(can.roleOptions.some(r => r !== "reader") || can.branch, false, `${label}: 昇格・異動の操作は出さない`);
+    }
+  }
+  assert.deepEqual([assignableRoles("companyAdmin"), assignableRoles("branchAdmin"), assignableRoles("reader")], [["reader", "branchAdmin", "companyAdmin"], ["reader"], []]);
+  const calls = [];
+  const api = createDealerPortalApi({ functions: {}, httpsCallable: (f, name) => async (payload) => { calls.push([name, payload]); return { data: {} }; } });
+  await api.manageUpdateStaff({ companyId: "c", staffId: "s", facilityIds: ["fB"], companyIdOverride: "x", role: undefined, actorRole: "companyAdmin" });
+  await api.manageBranch({ companyId: "c", name: "東京支店", staffId: "s" });
+  assert.deepEqual(calls, [["dealerPortalApi", { action: "manageUpdateStaff", companyId: "c", staffId: "s", facilityIds: ["fB"] }],
+    ["dealerPortalApi", { action: "manageBranch", companyId: "c", name: "東京支店" }]]);
+});

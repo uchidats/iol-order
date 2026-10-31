@@ -11,6 +11,7 @@ import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/f
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { doc, getDoc, getDocs, collection, collectionGroup, query, where } from "firebase/firestore";
 import { createOrderService } from "../../functions/src/orders.js";
+import { managerPolicyError } from "../../functions/src/dealer-portal.js";
 import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf, weekDatesOf, surgeryDatesOf } from "../../functions/src/dealer-portal.js";
 
 const PROJECT = "demo-iol-functions";
@@ -1069,6 +1070,232 @@ test("週表示(手術日): 月曜〜日曜の自社宛ての明細を手術日�
   assert.deepEqual((await rref.get()).get("surgeryDates"), [W1[3]]);
   assert.deepEqual(flat(await week("x1", W1[0])).map(x => x[1]), [o2.orderNumber]);
   assert.deepEqual(surgeryDatesOf([{ surgeryDate: "2026-11-03" }, { surgeryDate: "2026-11-02" }, { surgeryDate: "2026-11-03" }, { surgeryDate: "bad" }, null]), ["2026-11-02", "2026-11-03"]);
+});
+
+test("役割の規則(純粋関数): 会社管理者は自社の全員(自分の役割・無効化を除く)。支店管理者は自分の支店の閲覧者だけ。昇格・任命・他の支店への異動は不可。閲覧者は操作できない", () => {
+  const P = managerPolicyError;
+  const CA = { role: "companyAdmin", branchId: "t" }, BA = { role: "branchAdmin", branchId: "t" };
+  // 会社管理者
+  assert.equal(P(CA, { targetRole: "reader", nextRole: "companyAdmin", targetBranchId: "o" }), null, "他の支店の閲覧者を会社管理者に");
+  assert.equal(P(CA, { targetRole: "companyAdmin", nextRole: "branchAdmin" }), null, "別の会社管理者の降格");
+  assert.equal(P(CA, { targetRole: "branchAdmin", statusChange: true, targetBranchId: "o", nextBranchId: "t" }), null);
+  assert.match(P(CA, { self: true, targetRole: "companyAdmin", nextRole: "branchAdmin" }), /自分自身/);
+  assert.match(P(CA, { self: true, targetRole: "companyAdmin", statusChange: true }), /自分自身/);
+  assert.equal(P(CA, { self: true, targetRole: "companyAdmin", targetBranchId: "t", nextBranchId: "o" }), null, "自分の氏名・支店の変更");
+  // 支店管理者: 自分の支店の閲覧者
+  assert.equal(P(BA, { targetRole: "reader", targetBranchId: "t" }), null, "自分の支店の閲覧者の招待・氏名・担当施設");
+  assert.equal(P(BA, { targetRole: "reader", targetBranchId: "t", statusChange: true }), null, "無効化・再有効化");
+  assert.equal(P(BA, { self: true, targetRole: "branchAdmin", targetBranchId: "t" }), null, "自分の氏名・担当施設");
+  // 支店管理者: できないこと
+  assert.match(P(BA, { targetRole: "reader", nextRole: "companyAdmin", targetBranchId: "t" }), /会社管理者の任命/);
+  assert.match(P(BA, { targetRole: "companyAdmin", targetBranchId: "t" }), /会社管理者の任命/);
+  assert.match(P(BA, { targetRole: "reader", nextRole: "branchAdmin", targetBranchId: "t" }), /支店管理者の任命/);
+  assert.match(P(BA, { targetRole: "branchAdmin", targetBranchId: "t" }), /支店管理者の任命/, "同じ支店の別の支店管理者");
+  assert.match(P(BA, { targetRole: "branchAdmin", nextRole: "reader", targetBranchId: "t" }), /支店管理者の任命/);
+  assert.match(P(BA, { targetRole: "reader", targetBranchId: "o" }), /自分の支店の担当者だけ/, "他の支店の閲覧者");
+  assert.match(P(BA, { targetRole: "reader", targetBranchId: null }), /自分の支店の担当者だけ/, "支店未設定の閲覧者");
+  assert.match(P(BA, { targetRole: "reader", targetBranchId: "t", nextBranchId: "o" }), /自分の支店の担当者だけ/, "他の支店への異動");
+  assert.match(P(BA, { targetRole: "reader", targetBranchId: "o", nextBranchId: "t" }), /自分の支店の担当者だけ/, "他の支店からの引き抜き");
+  assert.match(P(BA, { self: true, targetRole: "branchAdmin", targetBranchId: "t", statusChange: true }), /自分自身/);
+  assert.match(P(BA, { self: true, targetRole: "branchAdmin", targetBranchId: "t", nextBranchId: "o" }), /自分の支店の担当者だけ/, "自分の異動");
+  assert.match(P({ role: "branchAdmin", branchId: null }, { targetRole: "reader", targetBranchId: null }), /所属支店が設定されていない/);
+  assert.match(P({ role: "reader", branchId: "t" }, { targetRole: "reader", targetBranchId: "t" }), /会社管理者・支店管理者のみ/);
+  assert.match(P(null, { targetRole: "reader" }), /会社管理者・支店管理者のみ/);
+});
+
+/**
+ * 架空の せんじゅメディカル(東京支店・大阪支店)。会社管理者 sadm(東京)、支店管理者 tadm(東京)・tadm2(東京)・oadm(大阪)、閲覧者 r1(東京)・r2(大阪)。
+ * 閲覧の許可: B眼科の発注先 dB2(関連付け+許可)。A眼科の発注先 dA3 は関連付けだけ(許可前)
+ */
+async function setupSenju() {
+  const S = (await op("createCompany", { name: "せんじゅメディカル", requestId: crypto.randomUUID() })).companyId;
+  const tokyo = (await op("upsertBranch", { companyId: S, name: "東京支店" })).branchId;
+  await op("inviteStaff", { companyId: S, email: "sadm@corp.example.jp", name: "東京の責任者", role: "companyAdmin", branchId: tokyo });
+  await join("sadm");
+  const m = (uid, action, data = {}) => api(uid, action, data);
+  const osaka = (await m("sadm", "manageBranch", { name: "大阪支店" })).branchId;
+  for (const [u, role, b] of [["tadm", "branchAdmin", tokyo], ["tadm2", "branchAdmin", tokyo], ["oadm", "branchAdmin", osaka], ["r1", "reader", tokyo], ["r2", "reader", osaka]]) {
+    await m("sadm", "manageInvite", { email: `${u}@corp.example.jp`, name: u, role, branchId: b });
+    await join(u);
+  }
+  await db.doc("facilities/fB/facilityDealers/dB2").set({ facilityId: "fB", name: "せんじゅメディカル", orderEmails: ["order-s@s.example.jp"] });
+  await db.doc("facilities/fA/facilityDealers/dA3").set({ facilityId: "fA", name: "せんじゅメディカルA", orderEmails: ["order-sa@s.example.jp"] });
+  await op("proposeLink", { facilityId: "fB", localDealerId: "dB2", companyId: S });
+  await op("proposeLink", { facilityId: "fA", localDealerId: "dA3", companyId: S });
+  await grant("adminB", "fB", "dB2");
+  return { S, tokyo, osaka, m, sidOf: (uid) => sid(S, uid) };
+}
+const deniedBy = (p, re) => assert.rejects(p, (e) => e.code === "permission-denied" && (!re || re.test(e.message)), String(re));
+
+test("会社管理者: 自社の全支店・担当者・支店・担当施設を管理できる。自分の役割・無効化と最後の会社管理者は守る。担当施設は会社に関連付けられ許可された施設だけ", async () => {
+  const { S, tokyo, osaka, m, sidOf } = await setupSenju();
+  const view = async (uid = "sadm") => Object.fromEntries((await m(uid, "manage")).staff.map(x => [x.email.split("@")[0], [x.role, x.status, x.branchId]]));
+  let ov = await m("sadm", "manage");
+  assert.deepEqual([ov.me, ov.branches.map(b => b.name).sort()], [{ staffId: sidOf("sadm"), role: "companyAdmin", branchId: tokyo }, ["大阪支店", "東京支店"].sort()]);
+  assert.deepEqual(Object.keys(ov.staff[0]).sort(), ["branchId", "email", "facilityIds", "name", "role", "staffId", "status", "verified"], "ログイン方法の内部の ID は返さない");
+  assert.deepEqual(ov.facilities, [{ facilityId: "fB", name: "B眼科" }], "担当施設の候補は許可された施設だけ(関連付けだけの A眼科・他社の施設は出さない)");
+  assert.deepEqual(Object.keys(await view()).sort(), ["oadm", "r1", "r2", "sadm", "tadm", "tadm2"]);
+  // 他の支店を含む全員: 異動・昇格・降格・無効化・再有効化、支店管理者の任命・解除
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), branchId: osaka });
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r2"), role: "branchAdmin" });
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r2"), role: "reader" });
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("oadm"), status: "disabled" });
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("oadm"), status: "active" });
+  await join("oadm");   // 有効に戻した後は本人確認をし直す
+  assert.deepEqual([(await view()).r1, (await view()).r2], [["reader", "active", osaka], ["reader", "active", osaka]]);
+  // 担当施設: 許可された施設だけ。関連付けだけの施設・他社の施設・存在しない施設は断る
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: ["fB"] });
+  assert.deepEqual((await m("sadm", "manage")).staff.find(x => x.staffId === sidOf("r1")).facilityIds, ["fB"]);
+  for (const ids of [["fA"], ["fB", "fA"], ["fX"]]) await rejects(m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: ids }), "invalid-argument");
+  await rejects(m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: "fB" }), "invalid-argument");
+  assert.equal((await m("r1", "context")).facilities.find(f => f.id === "fB").assigned, true, "本人の受注一覧の初期選択に反映");
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("sadm"), facilityIds: ["fB"], name: "東京の責任者(改)" });   // 自分の氏名・担当施設
+  // 自分の役割・無効化は不可。新しい会社管理者を任命した後は、別の会社管理者として降格できる
+  await deniedBy(m("sadm", "manageUpdateStaff", { staffId: sidOf("sadm"), role: "branchAdmin" }), /自分自身/);
+  await deniedBy(m("sadm", "manageUpdateStaff", { staffId: sidOf("sadm"), status: "disabled" }), /自分自身/);
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("oadm"), role: "companyAdmin" });
+  await m("oadm", "manageUpdateStaff", { staffId: sidOf("sadm"), role: "branchAdmin" });
+  assert.equal((await m("sadm", "manage")).me.role, "branchAdmin", "再ログイン・再確認なしで、支店管理者として使える");
+  await deniedBy(m("sadm", "manageBranch", { name: "x支店" }), /会社管理者のみ/, "降格された元の会社管理者は支店を変えられない");
+  // 支店: 所属する担当者がいれば無効にできない。いなければ無効にでき、無効の支店は選べない
+  await assert.rejects(m("oadm", "manageBranch", { branchId: osaka, name: "大阪支店", status: "inactive" }), (e) => e.code === "failed-precondition" && /所属する担当者/.test(e.message));
+  const nagoya = (await m("oadm", "manageBranch", { name: "名古屋支店" })).branchId;
+  await m("oadm", "manageBranch", { branchId: nagoya, name: "名古屋支店", status: "inactive" });
+  await rejects(m("oadm", "manageUpdateStaff", { staffId: sidOf("r1"), branchId: nagoya }), "invalid-argument");
+  await m("oadm", "manageBranch", { branchId: osaka, name: "大阪支社" });
+  assert.deepEqual((await m("oadm", "manage")).branches.map(b => [b.name, b.status]).sort(), [["名古屋支店", "inactive"], ["大阪支社", "active"], ["東京支店", "active"]].sort());
+  // 招待の取消(会社管理者の招待も)
+  await m("oadm", "manageInvite", { email: "nadm@corp.example.jp", name: "", role: "companyAdmin" });
+  await m("oadm", "manageCancelInvite", { staffId: sidOf("nadm") });
+  // 最後の会社管理者: 運営者は例外(復旧・会社の停止など)
+  await op("updateStaff", { companyId: S, staffId: sidOf("oadm"), role: "reader" });
+  assert.equal((await view("tadm")).tadm[0], "branchAdmin");
+  // 監査の記録: ディーラーの操作は担当者 ID と役割、運営者の操作は operator
+  const logs = (await db.collection("dealerPortalAuditLogs").where("companyId", "==", S).get()).docs.map(d => d.data());
+  assert.ok(logs.some(l => l.action === "staff.update" && l.actorStaffId === sidOf("sadm") && l.actorRole === "companyAdmin" && l.fields.includes("facilityAssignments") && l.operator === false));
+  assert.ok(logs.some(l => l.action === "staff.update" && l.actorStaffId === sidOf("oadm") && l.actorRole === "companyAdmin" && l.role === "branchAdmin"));
+  assert.ok(logs.some(l => l.action === "staff.invite" && l.operator === true && l.role === "companyAdmin"));
+});
+
+test("支店管理者: 自分の支店の閲覧者だけを管理できる。支店・支店管理者・会社管理者・他の支店には触れない。一覧も自分の支店だけ", async () => {
+  const { S, tokyo, osaka, m, sidOf } = await setupSenju();
+  // 一覧: 自分の支店の担当者(会社管理者を含む)と自分だけ。支店は自分の支店だけ(他の支店の名称・担当者は返さない)
+  let ov = await m("tadm", "manage");
+  assert.deepEqual(ov.me, { staffId: sidOf("tadm"), role: "branchAdmin", branchId: tokyo });
+  assert.deepEqual(ov.branches.map(b => b.branchId), [tokyo]);
+  assert.deepEqual(ov.staff.map(x => x.email.split("@")[0]).sort(), ["r1", "sadm", "tadm", "tadm2"]);
+  assert.deepEqual(ov.facilities, [{ facilityId: "fB", name: "B眼科" }]);
+  // できること: 自分の支店への閲覧者の招待・取消、閲覧者の氏名・担当施設・無効化・再有効化、自分の氏名・担当施設
+  await m("tadm", "manageInvite", { email: "r3@corp.example.jp", name: "閲覧者3", role: "reader", branchId: tokyo });
+  await m("tadm", "manageCancelInvite", { staffId: sidOf("r3") });
+  await m("tadm", "manageInvite", { email: "r3@corp.example.jp", name: "閲覧者3", role: "reader", branchId: tokyo });   // 取り消した招待は新しい招待と同じ
+  await m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), name: "閲覧者1(改)", facilityIds: ["fB"] });
+  await m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), branchId: tokyo });   // 同じ支店のまま(変更なし)は可
+  await m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), status: "disabled" });
+  await assert.rejects(m("r1", "context"), needsVerify, "無効化した閲覧者はすぐに使えない");
+  await m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), status: "active" });
+  await join("r1");   // 有効に戻した後は本人確認をし直す
+  await m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), name: "東京の支店管理者(改)", facilityIds: [] });
+  // 権限の昇格: 会社管理者・支店管理者への任命・招待はできない
+  await deniedBy(m("tadm", "manageInvite", { email: "x@corp.example.jp", name: "", role: "companyAdmin", branchId: tokyo }), /会社管理者の任命/);
+  await deniedBy(m("tadm", "manageInvite", { email: "x@corp.example.jp", name: "", role: "branchAdmin", branchId: tokyo }), /支店管理者の任命/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), role: "companyAdmin" }), /会社管理者の任命/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), role: "branchAdmin" }), /支店管理者の任命/);
+  // 同じ支店の別の支店管理者・会社管理者: 解除・無効化・編集はできない
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm2"), role: "reader" }), /支店管理者の任命/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm2"), status: "disabled" }), /支店管理者の任命/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm2"), name: "変更", facilityIds: ["fB"] }), /支店管理者の任命/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("sadm"), name: "変更" }), /会社管理者の任命/);
+  // 他の支店: 招待・異動・引き抜き・編集・無効化・取消はできない
+  await deniedBy(m("tadm", "manageInvite", { email: "o9@corp.example.jp", name: "", role: "reader", branchId: osaka }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageInvite", { email: "o9@corp.example.jp", name: "", role: "reader" }), /自分の支店の担当者だけ/, "支店未設定での招待");
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), branchId: osaka }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), branchId: null }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r2"), branchId: tokyo }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r2"), name: "変更" }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r2"), status: "disabled" }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r2"), facilityIds: ["fB"] }), /自分の支店の担当者だけ/);
+  await m("sadm", "manageInvite", { email: "p1@corp.example.jp", name: "", role: "reader", branchId: osaka });
+  await deniedBy(m("tadm", "manageCancelInvite", { staffId: sidOf("p1") }), /自分の支店の担当者だけ/);
+  await deniedBy(m("tadm", "manageInvite", { email: "p1@corp.example.jp", name: "", role: "reader", branchId: tokyo }), /自分の支店の担当者だけ/, "他の支店の参加待ちの上書き");
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r2"), status: "disabled" });
+  await deniedBy(m("tadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: tokyo }), /自分の支店の担当者だけ/, "他の支店の無効の担当者の再招待");
+  await m("sadm", "manageInvite", { email: "c1@corp.example.jp", name: "", role: "companyAdmin", branchId: osaka });
+  await deniedBy(m("tadm", "manageCancelInvite", { staffId: sidOf("c1") }), /会社管理者の任命/);
+  await m("sadm", "manageCancelInvite", { staffId: sidOf("c1") });
+  await m("tadm", "manageInvite", { email: "c1@corp.example.jp", name: "", role: "reader", branchId: tokyo });   // 取り消された招待は新しい招待(閲覧者として)
+  // 自分自身: 無効化・降格・異動はできない
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), status: "disabled" }), /自分自身/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), role: "reader" }), /自分自身/);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), branchId: osaka }), /自分の支店の担当者だけ/);
+  // 支店の追加・名称変更・無効化は会社管理者だけ
+  for (const data of [{ name: "名古屋支店" }, { branchId: tokyo, name: "東京支社" }, { branchId: osaka, name: "大阪支店", status: "inactive" }]) {
+    await deniedBy(m("tadm", "manageBranch", data), /会社管理者のみ/);
+  }
+  // 会社管理者による異動・降格・所属支店の解除は、次の操作からすぐに反映
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("tadm"), branchId: osaka });
+  ov = await m("tadm", "manage");
+  assert.deepEqual([ov.branches.map(b => b.branchId), ov.staff.map(x => x.email.split("@")[0]).sort()], [[osaka], ["oadm", "p1", "r2", "tadm"].sort()]);
+  await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), name: "x" }), /自分の支店の担当者だけ/);
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("tadm"), branchId: null });
+  ov = await m("tadm", "manage");
+  assert.deepEqual([ov.branches, ov.staff.map(x => x.staffId)], [[], [sidOf("tadm")]]);
+  await deniedBy(m("tadm", "manageInvite", { email: "z@corp.example.jp", name: "", role: "reader" }), /所属支店が設定されていない/);
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("tadm"), role: "reader", branchId: tokyo });
+  await deniedBy(m("tadm", "manage"), /会社管理者・支店管理者のみ/);
+  // 閲覧者: 管理の操作はできない
+  for (const [action, data] of [["manage", {}], ["manageBranch", { name: "x支店" }], ["manageInvite", { email: "z@corp.example.jp", name: "", role: "reader", branchId: tokyo }],
+    ["manageUpdateStaff", { staffId: sidOf("r1"), name: "x" }], ["manageCancelInvite", { staffId: sidOf("r3") }]]) await deniedBy(m("r1", action, data), /会社管理者・支店管理者のみ/);
+  // 監査の記録: 支店管理者の操作は担当者 ID と役割
+  const logs = (await db.collection("dealerPortalAuditLogs").where("companyId", "==", S).get()).docs.map(d => d.data());
+  assert.ok(logs.some(l => l.action === "staff.invite" && l.actorStaffId === sidOf("tadm") && l.actorRole === "branchAdmin" && l.operator === false));
+});
+
+test("会社管理者・支店管理者: 他社の担当者・支店は操作できない。閲覧は会社単位のまま(施設の許可が必須。役割・支店で広がらない)", async () => {
+  const { S, tokyo, m, sidOf } = await setupSenju();
+  // 他社(エックス商事の会社管理者 x1): 会社 ID・担当者 ID を指定しても操作できない
+  await deniedBy(m("x1", "manage", { companyId: S }));
+  await assert.rejects(m("x1", "manageUpdateStaff", { staffId: sidOf("r1"), status: "disabled" }), (e) => e.code === "not-found" || e.code === "permission-denied");
+  await assert.rejects(m("x1", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: [] }), (e) => e.code === "not-found" || e.code === "permission-denied");
+  await assert.rejects(m("x1", "manageCancelInvite", { staffId: sidOf("r1") }), (e) => e.code === "not-found" || e.code === "permission-denied" || e.code === "failed-precondition");
+  await assert.rejects(m("x1", "manageBranch", { branchId: tokyo, name: "乗っ取り", status: "inactive" }), (e) => e.code === "not-found");
+  // 他社の担当者を自社に招待しても、他社の担当者の文書(会社×メール)は変わらない
+  await m("x1", "manageInvite", { email: "r1@corp.example.jp", name: "", role: "reader" });
+  const r1 = (await db.doc(`dealerStaff/${sidOf("r1")}`).get()).data();
+  assert.deepEqual([r1.companyId, r1.status, r1.branchId], [S, "active", tokyo]);
+  // 担当施設: 他社に許可された施設(エックス商事の A眼科)は選べない
+  await grant("adminA", "fA", "dA1");
+  await rejects(m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: ["fA"] }), "invalid-argument");
+  assert.deepEqual((await m("x1", "manage")).facilities.map(f => f.facilityId), ["fA"]);
+  // 閲覧: 許可された施設(B眼科)の自社宛ての注文だけ。役割・支店に関係なく会社単位。許可前の A眼科(dA3)・他社宛ては見えない
+  await placeOrder("fB", "ordB", [line({ dealerId: "dB2" })]);
+  await placeOrder("fA", "ordA", [line({ dealerId: "dA3" }), line({ dealerId: "dA1", power: "+21.0D" })]);
+  for (const uid of ["sadm", "tadm", "oadm", "r1", "r2"]) assert.deepEqual((await list(uid)).items.map(i => i.facilityId), ["fB"], uid);
+  assert.deepEqual((await list("x1")).items.map(i => i.facilityId), ["fA"]);
+  // 施設が取り消すと、会社管理者・担当施設の設定に関係なく見えない
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r1"), facilityIds: ["fB"] });
+  await revoke("adminB", "fB", "dB2");
+  for (const uid of ["sadm", "r1"]) assert.deepEqual((await list(uid)).items, [], uid);
+  assert.deepEqual((await m("sadm", "manage")).facilities, [], "取消後の施設は担当施設の候補から外れる");
+  // 機能の停止中は管理もできない
+  enabled.v = false;
+  await rejects(m("sadm", "manage"), "failed-precondition");
+  enabled.v = true;
+});
+
+test("会社管理者・支店管理者の招待の上限: 24時間の招待の数を超えると断る(運営者は対象外)", async () => {
+  const S = (await op("createCompany", { name: "上限テスト", requestId: crypto.randomUUID() })).companyId;
+  const b = (await op("upsertBranch", { companyId: S, name: "本店" })).branchId;
+  await op("inviteStaff", { companyId: S, email: "lim@corp.example.jp", name: "", role: "branchAdmin", branchId: b });
+  await join("lim");
+  let n = 0, err = null;
+  for (; n < 40; n++) {
+    try { await api("lim", "manageInvite", { email: `v${n}@corp.example.jp`, name: "", role: "reader", branchId: b }); }
+    catch (e) { err = e; break; }
+  }
+  assert.ok(err && err.code === "resource-exhausted" && /24時間/.test(err.message), String(err && err.message));
+  assert.equal(n, 29, "運営者の招待(1件)を含めて24時間で30件まで");
+  await op("inviteStaff", { companyId: S, email: "opinvite@corp.example.jp", name: "", role: "reader" });   // 運営者は対象外
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {

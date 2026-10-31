@@ -45,6 +45,30 @@ export function weekLabel(weekStart) {
 /** 「11/12」(ほかの手術日の案内) */
 export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
+// ---- 担当者・支店の管理(会社管理者・支店管理者)。画面の表示だけの判定(実行の可否はサーバーが確認する) ----
+export const DEALER_ROLE_LABELS = Object.freeze({ companyAdmin: "会社管理者", branchAdmin: "支店管理者", reader: "閲覧者" });
+export const isDealerManager = (role) => role === "companyAdmin" || role === "branchAdmin";
+/** 招待・役割の変更で選べる役割(会社管理者はすべて、支店管理者は閲覧者だけ) */
+export const assignableRoles = (actorRole) => (actorRole === "companyAdmin" ? ["reader", "branchAdmin", "companyAdmin"] : actorRole === "branchAdmin" ? ["reader"] : []);
+/**
+ * 担当者の行で出す操作(サーバーの規則 managerPolicyError と同じ考え方)。
+ * 会社管理者は全員(自分の役割・有効/無効は除く)。支店管理者は自分の支店の閲覧者と、自分の氏名・担当施設だけ(所属支店は変えられない)。
+ * @param {{role:string, staffId:string, branchId?:string|null}} me 操作する本人
+ * @returns {{edit:boolean, roleOptions:string[], branch:boolean, toggle:boolean, cancel:boolean}}
+ */
+export function staffActions(me, t) {
+  const none = { edit: false, roleOptions: [], branch: false, toggle: false, cancel: false };
+  if (!me || !isDealerManager(me.role)) return none;
+  const ca = me.role === "companyAdmin";
+  const own = ca || (!!me.branchId && (t.branchId || null) === me.branchId);   // 支店管理者: 自分の支店の担当者か
+  if (t.status === "invited" || t.status === "expired") return { ...none, cancel: ca || (own && t.role === "reader") };
+  if (t.staffId === me.staffId) return { ...none, edit: own, branch: ca };   // 自分の役割・有効/無効は変えない
+  if (!ca && (!own || t.role !== "reader")) return none;
+  return { edit: true, roleOptions: assignableRoles(me.role), branch: ca, toggle: true, cancel: false };
+}
+/** 担当者の一覧の支店の絞り込み: "all"(すべての支店)/ "none"(支店未設定)/ 支店 ID */
+export const filterStaffByBranch = (staff, key) => (staff || []).filter(x => key === "all" || (key === "none" ? !x.branchId : x.branchId === key));
+
 /** YYYY-MM-DD → 「YYYY/MM/DD」 */
 export const formatDate = (s) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.replace(/-/g, "/") : "—");
 
