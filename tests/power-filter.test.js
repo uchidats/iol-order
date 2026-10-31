@@ -5,8 +5,8 @@ import { filterPowersByModel, defaultPowerLabel } from "../src/domain/power-filt
 
 const byName = (n) => IOL_MODELS.find(m => m.displayName === n);
 
-test("12モデルが定義されている", () => {
-  assert.equal(IOL_MODELS.length, 12);
+test("14モデルが定義されている", () => {
+  assert.equal(IOL_MODELS.length, 14);
 });
 
 test("標準モデルは +6.0D〜+30.0D の0.5ステップ", () => {

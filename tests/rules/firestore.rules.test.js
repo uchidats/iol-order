@@ -362,6 +362,11 @@ test("採用IOL: ドキュメントIDと catalogIolId が一致し、共通マ�
   await ok(db, "facilities/fA/adoptedIols/alcon-cna0t0", { facilityId: "fA", catalogIolId: "alcon-cna0t0", enabled: false }); // 採用解除
   await ok(db, "facilities/fA/adoptedIols/hoya-xy1", { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true, dealerId: "dealer-1" });
   // 存在しないIOL / ID不一致 / 他施設ID / 余分なフィールド
+  for (const id of ['nidek-np-1', 'kowa-pn6a']) {
+    await ok(db, 'facilities/fA/adoptedIols/'+id, {facilityId:'fA',catalogIolId:id,enabled:true});
+    await ng(as('ordA'), 'facilities/fA/adoptedIols/'+id, {facilityId:'fA',catalogIolId:id,enabled:false});
+  }
+  // 存在しないIOL / ID不一致 / 他施設ID / 余分なフィールド
   await ng(db, "facilities/fA/adoptedIols/unknown-iol", { facilityId: "fA", catalogIolId: "unknown-iol", enabled: true });
   await ng(db, "facilities/fA/adoptedIols/hoya-xy1", { facilityId: "fA", catalogIolId: "nidek-nsp-2", enabled: true });
   await ng(db, "facilities/fA/adoptedIols/auto-id-1", { facilityId: "fA", catalogIolId: "hoya-xy1", enabled: true });

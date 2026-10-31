@@ -106,7 +106,9 @@ service cloud.firestore {
         'nidek-np-tx-toric',
         'hoya-xy1',
         'hoya-py-60ad',
-        'alcon-mn60ma-yellow'
+        'alcon-mn60ma-yellow',
+        'nidek-np-1',
+        'kowa-pn6a'
       ];
     }
 

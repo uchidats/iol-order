@@ -1,11 +1,12 @@
 # 作業報告
 
-- 日時: 2026-10-30（日本時間）。
-- 作業1（commit 8383c21）: スマホのIOL注文フォーム（項目名を左・入力欄を右の配置）の入力欄の幅を変更。
-  - 手術日: 160px。Chromium・Firefox・WebKit で日付の全文と日付選択のアイコンが収まり、入力・値の保持は従来どおり。
-  - 担当医: 施設の担当医の候補（と「選択」）のうち最も長い氏名の実際の表示幅（文字幅を計測）＋左右の余白・矢印・枠線に合わせて幅を自動で決める。最小120px・最大は入力欄の利用可能な幅で、超える氏名は折り返して全文表示。幅の再計算は候補が変わったとき（担当医の追加・削除・施設の切り替え）だけで、選択の変更では幅は変わらない。
-  - 左端の位置は維持。IOLモデル・IOLパワー・枚数・発注先、320pxの縦並び、PCの従来の配置は変更なし（360・390・430・320・1100pxで3ブラウザとも main と比較。横スクロールなし）。
-- 作業2（この記録と同じcommit）: IOLパワー未選択の入力エラーを「IOLパワーを選択してください」に変更（画面側の1か所。確認画面へ進むときの検証も同じ処理。サーバー側はすでに同じ文言）。判定条件は変更なし。注文メール本文の項目名「IOLパワー (ディオプター)」はエラーメッセージではないため変更していない。
-- テスト: unit 272（1 skip）、ブラウザのレンズ関連（custom-select・default-dealer・draft-and-trash・lens-collapse・lens-dealer・lens-overlap・self-doctor）がすべて成功。担当医の幅のテストを新しい仕様に更新。全テスト・Functions・Rulesのテストは実行していない（UIの変更のため）。
-- push: mainへpush（画面の公開）。Functions・Rulesの変更・デプロイなし。
-- 別件（未公開）: 代行入力時のデフォルト担当医 `feature/proxy-default-doctor`、ディーラーの会社管理者・支店管理者 `feature/dealer-company-admin`。
+- 日時: 本コミットの作業完了日時（git log -1 --format=%aI）。
+- 作業環境: work/mobile-updates。取得したorigin/mainと基点HEADはともにf19d738。
+- 追加: NIDEK NP-1（ネックスロード NP、単焦点・非トーリック）、KOWA PN6A（アバンシィプリセット、単焦点・非トーリック）。両モデルは既存マスターに未登録であることを確認し、一意のIDで追記した。
+- 仕様: NP-1は+1～+5Dを1D刻み、+5～+27Dを0.5D刻み、+27～+30Dを1D刻み（52候補）。PN6Aは+6～+9Dを1D刻み、+10～+26Dを0.5D刻み（37候補）。既存のcustomSegmentsと度数プルダウン・サーバー検証を使用し、PN6Aの+9.5D等の範囲外を拒否する。
+- 公式資料: [NIDEK NP-1](https://www.nidek.co.jp/items/surgical_np-1/)、[KOWA PN6A](https://www.kowa.co.jp/e/life/product/iol.htm)の製造/度数範囲を照合。製品名はnotesへ記録し、画面の表示名は既存方式のメーカー/型番に統一。
+- 同期: scripts/sync-catalog.mjsでFunctions用マスターを生成。施設設定から採用できるようFirestore Rulesの許可ID一覧に2件だけ追加。アセット番号を再生成。選択・注文・入力保持の処理コードは変更していない。
+- 保持: 既存12モデルは基点コミットと完全一致。既存施設の採用設定・表示順・既定ディーラーは変更せず、新モデルを自動採用しない。既存のfeature/dealer-portal・main worktree・未追跡資料には触れていない。
+- 関連テスト: 単体61件、ローカルFirestoreエミュレータ3件（新モデルの注文/範囲外/採用解除拒否、既存の未採用拒否、Rulesの採用権限）、ブラウザ5件（度数の範囲と入力保持をChromium/Firefox/WebKit、採用設定と既定ディーラーをChromium）すべて成功。全Functions・全Rules・全ブラウザは再実行していない。
+- commit: 本報告を含むコミット（git log -1で確認）。push・mainへのマージは未実施。
+- 本番: Firebase Rules/Functions/Webの配備、施設データ変更、実注文・実メール送信は未実施。公開の承認後にRulesのID一覧・Functionsのマスター・Webをそろえて反映する必要がある。

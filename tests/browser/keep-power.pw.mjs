@@ -119,6 +119,19 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await mf.check(); await mf.uncheck();
       assert.equal(await power.inputValue(), "", "未選択のまま");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+      // 追加モデルも既存のプルダウンを使い、範囲外は出さず、互換な度数は保持する
+      await model.selectOption('nidek-np-1');
+      assert.equal(await power.locator('option[value]:not([value=""])').count(), 52);
+      assert.equal(await power.locator('option[value="+27.5D"]').count(), 0);
+      await power.selectOption('+5.5D');
+      await model.selectOption('kowa-pn6a');
+      assert.equal(await power.inputValue(), '');
+      assert.equal(await power.locator('option[value]:not([value=""])').count(), 37);
+      assert.equal(await power.locator('option[value="+9.5D"]').count(), 0);
+      assert.equal(await power.locator('option[value="+26.5D"]').count(), 0);
+      await power.selectOption('+20.5D');
+      await model.selectOption('nidek-np-1');
+      assert.equal(await power.inputValue(), '+20.5D');
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

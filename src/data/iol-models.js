@@ -221,6 +221,51 @@ export const IOL_MODELS = [
     powerRange: { min: -5.0, max: 5.0, step: 1.0, default: 0.0 },
     calculatorUrl: "",
     notes: "-5.0～+5.0D [1.0ステップ]"
+  },
+  // 13. NIDEK / NP-1。製造範囲: https://www.nidek.co.jp/items/surgical_np-1/
+  {
+    manufacturer: "NIDEK",
+    model: "NP-1",
+    id: "nidek-np-1",
+    displayName: "NIDEK / NP-1",
+    isToric: false,
+    isMultifocal: false,
+    toricModels: [],
+    powerRange: {
+      min: 1,
+      max: 30,
+      step: 0.5,
+      default: 20,
+      customSegments: [
+        { min: 1, max: 5, step: 1 },
+        { min: 5, max: 27, step: 0.5 },
+        { min: 27, max: 30, step: 1 }
+      ]
+    },
+    calculatorUrl: "",
+    notes: "ネックスロード NP。+1.0～+5.0D [1.0ステップ] / +5.0～+27.0D [0.5ステップ] / +27.0～+30.0D [1.0ステップ]"
+  },
+  // 14. KOWA / PN6A。製造範囲: https://www.kowa.co.jp/e/life/product/iol.htm
+  {
+    manufacturer: "KOWA",
+    model: "PN6A",
+    id: "kowa-pn6a",
+    displayName: "KOWA / PN6A",
+    isToric: false,
+    isMultifocal: false,
+    toricModels: [],
+    powerRange: {
+      min: 6,
+      max: 26,
+      step: 0.5,
+      default: 20,
+      customSegments: [
+        { min: 6, max: 9, step: 1 },
+        { min: 10, max: 26, step: 0.5 }
+      ]
+    },
+    calculatorUrl: "",
+    notes: "アバンシィプリセット。+6.0～+9.0D [1.0ステップ] / +10.0～+26.0D [0.5ステップ]"
   }
 ];
 

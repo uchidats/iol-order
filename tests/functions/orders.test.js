@@ -728,3 +728,22 @@ test("発注先: 冪等性。同じ requestId・同じ内容の再送は同じ�
   assert.deepEqual([r2.replayed, r2.orderId], [true, r1.orderId]);
   await rejects(order(user("ordA"), { ...body1, lines: [line({ dealerId: "dB" })] }), "already-exists");
 });
+
+
+test('追加IOL NP-1/PN6A: 未採用では拒否し、採用後は区間ごとの製造範囲で注文を受け付ける', async () => {
+  for (const [modelId,model,powers,badPower] of [
+    ['nidek-np-1','NP-1',['+1.0D','+5.5D','+27.0D','+30.0D'],'+27.5D'],
+    ['kowa-pn6a','PN6A',['+6.0D','+9.0D','+10.5D','+26.0D'],'+9.5D']
+  ]) {
+    await rejects(order(user('ordA'),body({modelId,power:powers[0]})),'invalid-argument');
+    await db.doc('facilities/'+F+'/adoptedIols/'+modelId).set({facilityId:F,catalogIolId:modelId,enabled:true});
+    for (const power of powers) {
+      const r=await order(user('ordA'),body({modelId,power}));
+      const saved=(await db.doc('facilities/'+F+'/orders/'+r.orderId).get()).data();
+      assert.deepEqual([saved.lines[0].item.modelId,saved.lines[0].item.model,saved.lines[0].item.power],[modelId,model,power]);
+    }
+    await rejects(order(user('ordA'),body({modelId,power:badPower})),'invalid-argument');
+    await db.doc('facilities/'+F+'/adoptedIols/'+modelId).update({enabled:false});
+    await rejects(order(user('ordA'),body({modelId,power:powers[0]})),'invalid-argument');
+  }
+});

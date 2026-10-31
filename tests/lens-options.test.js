@@ -25,7 +25,7 @@ test("分類: 全系列に isMultifocal(真偽値)があり、確定した分類
 test("絞り込み: 両方OFF=単焦点・ノントーリックのみ(全メーカー横断)", () => {
   const r = filterLensOptions(buildLensOptions(adoptAll()), {});
   assert.deepEqual(labels(r), [
-    "J&J / DIB00V", "ALCON / CNA0T0", "SANTEN / NX-70S", "NIDEK / NSP-2", "HOYA / XY1", "HOYA / PY-60AD", "ALCON / MN60MA"
+    "J&J / DIB00V", "ALCON / CNA0T0", "SANTEN / NX-70S", "NIDEK / NSP-2", "HOYA / XY1", "HOYA / PY-60AD", "ALCON / MN60MA", "NIDEK / NP-1", "KOWA / PN6A"
   ]);
 });
 

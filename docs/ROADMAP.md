@@ -150,3 +150,12 @@
 最新報告は上書きされるため、後日の確認では上記commitの `docs/CLAUDE_REPORT.md` と履歴も参照する。過去資料に残る「dryrun」「未実装」などの記述だけで、現在の状態を判断しない。
 
 - 2026-10-29(Claude Code、ユーザーの指示): 注文受付の許可リスト `ORDER_TEST_FACILITY_IDS` に立川病院を追加(せんじゅ眼科は維持。`ORDER_TEST_UIDS`・`ORDER_INTAKE_UNRESTRICTED=false`・`ORDER_TEST_MODE=false`・メールの設定は変更なし)。`createOrder` のみ再配備し、配備後の設定値・起動(ログインなしの呼び出しは拒否)・エラーログを読み取りで確認。実際の注文・メールの送信はしていない(立川病院からの注文は本番の注文として発注先へ送られる)。
+
+
+### 共通IOLマスター追加: NIDEK NP-1 / KOWA PN6A
+
+- 担当: Codex。ユーザー依頼に基づく今回の実装。work/mobile-updates、基点origin/main f19d738。
+- 実装済み: 単焦点・非トーリック2モデルを既存形式で追加。公式資料の度数範囲/刻みをcustomSegmentsへ登録し、Functions用マスターとRulesの採用可能IDを同期。既存12モデル・施設の採用設定は変更しない。
+- テスト済み: 関連単体61件・Functions/Rulesのエミュレータ3件・ブラウザ5件が成功。全テストは再実行していない。
+- 本番未反映: push・デプロイ・施設の自動採用は行わない。ユーザー確認後、Rules・Functions・Webをそろえて反映し、施設ごとに明示的に採用する。
+- 根拠: [NIDEK NP-1](https://www.nidek.co.jp/items/surgical_np-1/) / [KOWA PN6A](https://www.kowa.co.jp/e/life/product/iol.htm)。
