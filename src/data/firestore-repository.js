@@ -23,6 +23,7 @@ export function createFirestoreRepository(db, fs) {
       if (!snap.exists()) throw new Error("施設情報を取得できません");
       return { id: snap.id, ...snap.data() };
     },
+    listRelatedLinks: (facilityId) => listSub(facilityId, "relatedLinks"),
     listOrderers: async (facilityId) => (await listSub(facilityId, "orderers")).sort(bySortOrder),
     listAdoptedIols: (facilityId) => listSub(facilityId, "adoptedIols"),
     /** 注文履歴(閲覧のみ)。新しい順に最大 limit 件。読めるのは自施設の所属メンバーと運営者(Rules) */
@@ -156,6 +157,15 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
     await batch.commit();
   };
   return {
+    async saveRelatedLinks(facilityId, { upserts = [], deletes = [] }) {
+      if (!upserts.length && !deletes.length) return;
+      const batch = fs.writeBatch(db);
+      const updatedBy = actorUid();
+      for (const w of upserts) batch.set(fs.doc(db, "facilities", facilityId, "relatedLinks", w.id),
+        { ...w.data, updatedBy, updatedAt: fs.serverTimestamp() });
+      for (const id of deletes) batch.delete(fs.doc(db, "facilities", facilityId, "relatedLinks", id));
+      await batch.commit();
+    },
     saveOrderers: (facilityId, writes) => commit(facilityId, "orderers", writes),
     saveAdoptedIols: (facilityId, writes) => commit(facilityId, "adoptedIols", writes),
     saveDealers: (facilityId, writes) => commit(facilityId, "facilityDealers", writes),

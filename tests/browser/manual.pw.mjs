@@ -74,9 +74,9 @@ async function openHelpFromMenu(page) {
 test("ヘルプ: メニューの項目とハッシュの処理は、他の画面へ移るときにヘルプを閉じる", () => {
   const main = fs.readFileSync(path.join(ROOT, "src/main.js"), "utf8");
   for (const k of ["onOpenHistory", "onOpenSettings", "onOpenApplications", "onOpenPreregistrations", "onRegisterFacility", "onSignOut"]) {
-    assert.match(main, new RegExp(`${k}: \\(\\) => \\{ leaveOverlay\\(\\);`), k);
+    assert.ok(main.split("\n").some(line => line.includes(k + ": ") && line.includes("leaveOverlay()")), k);
   }
-  assert.match(main, /onSwitchFacility: async \(\) => \{\s*leaveOverlay\(\);/);
+  assert.match(main, /onSwitchFacility: async \(\) => \{[\s\S]*?leaveOverlay\(\);/);
   for (const f of ["src/ui/manual-view.js", "src/ui/markdown-view.js", "src/ui/about-view.js"]) {
     const view = fs.readFileSync(path.join(ROOT, f), "utf8");
     assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(view), `${f}: Markdown の表示は HTML として解釈しない`);

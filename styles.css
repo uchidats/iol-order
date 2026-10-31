@@ -2493,3 +2493,16 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-operator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 12px; }
 .dealer-operator-assign { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .member-role-badge.is-muted { opacity: 0.6; }
+
+/* R18: リンクは背景・外枠を持たず、入力欄はスマートフォン内に収める。 */
+#groupNotes .ref-links-accordion { background: transparent; border: 0; box-shadow: none; }
+.related-setting-row { padding: 8px 0; min-width: 0; }
+.related-setting-row label { display: flex; align-items: center; gap: 8px; }
+.related-url { display: block; overflow-wrap: anywhere; margin-left: 24px; }
+.related-link-line { display: flex; align-items: center; gap: 6px; }
+.related-link-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.related-link-line button { flex: 0 0 auto; padding: 4px 6px; }
+.related-link-editor { display: grid; gap: 8px; margin-top: 8px; min-width: 0; }
+.related-link-editor[hidden] { display: none; }
+.related-link-editor input { width: 100%; min-width: 0; box-sizing: border-box; }
+.related-setting-row.is-deleting { opacity: .6; }

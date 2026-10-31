@@ -1,3 +1,4 @@
+import { createRelatedLinksSection } from "./related-links-settings.js";
 import {
   validateOrderers, planOrdererWrites, validateAdoption, planAdoptedWrites,
   validateDealers, validateMailSettings, planMailSettingsWrite, planDealerWrites, LIMITS
@@ -59,6 +60,7 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {{saveOrderers:Function, saveAdoptedIols:Function, saveDealers:Function}} deps.settingsApi
  * @param {Array<object>} deps.masters 共通IOLマスター（IOL_MODELS）
  * @param {() => Promise<void>} deps.onSaved 保存後（注文フォームへの反映など）
+ * @param {(facilityId:string, documents:object[]) => void} [deps.onRelatedLinksSaved] リンクだけを更新する通知（注文フォームは再生成しない）
  * @param {() => void} deps.onClose
  * @param {{uid:string, displayName?:string}} [deps.currentUser] 操作者（利用者管理の操作記録に使う）
  * @param {"admin"|"subadmin"} [deps.actorRole] 操作者のこの施設での役割(画面の出し分け用。権限の最終判定はサーバー・Rules)
@@ -67,7 +69,7 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {object|null} [deps.dealerPortalApi] ディーラー画面の閲覧の許可・取消(data/dealer-portal-api.js。null なら項目を出さない)
  * @param {{removeMember?:Function, addMember?:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 利用者管理・施設の操作（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {} }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onRelatedLinksSaved = () => {}, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {} }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -111,7 +113,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         while (again) {
           again = false;
           try { await run(); if (api.failed) { api.failed = false; clearError(); } }
-          catch (e) { console.error("自動保存に失敗しました:", e); api.failed = true; showError(); break; }
+          catch (e) { console.error("自動保存に失敗しました:", e); api.failed = true; again = false; showError(); break; }
         }
       } finally { running = false; settle(); if (again && !api.failed) pump(); }
     }
@@ -127,7 +129,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
   let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver].filter(Boolean);
+  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver, built.relatedLinks?._related.saver].filter(Boolean);
 
   const message = (container, text, isError = false) => {
     const p = container.querySelector("[data-msg]");
@@ -1131,10 +1133,11 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 画面全体 ----------
   const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null,
     theme: settingsApi.saveHeaderTheme && settingsApi.resetHeaderTheme ? themeSection() : null };
+  if (settingsApi.saveRelatedLinks && repository.listRelatedLinks) built.relatedLinks = createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved: onRelatedLinksSaved });
   if (canManageMembers) built.members = memberSection();
   if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
-  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → テーマカラー(作成の順番・機能は変えない)
-  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.theme ? { theme: built.theme } : {}) };
+  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → 関連リンク → テーマカラー
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.relatedLinks ? { relatedLinks: built.relatedLinks } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------
   // 開閉の状態は、施設ごとにこの端末(localStorage)に保存し、再読み込みしても戻す。ⓘと「追加」の操作では開閉しない。設定の内容・保存には影響しない
   const collapseKey = () => `iol_settings_collapsed:${facility ? facility.id : ""}`;
@@ -1226,15 +1229,18 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     status,
     ...Object.values(sections));
 
-  closeBtn.addEventListener("click", async () => {
-    await Promise.all(savers().map(s => s.idle()));   // 保存中なら、終わるのを待つ
-    const unsaved = dirty || savers().some(s => s.failed);   // 自動保存に失敗した変更も「保存されていない」
-    if (unsaved && !window.confirm("保存されていない変更があります。破棄して注文画面に戻りますか？")) return;
+  async function requestClose() {
+    await built.relatedLinks?._related.flush();
+    await Promise.all(savers().map(s => s.idle()));
+    const unsaved = dirty || savers().some(s => s.failed) || built.relatedLinks?._related.hasUnsaved();
+    if (unsaved && !window.confirm("この画面を離れると、未保存の入力や保存に失敗した変更が破棄されます。離れますか？")) return false;
     close();
-    onClose();
-  });
+    return true;
+  }
+  closeBtn.addEventListener("click", async () => { if (await requestClose()) onClose(); });
 
   function close() {
+    built.relatedLinks?._related.discard();
     open = false; dirty = false;
     savers().forEach(s => { s.failed = false; });
     root.hidden = true;
@@ -1242,6 +1248,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   return {
     isOpen: () => open,
+    requestClose,
     async open(fac) {
       facility = fac;
       applyCollapsed();   // この施設で前回の開閉の状態(初回はすべて開く)
@@ -1253,6 +1260,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       open = true;
       try {
         await load();
+        if (!open || facility.id !== fac.id) return;
+        if (built.relatedLinks) await built.relatedLinks._related.load(fac.id);
+        if (!open || facility.id !== fac.id) return;
         renderOrderers(sections.orderers);
         renderIols(sections.iols);
         renderDealers(sections.dealers);

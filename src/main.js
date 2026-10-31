@@ -1,3 +1,4 @@
+import { createRelatedLinksView } from "./ui/related-links.js";
 import { loadConfig } from "./config.js";
 import { initOrderForm, isOrderFormDirty, reloadFacilityOptions } from "./ui/order-form.js";
 import { initBiometry, BIOMETRY_OCR_ENABLED } from "./biometry/biometry-ui.js";
@@ -85,6 +86,7 @@ async function bootstrapWithFirebase(config) {
   const registration = { busy: false, duplicate: null, open: null }; // 施設登録の状態（open: 所属済みユーザーがメニューから開いた画面 "register"）
   let formUid = null; // 注文画面を初期化済みのユーザー
   let ctx = null;     // { service, db, repository, settingsApi }
+  const relatedLinksView = createRelatedLinksView();
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
   let orderHistory = null;  // 注文履歴（所属メンバー全員が閲覧。管理者・副管理者は削除も・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
@@ -112,9 +114,15 @@ async function bootstrapWithFirebase(config) {
     onSignOut: () => signOut()
   });
 
+  const leaveSettings = action => async (...args) => {
+    if (settings?.isOpen() && !(await settings.requestClose())) return;
+    return action(...args);
+  };
   const menu = createHeaderMenu({
     onSwitchFacility: async () => {
+      if (settings?.isOpen() && !(await settings.requestClose())) return;
       leaveOverlay();
+      setOrderViewHidden(false);
       const dirty = isOrderFormDirty() || biometryState.userConfirmedValues.isConfirmed;
       // 入力中なら確認(既存のモーダルと同じ見た目。キャンセルなら入力内容・現在の施設はそのまま)
       if (dirty && !(await confirmDialog({ message: "入力中の内容は破棄されます。施設を切り替えますか？", okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
@@ -122,12 +130,12 @@ async function bootstrapWithFirebase(config) {
       selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
       location.reload(); // 入力内容・計測値をメモリごと破棄
     },
-    onOpenHistory: () => { leaveOverlay(); openHistory(); },
-    onOpenSettings: () => { leaveOverlay(); openSettings(); },
-    onOpenApplications: () => { leaveOverlay(); openApplications(); },
-    onOpenPreregistrations: () => { leaveOverlay(); openPreregistrations(); },
-    onOpenDealerOperator: () => { leaveOverlay(); openDealerOperator(); },
-    onRegisterFacility: () => { leaveOverlay(); openOnboarding("register"); },
+    onOpenHistory: leaveSettings(() => { leaveOverlay(); openHistory(); }),
+    onOpenSettings: leaveSettings(() => { leaveOverlay(); openSettings(); }),
+    onOpenApplications: leaveSettings(() => { leaveOverlay(); openApplications(); }),
+    onOpenPreregistrations: leaveSettings(() => { leaveOverlay(); openPreregistrations(); }),
+    onOpenDealerOperator: leaveSettings(() => { leaveOverlay(); openDealerOperator(); }),
+    onRegisterFacility: leaveSettings(() => { leaveOverlay(); openOnboarding("register"); }),
     onOpenHelp: () => openHelp(),
     onOpenAbout: () => openAbout(),
     onSignOut: () => { leaveOverlay(); signOut(); }
@@ -153,6 +161,7 @@ async function bootstrapWithFirebase(config) {
   async function syncHelpFromHash() {
     const { pageIdFromHash, createManualView } = await import("./ui/manual-view.js");
     const pageId = pageIdFromHash(location.hash);
+    if (pageId !== null && settings?.isOpen() && !(await settings.requestClose())) { history.replaceState(null, "", location.pathname + location.search); return; }
     if (pageId === null) { if (manual && manual.isOpen()) manual.close(); return; }
     if (!manual) {
       manual = manual || createManualView({ mount: document.querySelector("main.main-content"), backLabel: helpBackLabel, onBack: () => backFromHelp(), audience: helpAudience });
@@ -172,6 +181,7 @@ async function bootstrapWithFirebase(config) {
    */
   async function syncAboutFromHash() {
     if (location.hash !== INTRODUCTION_HASH) { if (about && about.isOpen()) about.close(); return; }
+    if (settings?.isOpen() && !(await settings.requestClose())) { history.replaceState(null, "", location.pathname + location.search); return; }
     if (!adminChecked) return;   // ログインの状態が分かってから(確認後にもう一度呼ぶ)
     if (!ctx || !state.user || !canViewIntroduction({ isPlatformAdmin })) {
       if (about && about.isOpen()) about.close();
@@ -290,6 +300,7 @@ async function bootstrapWithFirebase(config) {
         currentUser: { uid: state.user.uid, displayName: state.user.displayName },
         actorRole: access.role,   // 施設の切り替えはページの再読み込みで行うため、画面の生成時の役割で出し分ける
         onSaved: () => reloadFacilityOptions(),
+        onRelatedLinksSaved: (fid, docs) => relatedLinksView.saved(fid, docs),
         onDeleted: () => { selection.clearRemembered(window.localStorage); selection.setForceSelect(window.sessionStorage); location.reload(); },   // 削除後は所属を取得し直し、残りの施設の選択(なければ登録・参加)へ
         dealerPortalApi: ctx.dealerPortalApi,   // ディーラー画面での閲覧の許可・取消(管理者・副管理者)
         onRenamed: (id, name) => { const f = state.facilities.find(x => x.id === id); if (f) f.name = name; render(); },   // ヘッダー・メニューの施設名を更新
@@ -363,6 +374,7 @@ async function bootstrapWithFirebase(config) {
   }
 
   async function signOut() {
+    if (settings?.isOpen() && !(await settings.requestClose())) return;
     selection.clearRemembered(window.localStorage); // 再ログイン時は施設を選び直す
     try { await ctx.service.signOut(); } finally { location.reload(); }
   }
@@ -394,6 +406,7 @@ async function bootstrapWithFirebase(config) {
       });
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
+      relatedLinksView.clear();
       menu.update(null);
     }
     if (manual && manual.isOpen()) manual.updateAudience();   // 閲覧範囲(ログイン・役割の確認が進んだら表示し直す)・戻るボタンの文言
@@ -422,6 +435,7 @@ async function bootstrapWithFirebase(config) {
     const access = render();
     if (access.state === ACCESS.GRANTED && !formUid) {
       formUid = state.user.uid;
+      relatedLinksView.load(access.facilityId, ctx.repository);
       loadHeaderTheme(access.facilityId, ctx.repository);   // ヘッダーのテーマカラー(施設ごと。待たずに注文画面を表示する)
       await initOrderForm({
         config,

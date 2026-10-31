@@ -290,6 +290,32 @@ service cloud.firestore {
         allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 
+      // R18: 閲覧は有効な所属者、変更は管理者・副管理者。
+      match /relatedLinks/{linkId} {
+        function standard() { return linkId.matches('^std-.*'); }
+        function validUrl(v) {
+          let label = '[\\p{L}\\p{N}]([\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?';
+          let host = '(' + label + '(\\.' + label + ')*\\.?|\\[[0-9A-Fa-f:]+\\])';
+          return stringIn(v, 9, 2048)
+            && v.matches('^(?i:https)://' + host + '(:[0-9]{1,5})?([/?#][^\\s\\x{00a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}\\x{feff}\\x00-\\x1f\\x7f\\\\]*)?$');
+        }
+        function validLink(d) {
+          return d.keys().hasAll(['enabled', 'updatedBy', 'updatedAt'])
+            && d.enabled is bool && d.updatedBy == request.auth.uid && d.updatedAt == request.time
+            && (standard()
+              ? (linkId in ['std-tecnis', 'std-alcon', 'std-teleon', 'std-santen', 'std-escrs']
+                && d.keys().hasOnly(['enabled', 'updatedBy', 'updatedAt']))
+              : (d.keys().hasOnly(['name', 'url', 'enabled', 'sortOrder', 'updatedBy', 'updatedAt'])
+                && d.keys().hasAll(['name', 'url', 'sortOrder'])
+                && stringIn(d.name, 1, 100) && d.name.matches('[\\s\\S]*[^\\s\\x{00a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}\\x{feff}][\\s\\S]*')
+                && validUrl(d.url) && d.sortOrder is int && d.sortOrder >= 0 && d.sortOrder <= 1000000000));
+        }
+        allow read: if isMember(fid);
+        allow create, update: if isFacilityManager(fid) && validLink(request.resource.data);
+        allow delete: if isFacilityManager(fid) && !standard();
+      }
+
+
       // 注文（サーバーのみが作成。クライアントは読取のみ）
       match /orders/{orderId} {
         allow read: if isPlatformAdmin() || isMember(fid);
