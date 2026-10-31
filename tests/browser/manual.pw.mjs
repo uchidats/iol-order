@@ -305,3 +305,33 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ヘルプ: 3. の「役割ごとにできること」の表は、スマホでは列幅の目安(100/170/300px)を保って表の中だけ横にスクロール。PC・文字の大きさ・内容は従来どおり。他の表は対象外: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page3 = MANUAL_PAGES.find(p => p.id === "03-managers");
+      for (const width of [320, 390, 1100]) {
+        const context = await newContext(browser, width, withRole("admin", {}));
+        const page = await context.newPage();
+        await page.goto(`${base}#help/03-managers`);
+        await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, page3.title);
+        const wrap = page.locator(".manual-table-roles-03");
+        assert.equal(await wrap.count(), 1, "役割ごとにできることの表だけが対象");
+        assert.equal(await page.locator(".manual-table-roles").count(), 0, "2. の比較表の設定は使わない");
+        const m = await wrap.evaluate(w => ({ head: [...w.querySelectorAll("thead th")].map(th => th.textContent.trim()), rows: w.querySelectorAll("tbody tr").length,
+          cols: [...w.querySelectorAll("thead th")].map(th => Math.round(th.getBoundingClientRect().width)), scroll: w.scrollWidth > w.clientWidth + 1 }));
+        assert.deepEqual([m.head, m.rows], [["役割", "主な対象者", "できること"], 4], "内容は変えない");
+        if (width < 560) {
+          assert.deepEqual(m.cols, [100, 170, 300], `${width}: 列幅の目安`);
+          assert.equal(m.scroll, true, `${width}: 表の中で横にスクロールできる`);
+        } else {
+          assert.equal(m.scroll, false, "PC: 横スクロールなし(自然な幅)");
+        }
+        assert.ok(await noOverflow(page), `${width}: ページ全体は横に動かない`);
+        await context.close();
+      }
+    } finally { await browser.close(); }
+  });
+}

@@ -2394,6 +2394,12 @@ input[type="date"], .lens-line select { color-scheme: light; }
   .manual-body .manual-table-roles th:nth-child(2) { width: 240px; }
   .manual-body .manual-table-roles th:nth-child(3) { width: 300px; }
   .manual-body .manual-table-roles td { overflow-wrap: anywhere; }
+  /* 3. の「役割ごとにできること」の表: 同じ方式で列幅の目安(役割100px・主な対象者170px・できること300px)を保ち、文章は折り返す。横スクロールは表の中だけ。PCは従来どおり */
+  .manual-body .manual-table-roles-03 table { table-layout: fixed; width: 570px; min-width: 570px; }
+  .manual-body .manual-table-roles-03 th:nth-child(1) { width: 100px; }
+  .manual-body .manual-table-roles-03 th:nth-child(2) { width: 170px; }
+  .manual-body .manual-table-roles-03 th:nth-child(3) { width: 300px; }
+  .manual-body .manual-table-roles-03 td { overflow-wrap: anywhere; }
 }
 
 /* ==========================================================================

@@ -34,6 +34,8 @@ export function renderManualMarkdown(markdown) {
   for (const wrap of out.querySelectorAll(".manual-table-wrap")) {
     const head = [...wrap.querySelectorAll("thead th")].map(th => th.textContent.trim());
     if (head.length === 3 && head[0] === "項目" && head[1] === "注文者" && head[2].startsWith("代行入力者")) wrap.classList.add("manual-table-roles");
+    // 3. の「役割ごとにできること」(役割・主な対象者・できること): 同じ方式で列幅を保つ(styles.css の .manual-table-roles-03)
+    if (head.length === 3 && head[0] === "役割" && head[1] === "主な対象者" && head[2] === "できること") wrap.classList.add("manual-table-roles-03");
   }
   return out;
 }
