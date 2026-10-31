@@ -1,3 +1,4 @@
+import { STANDARD_LINKS } from "../../src/domain/related-links.js";
 // 回帰テスト(ブラウザ): 「各社 Calculator 関連リンク」。常時の下線なし・右に外部リンクアイコン・青色・ホバー/フォーカスの視覚効果・スマホ幅。  npm run test:browser
 // index.html の実際のマークアップ(関連リンクの部分)と styles.css を、最小のページに読み込んで確認する。
 import test from "node:test";
@@ -12,8 +13,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 
 const INDEX = fs.readFileSync(path.join(ROOT, "index.html"), "utf8").replace(/\r\n/g, "\n");
-const START = INDEX.indexOf('<details class="ref-links-accordion">');
-const REF = INDEX.slice(START, INDEX.indexOf("</details>", START) + "</details>".length).replace('<details class="ref-links-accordion">', '<details class="ref-links-accordion" open>');
+const START = INDEX.indexOf('<details class="ref-links-accordion"');
+const REF = INDEX.slice(START, INDEX.indexOf("</details>", START) + "</details>".length).replace(/<details class="ref-links-accordion"[^>]*>/, '<details class="ref-links-accordion" open>');
 const EXPECTED = [
   ["TECNIS Eyhance Toric Calculator", "https://tecnistoriccalc.com"],
   ["Alcon Online Toric IOL Calculator", "https://www.myalcon-toriccalc.com"],
@@ -26,7 +27,7 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="/styles.css"></head><body>
 <main class="main-content"><form class="order-form"><div class="order-fields"><div class="form-group" id="groupNotes">
 <textarea class="form-control" rows="2"></textarea>
-${REF}
+${REF}<script type="module">import { renderRelatedLinks } from "/src/ui/related-links.js";renderRelatedLinks([]);window.__ready=true;</script>
 </div></div></form></main></body></html>`;
 
 let server, base;
@@ -57,8 +58,7 @@ async function launch(type, name) {
 test("index.html: 旧名称「Alcon Online Toric Calculator」は残っていない。リンク先・別タブの指定は従来どおり", () => {
   assert.ok(!INDEX.includes("Alcon Online Toric Calculator"), "旧名称");
   assert.ok(!fs.readFileSync(path.join(ROOT, "src/ui/lens-lines.js"), "utf8").includes("Alcon Toric Calculator"), "短い名称");
-  const links = [...REF.matchAll(/<a href="([^"]+)" target="_blank" rel="noopener" class="ref-link">([^<]*)</g)].map(m => [m[2], m[1]]);
-  assert.deepEqual(links, EXPECTED);
+  assert.deepEqual(STANDARD_LINKS.map(r => [r.name, r.url]), EXPECTED);
 });
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
@@ -71,7 +71,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", e => errors.push(String(e)));
-      await page.goto(base);
+      await page.goto(base); await page.waitForFunction(() => window.__ready);
       const links = page.locator(".ref-links-list a");
       assert.equal(await links.count(), 5);
       assert.deepEqual(await links.evaluateAll(as => as.map(a => [a.textContent.trim(), a.href])), EXPECTED.map(([n, u]) => [n, new URL(u).href]));

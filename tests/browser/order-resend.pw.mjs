@@ -14,6 +14,8 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
 // 偽のサーバー: 状態は localStorage("__srv")に置き、再読み込みしても残す。
 // mode: "ok" = 保存して応答 / "timeout" = 保存したが応答が届かない / "lost" = 保存されず応答も届かない
 const SCRIPT = `<script type="module">
+import { renderRelatedLinks } from "./src/ui/related-links.js";
+renderRelatedLinks([]);
 import { initOrderForm } from "./src/ui/order-form.js";
 import { deriveOrderId } from "./src/domain/pending-order.js";
 import { IOL_MODELS } from "./src/data/iol-models.js";
@@ -253,8 +255,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator("#ocrPatientName").count(), 0, "患者名の入力欄はない");
       const jst = (days) => new Date(Date.now() + (9 * 3600 + days * 86400) * 1000).toISOString().slice(0, 10);
       const date = page.locator(".lens-line").first().locator("[data-f=date]");
-      // WebKit では日付の入力の反映が遅れることがあるため、値が入ったのを確認してから押す
-      const setDate = async (d) => { await date.fill(d); await page.waitForFunction((v) => document.querySelector(".lens-line [data-f=date]").value === v, d); };
+      // WebKit/Firefox のネイティブ日付入力は、フォーカス移動時の change で前のエラーを消す。
+      // submit より先に blur/change を完了させ、検証後のエラーを遅い change が消す競合を避ける
+      const setDate = async (d) => { await date.fill(d); await date.blur(); await page.waitForFunction((v) => document.querySelector(".lens-line [data-f=date]").value === v && document.querySelector('.lens-line [data-err="date"]').textContent === "", d); };
       assert.deepEqual([await date.getAttribute("min"), await date.getAttribute("max")], [jst(0), jst(366)]);
       await fillOrder(page, "");
       for (const [d, msg] of [[jst(-1), /手術日は本日以降/], [jst(367), /手術日が先すぎます/]]) {

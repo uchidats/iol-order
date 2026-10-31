@@ -45,6 +45,7 @@
  * @property {(facilityId: string) => Promise<Orderer[]>} listOrderers
  * @property {(facilityId: string) => Promise<AdoptedIol[]>} listAdoptedIols
  * @property {(facilityId: string) => Promise<Dealer[]>} listDealers
+ * @property {(facilityId: string) => Promise<object[]>} listRelatedLinks
  */
 
 export {};
