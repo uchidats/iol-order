@@ -64,7 +64,10 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     });
     return h("div", { class: "settings-section" }, createSectionHeading("会社を登録", "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"),   // 説明は見出しの右のⓘ
       field("会社名", name),
-      h("label", { class: "settings-check dealer-operator-testonly" }, testOnly, h("span", {}, "試験用の会社にする(運営者の試験専用。施設の発注先と関連付けできません。登録後は変更できません)")),
+      // 表示は「試験用の会社にする」だけ。説明は右のⓘ(共通の info-tip)。ⓘ はラベルの外に置く(押してもチェックは変わらない)
+      h("div", { class: "dealer-operator-testonly-row" },
+        h("label", { class: "settings-check dealer-operator-testonly" }, testOnly, h("span", {}, "試験用の会社にする")),
+        createInfoTip("運営者の試験専用。施設の発注先と関連付けできません。登録後は変更できません。", { label: "試験用の会社の説明" }).root),
       h("div", { class: "form-row" }, btn), err);
   }
 

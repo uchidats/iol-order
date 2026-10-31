@@ -2528,8 +2528,9 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-operator-list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
 .dealer-operator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 12px; }
 .dealer-operator-assign, .dealer-manage-assign { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-/* 運営者の会社登録の「試験用の会社にする」(説明が長いので折り返す。スマホで横にはみ出さない) */
-.dealer-operator-testonly { display: flex; align-items: flex-start; white-space: normal; overflow-wrap: anywhere; margin: 4px 0 8px; }
+/* 運営者の会社登録の「試験用の会社にする」と右のⓘ(説明はⓘの中。スマホでも横にはみ出さない) */
+.dealer-operator-testonly-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 4px 0 8px; }
+.dealer-operator-testonly { display: inline-flex; align-items: center; white-space: normal; overflow-wrap: anywhere; }
 .member-role-badge.is-muted { opacity: 0.6; }
 
 /* R18: リンクは背景・外枠を持たず、入力欄はスマートフォン内に収める。 */

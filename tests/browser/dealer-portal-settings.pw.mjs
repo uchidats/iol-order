@@ -228,6 +228,15 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       assert.equal(cc.testOnly, undefined, "通常の会社は試験用の印を送らない");
       // 試験用の会社(チェックした場合だけ testOnly を送る。送信の要求 ID は新しくする)
       await page.fill('[data-f="companyName"]', "試験商事");
+      // 表示は「試験用の会社にする」だけで、説明は右のⓘ。ⓘを押してもチェックは変わらない
+      const tor = page.locator(".dealer-operator-testonly-row");
+      assert.equal((await tor.locator("label").innerText()).trim(), "試験用の会社にする");
+      await tor.locator(".info-tip-btn").click();
+      assert.match(await tor.locator(".info-tip-pop").innerText(), /^運営者の試験専用。施設の発注先と関連付けできません。登録後は変更できません。$/);
+      assert.equal(await page.locator('[data-f="companyTestOnly"]').isChecked(), false, "ⓘではチェックしない");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 説明を開いても横にはみ出さない`);
+      await page.keyboard.press("Escape");
+      assert.equal(await tor.locator(".info-tip-pop").isVisible(), false);
       await page.check('[data-f="companyTestOnly"]');
       await page.click('[data-act="createCompany"]');
       await page.waitForFunction(() => window.__calls.filter(c => c[0] === "createCompany").length >= 2);
