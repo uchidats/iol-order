@@ -1161,6 +1161,38 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     });
   }
 
+  /**
+   * 会社の削除(運営者)。依存するデータが1件もない会社だけ(誤登録の取り消し用。使い終えた会社は「停止」にする)。
+   * 依存: 担当者(参加待ち・取消済みの招待・無効を含むすべての記録)、ログイン方法の紐付け、支店(無効を含む)、施設の発注先との関連付け(状態を問わない)、
+   * 閲覧の許可(取消済みを含む)、受信の索引(注文の履歴)。1つでもあれば削除しない(何も消さない)。
+   * 読み取りと削除を1つのトランザクションで行い、確認と削除の間に招待・関連付けなどが加わった場合は再試行で検出する。操作の記録(監査)は残す
+   */
+  async function deleteCompany(user, data) {
+    strict(data, ["companyId"]);
+    if (!isId(data.companyId)) throw badInput();
+    const cid = data.companyId;
+    const one = (q) => q.limit(1);
+    return db.runTransaction(async (tx) => {
+      const c = await tx.get(companyRef(cid));
+      if (!c.exists) throw notVisible();
+      const [staff, binds, branches, grants, receipts, facilities] = await Promise.all([
+        tx.get(one(db.collection("dealerStaff").where("companyId", "==", cid))),
+        tx.get(one(db.collection("dealerAuthBindings").where("companyId", "==", cid))),
+        tx.get(one(companyRef(cid).collection("branches"))),
+        tx.get(one(db.collection("dealerPortalGrants").where("companyId", "==", cid))),
+        tx.get(one(companyRef(cid).collection("receipts"))),
+        tx.get(db.collection("facilities"))]);
+      // 関連付けは施設ごと(停止中の施設を含む。collection group の索引に頼らない)
+      const links = await Promise.all(facilities.docs.map(f => tx.get(one(f.ref.collection("dealerPortalLinks").where("companyId", "==", cid)))));
+      const deps = [[!staff.empty || !binds.empty, "担当者(参加待ち・取消済みの招待・無効を含む)"], [!branches.empty, "支店"],
+        [links.some(l => !l.empty), "施設の発注先との関連付け"], [!grants.empty, "閲覧の許可の記録"], [!receipts.empty, "注文の受信の記録"]].filter(([has]) => has).map(([, label]) => label);
+      if (deps.length) throw new RegistrationError("failed-precondition", `この会社には${deps.join("・")}があるため削除できません。利用をやめる場合は「会社を停止」してください`);
+      tx.delete(c.ref);
+      audit(tx, { action: "company.delete", companyId: cid, actorUid: user.uid, operator: true, name: String(c.get("name") || ""), ...(c.get("testOnly") === true ? { testOnly: true } : {}) });
+      return { ok: true };
+    });
+  }
+
   async function upsertBranch(user, data, guard = null) {
     strict(data, ["companyId", "branchId", "name", "status"]);
     if (!isId(data.companyId) || (data.branchId !== undefined && !isId(data.branchId))) throw badInput();
@@ -1342,6 +1374,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "overview": strict(rest, []); return overview();
       case "createCompany": return createCompany(user, rest);
       case "updateCompany": return updateCompany(user, rest);
+      case "deleteCompany": return deleteCompany(user, rest);
       case "upsertBranch": return upsertBranch(user, rest);
       case "inviteStaff": return inviteStaff(user, rest);
       case "cancelInvitation": return cancelInvitation(user, rest);

@@ -60,7 +60,7 @@ window.__calls = [];
 const companies = [{ companyId: "dco-x", name: "エックス商事", status: "active", branches: [], staff: [{ staffId: "dstf_x1", name: "担当x1", email: "x1@corp.example.jp", role: "reader", status: "active", branchId: null, facilityIds: [], logins: ["device", "google"] }, { staffId: "dstf_x9", name: "担当x9", email: "x9@corp.example.jp", role: "reader", status: "disabled", branchId: null, facilityIds: [], logins: [] }], invitations: [{ staffId: "dstf_n1", email: "n1@corp.example.jp", name: "新人", role: "reader", expiresAt: "2026-11-27T03:00:00.000Z" }], grants: [{ facilityId: "fA", localDealerId: "dA1", effectiveFrom: "2026-10-27T03:00:00.000Z" }] }];
 const facilities = [{ facilityId: "fA", name: "A眼科", dealers: [{ localDealerId: "dA1", name: "エックス商事A窓口", link: { companyId: "dco-x", status: "active" } }, { localDealerId: "dA2", name: "<b>ワイ</b>医療", link: null }] }];
 const rec = (name) => async (a) => { window.__calls.push([name, a]); return { ok: true }; };
-const api = { overview: async () => ({ companies, facilities }), createCompany: rec("createCompany"), updateCompany: rec("updateCompany"), upsertBranch: rec("upsertBranch"),
+const api = { overview: async () => ({ companies, facilities }), createCompany: rec("createCompany"), updateCompany: rec("updateCompany"), deleteCompany: rec("deleteCompany"), upsertBranch: rec("upsertBranch"),
   inviteStaff: rec("inviteStaff"), cancelInvitation: rec("cancelInvitation"), updateStaff: rec("updateStaff"), proposeLink: rec("proposeLink") };
 const v = createDealerPortalOperator({ mount: document.querySelector("main"), api, onClose() {} });
 await v.open();
@@ -234,6 +234,27 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       const tc = await page.evaluate(() => window.__calls.filter(c => c[0] === "createCompany")[1][1]);
       assert.deepEqual([tc.name, tc.testOnly], ["試験商事", true]);
       assert.notEqual(tc.requestId, cc.requestId);
+      // 会社名の編集・削除: 施設設定の「担当医」と同じアイコンボタン(orderer-icon・同じ寸法)
+      const co = page.locator('[data-company="dco-x"] .dealer-operator-title');
+      assert.deepEqual(await co.locator('.orderer-icon').evaluateAll(bs => bs.map(b => [b.dataset.act, b.getAttribute("aria-label"), !!b.querySelector("svg")])), [["editCompany", "会社名を編集", true], ["deleteCompany", "この会社を削除", true]]);
+      assert.equal(await co.locator('[data-act="toggleCompany"]').count(), 1, "「会社を停止」は残す");
+      const sz = await co.locator('.orderer-icon').evaluateAll(bs => bs.map(b => { const r = b.getBoundingClientRect(); return [Math.round(r.height), Math.round(r.width)]; }));
+      assert.deepEqual(sz, [[32, 32], [32, 32]], "担当医の鉛筆・ゴミ箱と同じ寸法(orderer-icon の 32px)");
+      await co.locator('[data-act="editCompany"]').click();
+      assert.equal(await co.locator('[data-f="editCompanyName"]').inputValue(), "エックス商事");
+      await co.locator('[data-f="editCompanyName"]').fill("エックス商事株式会社");
+      await co.locator('[data-act="saveCompany"]').click();
+      await page.waitForFunction(() => window.__calls.some(c => c[0] === "updateCompany" && c[1].name));
+      assert.deepEqual(await page.evaluate(() => window.__calls.filter(c => c[0] === "updateCompany" && c[1].name).at(-1)[1]), { companyId: "dco-x", name: "エックス商事株式会社" });
+      // 削除: 確認ダイアログでキャンセルすると送らない。OK で会社 ID だけを送る
+      await page.locator('[data-company="dco-x"] [data-act="deleteCompany"]').click();
+      await page.locator('.confirm-dialog [data-act="cancel"]').click();
+      assert.equal(await page.evaluate(() => window.__calls.filter(c => c[0] === "deleteCompany").length), 0);
+      await page.locator('[data-company="dco-x"] [data-act="deleteCompany"]').click();
+      assert.match(await page.locator('.confirm-dialog').innerText(), /エックス商事.*削除しますか/s);
+      await page.locator('.confirm-dialog [data-act="ok"]').click();
+      await page.waitForFunction(() => window.__calls.some(c => c[0] === "deleteCompany"));
+      assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c[0] === "deleteCompany")[1]), { companyId: "dco-x" });
       assert.equal(await page.locator('.form-label:has([data-f="staffEmail"]) > span').innerText(), "勤務先メールアドレス");
       await page.fill('[data-f="staffEmail"]', "x2@corp.example.jp");
       await page.fill('[data-f="staffName"]', "担当x2");

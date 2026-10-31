@@ -29,7 +29,7 @@
 - `dealerPortalApi`(担当者): `companies`(本人の有効な所属の会社) / `context`(会社・支店・閲覧できる施設・担当施設・初期選択) / `setAssignments`(自分の担当施設。許可済みの施設だけ) / `list`(期間・施設の複数選択・注文番号の完全一致・カーソル) / `get`(詳細) / `sendCode`・`verifyCode`(本人確認。参加を含む)。
 - `dealerPortalApi` の `week`(手術日の週表示。`weekStart`=月曜の日付・`facilityFilter`): 受信の索引の `surgeryDates`(自社宛ての明細の手術日。`indexDealerReceipts` が作成し、作り直しで既存の索引にも補う)で、その週(月曜〜日曜)に手術日がある受信を最大100件読み、詳細と同じ確認(許可・関連付け・許可の後・テストでない・注文時点の発注先)を通ったものだけ、その週の自社宛ての明細(メーカー・型番・度数・枚数)を手術日ごとに返す。1つの注文に手術日が複数あれば、各週・各日にその日の明細だけ(注文番号は同じ。`otherDates` でほかの手術日を示す)。超えたら `truncated`。施設側の手術日の索引(orderSurgeryIndex)は他社の注文を含み、論理削除の扱いも受信の一覧と異なるため使わない。
 - `facilityDealerPortal`(施設の管理者・副管理者): `status` / `grant` / `revoke`(revision で同時操作を検出)。
-- `dealerPortalOperator`(運営者): `overview` / `createCompany` / `updateCompany` / `upsertBranch` / `inviteStaff` / `cancelInvitation`(`staffId`) / `updateStaff`(`staffId`。無効化・役割・支店・担当施設の代行) / `proposeLink` / `reindex`(索引の作り直し。既定は確認のみ)。
+- `dealerPortalOperator`(運営者): `overview` / `createCompany` / `updateCompany`(会社名・状態。会社 ID と担当者・支店・関連付けはそのまま。試験用の会社は【試験】と印を残す) / `deleteCompany`(依存するデータ=担当者の記録(取消済みの招待を含む)・ログイン方法の紐付け・支店・関連付け・閲覧の許可の記録・受信の記録が1件もない会社だけ。サーバーが1つのトランザクションで確かめ、あれば拒否。監査の記録は残す。運営者の画面では会社名の右の鉛筆・ゴミ箱、削除は確認ダイアログの後) / `upsertBranch` / `inviteStaff` / `cancelInvitation`(`staffId`) / `updateStaff`(`staffId`。無効化・役割・支店・担当施設の代行) / `proposeLink` / `reindex`(索引の作り直し。既定は確認のみ)。
 - トリガー `indexDealerReceipts`(注文の作成時): 許可が有効・関連付けが一致・発注先が許可した時点と同じ・注文が許可の後・テストでない・発注先の矛盾がない場合だけ、冪等な ID で索引を作る。失敗は再試行(24時間まで)。
 
 取得のたびに、今回のログインの認証主体が紐付け済みで世代が一致・担当者が有効でログインのメールが承認済みと一致・会社が有効・許可が有効で関連付けの現在の許可と一致・施設が有効・施設別発注先が存在し許可した時点と同じ・(詳細では)元注文が許可の後でテストでない、を確認する(キャッシュしない)。一覧は索引を読み、元注文は読み直さない(索引の作成時に除外済み)。取消・退職・会社の停止・施設の停止・発注先の削除の後は、次の取得から拒否する。他社・未許可の対象は「対象を表示できません」にまとめる。

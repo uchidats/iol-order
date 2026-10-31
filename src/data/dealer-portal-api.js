@@ -52,6 +52,7 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     overview: () => operator({ action: "overview" }),
     createCompany: (a) => operator({ action: "createCompany", ...pick(a, ["name", "requestId", "testOnly"]) }),
     updateCompany: (a) => operator({ action: "updateCompany", ...pick(a, ["companyId", "name", "status"]) }),
+    deleteCompany: (a) => operator({ action: "deleteCompany", ...pick(a, ["companyId"]) }),   // 依存するデータがない会社だけ(サーバーが確かめる)
     upsertBranch: (a) => operator({ action: "upsertBranch", ...pick(a, ["companyId", "branchId", "name", "status"]) }),
     inviteStaff: (a) => operator({ action: "inviteStaff", ...pick(a, ["companyId", "email", "name", "role", "branchId"]) }),
     cancelInvitation: (a) => operator({ action: "cancelInvitation", ...pick(a, ["companyId", "staffId"]) }),

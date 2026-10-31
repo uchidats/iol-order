@@ -1429,6 +1429,74 @@ test("試験モードの拒否: 一般の利用者・試験の UID 以外・ト�
   assert.equal(sentCodes.length, n0);
 });
 
+test("会社名の変更(運営者): 会社 ID・担当者・支店・関連付けはそのまま。試験用の会社は【試験】と印を残す", async () => {
+  const b = (await op("upsertBranch", { companyId: C.X, name: "本社" })).branchId;
+  const before = (await op("overview")).companies.find(c => c.companyId === C.X);
+  await op("updateCompany", { companyId: C.X, name: "エックス商事株式会社" });
+  const after = (await op("overview")).companies.find(c => c.companyId === C.X);
+  assert.equal(after.name, "エックス商事株式会社");
+  assert.deepEqual([after.staff.map(s => s.staffId).sort(), after.branches.map(x => x.branchId), after.testOnly], [before.staff.map(s => s.staffId).sort(), [b], false]);
+  assert.deepEqual((await op("overview")).facilities.find(f => f.facilityId === "fA").dealers.find(d => d.localDealerId === "dA1").link.companyId, C.X, "関連付けは同じ会社 ID のまま");
+  assert.equal((await api("x1", "context", { companyId: C.X })).company.name, "エックス商事株式会社", "担当者の画面にも反映(ログインし直し不要)");
+  const T = (await op("createCompany", { name: "試験商事", requestId: crypto.randomUUID(), testOnly: true })).companyId;
+  for (const name of ["改名商事", "【試験】改名2"]) {
+    await op("updateCompany", { companyId: T, name });
+    const t = (await op("overview")).companies.find(c => c.companyId === T);
+    assert.deepEqual([t.name, t.testOnly], [name.startsWith("【試験】") ? name : `【試験】${name}`, true]);
+  }
+});
+
+test("会社の削除(運営者): 依存するデータが1件もない会社だけ。担当者(取消済みの招待を含む)・支店・関連付け・閲覧の許可・受信の記録があれば拒否し、何も消さない", async () => {
+  const create = async (name, extra = {}) => (await op("createCompany", { name, requestId: crypto.randomUUID(), ...extra })).companyId;
+  const exists = async (cid) => (await db.doc(`dealerCompanies/${cid}`).get()).exists;
+  const blocked = async (cid, re, what) => {
+    await assert.rejects(op("deleteCompany", { companyId: cid }), (e) => e.code === "failed-precondition" && re.test(e.message) && /会社を停止/.test(e.message), what);
+    assert.equal(await exists(cid), true, `${what}: 削除されない`);
+  };
+  // 依存なし: 削除でき、一覧から消え、監査の記録は残る(試験用の会社も同じ)
+  const E = await create("誤登録商事");
+  const T = await create("試験の空き", { testOnly: true });
+  for (const cid of [E, T]) {
+    assert.deepEqual(await op("deleteCompany", { companyId: cid }), { ok: true });
+    assert.equal(await exists(cid), false);
+  }
+  assert.equal((await op("overview")).companies.some(c => c.companyId === E || c.companyId === T), false);
+  const logs = (await db.collection("dealerPortalAuditLogs").where("action", "==", "company.delete").get()).docs.map(d => d.data());
+  assert.deepEqual(logs.map(l => [l.companyId, l.name, l.operator, l.testOnly === true]).sort(), [[E, "誤登録商事", true, false], [T, "【試験】試験の空き", true, true]].sort());
+  await rejects(op("deleteCompany", { companyId: E }), "not-found");
+  // 担当者: 参加済み(エックス商事)・参加待ち・取消済みの招待
+  await blocked(C.X, /担当者/, "参加済みの担当者");
+  const I = await create("招待中商事");
+  await op("inviteStaff", { companyId: I, email: "inv@corp.example.jp", name: "", role: "reader" });
+  await blocked(I, /担当者/, "参加待ち");
+  await op("cancelInvitation", { companyId: I, staffId: sid(I, "inv") });
+  await blocked(I, /担当者/, "取消済みの招待");
+  // 支店(無効を含む)
+  const B = await create("支店あり商事");
+  const br = (await op("upsertBranch", { companyId: B, name: "本店" })).branchId;
+  await op("upsertBranch", { companyId: B, branchId: br, name: "本店", status: "inactive" });
+  await blocked(B, /支店/, "無効の支店");
+  // 施設の発注先との関連付け(許可前)
+  const L = await create("関連付け商事");
+  await db.doc("facilities/fB/facilityDealers/dB9").set({ facilityId: "fB", name: "関連付けの窓口", orderEmails: ["l@l.example.jp"] });
+  await op("proposeLink", { facilityId: "fB", localDealerId: "dB9", companyId: L });
+  await blocked(L, /関連付け/, "関連付け(許可前)");
+  // 閲覧の許可の記録(取消済み)と受信の記録: エックス商事とは別の会社で、記録だけを作って確かめる
+  const G = await create("許可記録商事");
+  await db.doc("dealerPortalGrants/dgr-test-revoked").set({ companyId: G, facilityId: "fA", localDealerId: "dZ", status: "revoked" });
+  await blocked(G, /閲覧の許可/, "取消済みの許可の記録");
+  const R = await create("受信記録商事");
+  await db.doc(`dealerCompanies/${R}/receipts/rcp-test`).set({ facilityId: "fA", orderId: "o1" });
+  await blocked(R, /注文の受信/, "受信の記録");
+  // 運営者以外・不正な入力
+  await rejects(portal.operator({ auth: auth("adminA"), data: { action: "deleteCompany", companyId: G } }), "permission-denied");
+  await rejects(op("deleteCompany", { companyId: G, force: true }), "invalid-argument");
+  await rejects(op("deleteCompany", { companyId: "../x" }), "invalid-argument");
+  // ディーラーの担当者・施設の管理者の API には削除の操作はない
+  await rejects(api("x1", "deleteCompany", { companyId: C.X }), "invalid-argument");
+  assert.equal(await exists(C.X), true);
+});
+
 test("試験用の会社(testOnly): 施設の発注先との関連付け・閲覧の許可を拒否(機能の有効化後も)。印は作成時だけ・運営者だけが付けられ、変更・解除できない。名前の【試験】は残る", async () => {
   const { T } = await setupTestMode();
   // 関連付けの拒否(運営者でも)

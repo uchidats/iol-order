@@ -3,6 +3,7 @@ import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { formatJstDateTime } from "../domain/dealer-portal.js";
 import { createInfoTip, createSectionHeading } from "./info-tip.js";
+import { pencilIcon, trashIcon } from "./action-icons.js";
 
 const ROLE_LABELS = { reader: "閲覧者", branchAdmin: "支店管理者", companyAdmin: "会社管理者" };
 const STAFF_STATUS = { active: "有効", disabled: "無効(退職など)" };
@@ -108,6 +109,38 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
       if (c.status === "active" && !(await confirmDialog({ message: `「${c.name}」を停止しますか？\n会社の全担当者が、次の操作からディーラー画面を利用できなくなります。`, okLabel: "停止する" }))) return;
       run(() => api.updateCompany({ companyId: c.companyId, status: c.status === "active" ? "suspended" : "active" }), "会社の状態を変更しました。", err);
     });
+    // 会社名の編集(鉛筆)・削除(ゴミ箱)。施設設定の「担当医」と同じアイコンボタン。会社 ID・担当者・支店・関連付けはそのまま
+    // (試験用の会社の【試験】と印はサーバーが残す)。削除は依存するデータがない会社だけで、可否はサーバーが確かめる
+    const iconBtn = (act, label, child) => h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": act, "aria-label": label, title: label }, child);
+    const title = h("div", { class: "dealer-operator-title" });
+    const showTitle = () => {
+      const edit = iconBtn("editCompany", "会社名を編集", pencilIcon());
+      const del = iconBtn("deleteCompany", "この会社を削除", trashIcon());
+      edit.addEventListener("click", showEdit);
+      del.addEventListener("click", async () => {
+        if (!(await confirmDialog({ message: `「${c.name}」を削除しますか？
+担当者・支店・施設との関連付け・閲覧の許可・注文の受信の記録がない会社だけ削除できます(ある場合は削除されません)。この操作は取り消せません。`, okLabel: "削除する" }))) return;
+        run(() => api.deleteCompany({ companyId: c.companyId }), `「${c.name}」を削除しました。`, err);
+      });
+      title.replaceChildren(h("h3", {}, c.name), h("span", { class: c.status === "active" ? "member-role-badge" : "member-role-badge is-muted" }, c.status === "active" ? "有効" : "停止中"),
+        ...(c.testOnly ? [h("span", { class: "member-role-badge", "data-badge": "testOnly" }, "試験用")] : []), edit, del, suspend);
+    };
+    const showEdit = () => {
+      const input = h("input", { class: "form-control dealer-operator-name", type: "text", maxlength: "100", "data-f": "editCompanyName", value: c.name, "aria-label": "会社名" });
+      const save = h("button", { type: "button", class: "btn btn-primary btn-sm-inline", "data-act": "saveCompany" }, "保存");
+      const cancel = h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "cancelCompany" }, "キャンセル");
+      save.addEventListener("click", () => {
+        const name = input.value.trim();
+        if (!name) { err.textContent = "会社名を入力してください"; return; }
+        if (name === c.name) { showTitle(); return; }
+        run(() => api.updateCompany({ companyId: c.companyId, name }), "会社名を変更しました。", err);
+      });
+      cancel.addEventListener("click", showTitle);
+      title.replaceChildren(input, save, cancel,
+        ...(c.testOnly ? [h("span", { class: "form-hint" }, "試験用の会社は、名前の先頭の「【試験】」が自動で残ります。")] : []));
+      input.focus();
+    };
+    showTitle();
     const invitations = c.invitations.map(i => {
       const cancel = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "cancelInvite" }, "取り消す");
       cancel.addEventListener("click", () => run(() => api.cancelInvitation({ companyId: c.companyId, staffId: i.staffId }), "参加待ちを取り消しました。", err));
@@ -115,7 +148,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     });
     const grants = (data.grantsByCompany.get(c.companyId) || []).map(g => h("li", {}, `${g.name}(${formatJstDateTime(g.effectiveFrom)} 以降)`));
     return h("div", { class: "settings-section dealer-operator-company", "data-company": c.companyId },
-      h("div", { class: "dealer-operator-title" }, h("h3", {}, c.name), h("span", { class: c.status === "active" ? "member-role-badge" : "member-role-badge is-muted" }, c.status === "active" ? "有効" : "停止中"), c.testOnly ? h("span", { class: "member-role-badge", "data-badge": "testOnly" }, "試験用") : null, suspend),
+      title,
       h("h4", {}, `担当者(${c.staff.length}人)`),
       c.staff.length ? h("ul", { class: "dealer-operator-list" }, c.staff.map(s => staffRow(c, s))) : h("p", { class: "form-hint" }, "担当者はまだいません。"),
       invitations.length ? h("div", {}, h("h4", {}, "参加待ち"), h("ul", { class: "dealer-operator-list" }, invitations)) : null,
