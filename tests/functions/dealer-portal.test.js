@@ -1217,13 +1217,26 @@ test("支店管理者: 自分の支店の閲覧者だけを管理できる。支
   await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r2"), facilityIds: ["fB"] }), /自分の支店の担当者だけ/);
   await m("sadm", "manageInvite", { email: "p1@corp.example.jp", name: "", role: "reader", branchId: osaka });
   await deniedBy(m("tadm", "manageCancelInvite", { staffId: sidOf("p1") }), /自分の支店の担当者だけ/);
-  await deniedBy(m("tadm", "manageInvite", { email: "p1@corp.example.jp", name: "", role: "reader", branchId: tokyo }), /自分の支店の担当者だけ/, "他の支店の参加待ちの上書き");
+  // 他の支店の担当者(参加待ち・無効・有効)のメール: 状態・支店を示さない同じ文言で断る(Low-1)
+  const generic = /^このメールアドレスは招待できません/;
+  await deniedBy(m("tadm", "manageInvite", { email: "p1@corp.example.jp", name: "", role: "reader", branchId: tokyo }), generic, "他の支店の参加待ちの上書き");
+  await deniedBy(m("tadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: tokyo }), generic, "他の支店の有効な担当者(「すでに参加」を返さない)");
+  await deniedBy(m("tadm", "manageInvite", { email: "oadm@corp.example.jp", name: "", role: "reader", branchId: tokyo }), generic, "他の支店の支店管理者");
+  await assert.rejects(m("tadm", "manageInvite", { email: "r1@corp.example.jp", name: "", role: "reader", branchId: tokyo }), (e) => e.code === "failed-precondition" && /すでに参加/.test(e.message), "自分の支店の有効な担当者は従来の文言");
   await m("sadm", "manageUpdateStaff", { staffId: sidOf("r2"), status: "disabled" });
-  await deniedBy(m("tadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: tokyo }), /自分の支店の担当者だけ/, "他の支店の無効の担当者の再招待");
+  await deniedBy(m("tadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: tokyo }), generic, "他の支店の無効の担当者の再招待");
   await m("sadm", "manageInvite", { email: "c1@corp.example.jp", name: "", role: "companyAdmin", branchId: osaka });
   await deniedBy(m("tadm", "manageCancelInvite", { staffId: sidOf("c1") }), /会社管理者の任命/);
   await m("sadm", "manageCancelInvite", { staffId: sidOf("c1") });
   await m("tadm", "manageInvite", { email: "c1@corp.example.jp", name: "", role: "reader", branchId: tokyo });   // 取り消された招待は新しい招待(閲覧者として)
+  // 取り消した招待からの招待は担当施設を引き継がない(Low-2)。無効化→再招待は従来どおり残す
+  await m("sadm", "manageUpdateStaff", { staffId: sidOf("r2"), facilityIds: ["fB"] });
+  await m("sadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: osaka });   // 無効の r2 を再招待(担当施設は残る)
+  assert.deepEqual((await db.doc(`dealerStaff/${sidOf("r2")}`).get()).get("facilityAssignments"), ["fB"], "無効化からの再招待は担当施設を残す");
+  await m("sadm", "manageCancelInvite", { staffId: sidOf("r2") });
+  await m("tadm", "manageInvite", { email: "r2@corp.example.jp", name: "", role: "reader", branchId: tokyo });   // 取り消された招待は新しい招待
+  assert.deepEqual((await db.doc(`dealerStaff/${sidOf("r2")}`).get()).get("facilityAssignments"), [], "取り消しからの招待は担当施設を引き継がない");
+  assert.deepEqual((await m("tadm", "manage")).staff.find(x => x.staffId === sidOf("r2")).facilityIds, []);
   // 自分自身: 無効化・降格・異動はできない
   await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), status: "disabled" }), /自分自身/);
   await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("tadm"), role: "reader" }), /自分自身/);
@@ -1235,7 +1248,7 @@ test("支店管理者: 自分の支店の閲覧者だけを管理できる。支
   // 会社管理者による異動・降格・所属支店の解除は、次の操作からすぐに反映
   await m("sadm", "manageUpdateStaff", { staffId: sidOf("tadm"), branchId: osaka });
   ov = await m("tadm", "manage");
-  assert.deepEqual([ov.branches.map(b => b.branchId), ov.staff.map(x => x.email.split("@")[0]).sort()], [[osaka], ["oadm", "p1", "r2", "tadm"].sort()]);
+  assert.deepEqual([ov.branches.map(b => b.branchId), ov.staff.map(x => x.email.split("@")[0]).sort()], [[osaka], ["oadm", "p1", "tadm"].sort()]);
   await deniedBy(m("tadm", "manageUpdateStaff", { staffId: sidOf("r1"), name: "x" }), /自分の支店の担当者だけ/);
   await m("sadm", "manageUpdateStaff", { staffId: sidOf("tadm"), branchId: null });
   ov = await m("tadm", "manage");

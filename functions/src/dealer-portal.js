@@ -884,8 +884,10 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const { companyId: _c, ...rest } = data;
     return inviteStaff(actor, { ...rest, companyId: actor.companyId }, async (tx, { existing, role, branchId }) => {
       const staff = await recheck(tx, actor);
-      // 取り消した招待の文書は新しい招待と同じ扱い。それ以外(参加待ち・期限切れ・無効)は、今の役割・支店からの変更として確かめる
+      // 取り消した招待の文書は新しい招待と同じ扱い。それ以外(有効・参加待ち・期限切れ・無効)は、今の役割・支店からの変更として確かめる
       const prior = existing.exists && existing.get("status") !== "cancelled";
+      // 支店管理者: 他の支店の担当者(有効・無効・参加待ち)のメールは、状態・支店を示さず同じ文言で断る(自社内の他の支店の担当者を推測させない)
+      if (prior && actor.role === "branchAdmin" && branchOf(existing) !== actor.branchId) throw new RegistrationError("permission-denied", "このメールアドレスは招待できません。会社管理者にお問い合わせください");
       deny(managerPolicyError(actor, { targetRole: prior ? existing.get("role") : role, nextRole: role,
         targetBranchId: prior ? branchOf(existing) : branchId, nextBranchId: branchId,
         statusChange: prior && existing.get("status") === "disabled" }));   // 無効の担当者の再招待は、再有効化と同じ扱い
@@ -1127,7 +1129,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   /**
    * 担当者の招待(運営者)。担当者の文書(会社×メール)を「招待中」にする。参加済み(有効)なら招待しない(設定の変更は updateStaff)。
-   * 無効化・取り消し・期限切れからの再招待では世代を進める(前の紐付けはすべて使えない)。担当施設は残す
+   * 無効化・取り消し・期限切れからの再招待では世代を進める(前の紐付けはすべて使えない)。担当施設は残す(取り消した招待からの招待は新しい招待として空にする)。
+   * guard(ディーラーの会社管理者・支店管理者の規則)は「すでに参加しています」の判定より前に呼ぶ(権限のない相手の状態を文言で示さない)
    */
   async function inviteStaff(user, data, guard = null) {
     strict(data, ["companyId", "email", "name", "role", "branchId"]);
@@ -1140,12 +1143,13 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!c.exists || c.get("status") !== "active") throw notVisible();
       const branchId = await checkBranch(tx, data.companyId, data.branchId);
       const s = await tx.get(staffRef(sid));
-      if (s.exists && s.get("status") === "active") throw new RegistrationError("failed-precondition", "この担当者はすでに参加しています(役割・支店は担当者の設定で変更します)");
       if (guard) await guard(tx, { company: c, existing: s, role: data.role, branchId });
+      if (s.exists && s.get("status") === "active") throw new RegistrationError("failed-precondition", "この担当者はすでに参加しています(役割・支店は担当者の設定で変更します)");
+      const fromCancelled = s.exists && s.get("status") === "cancelled";
       tx.set(staffRef(sid), {
         staffId: sid, companyId: data.companyId, approvedEmail: email, name, role: data.role, branchId, status: "invited",
         authRevision: (s.exists && Number.isInteger(s.get("authRevision")) ? s.get("authRevision") : 0) + 1,
-        facilityAssignments: s.exists && Array.isArray(s.get("facilityAssignments")) ? s.get("facilityAssignments") : [],
+        facilityAssignments: s.exists && !fromCancelled && Array.isArray(s.get("facilityAssignments")) ? s.get("facilityAssignments") : [],
         inviteExpiresAt: Timestamp.fromMillis(now() + PORTAL_LIMITS.invitationTtlMs), invitedBy: user.uid, invitedAt: FieldValue.serverTimestamp(),
         revision: (s.exists ? Number(s.get("revision")) || 0 : 0) + 1, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid
       });
