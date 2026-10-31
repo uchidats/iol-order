@@ -3,28 +3,27 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-01
-- **作業**: ディーラー専用画面(ROADMAP R06)の運営者の試験モード。ブランチ `feature/dealer-portal-test-mode`(main `0ea8c63` から)。`feature/dealer-portal-test-uids`(172ca69)の考え方を取り込み、調査の提案1〜4(ユーザー採用)で実装。
-- **本番への反映はしていない**: push・main への統合・デプロイ・本番データの変更は未実施。`DEALER_PORTAL_ENABLED=false` のまま。試験の UID・期限の設定は空(誰も使えない)。注文受付・メール送信の処理と設定、許可リスト、Rules は変更なし。
+- **作業**: ディーラー専用画面(ROADMAP R06)の運営者の試験モード(本体 3180c4b)の独立レビュー(Fable 5.1)への対応と本番配備。ブランチ `feature/dealer-portal-test-mode`。
+- ユーザーの指示で、この commit の後に main へ統合・push し、4つの Functions(`dealerPortalApi`・`deliverDealerAuthCode`・`dealerPortalOperator`・`facilityDealerPortal`)と画面を本番へ配備する(配備の結果は完了回答に記録)。`DEALER_PORTAL_ENABLED=false`、`DEALER_PORTAL_TEST_UIDS`・`DEALER_PORTAL_TEST_UNTIL` は空のまま(試験モード・一般利用とも使えない)。
+- Rules・注文処理・本番データ・IAM は変更しない。確認コードのメール・注文メールは送らない。
 
-## 変更内容(詳細は `docs/dealer-portal.md` の「運営者の試験モード」)
-- 通す条件(サーバー): 試験の UID のリスト・期限内(14日まで。過ぎれば自動的に閉じる)・いまも有効な運営者(ID トークンの `platformAdmin` と Auth のユーザー記録の両方)。欠ければ停止中と同じ応答。
-- 範囲: 試験用の会社(`testOnly`)の所属だけで、ログイン・参加・担当者の管理。注文の閲覧・担当施設・施設の閲覧の許可・受信の索引は停止のまま。画面は「試験モード」の案内と担当者の管理だけ。
-- 確認コード: 運営者本人に、試験用の会社の分だけ送る。送る直前にも条件を確かめ直す。注文メールは送らない。
-- 試験用の会社: 運営者が登録時にだけ指定(運営者の画面に「試験用の会社にする」)。名前に【試験】。付け外し不可。関連付け・閲覧の許可は機能の有効化後も拒否。
-- 設定: `functions/.env.medconf-iol-dev` に `DEALER_PORTAL_TEST_UIDS=`・`DEALER_PORTAL_TEST_UNTIL=`(空)を追加。
+## IAM の調査(読み取りのみ。変更なし)
+- 本番の Functions(`dealerPortalApi`・`deliverDealerAuthCode`)は `.env` の `RUNTIME_SERVICE_ACCOUNT` の実行サービスアカウントで動いている。
+- その役割は `roles/datastore.user`・`roles/eventarc.eventReceiver`・`roles/logging.logWriter` だけで、Firebase Auth のユーザー情報の読み取り(`firebaseauth.users.get`)を含まない。
+- このため「いまも有効な運営者」の確認が失敗し、試験モードは常に閉じる(安全側)。本番で試験モードを使う前に、ユーザーの承認を得て読み取りだけの `roles/firebaseauth.viewer` を付与する必要がある(手順を `docs/dealer-portal.md` に記載)。
+
+## 変更内容(文書のみ)
+- `docs/dealer-portal.md`: 試験モードの配備の対象を4つの Functions に訂正(Low-1)。実行サービスアカウントの権限の調査結果と、試験の前の付与の手順を追記(Medium-1)。一般公開の前に、試験用の会社の招待の取消・担当者の無効化・会社の停止を行い、有効化の直前に運営者の一覧で確かめる手順を追記(Low-2。デプロイ手順の4にも反映)。
+- `docs/ROADMAP.md`(R06)、本報告。
 
 ## commit ID
-- 本体: 本ファイルを含む commit(`git log -1`。今回の作業は1 commit)。
+- 本体: 3180c4b(試験モードの実装)。今回の文書の修正は本ファイルを含む commit(`git log -1`)。
 
-## テスト結果(関連のみ)
-- Functions のディーラー専用画面 44 成功(試験モード4件を追加)。試験モードの判定を外すと拒否のテストが失敗することを確認(元に戻し済み)。
-- Functions E2E 15 成功。ただし、それまでの3回はトリガーの起動待ちの時間切れで1〜2件が失敗(施設設定の変更履歴・注文メール。ディーラーとは無関係のトリガーで、処理自体はテストの後に正常に終了)。main のコードでの比較でも同じ待ち方で、4回目にすべて成功。
-- unit(ディーラー画面・マニュアル)17、ブラウザ(ディーラー画面・施設設定。3ブラウザ)27 成功。
-- 全テスト・Rules の全体は再実行していない(Rules は変更なし。会社の文書をクライアントが書けないことは Functions のテストで確認)。
+## テスト結果
+- 今回は文書だけの変更のため、コードのテストは実行していない(3180c4b の時点で Functions のディーラー 44・E2E 15・unit 21・ブラウザ 27 が成功)。統合後にバージョン付与の確認(`tests/asset-stamp.test.js`)を行う。
 
 ## 判断待ち事項
-- 本番での試験の実施(UID・期限の設定と `dealerPortalApi`・`deliverDealerAuthCode`・`dealerPortalOperator` の再デプロイ)の可否と時期。
-- E2E のトリガーの待ち時間(10〜20秒)を延ばすか(負荷が高いときに時間切れになる)。
+- 本番で試験モードを使うか(使う場合は `roles/firebaseauth.viewer` の付与、UID・期限の設定、`dealerPortalApi`・`deliverDealerAuthCode` の再デプロイ)。
 
 ## 残課題
-- 試験用の会社のデータの後片付け(削除の API はない。停止・無効化で対応)。ディーラー向けマニュアル(他AIの未追跡原稿)の扱い。
+- 試験用の会社のデータの後片付け(削除の API はない)。ディーラー向けマニュアル(他AIの未追跡原稿)の扱い。E2E のトリガーの待ち時間。

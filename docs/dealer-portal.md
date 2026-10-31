@@ -133,7 +133,10 @@
 - 対象は試験用の会社(`testOnly: true`)の所属だけ。所属の確認・確認コードの対象・照合のすべてで試験用でない会社を除く(運営者が実際の会社に招待されていても、試験モードではその会社に参加・閲覧しない)。
 - 確認コードのメール: 承認済みのメール(運営者本人)にだけ、試験用の会社の分だけ送る。送る直前にも試験の条件(UID・期限・有効な運営者)を確かめ直し、試験モードで依頼していないコードは停止中は送らない。注文メールは送らない(注文を作らない)。
 - 試験用の会社: 運営者が会社の登録時にだけ「試験用の会社にする」で指定(`createCompany` の `testOnly`。値は真偽値だけ)。名前の先頭に「【試験】」を付け、名称を変えても残す。`updateCompany` は `testOnly` を受け付けない(付け外し不可)。クライアントは Rules で会社の文書を読み書きできない。施設の発注先との関連付け(`proposeLink`)と閲覧の許可(`grant`)は、機能の有効化後も拒否する(注文が公開される経路を作らない)。運営者の画面では「試験用」の印を出し、関連付けの会社の選択肢から外す。
-- 試験の手順: `.env` に UID と期限を書いて `dealerPortalApi`・`deliverDealerAuthCode` を再デプロイ → 運営者が試験用の会社を登録し、自分の勤務先メールを担当者として招待 → `dealer.html` でログイン・確認コード・担当者の管理を確かめる → `.env` の UID と期限を空に戻して同じ2つを再デプロイ(期限を過ぎれば自動的に閉じるが、設定も戻す)。試験用の会社は停止にし、担当者は無効にする(削除の API はない)。
+- 試験モードの配備(コードの反映): 変更は次の4つの Functions にある。`dealerPortalApi`(試験モードの判定)・`deliverDealerAuthCode`(確認コードの送信の条件)・`dealerPortalOperator`(試験用の会社の登録・関連付けの拒否・一覧の印)・`facilityDealerPortal`(試験用の会社への閲覧の許可の拒否)。`firebase deploy --only functions:dealerPortalApi,functions:deliverDealerAuthCode,functions:dealerPortalOperator,functions:facilityDealerPortal`。`.env` の UID・期限は空のまま配備する(誰も使えない)。
+- 実行サービスアカウントの権限(2026-11-01 の調査): 本番の Functions の実行サービスアカウント(`RUNTIME_SERVICE_ACCOUNT`)のプロジェクトの役割は `roles/datastore.user`・`roles/eventarc.eventReceiver`・`roles/logging.logWriter` だけで、Firebase Auth のユーザー情報の読み取り(`firebaseauth.users.get`)を含まない。このままでは「いまも有効な運営者」の確認(Auth のユーザー記録の取得)が失敗し、試験モードは常に閉じる(安全側)。**本番で試験モードを使う前に**、ユーザーの承認を得て、この実行サービスアカウントに読み取りだけの `roles/firebaseauth.viewer` を付与する(過大な役割は付けない。付与・削除は [self-registration.md](self-registration.md) の権限の一覧にも記録する)。試験の後は付与を外すかどうかも決める。
+- 試験の手順: (承認後)上記の役割の付与 → `.env` に UID と期限を書いて `dealerPortalApi`・`deliverDealerAuthCode` を再デプロイ(この2つが UID・期限を読む) → 運営者が試験用の会社を登録し、自分の勤務先メールを担当者として招待 → `dealer.html` でログイン・確認コード・担当者の管理を確かめる → `.env` の UID と期限を空に戻して同じ2つを再デプロイ(期限を過ぎれば自動的に閉じるが、設定も戻す) → 下記の後片付け。
+- 試験の後片付け(**一般公開=`DEALER_PORTAL_ENABLED=true` の前に必ず行う**): 試験モードの間は運営者以外を拒否するが、有効化の後は試験用の会社の有効な担当者も通常どおりログインできる(関連付け・閲覧の許可がないため注文は見えない)。削除の API はないため、運営者の画面の「ディーラー管理」で、(1) 試験用の会社(「試験用」の印・名前の【試験】)の参加待ちの招待をすべて取り消す (2) 担当者をすべて「無効にする」(世代が進み、Google・Microsoft・メールのリンクの紐付けがすべて失効) (3) 会社を「停止する」(会社が停止中なら、担当者が残っていても閲覧・管理・確認コードはすべて拒否)。有効化の直前に、運営者の一覧で試験用の会社がすべて「停止中」で、有効な担当者・参加待ちがないことを確かめる。データ自体を消す必要が出たら、dry-run を既定にしバックアップを取るスクリプトを別に用意する。
 
 ### Microsoft ログイン
 - 「Microsoftでログイン」(Firebase 標準の `OAuthProvider("microsoft.com")`。ポップアップ)。ほかの方式と同じく、初回は確認コードで紐付けた Microsoft の固有IDだけが使える。設定手順・安全上の扱いは [dealer-microsoft-login.md](dealer-microsoft-login.md)。
@@ -155,7 +158,7 @@
 1. Firestore Rules: `firebase deploy --only firestore:rules`。新しい領域の明示的な拒否に加えて、**既存の発注先(facilityDealers)の作成・更新・削除の条件も変わる**(閲覧を許可中の発注先の識別項目のロック)。「追加のみ」ではないので、本番との差分を確認してから配備する。
 2. Functions: `dealerPortalApi`・`facilityDealerPortal`・`dealerPortalOperator`・`indexDealerReceipts`(新規)。`DEALER_PORTAL_ENABLED` は既定の false のまま。新しいトリガーの Cloud Run サービス `indexdealerreceipts` だけに、関数の実行アカウントの `roles/run.invoker` を付ける。
 3. 画面(`main` へ取り込み)。機能が止まっている間は、施設設定の項目は表示されない。`dealer.html` は「現在ご利用いただけません」。
-4. 運営者が試験の会社・担当者・関連付けを登録し、`DEALER_PORTAL_ENABLED=true` にして Functions を再デプロイ。施設の管理者・副管理者が許可した後の新規注文から表示される。
+4. 有効化の前に、試験用の会社(`testOnly`)を停止し、その担当者を無効・招待を取消済みにする(上記「試験の後片付け」。運営者の一覧で、試験用の会社がすべて停止中で有効な担当者・参加待ちがないことを確かめる)。その後、運営者が実際の会社・担当者・関連付けを登録し、`DEALER_PORTAL_ENABLED=true` にして Functions を再デプロイ。施設の管理者・副管理者が許可した後の新規注文から表示される。試験モードの UID・期限は空のままにする。
 5. 停止するときは `DEALER_PORTAL_ENABLED=false`(注文・メールには影響しない)。
 
 ## 残る決定事項
