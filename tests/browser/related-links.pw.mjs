@@ -57,7 +57,17 @@ for(const [name,type] of [['chromium',chromium],['firefox',firefox],['webkit',we
    const waitSaved=async n=>page.waitForFunction(n=>JSON.parse(localStorage.getItem('__links')||'[]').filter(r=>!r.id.startsWith('std-')).length===n,n);
    const add=async(name,url)=>{await section.locator('[data-act="add"]').click();const row=rows.last();await row.getByLabel('リンク名',{exact:true}).fill(name);await row.getByLabel('リンクURL',{exact:true}).fill(url);return row;};
    assert.equal(await page.locator('.ref-links-list a').count(),5);assert.equal(await page.locator('.ref-links-accordion').getAttribute('open'),null);
-   const first=await add('施設資料','https://example.org/a');await waitSaved(1);
+   // 入力例はvalueや保存値ではない。空欄のまま入力イベントを発生させても保存しない。
+   await section.locator('[data-act="add"]').click();
+   const blank=rows.last();
+   assert.deepEqual(await blank.locator('.related-link-editor input').evaluateAll(es=>es.map(e=>[e.placeholder,e.value])),[['サイト名',''],['https://example.com','']]);
+   await blank.getByLabel('リンク名',{exact:true}).dispatchEvent('input');
+   await page.evaluate(()=>document.querySelector('[data-section="relatedLinks"]')._related.flush());
+   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('__links')||'[]')),[]);
+   for(const width of [390,1100]){await page.setViewportSize({width,height:1000});await section.screenshot({path:'.env.r18-ui-'+name+'-'+width+'.png'});}
+   page.once('dialog',d=>d.accept());await blank.locator('[data-act="delete"]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-custom-links]>div').length===0);
+   const first=await add('施設資料','https://example.org/a');
+await waitSaved(1);
    // 入力停止500msまでは保存しない。編集中の行は保存後も入力欄・フォーカスを維持。
    await first.getByLabel('リンク名',{exact:true}).fill('変更資料');assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('__links'))[0].name),'施設資料');
    await page.waitForFunction(()=>JSON.parse(localStorage.getItem('__links'))[0].name==='変更資料');assert.equal(await first.getByLabel('リンク名',{exact:true}).inputValue(),'変更資料');
@@ -75,6 +85,11 @@ for(const [name,type] of [['chromium',chromium],['firefox',firefox],['webkit',we
    await page.locator('#notesInput').fill('入力内容を保持');
    for(const width of [320,360,390,430,1100]){
     await page.setViewportSize({width,height:1000});
+    for(const act of ['edit','delete']){
+     const readButton=el=>{const s=getComputedStyle(el),r=el.getBoundingClientRect();return {width:r.width,height:r.height,color:s.color,background:s.backgroundColor,border:s.border,borderRadius:s.borderRadius,padding:s.padding,icon:el.querySelector('svg').outerHTML,text:el.textContent};};
+     assert.deepEqual(await rows.first().locator('[data-act="'+act+'"]').evaluate(readButton),await page.locator('[data-section="orderers"] [data-act="'+act+'"]').first().evaluate(readButton),act+' matches doctor '+width);
+    }
+    assert.equal(await rows.first().getByLabel('リンク名',{exact:true}).evaluate(e=>getComputedStyle(e,'::placeholder').color),'rgb(156, 163, 175)');
     assert.ok(await section.evaluate(e=>e.getBoundingClientRect().right<=innerWidth),'設定欄の横幅 '+width);
     assert.ok(await page.locator('.related-link-editor input').first().evaluate(e=>e.getBoundingClientRect().right<=innerWidth),'入力欄 '+width);
    }

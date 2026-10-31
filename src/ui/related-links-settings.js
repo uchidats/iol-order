@@ -2,7 +2,7 @@ import { STANDARD_LINKS, relatedLinkRows, validateRelatedLink, planRelatedLinkWr
 import { createSectionHeading } from "./info-tip.js";
 
 const LEAVE = "この画面を離れると、未保存の入力や保存に失敗した変更が破棄されます";
-export function createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved }) {
+export function createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved, pencilIcon, trashIcon }) {
   const standards = h("div"), customs = h("div", { "data-custom-links": "" });
   const add = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "add" }, "追加");
   const section = h("section", { class: "settings-section", "data-section": "relatedLinks" },
@@ -45,13 +45,13 @@ export function createRelatedLinksSection({ h, createAutoSaver, repository, sett
     const el = h("div", { class: "related-setting-row", "data-id": row.id }); controls.set(row.id, el);
     checkbox.addEventListener("change", () => { row.enabled = checkbox.checked; changed(); });
     if (row.standard) { el.append(h("label", {}, checkbox, name), h("span", { class: "form-hint related-url" }, row.url)); return el; }
-    const input = h("input", { class: "form-control", value: row.name, maxlength: "100", "aria-label": "リンク名" });
-    const url = h("input", { class: "form-control", value: row.url, type: "url", maxlength: "2048", "aria-label": "リンクURL" });
+    const input = h("input", { class: "form-control", value: row.name, maxlength: "100", placeholder: "サイト名", "aria-label": "リンク名" });
+    const url = h("input", { class: "form-control", value: row.url, type: "url", maxlength: "2048", placeholder: "https://example.com", "aria-label": "リンクURL" });
     const error = h("p", { class: "error-message", role: "status" });
     const editBox = h("div", { class: "related-link-editor", hidden: !editing }, input, url, error);
     const up = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "up", "aria-label": "リンクを上へ" }, "↑");
-    const edit = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "edit" }, "編集");
-    const del = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "delete" }, "削除");
+    const edit = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "edit", "aria-label": "リンクを編集", title: "リンクを編集" }, pencilIcon());
+    const del = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", "data-act": "delete", "aria-label": "このリンクを削除", title: "このリンクを削除" }, trashIcon());
     el.append(h("div", { class: "related-link-line" }, checkbox, name, up, edit, del), editBox);
     edit.addEventListener("click", () => { editBox.hidden = !editBox.hidden; if (!editBox.hidden) input.focus(); });
     const read = () => {

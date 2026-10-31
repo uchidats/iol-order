@@ -1133,7 +1133,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // ---------- 画面全体 ----------
   const built = { orderers: ordererSection(), iols: iolSection(), dealers: dealerSection(), mail: settingsApi.saveMailSettings ? mailSection() : null,
     theme: settingsApi.saveHeaderTheme && settingsApi.resetHeaderTheme ? themeSection() : null };
-  if (settingsApi.saveRelatedLinks && repository.listRelatedLinks) built.relatedLinks = createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved: onRelatedLinksSaved });
+  if (settingsApi.saveRelatedLinks && repository.listRelatedLinks) built.relatedLinks = createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved: onRelatedLinksSaved, pencilIcon, trashIcon });
   if (canManageMembers) built.members = memberSection();
   if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
   // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → 関連リンク → テーマカラー

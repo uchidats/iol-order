@@ -2501,8 +2501,11 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .related-url { display: block; overflow-wrap: anywhere; margin-left: 24px; }
 .related-link-line { display: flex; align-items: center; gap: 6px; }
 .related-link-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.related-link-line button { flex: 0 0 auto; padding: 4px 6px; }
+.related-link-line button { flex: 0 0 auto; }
+.related-link-line button:not(.orderer-icon) { padding: 4px 6px; }
 .related-link-editor { display: grid; gap: 8px; margin-top: 8px; min-width: 0; }
 .related-link-editor[hidden] { display: none; }
 .related-link-editor input { width: 100%; min-width: 0; box-sizing: border-box; }
 .related-setting-row.is-deleting { opacity: .6; }
+
+.related-link-editor input::placeholder { color: #9ca3af; opacity: 1; }
