@@ -147,10 +147,27 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   }
 
   // ---------- 受注一覧 ----------
+  /**
+   * 運営者の試験モード(機能の停止中。サーバーが試験の UID・期限・有効な運営者を確かめたときだけ context が testMode を返す)。
+   * 受注一覧・医療機関の選択は出さず、会社管理者・支店管理者には担当者の管理だけを出す(注文の閲覧はサーバーでも停止)
+   */
+  async function showTestMode() {
+    const manage = isDealerManager(ctx.me.role) ? createDealerManage({ api, companyId: ctx.company.id, onAuthError: manageAuthError }) : null;
+    panel.replaceChildren(...[
+      h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "試験モード"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
+      h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
+      h("p", { class: "form-hint", "data-notice": "test-mode" }, "運営者の試験モードです(ディーラー画面は停止中)。ログイン・参加・担当者の管理だけを確認できます。受注一覧と医療機関の閲覧の許可は停止しています。"),
+      deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
+      manage ? manage.root : null].filter(Boolean));
+    if (manage) await manage.load();
+  }
+  const manageAuthError = (e) => { if (String((e && e.code) || "").endsWith("permission-denied") && e.details && e.details.reason === "verification-required") showMessage("ディーラー画面", describeCallableError(e), { error: true }); };
+
   async function showPortal(context) {
     ctx = context;
     selected = new Set(ctx.selectedFacilityIds);
     setSubtitle(ctx.company.name);
+    if (ctx.testMode) return showTestMode();
     const from = h("input", { class: "form-control", type: "date", id: "dealerFrom", value: ctx.defaultRange.from, "aria-label": "注文日(から)" });
     const to = h("input", { class: "form-control", type: "date", id: "dealerTo", value: ctx.defaultRange.to, "aria-label": "注文日(まで)" });
     const number = h("input", { class: "form-control", type: "text", id: "dealerOrderNumber", maxlength: "40", placeholder: "例: IOL-20261027-01", "aria-label": "注文番号(完全一致)", autocomplete: "off" });
@@ -377,8 +394,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
           ordersArea.forEach(el => { el.hidden = onManage; });
           if (onManage) { detail.hidden = true; detail.replaceChildren(); }
           if (onManage && !manage) {
-            manage = createDealerManage({ api, companyId: ctx.company.id,
-              onAuthError: (e) => { if (String((e && e.code) || "").endsWith("permission-denied") && e.details && e.details.reason === "verification-required") showMessage("ディーラー画面", describeCallableError(e), { error: true }); } });
+            manage = createDealerManage({ api, companyId: ctx.company.id, onAuthError: manageAuthError });
             panel.append(manage.root);
             manage.load();
           }

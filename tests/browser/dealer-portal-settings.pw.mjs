@@ -225,6 +225,15 @@ test("運営者の管理画面: 会社の登録・担当者の招待・支店・
       const cc = await page.evaluate(() => window.__calls.find(c => c[0] === "createCompany")[1]);
       assert.equal(cc.name, "ゼット商会");
       assert.match(cc.requestId, /^[A-Za-z0-9-]{16,64}$/);
+      assert.equal(cc.testOnly, undefined, "通常の会社は試験用の印を送らない");
+      // 試験用の会社(チェックした場合だけ testOnly を送る。送信の要求 ID は新しくする)
+      await page.fill('[data-f="companyName"]', "試験商事");
+      await page.check('[data-f="companyTestOnly"]');
+      await page.click('[data-act="createCompany"]');
+      await page.waitForFunction(() => window.__calls.filter(c => c[0] === "createCompany").length >= 2);
+      const tc = await page.evaluate(() => window.__calls.filter(c => c[0] === "createCompany")[1][1]);
+      assert.deepEqual([tc.name, tc.testOnly], ["試験商事", true]);
+      assert.notEqual(tc.requestId, cc.requestId);
       assert.equal(await page.locator('.form-label:has([data-f="staffEmail"]) > span').innerText(), "勤務先メールアドレス");
       await page.fill('[data-f="staffEmail"]', "x2@corp.example.jp");
       await page.fill('[data-f="staffName"]', "担当x2");

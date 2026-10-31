@@ -61,6 +61,22 @@ export const PORTAL_LIMITS = Object.freeze({
   lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** 試験用の会社(testOnly)の名前の先頭(確認コードのメール・運営者の画面で試験用と分かるように) */
+export const TEST_COMPANY_PREFIX = "【試験】";
+/** 運営者の試験モードの期限の上限(設定の時点から14日。長期間開いたままにしない) */
+export const TEST_MODE_MAX_MS = 14 * DAY_MS;
+/**
+ * 試験モードの設定(環境変数)の解釈(純粋関数)。UID はカンマ区切り(英数字のみ。それ以外は無視)。
+ * 期限はタイムゾーンの明示が必要な ISO 8601(例: 2026-11-08T18:00:00+09:00)。空・不正なら期限なし(=閉じる)
+ * @returns {{uids:string[], untilMs:number|null}}
+ */
+export function parseTestAccess(uidsText, untilText) {
+  const uids = String(uidsText || "").split(",").map(v => v.trim()).filter(v => /^[A-Za-z0-9]{1,128}$/.test(v));
+  const s = String(untilText || "").trim();
+  const ok = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(s);
+  const ms = ok ? Date.parse(s) : NaN;
+  return { uids, untilMs: Number.isFinite(ms) ? ms : null };
+}
 const JST_MS = 9 * 60 * 60 * 1000;
 
 const badInput = (msg = "入力内容を確認してください") => new RegistrationError("invalid-argument", msg);
@@ -243,9 +259,12 @@ export function initialFacilitySelection(allowedFacilities, assignedIds) {
  * @param {object} deps.Timestamp
  * @param {object} deps.FieldPath
  * @param {() => boolean} [deps.isEnabled] ディーラー画面の機能スイッチ(注文受付・メールのスイッチとは別)。false なら API・索引作成を止める
+ * @param {() => {uids:string[], untilMs:number|null}} [deps.testAccess] 停止中の運営者の試験モード: 試験に使う UID と期限(過ぎたら閉じる)。既定は誰も使えない
+ * @param {(uid:string) => Promise<boolean>} [deps.isCurrentOperator] いまも有効な運営者か(Auth のユーザー記録で確かめる。無効化・権限の削除を即時に反映)
  * @param {() => number} [deps.now]
  */
-export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, now = Date.now, sendJoinCode = null }) {
+export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, testAccess = () => ({ uids: [], untilMs: null }),
+  isCurrentOperator = async () => false, now = Date.now, sendJoinCode = null }) {
   const audit = (tx, entry) => tx.create(db.collection("dealerPortalAuditLogs").doc(), { ...entry, at: FieldValue.serverTimestamp() });
   /** 監査の記録の操作者: 運営者(operator: true)か、ディーラーの会社管理者・支店管理者(担当者 ID と役割) */
   const actorOf = (user) => (user && user.staffId
@@ -257,6 +276,30 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
   const policyOk = (c) => c && c.status === "active" && c.accessMode === PORTAL_POLICY.accessMode && c.policyVersion === PORTAL_POLICY.policyVersion;
 
   function assertOn() { if (!isEnabled()) throw disabled(); }
+
+  // ======================= 運営者の試験モード(機能の停止中だけ) =======================
+  // 停止中でも、次の3つをすべて満たす UID だけ担当者の画面の一部(ログイン・参加・担当者の管理)を使える:
+  //  (1) 試験の UID のリストにある (2) 試験の期限内 (3) いまも有効な運営者(Auth のユーザー記録。無効化・権限の削除はすぐに反映)。
+  // 対象は試験用の会社(testOnly。運営者が作成時にだけ付け、解除できない)の所属だけ。注文の閲覧・施設の閲覧の許可・受信の索引は停止のまま
+  // (試験用の会社は関連付け・許可を拒否するため、注文が公開される経路はない)。条件を満たさなければ、停止中と同じ応答にする(違いを示さない)。
+  const TEST_MODE_ACTIONS = new Set(["companies", "sendCode", "verifyCode", "context", "manage", "manageInvite", "manageCancelInvite", "manageUpdateStaff", "manageBranch"]);
+  /** UID が試験の UID で期限内、かついまも有効な運営者か(トークンを持たない処理=確認コードの送信でも使う) */
+  async function testUidOpen(uid) {
+    if (typeof uid !== "string" || !uid) return false;
+    let cfg;
+    try { cfg = testAccess() || {}; } catch { return false; }
+    if (!Array.isArray(cfg.uids) || !cfg.uids.includes(uid)) return false;
+    // 期限内で、かつ期限が先すぎない(上限を超える設定は誤りとして閉じる)
+    if (typeof cfg.untilMs !== "number" || !Number.isFinite(cfg.untilMs) || !(cfg.untilMs > now()) || cfg.untilMs - now() > TEST_MODE_MAX_MS) return false;
+    try { return (await isCurrentOperator(uid)) === true; } catch { return false; }
+  }
+  /** 停止中の担当者の呼び出しを試験モードとして通すか。ID トークンの運営者の印も必要(ユーザー記録と両方) */
+  async function testModeOpen(auth) {
+    if (!auth || !auth.uid || !auth.token || auth.token.platformAdmin !== true) return false;
+    return testUidOpen(auth.uid);
+  }
+  /** 試験モードでは試験用の会社だけを対象にする(停止していなければ制限しない) */
+  const inTestScope = (testMode, c) => !testMode || (c && c.exists && c.get("testOnly") === true);
 
   // ======================= 担当者の本人確認(認証主体のホワイトリスト) =======================
   /**
@@ -290,23 +333,24 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const fb = t.firebase || {};
     const email = normEmail(t.email);
     const dev = auth.dealerDevice;
+    const testMode = auth.dealerTestMode === true;   // portal() が試験モードで通したときだけ true(試験用の会社だけを対象にする)
     const deviceKey = typeof dev === "string" && DEVICE_RE.test(dev) ? `device:${sha256(dev)}` : null;
     const only = (p) => { const ids = fb.identities && fb.identities[p]; return Array.isArray(ids) && ids.length === 1 && typeof ids[0] === "string" && PROVIDER_ID_RE.test(ids[0]) ? ids[0] : null; };
     switch (fb.sign_in_provider) {
       case "google.com": {
         const id = only("google.com");
         if (!id || t.email_verified !== true || !isValidEmail(email)) throw loginRejected("Google アカウントを確認できません。もう一度ログインしてください");
-        return { kind: "google", key: `google:${id}`, deviceKey, uid: auth.uid, email };
+        return { kind: "google", key: `google:${id}`, deviceKey, uid: auth.uid, email, testMode };
       }
       case "microsoft.com": {
         const id = only("microsoft.com");
         if (!id) throw loginRejected("Microsoft アカウントを確認できません。もう一度ログインしてください");
         if (!isValidEmail(email)) throw loginRejected("Microsoft アカウントのメールアドレスを確認できません。招待されたメールアドレスのアカウントでログインしてください");
-        return { kind: "microsoft", key: `microsoft:${id}`, deviceKey, uid: auth.uid, email };
+        return { kind: "microsoft", key: `microsoft:${id}`, deviceKey, uid: auth.uid, email, testMode };
       }
       case "password": {
         if (t.email_verified !== true || !isValidEmail(email)) throw loginRejected("メールアドレスの確認が済んだアカウントのみ利用できます");
-        return { kind: "device", key: deviceKey, deviceKey, uid: auth.uid, email };
+        return { kind: "device", key: deviceKey, deviceKey, uid: auth.uid, email, testMode };
       }
       default:
         throw loginRejected("このログイン方法は利用できません。Google・Microsoft・メールアドレスのいずれかでログインしてください");
@@ -337,6 +381,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         if (b.get("expiresAt") !== undefined && !(millisOf(b.get("expiresAt")) > now())) return null;
         const [s, c, d] = await Promise.all([staffRef(sid).get(), companyRef(cid).get(), pr.kind === "device" ? b : bindingRef(cid, pr.deviceKey).get()]);
         if (!staffActive(s, c, pr.email) || s.get("companyId") !== cid || s.get("authRevision") !== b.get("authRevision")) return null;
+        if (!inTestScope(pr.testMode, c)) return null;   // 試験モードは試験用の会社だけ
         if (!bindingOk(d, sid, cid, "device", s.get("authRevision"))) return null;   // 確認済みの端末(セッションの証明)
         if (d.get("issuedFor") !== (pr.kind === "device" ? "device" : pr.key)) return null;   // 今回の主体・方式に発行した値だけ(転用しない)
         return { principal: pr, staffId: sid, companyId: cid, company: c.data(), staff: s.data() };
@@ -362,8 +407,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return a;
   }
 
-  /** このメールの、参加できる招待・有効な所属(会社ごとに個別に確かめる)。tx を渡すとトランザクションで読む */
-  async function eligibleStaffOf(email, tx = null) {
+  /** このメールの、参加できる招待・有効な所属(会社ごとに個別に確かめる)。tx を渡すとトランザクションで読む。testMode なら試験用の会社だけ */
+  async function eligibleStaffOf(email, tx = null, testMode = false) {
     const read = (ref) => (tx ? tx.get(ref) : ref.get());
     const snap = await read(db.collection("dealerStaff").where("approvedEmail", "==", email));
     const out = [];
@@ -371,6 +416,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const cid = s.get("companyId");
       if (!isId(cid) || s.id !== staffIdOf(cid, email)) continue;
       const c = await read(companyRef(cid));
+      if (!inTestScope(testMode, c)) continue;
       if (inviteOpen(s, c, email)) out.push({ s, c, cid, invited: true });
       else if (staffActive(s, c, email)) out.push({ s, c, cid, invited: false });
     }
@@ -384,7 +430,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const valid = await affiliationsOf(pr);
     if (!valid.length) throw verificationRequired();
     const bound = new Set(valid.map(a => a.companyId));
-    const pendingInvitation = (await eligibleStaffOf(pr.email)).some(e => e.invited && !bound.has(e.cid));
+    const pendingInvitation = (await eligibleStaffOf(pr.email, null, pr.testMode)).some(e => e.invited && !bound.has(e.cid));
     return { companies: valid.map(a => ({ companyId: a.companyId, name: String(a.company.name || "") })), pendingInvitation };
   }
 
@@ -410,7 +456,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const requestId = randomBytes(16).toString("hex");
     await db.runTransaction(async (tx) => {
       const [prev, quota] = await Promise.all([tx.get(cref), tx.get(qref)]);
-      const eligible = await eligibleStaffOf(pr.email, tx);
+      const eligible = await eligibleStaffOf(pr.email, tx, pr.testMode);
       const p = prev.exists ? prev.data() : null;
       const fresh = p && typeof p.windowStartMs === "number" && now() - p.windowStartMs < PORTAL_LIMITS.codeWindowMs;
       const sends = fresh && Number.isInteger(p.sends) ? p.sends : 0;
@@ -422,7 +468,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (qSends >= PORTAL_LIMITS.codeMaxSendsPerEmail) throw codeError("このメールアドレスへの確認コードの送信回数の上限に達しました。時間をおいてお試しください");
       const targets = eligible.map(e => ({ companyId: e.cid, staffId: e.s.id, authRevision: Number.isInteger(e.s.get("authRevision")) ? e.s.get("authRevision") : 1, status: e.invited ? "invited" : "active" }));
       // 前のコードは無効にする(新しいコードは送信の処理で作る)。対象がなくても同じ書き込み
-      tx.set(cref, { targets, uid: pr.uid, kind: pr.kind, principalKey: pr.kind === "device" ? null : pr.key, email: pr.email, requestId,
+      tx.set(cref, { targets, testMode: pr.testMode === true, uid: pr.uid, kind: pr.kind, principalKey: pr.kind === "device" ? null : pr.key, email: pr.email, requestId,
         companyName: [...new Set(eligible.map(e => String(e.c.get("name") || "")))].join("、"),
         sentAtMs: now(), sends: sends + 1, windowStartMs: fresh ? p.windowStartMs : now(), deliveryStatus: "queued" });
       tx.set(qref, { windowStartMs: qFresh ? q.windowStartMs : now(), sends: qSends + 1 });
@@ -458,15 +504,18 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         const rev = Number.isInteger(st.exists && st.get("authRevision")) ? st.get("authRevision") : 1;
         const still = st.exists && st.get("companyId") === t.companyId && rev === t.authRevision
           && (t.status === "invited" ? inviteOpen(st, co, email) : t.status === "active" && staffActive(st, co, email));
-        return still ? { t, name: String(co.get("name") || "") } : null;
+        return still ? { t, name: String(co.get("name") || ""), testOnly: co.get("testOnly") === true } : null;
       }));
       tx.delete(jref);   // 依頼は1回だけ処理する
       if (!c.exists || c.get("requestId") !== j.get("requestId") || c.get("deliveryStatus") !== "queued") return null;   // 新しい要求がある・処理済み
       const jobExp = j.get("expiresAtMs");
       if (typeof jobExp !== "number" || !(jobExp > now())) { tx.update(cref, { deliveryStatus: "expired" }); return { skipped: true }; }   // 期限切れの依頼からはコードを作らない
-      const live = current.filter(Boolean);
+      // 停止中は、試験モードで依頼された確認コードだけを、いまも試験の条件(UID・期限・有効な運営者)を満たすときに試験用の会社の分だけ送る
+      const enabled = isEnabled();
+      const testSend = !enabled && c.get("testMode") === true && await testUidOpen(c.get("uid"));
+      const live = current.filter(Boolean).filter(x => enabled || (testSend && x.testOnly));
       const expiresAtMs = now() + PORTAL_LIMITS.codeTtlMs;
-      const willSend = live.length > 0 && isEnabled() && typeof sendJoinCode === "function";
+      const willSend = live.length > 0 && (enabled || testSend) && typeof sendJoinCode === "function";
       // 送る直前に対象がなくなった(取消・無効化・会社の停止など)ときも、照合の結果を同じにするためコードのハッシュは作る(送らない)
       const status = willSend ? "sending" : !requested.length ? "no-target" : !live.length ? "target-changed" : "not-sent";
       tx.update(cref, { hash: codeHash(code, salt), salt, expiresAtMs, attempts: 0, targets: live.map(x => x.t), deliveryStatus: status });
@@ -506,7 +555,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         throw invalid();
       }
       // 送った時点の対象と、いまの状態が一致するものだけ(世代・状態・会社)
-      const now0 = await eligibleStaffOf(pr.email, tx);
+      const now0 = await eligibleStaffOf(pr.email, tx, pr.testMode);
       const eligible = now0.filter(e => c.targets.some(t => t.staffId === e.s.id && t.companyId === e.cid && t.status === (e.invited ? "invited" : "active")
         && t.authRevision === (Number.isInteger(e.s.get("authRevision")) ? e.s.get("authRevision") : 1)));
       const existing = await Promise.all(eligible.map(e => tx.get(db.collection("dealerAuthBindings").where("staffId", "==", e.s.id))));
@@ -593,6 +642,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const sel = initialFacilitySelection([...scope.values()].map(s => ({ id: s.facilityId, name: s.facilityName })), a.staff.facilityAssignments);
     const today = jstDateOf(now());
     return {
+      ...(a.principal.testMode ? { testMode: true } : {}),   // 運営者の試験モード(画面は受注一覧を出さない)
       company: { id: a.companyId, name: String(a.company.name || "") },
       me: { name: String(a.staff.name || ""), role: a.staff.role, branch },
       ...sel,
@@ -942,11 +992,14 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   /** ディーラー画面の呼び出し(担当者・招待先本人) */
   async function portal({ auth, data }) {
-    assertOn();
+    // 停止中は試験モードの条件を満たす運営者だけ(認証の確認より前。条件を満たさなければ停止中と同じ応答)
+    const testMode = !isEnabled();
+    if (testMode && !(await testModeOpen(auth))) throw disabled();
     const d = data && typeof data === "object" && !Array.isArray(data) ? data : null;
     if (!d || typeof d.action !== "string") throw badInput();
     const { action, deviceToken, ...rest } = d;
-    auth = auth ? { ...auth, dealerDevice: typeof deviceToken === "string" ? deviceToken : null } : auth;   // 確認済みの端末(メールリンクのログインの認証主体)
+    if (testMode && !TEST_MODE_ACTIONS.has(action)) throw disabled();   // 注文の閲覧・担当施設は試験モードでも停止
+    auth = auth ? { ...auth, dealerDevice: typeof deviceToken === "string" ? deviceToken : null, dealerTestMode: testMode } : auth;   // 確認済みの端末(メールリンクのログインの認証主体)
     switch (action) {
       case "context": return getContext(auth, rest);
       case "setAssignments": return setMyAssignments(auth, rest);
@@ -1022,7 +1075,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (action === "grant") {
         if (link.get("status") === "active") throw new RegistrationError("failed-precondition", "すでに閲覧を許可しています");
         const c = await tx.get(companyRef(cid));
-        if (!c.exists || !policyOk(c.data())) throw new RegistrationError("failed-precondition", "このディーラーは現在、閲覧を許可できません。運営者にお問い合わせください");
+        if (!c.exists || !policyOk(c.data()) || c.get("testOnly") === true) throw new RegistrationError("failed-precondition", "このディーラーは現在、閲覧を許可できません。運営者にお問い合わせください");
         // 同じ施設・同じ会社の有効な許可は1件まで(初版)
         const dup = await tx.get(db.collection("dealerPortalGrants").where("companyId", "==", cid).where("facilityId", "==", facilityId).where("status", "==", "active"));
         if (!dup.empty) throw new RegistrationError("failed-precondition", "この会社には、この施設の別の発注先で閲覧を許可しています");
@@ -1068,16 +1121,23 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   // ======================= 運営者: 会社・支店・担当者・関連付け =======================
 
+  /**
+   * 会社の登録(運営者)。testOnly(試験用。運営者の試験モードの対象)は作成時にだけ指定でき、後から付け外しできない(updateCompany は受け付けない)。
+   * 試験用の会社は名前の先頭に「【試験】」を付け、施設の発注先との関連付け・閲覧の許可を拒否する
+   */
   async function createCompany(user, data) {
-    strict(data, ["name", "requestId"]);
-    const name = typeof data.name === "string" ? normalizeName(data.name) : "";
-    if (!name || name.length > PORTAL_LIMITS.nameMax || typeof data.requestId !== "string" || !REQUEST_ID_RE.test(data.requestId)) throw badInput();
+    strict(data, ["name", "requestId", "testOnly"]);
+    if (data.testOnly !== undefined && typeof data.testOnly !== "boolean") throw badInput();
+    const testOnly = data.testOnly === true;
+    const base = typeof data.name === "string" ? normalizeName(data.name) : "";
+    const name = testOnly && base && !base.startsWith(TEST_COMPANY_PREFIX) ? `${TEST_COMPANY_PREFIX}${base}` : base;
+    if (!base || name.length > PORTAL_LIMITS.nameMax || typeof data.requestId !== "string" || !REQUEST_ID_RE.test(data.requestId)) throw badInput();
     const cid = companyIdOf(user.uid, data.requestId);
     return db.runTransaction(async (tx) => {
       const c = await tx.get(companyRef(cid));
       if (c.exists) return { companyId: cid, status: "exists" };
-      tx.create(companyRef(cid), { name, status: "active", ...PORTAL_POLICY, createdBy: user.uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-      audit(tx, { action: "company.create", companyId: cid, actorUid: user.uid, operator: true });
+      tx.create(companyRef(cid), { name, status: "active", ...PORTAL_POLICY, ...(testOnly ? { testOnly: true } : {}), createdBy: user.uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+      audit(tx, { action: "company.create", companyId: cid, actorUid: user.uid, operator: true, ...(testOnly ? { testOnly: true } : {}) });
       return { companyId: cid, status: "created" };
     });
   }
@@ -1092,6 +1152,9 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return db.runTransaction(async (tx) => {
       const c = await tx.get(companyRef(data.companyId));
       if (!c.exists) throw notVisible();
+      // 試験用の会社は名前を変えても先頭の「【試験】」を残す(testOnly 自体はここでは変えられない)
+      if (patch.name !== undefined && c.get("testOnly") === true && !patch.name.startsWith(TEST_COMPANY_PREFIX)) patch.name = `${TEST_COMPANY_PREFIX}${patch.name}`;
+      if (patch.name !== undefined && patch.name.length > PORTAL_LIMITS.nameMax) throw badInput();
       tx.update(c.ref, { ...patch, updatedAt: FieldValue.serverTimestamp() });
       audit(tx, { action: "company.update", companyId: data.companyId, actorUid: user.uid, operator: true, fields: Object.keys(patch) });
       return { ok: true };
@@ -1217,6 +1280,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         tx.get(companyRef(data.companyId)), tx.get(linkRef(data.facilityId, data.localDealerId))
       ]);
       if (!f.exists || !fd.exists || !c.exists) throw notVisible();
+      // 試験用の会社は実際の施設の発注先と関連付けない(注文が公開される経路を作らない)
+      if (c.get("testOnly") === true) throw new RegistrationError("failed-precondition", "試験用の会社は、施設の発注先と関連付けできません");
       if (link.exists && link.get("status") === "active") throw new RegistrationError("failed-precondition", "閲覧を許可中の関連付けは変更できません。施設で取消してから変更してください");
       tx.set(linkRef(data.facilityId, data.localDealerId), {
         companyId: data.companyId, status: "proposed", currentGrantId: null,
@@ -1243,7 +1308,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
         logins.set(s.id, [...new Set([...(logins.get(s.id) || []), b.get("provider")])].sort());
       }
       out.push({
-        companyId: c.id, name: c.get("name"), status: c.get("status"),
+        companyId: c.id, name: c.get("name"), status: c.get("status"), testOnly: c.get("testOnly") === true,
         branches: branches.docs.map(b => ({ branchId: b.id, name: b.get("name"), status: b.get("status") })),
         staff: staff.docs.filter(s => ["active", "disabled"].includes(s.get("status"))).map(s => ({ staffId: s.id, name: s.get("name") || "", email: s.get("approvedEmail"), role: s.get("role"), status: s.get("status"),
           branchId: s.get("branchId") || null, facilityIds: s.get("facilityAssignments") || [], logins: logins.get(s.id) || [] })),

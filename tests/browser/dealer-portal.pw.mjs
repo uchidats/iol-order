@@ -54,7 +54,7 @@ function installFakeServer(page, scenario) {
     ];
     let verified = !["unverified", "none"].includes(scenario);
     // 役割: "companyAdmin" / "branchAdmin" のシナリオは、確認済みの会社管理者・支店管理者(ほかは閲覧者)
-    const myRole = ["companyAdmin", "branchAdmin"].includes(scenario) ? scenario : "reader";
+    const myRole = ["companyAdmin", "branchAdmin"].includes(scenario) ? scenario : scenario === "testMode" ? "companyAdmin" : "reader";   // testMode: 運営者の試験モード(会社管理者)
     const manageDb = {
       branches: [{ branchId: "b-tokyo", name: "東京支店", status: "active" }, { branchId: "b-osaka", name: "大阪支店", status: "active" }],
       staff: [
@@ -117,6 +117,7 @@ function installFakeServer(page, scenario) {
             days: Array.from({ length: 7 }, (_, i) => ({ date: day(i), orders: (byDate[day(i)] || []).filter(o => sel.has(o.facilityId)) })) };
         }
         if (d.action === "context") return {
+          ...(scenario === "testMode" ? { testMode: true } : {}),
           company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: myRole, branch: { id: "br-1", name: "東京支店" } },
           facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
           defaultRange: { from: "2026-09-28", to: "2026-10-27" }, limits: { rangeDaysMax: 366, pageMax: 100 }
@@ -718,6 +719,29 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(errors, []);
         await context.close();
       }
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面の運営者の試験モード: 受注一覧を出さず(週表示も読まない)、案内と担当者の管理だけを表示。390pxで横にはみ出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await newFakeContext(browser, base, 390, STAFF);
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await installFakeServer(page, "testMode");
+      await page.goto(`${base}dealer.html`);
+      await page.locator('[data-notice="test-mode"]').waitFor();
+      await page.locator(".dealer-manage-staff").first().waitFor();
+      assert.equal(await page.locator(".dealer-panel .feature-title").innerText(), "試験モード");
+      assert.equal(await page.locator("[data-tab], #dealerWeekArea, .dealer-facility-list").count(), 0, "受注一覧・医療機関の選択は出さない");
+      assert.deepEqual(await page.evaluate(() => (window.__calls || []).map(([, d]) => d.action).filter(a => ["week", "list", "get", "setAssignments"].includes(a))), [], "注文の取得はしない");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.deepEqual(errors, []);
+      await context.close();
     } finally { await browser.close(); }
   });
 }

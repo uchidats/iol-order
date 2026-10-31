@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/firestore";
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, collection, collectionGroup, query, where } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, collection, collectionGroup, query, where } from "firebase/firestore";
 import { createOrderService } from "../../functions/src/orders.js";
 import { managerPolicyError } from "../../functions/src/dealer-portal.js";
+import { parseTestAccess, TEST_MODE_MAX_MS } from "../../functions/src/dealer-portal.js";
 import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf, weekDatesOf, surgeryDatesOf } from "../../functions/src/dealer-portal.js";
 
 const PROJECT = "demo-iol-functions";
@@ -1309,6 +1310,149 @@ test("会社管理者・支店管理者の招待の上限: 24時間の招待の�
   assert.ok(err && err.code === "resource-exhausted" && /24時間/.test(err.message), String(err && err.message));
   assert.equal(n, 29, "運営者の招待(1件)を含めて24時間で30件まで");
   await op("inviteStaff", { companyId: S, email: "opinvite@corp.example.jp", name: "", role: "reader" });   // 運営者は対象外
+});
+
+test("試験モードの設定の解釈(純粋関数): UID はカンマ区切りの英数字だけ。期限はタイムゾーン付きの ISO 8601 だけ(空・不正は閉じる)", () => {
+  assert.deepEqual(parseTestAccess(" opA1, bad-uid ,opB2,,", "2026-11-08T18:00:00+09:00"), { uids: ["opA1", "opB2"], untilMs: Date.parse("2026-11-08T09:00:00Z") });
+  assert.equal(parseTestAccess("opA1", "2026-11-08T09:00:00Z").untilMs, Date.parse("2026-11-08T09:00:00Z"));
+  for (const bad of ["", "2026-11-08", "2026-11-08T18:00:00", "tomorrow", "2026-13-40T99:00:00+09:00"]) assert.equal(parseTestAccess("opA1", bad).untilMs, null, bad);
+  assert.deepEqual(parseTestAccess("", "").uids, []);
+  assert.equal(TEST_MODE_MAX_MS, 14 * 24 * 3600 * 1000);
+});
+
+/**
+ * 運営者の試験モード(機能は停止のまま)。試験の UID・期限・いまも有効な運営者(ID トークンとユーザー記録)の3つを満たすときだけ、
+ * 試験用の会社(testOnly)のログイン・参加・担当者の管理を使える。注文の閲覧・施設の許可・索引は停止のまま。確認コードは運営者本人だけに送る
+ */
+async function setupTestMode() {
+  const cfg = { uids: ["opt1"], untilMs: Date.now() + 24 * 3600 * 1000 };
+  const operators = new Set(["opt1", "opt2"]);
+  const svc = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => false, now: () => clock.t ?? Date.now(),
+    testAccess: () => cfg, isCurrentOperator: async (uid) => operators.has(uid), sendJoinCode: async (m) => { sentCodes.push(m); return sendResult.v; } });
+  const opAuth = (uid, over = {}) => auth(uid, { email: `${uid}@corp.example.jp`, platformAdmin: true, ...over });
+  /** 試験モードのサービスを担当者として呼ぶ(確認済みの端末の値は devices に保持) */
+  const call = async (a, action, data = {}) => {
+    const r = await svc.portal({ auth: a, data: { action, ...data, ...(devices.get(a.uid) ? { deviceToken: devices.get(a.uid) } : {}) } });
+    if (r && typeof r.deviceToken === "string") devices.set(a.uid, r.deviceToken);
+    if (action === "sendCode") for (const j of (await db.collection("dealerAuthCodeJobs").get()).docs) await svc.deliverCodeJob(j.id);
+    return r;
+  };
+  const T = (await op("createCompany", { name: "試験商事", requestId: crypto.randomUUID(), testOnly: true })).companyId;
+  return { cfg, operators, svc, opAuth, call, T };
+}
+const closed = (p, what) => assert.rejects(p, (e) => e.code === "failed-precondition" && /現在ご利用いただけません/.test(e.message), what);
+
+test("試験モード: 条件を満たす運営者は、試験用の会社だけでログイン・参加・担当者の管理ができる。注文の閲覧・担当施設は停止のまま。確認コードは本人に試験用の会社の分だけ", async () => {
+  const { svc, opAuth, call, T } = await setupTestMode();
+  assert.equal((await db.doc(`dealerCompanies/${T}`).get()).get("name"), "【試験】試験商事");
+  assert.equal((await db.doc(`dealerCompanies/${T}`).get()).get("testOnly"), true);
+  // 運営者を試験用の会社(会社管理者)と、実際の会社(エックス商事。閲覧者)の両方に招待
+  await op("inviteStaff", { companyId: T, email: "opt1@corp.example.jp", name: "運営者", role: "companyAdmin" });
+  await op("inviteStaff", { companyId: C.X, email: "opt1@corp.example.jp", name: "運営者", role: "reader" });
+  await resetCodes();
+  const before = sentCodes.length;
+  await call(opAuth("opt1"), "sendCode");
+  const mails = sentCodes.slice(before);
+  assert.equal(mails.length, 1);
+  assert.deepEqual([mails[0].to, mails[0].companyName], ["opt1@corp.example.jp", "【試験】試験商事"], "本人に、試験用の会社の分だけ");
+  const v = await call(opAuth("opt1"), "verifyCode", { code: mails[0].code });
+  assert.deepEqual([v.companies, v.joined], [1, 1]);
+  assert.equal((await db.doc(`dealerStaff/${sid(C.X, "opt1")}`).get()).get("status"), "invited", "実際の会社の招待は承諾しない");
+  assert.deepEqual((await call(opAuth("opt1"), "companies")).companies.map(c => c.companyId), [T]);
+  const ctx = await call(opAuth("opt1"), "context", { companyId: T });
+  assert.deepEqual([ctx.testMode, ctx.facilities, ctx.me.role], [true, [], "companyAdmin"]);
+  await rejects(call(opAuth("opt1"), "context", { companyId: C.X }), "permission-denied");
+  // 担当者の管理(試験用の会社の中だけ)
+  const b = (await call(opAuth("opt1"), "manageBranch", { companyId: T, name: "試験支店" })).branchId;
+  await call(opAuth("opt1"), "manageInvite", { companyId: T, email: "opt2@corp.example.jp", name: "", role: "reader", branchId: b });
+  const ov = await call(opAuth("opt1"), "manage", { companyId: T });
+  assert.deepEqual([ov.facilities, ov.staff.map(s => s.email).sort()], [[], ["opt1@corp.example.jp", "opt2@corp.example.jp"]]);
+  // 注文の閲覧・担当施設は試験モードでも停止(停止中と同じ応答)
+  for (const [action, data] of [["list", range()], ["week", { weekStart: "2026-11-02", facilityFilter: { mode: "all" } }], ["get", { receiptId: "rcp-x" }], ["setAssignments", { facilityIds: [] }]]) {
+    await closed(call(opAuth("opt1"), action, { companyId: T, ...data }), action);
+  }
+  // 施設の閲覧の許可・受信の索引も停止のまま
+  await closed(svc.facility({ auth: auth("adminA"), data: { action: "grant", facilityId: "fA", localDealerId: "dA1", revision: await revOf("fA", "dA1") } }), "grant");
+  assert.equal((await svc.indexOrder("fA", "any")).disabled, true);
+  // 監査の記録・注文メールの outbox に試験の操作は注文を作らない
+  assert.equal((await db.collection("orders").get()).size + (await db.collectionGroup("orders").get()).size, 0, "注文は作られない");
+});
+
+test("試験モードの拒否: 一般の利用者・試験の UID 以外・トークンの運営者の印がない・権限を失った運営者・期限切れ・期限が長すぎる・設定なしは、停止中と同じ応答(確認コードも送らない)", async () => {
+  const { cfg, operators, svc, opAuth, call, T } = await setupTestMode();
+  await op("inviteStaff", { companyId: T, email: "opt1@corp.example.jp", name: "", role: "companyAdmin" });
+  await op("inviteStaff", { companyId: T, email: "opt2@corp.example.jp", name: "", role: "companyAdmin" });
+  await op("inviteStaff", { companyId: T, email: "x9@corp.example.jp", name: "", role: "reader" });
+  // 一般の利用者(実際の会社の担当者・試験用の会社に招待された一般の人)
+  for (const a of [staffAuth("x1"), staffAuth("x9")]) for (const action of ["companies", "sendCode", "context", "manage"]) await closed(call(a, action), `${a.uid} ${action}`);
+  // 運営者でも試験の UID にない(opt2)
+  await closed(call(opAuth("opt2"), "sendCode"), "リスト外の運営者");
+  // 試験の UID でも、ID トークンに運営者の印がない
+  await closed(call(auth("opt1", { email: "opt1@corp.example.jp" }), "sendCode"), "トークンの印なし");
+  // 参加まで済ませてから、条件を外す
+  await resetCodes();
+  const before = sentCodes.length;
+  await call(opAuth("opt1"), "sendCode");
+  await call(opAuth("opt1"), "verifyCode", { code: sentCodes.slice(before).at(-1).code });
+  assert.equal((await call(opAuth("opt1"), "manage", { companyId: T })).me.role, "companyAdmin");
+  // 権限を失った運営者(ユーザー記録で確認。トークンにはまだ印が残っていても拒否)
+  operators.delete("opt1");
+  await closed(call(opAuth("opt1"), "manage", { companyId: T }), "権限を失った運営者");
+  operators.add("opt1");
+  // 運営者の確認に失敗したときも閉じる
+  const svcErr = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => false, testAccess: () => cfg, isCurrentOperator: async () => { throw new Error("auth down"); } });
+  await closed(svcErr.portal({ auth: opAuth("opt1"), data: { action: "manage", companyId: T, deviceToken: devices.get("opt1") } }), "確認の失敗");
+  // 期限切れ・期限が長すぎる(14日を超える)・期限なし・UID なし
+  for (const [u, until, what] of [[["opt1"], Date.now() - 1000, "期限切れ"], [["opt1"], Date.now() + 15 * 24 * 3600 * 1000, "期限が長すぎる"], [["opt1"], null, "期限なし"], [[], Date.now() + 3600 * 1000, "UID なし"]]) {
+    cfg.uids = u; cfg.untilMs = until;
+    await closed(call(opAuth("opt1"), "manage", { companyId: T }), what);
+  }
+  // 期限は時刻の経過でも閉じる(自動)
+  cfg.uids = ["opt1"]; cfg.untilMs = Date.now() + 60 * 1000;
+  assert.equal((await call(opAuth("opt1"), "manage", { companyId: T })).me.role, "companyAdmin");
+  clock.t = Date.now() + 2 * 60 * 1000;
+  await closed(call(opAuth("opt1"), "manage", { companyId: T }), "期限の経過");
+  clock.t = null;
+  // 確認コードの送信: 依頼の後に権限を失った・期限が過ぎたら送らない
+  cfg.untilMs = Date.now() + 3600 * 1000;
+  await resetCodes();
+  const n0 = sentCodes.length;
+  await svc.portal({ auth: opAuth("opt1"), data: { action: "sendCode" } });
+  operators.delete("opt1");
+  for (const j of (await db.collection("dealerAuthCodeJobs").get()).docs) await svc.deliverCodeJob(j.id);
+  assert.equal(sentCodes.length, n0, "権限を失った後は送らない");
+  operators.add("opt1");
+  // 試験モードで依頼していない確認コード(機能の停止中の一般の依頼)は送らない
+  await db.collection("dealerAuthChallenges").doc("c_manual").set({ targets: [{ companyId: T, staffId: sid(T, "x9"), authRevision: 1, status: "invited" }], testMode: false, uid: "x9", kind: "device", email: "x9@corp.example.jp", requestId: "r1", deliveryStatus: "queued" });
+  const job = await db.collection("dealerAuthCodeJobs").add({ challengeId: "c_manual", requestId: "r1", expiresAtMs: Date.now() + 60000 });
+  await svc.deliverCodeJob(job.id);
+  assert.equal(sentCodes.length, n0);
+});
+
+test("試験用の会社(testOnly): 施設の発注先との関連付け・閲覧の許可を拒否(機能の有効化後も)。印は作成時だけ・運営者だけが付けられ、変更・解除できない。名前の【試験】は残る", async () => {
+  const { T } = await setupTestMode();
+  // 関連付けの拒否(運営者でも)
+  await assert.rejects(op("proposeLink", { facilityId: "fA", localDealerId: "dA1", companyId: T }), (e) => e.code === "failed-precondition" && /試験用の会社/.test(e.message));
+  // 何らかの経緯で関連付けがあっても、閲覧の許可は拒否(機能が有効でも)
+  await db.doc("facilities/fA/facilityDealers/dT1").set({ facilityId: "fA", name: "試験の窓口", orderEmails: ["t@t.example.jp"] });
+  await db.doc("facilities/fA/dealerPortalLinks/dT1").set({ companyId: T, status: "proposed", currentGrantId: null, revision: 1 });
+  await assert.rejects(grant("adminA", "fA", "dT1"), (e) => e.code === "failed-precondition");
+  assert.equal((await db.collection("dealerPortalGrants").where("companyId", "==", T).get()).size, 0);
+  // 印の変更・解除: 運営者の API は受け付けない。不正な値の作成も拒否
+  await rejects(op("updateCompany", { companyId: T, testOnly: false }), "invalid-argument");
+  await rejects(op("createCompany", { name: "x", requestId: crypto.randomUUID(), testOnly: "yes" }), "invalid-argument");
+  await op("updateCompany", { companyId: T, name: "改名商事" });
+  assert.deepEqual([(await db.doc(`dealerCompanies/${T}`).get()).get("name"), (await db.doc(`dealerCompanies/${T}`).get()).get("testOnly")], ["【試験】改名商事", true]);
+  // 一般の会社は印なし・従来どおり
+  assert.equal((await db.doc(`dealerCompanies/${C.X}`).get()).get("testOnly"), undefined);
+  // 運営者以外は会社を作れない(印も付けられない)
+  await rejects(portal.operator({ auth: auth("adminA"), data: { action: "createCompany", name: "x", requestId: crypto.randomUUID(), testOnly: true } }), "permission-denied");
+  // クライアント(運営者を含む)は会社の文書を直接読み書きできない(Rules)
+  const opDb = env.authenticatedContext("opt1", { platformAdmin: true, email: "opt1@corp.example.jp", email_verified: true }).firestore();
+  await assertFails(getDoc(doc(opDb, `dealerCompanies/${T}`)));
+  await assertFails(setDoc(doc(opDb, `dealerCompanies/${T}`), { testOnly: false }, { merge: true }));
+  // 運営者の一覧に試験用の印を返す
+  assert.equal((await op("overview")).companies.find(c => c.companyId === T).testOnly, true);
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {

@@ -53,13 +53,18 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     const err = h("p", { class: "error-message" });
     let requestId = newRequestId();
     name.addEventListener("input", () => { requestId = newRequestId(); });
+    // 試験用の会社(運営者の試験モードの対象。名前の先頭に【試験】。施設の発注先と関連付けできない。後から変更できない)
+    const testOnly = h("input", { type: "checkbox", "data-f": "companyTestOnly" });
+    testOnly.addEventListener("change", () => { requestId = newRequestId(); });
     const btn = h("button", { type: "button", class: "btn btn-primary", "data-act": "createCompany" }, "会社を登録");
     btn.addEventListener("click", () => {
       if (!name.value.trim()) { err.textContent = "会社名を入力してください"; return; }
-      run(() => api.createCompany({ name: name.value, requestId }), `「${name.value.trim()}」を登録しました。`, err);
+      run(() => api.createCompany({ name: name.value, requestId, ...(testOnly.checked ? { testOnly: true } : {}) }), `「${name.value.trim()}」を登録しました。`, err);
     });
     return h("div", { class: "settings-section" }, createSectionHeading("会社を登録", "責任者・取引先との確認で、会社の同一性を確かめてから登録してください(メールのドメインや名称の一致だけで判断しない)。"),   // 説明は見出しの右のⓘ
-      field("会社名", name), h("div", { class: "form-row" }, btn), err);
+      field("会社名", name),
+      h("label", { class: "settings-check dealer-operator-testonly" }, testOnly, h("span", {}, "試験用の会社にする(運営者の試験専用。施設の発注先と関連付けできません。登録後は変更できません)")),
+      h("div", { class: "form-row" }, btn), err);
   }
 
   function staffRow(c, s) {
@@ -110,7 +115,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     });
     const grants = (data.grantsByCompany.get(c.companyId) || []).map(g => h("li", {}, `${g.name}(${formatJstDateTime(g.effectiveFrom)} 以降)`));
     return h("div", { class: "settings-section dealer-operator-company", "data-company": c.companyId },
-      h("div", { class: "dealer-operator-title" }, h("h3", {}, c.name), h("span", { class: c.status === "active" ? "member-role-badge" : "member-role-badge is-muted" }, c.status === "active" ? "有効" : "停止中"), suspend),
+      h("div", { class: "dealer-operator-title" }, h("h3", {}, c.name), h("span", { class: c.status === "active" ? "member-role-badge" : "member-role-badge is-muted" }, c.status === "active" ? "有効" : "停止中"), c.testOnly ? h("span", { class: "member-role-badge", "data-badge": "testOnly" }, "試験用") : null, suspend),
       h("h4", {}, `担当者(${c.staff.length}人)`),
       c.staff.length ? h("ul", { class: "dealer-operator-list" }, c.staff.map(s => staffRow(c, s))) : h("p", { class: "form-hint" }, "担当者はまだいません。"),
       invitations.length ? h("div", {}, h("h4", {}, "参加待ち"), h("ul", { class: "dealer-operator-list" }, invitations)) : null,
@@ -129,7 +134,7 @@ export function createDealerPortalOperator({ mount, api, onClose }) {
     const err = h("p", { class: "error-message" });
     const facSel = select({ "data-f": "linkFacility" }, [["", "施設を選択"], ...data.facilities.map(f => [f.facilityId, f.name])]);
     const dealerSel = select({ "data-f": "linkDealer" }, [["", "発注先を選択"]]);
-    const companySel = select({ "data-f": "linkCompany" }, [["", "会社を選択"], ...data.companies.filter(c => c.status === "active").map(c => [c.companyId, c.name])]);
+    const companySel = select({ "data-f": "linkCompany" }, [["", "会社を選択"], ...data.companies.filter(c => c.status === "active" && !c.testOnly).map(c => [c.companyId, c.name])]);   // 試験用の会社は関連付けの対象にしない(サーバーでも拒否)
     const companyName = (id) => (data.companies.find(c => c.companyId === id) || {}).name || "—";
     facSel.addEventListener("change", () => {
       const f = data.facilities.find(x => x.facilityId === facSel.value);

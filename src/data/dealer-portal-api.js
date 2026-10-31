@@ -50,7 +50,7 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     revoke: (a) => facility({ action: "revoke", ...pick(a, ["facilityId", "localDealerId", "revision"]) }),
     // 運営者
     overview: () => operator({ action: "overview" }),
-    createCompany: (a) => operator({ action: "createCompany", ...pick(a, ["name", "requestId"]) }),
+    createCompany: (a) => operator({ action: "createCompany", ...pick(a, ["name", "requestId", "testOnly"]) }),
     updateCompany: (a) => operator({ action: "updateCompany", ...pick(a, ["companyId", "name", "status"]) }),
     upsertBranch: (a) => operator({ action: "upsertBranch", ...pick(a, ["companyId", "branchId", "name", "status"]) }),
     inviteStaff: (a) => operator({ action: "inviteStaff", ...pick(a, ["companyId", "email", "name", "role", "branchId"]) }),
