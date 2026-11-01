@@ -174,6 +174,7 @@
 
 最新報告は上書きされるため、後日の確認では上記commitの `docs/CLAUDE_REPORT.md` と履歴も参照する。過去資料に残る「dryrun」「未実装」などの記述だけで、現在の状態を判断しない。
 
+- 2026-11-02(Claude Code、ユーザーの指示): 施設設定の見出しの施設名の右の鉛筆・ゴミ箱を、担当医の行のボタン(`.orderer-icon`・間隔 4px)と同じ見た目に統一(ブランチ `fix/facility-head-icons`)。テスト: unit 285・ブラウザ(施設の削除・施設名の変更・施設設定の見出しと自動保存 × 3ブラウザ)。main へ push・公開
 - 2026-10-29(Claude Code、ユーザーの指示): 注文受付の許可リスト `ORDER_TEST_FACILITY_IDS` に立川病院を追加(せんじゅ眼科は維持。`ORDER_TEST_UIDS`・`ORDER_INTAKE_UNRESTRICTED=false`・`ORDER_TEST_MODE=false`・メールの設定は変更なし)。`createOrder` のみ再配備し、配備後の設定値・起動(ログインなしの呼び出しは拒否)・エラーログを読み取りで確認。実際の注文・メールの送信はしていない(立川病院からの注文は本番の注文として発注先へ送られる)。
 
 

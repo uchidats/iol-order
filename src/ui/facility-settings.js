@@ -1087,8 +1087,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
       h("p", { class: "form-hint" }, "注文履歴がある施設、自分以外の利用者が所属している施設は削除できません。削除すると、この施設の設定（担当医・採用IOL・ディーラーなど）と招待が消え、元に戻せません。"),
       msg,
       h("div", { class: "form-row" }, doDelete, cancel));
-    // 編集(鉛筆)と同じ大きさ・背景のゴミ箱ボタン(アイコンは濃いグレー)。押しただけでは削除しない
-    const trigger = h("button", { type: "button", class: "btn btn-outline-sm delete-trigger", id: "btnDeleteFacility", "aria-label": "施設を削除", title: "施設を削除" }, trashIcon());
+    // 「担当医」の行と同じゴミ箱ボタン(.orderer-icon。大きさ・余白・枠線・角丸・色が同じ)。押しただけでは削除しない
+    const trigger = h("button", { type: "button", class: "btn btn-outline-sm orderer-icon delete-trigger", id: "btnDeleteFacility", "aria-label": "施設を削除", title: "施設を削除" }, trashIcon());
 
     let deleting = false;
     const closeDialog = () => { if (dialog.open && !deleting) dialog.close(); };
@@ -1170,7 +1170,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     h("label", { class: "form-label" }, "施設名", nameInput),
     h("div", { class: "form-row" }, nameSave, nameConfirm, nameCancel), nameMsg);
   const nameEditBtn = isAdmin && inviteApi && inviteApi.renameFacility
-    ? h("button", { type: "button", class: "btn btn-outline-sm", id: "btnRenameFacility", "aria-label": "施設名を編集", title: "施設名を編集" }, pencilIcon())
+    ? h("button", { type: "button", class: "btn btn-outline-sm orderer-icon", id: "btnRenameFacility", "aria-label": "施設名を編集", title: "施設名を編集" }, pencilIcon())
     : null;
   let renaming = false;
   function setRenameOpen(on) {
@@ -1212,7 +1212,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
     // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない
-    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title, nameEditBtn, del && del.wrap, closeBtn),
+    // 施設名の右の鉛筆・ゴミ箱は「担当医」の行の操作ボタンと同じ並び(間隔 4px)
+    h("div", { class: "settings-head" }, h("div", { class: "settings-heading" }, h("h2", {}, "施設設定"), createInfoTip("この画面は施設管理者のみ変更できます。", { label: "施設設定の説明" }).root), title,
+      nameEditBtn || del ? h("span", { class: "settings-head-actions" }, nameEditBtn, del && del.wrap) : null, closeBtn),
     del && del.dialog,
     nameBox,
     status,

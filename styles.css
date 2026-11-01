@@ -2190,10 +2190,10 @@ input[type="date"], .lens-line select { color-scheme: light; }
 /* 施設設定: 施設名の変更 */
 .facility-rename { margin: 0 0 12px; }
 .facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-#btnRenameFacility { margin-left: -4px; }
+/* 施設名の右の鉛筆・ゴミ箱: ボタンは「担当医」と同じ .orderer-icon、並びの間隔も .orderer-actions と同じ 4px(PC・スマホ共通) */
+.settings-head-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 
-/* 施設設定: 施設削除のボタンとダイアログ */
-.delete-trigger { color: #1f2937; }   /* 大きさ・背景は編集(鉛筆)と同じ(btn-outline-sm)。アイコンは濃いグレー */
+/* 施設設定: 施設削除のダイアログ(ゴミ箱のボタンは .orderer-icon で「担当医」と同じ見た目) */
 /* 削除ダイアログ: ダークモードでも、背景は白・文字は濃いグレーに固定(入力欄も明るい配色) */
 .delete-dialog { width: min(92vw, 440px); border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; background: #fff; color: #1f2937; color-scheme: light; }
 .delete-dialog::backdrop { background: rgba(0,0,0,.45); }

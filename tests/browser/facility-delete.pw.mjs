@@ -17,7 +17,7 @@ const page = (withRename) => `<!doctype html><html lang="ja"><head><meta charset
 import { createFacilitySettings } from "/src/ui/facility-settings.js";
 import { IOL_MODELS } from "/src/data/iol-models.js";
 window.__calls = []; window.__deleted = []; window.__next = { status: "renamed" };
-const repository = { listOrderers: async () => [], listAdoptedIols: async () => [], listDealers: async () => [], listMembers: async () => [] };
+const repository = { listOrderers: async () => [{ id: "o1", name: "山田", email: "" }], listAdoptedIols: async () => [], listDealers: async () => [], listMembers: async () => [] };
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveDealers: async () => {}, deleteDealer: async () => {}, deleteOrderer: async () => {} };
 const inviteApi = { ${withRename ? `renameFacility: async () => ({ status: "unchanged" }), deleteFacility: async (a) => { window.__calls.push(a); if (window.__delay) await new Promise(r => setTimeout(r, window.__delay)); if (window.__fail) { const e = new Error(window.__fail); e.code = "functions/failed-precondition"; throw e; } return { status: "deleted" }; }` : ""} };
 const s = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, masters: IOL_MODELS, inviteApi, onSaved: async () => {}, onClose() {}, onDeleted: (id) => window.__deleted.push(id) });
@@ -74,7 +74,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await bgOf(trash), await bgOf(pencil), "背景色は鉛筆と同じ");
       assert.equal(await trash.locator("svg").count(), 1);
       assert.equal(await trash.getAttribute("aria-label"), "施設を削除");
-      assert.equal(await trash.evaluate(e => getComputedStyle(e).color), "rgb(31, 41, 55)", "ゴミ箱は濃いグレー(赤くない)");
+      // 「担当医」の行の鉛筆・ゴミ箱と、大きさ・余白・枠線・角丸・色・アイコン・間隔まで同じ(PC・スマホ)
+      const look = (sel) => pg.evaluate((q) => [...document.querySelectorAll(q)].map(e => { const c = getComputedStyle(e), b = e.getBoundingClientRect(), s = e.querySelector("svg").getBoundingClientRect();
+        return { w: b.width, h: b.height, pad: c.padding, border: c.border, radius: c.borderRadius, color: c.color, bg: c.backgroundColor, svg: [s.width, s.height], ml: c.marginLeft }; }), sel);
+      const gapOf = (a, b) => pg.evaluate(([x, y]) => document.querySelector(y).getBoundingClientRect().left - document.querySelector(x).getBoundingClientRect().right, [a, b]);
+      for (const w of [390, 1100, 320]) {
+        await pg.setViewportSize({ width: w, height: 900 });
+        const [fe, fd] = await look("#btnRenameFacility, #btnDeleteFacility");
+        const [oe, od] = await look('.orderer-actions [data-act="edit"], .orderer-actions [data-act="delete"]');
+        assert.deepEqual([fe, fd], [oe, od], `${w}px: 担当医の鉛筆・ゴミ箱と同じ`);
+        assert.equal(await gapOf("#btnRenameFacility", "#btnDeleteFacility"), await gapOf('.orderer-actions [data-act="edit"]', '.orderer-actions [data-act="delete"]'), `${w}px: ボタンの間隔も同じ`);
+        assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}px: 横にはみ出さない`);
+      }
+      await pg.setViewportSize({ width: 390, height: 900 });
+      const trashColor = await trash.evaluate(e => getComputedStyle(e).color);
+      assert.equal(trashColor, await pencil.evaluate(e => getComputedStyle(e).color), "ゴミ箱は鉛筆・担当医のゴミ箱と同じ色(赤くない)");
+      const tc = trashColor.match(/\d+/g).map(Number); assert.ok(Math.max(...tc) - Math.min(...tc) <= 25, "赤くない: " + trashColor);
       // ゴミ箱を押しただけでは削除しない(ダイアログでの確定が必須)
       await trash.click();
       assert.equal(await box.isVisible(), true);
