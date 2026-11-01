@@ -58,7 +58,9 @@ export const PORTAL_LIMITS = Object.freeze({
   codeTtlMs: 10 * 60 * 1000, codeJobTtlMs: 5 * 60 * 1000, codeMaxAttempts: 5, codeResendMs: 60 * 1000, codeMaxSends: 5, codeMaxSendsPerEmail: 10, codeWindowMs: 24 * 60 * 60 * 1000,
   // 確認済みの端末(メールリンクのログイン用)の期限と、担当者ごとの上限
   deviceTtlMs: 180 * 24 * 60 * 60 * 1000, devicesMax: 10,
-  lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000
+  lateCheckMax: 200, indexRetryMaxAgeMs: 24 * 60 * 60 * 1000,
+  // 受信の索引は、注文の取消可能な時間の後に作る(時計の差の余裕と、待つ上限)
+  cancelIndexMarginMs: 2000, cancelIndexMaxWaitMs: 30 * 1000
 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** 試験用の会社(testOnly)の名前の先頭(確認コードのメール・運営者の画面で試験用と分かるように) */
@@ -264,7 +266,7 @@ export function initialFacilitySelection(allowedFacilities, assignedIds) {
  * @param {() => number} [deps.now]
  */
 export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled = () => true, testAccess = () => ({ uids: [], untilMs: null }),
-  isCurrentOperator = async () => false, now = Date.now, sendJoinCode = null }) {
+  isCurrentOperator = async () => false, now = Date.now, sendJoinCode = null, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
   const audit = (tx, entry) => tx.create(db.collection("dealerPortalAuditLogs").doc(), { ...entry, at: FieldValue.serverTimestamp() });
   /** 監査の記録の操作者: 運営者(operator: true)か、ディーラーの会社管理者・支店管理者(担当者 ID と役割) */
   const actorOf = (user) => (user && user.staffId
@@ -737,6 +739,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const s = scope.get(r.facilityId);
       const t = millisOf(r.orderedAt);
       return Boolean(s && selected.has(r.facilityId) && r.grantId === s.grantId && r.localDealerId === s.localDealerId
+        && r.cancelled !== true   // 取り消した注文の索引(通常は作らない。order-cancel.js が印を付ける)
         && t !== null && t >= q.fromMs && t < q.toMs && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
     };
     // 検索時点(最初のページを読んだ時点)を固定し、続きのページも同じ時点の内容を読む(読み取り専用トランザクションの readTime)。
@@ -810,7 +813,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     if (!os.exists) return null;
     const order = os.data();
     const orderedMs = millisOf(order.createdAt);
-    if (order.testOrder === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) return null;
+    if (order.testOrder === true || order.cancelled === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) return null;   // 取り消した注文は出さない
     // 注文時点の発注先が、許可した時点と同じか(現在の発注先の値が同じでも、途中で別の会社宛てだった注文は返さない)
     if (!orderMatchesGrant(order, mail, s.localDealerId, s.grant)) return null;
     const view = buildDealerOrderView(order, s.localDealerId, { receiptId, facilityId: r.facilityId });
@@ -1397,7 +1400,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const os = await db.doc(`facilities/${facilityId}/orders/${orderId}`).get();
     if (!os.exists) return { created: 0, skipped: 0 };
     const order = os.data();
-    if (order.testOrder === true || millisOf(order.createdAt) === null) return { created: 0, skipped: 1 };
+    if (order.testOrder === true || order.cancelled === true || millisOf(order.createdAt) === null) return { created: 0, skipped: 1 };   // 取り消した注文は索引にしない
     const dealerIds = new Set();
     for (const l of Array.isArray(order.lines) ? order.lines : []) {
       const id = (l && (l.dealerId || (l.dealer && l.dealer.id))) || null;
@@ -1495,6 +1498,13 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       console.error("dealer receipt indexing gave up (event too old; use reindex):", facilityId, orderId, eventTime);
       return { expired: true };
     }
+    // 注文の取消可能な時間(cancelUntilMs)の後に作る(その間に取り消された注文はディーラーに出さない)。時計の差の余裕を足す
+    const o = await db.doc(`facilities/${facilityId}/orders/${orderId}`).get();
+    const until = o.exists ? o.get("cancelUntilMs") : null;
+    const created = o.exists ? millisOf(o.get("createdAt")) : null;
+    const windowed = typeof until === "number" && (created === null || until > created);   // 取消可能な時間がある注文だけ待つ
+    const wait = windowed ? until + PORTAL_LIMITS.cancelIndexMarginMs - now() : 0;
+    if (wait > 0) await sleep(Math.min(wait, PORTAL_LIMITS.cancelIndexMaxWaitMs));
     return indexOrder(facilityId, orderId);
   }
 

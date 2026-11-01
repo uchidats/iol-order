@@ -12,6 +12,8 @@ export function createOrderApi({ functions, httpsCallable }) {
     /** @returns {Promise<{orderId:string, orderNumber:string, status:string, replayed:boolean}>} */
     createOrder: async (request) => (await httpsCallable(functions, "createOrder")(request)).data,
     /** 注文の削除(論理削除。施設の管理者・副管理者のみ。サーバーが所属・役割を確認する) @returns {Promise<{orderId:string, deleted:true, alreadyDeleted:boolean}>} */
-    deleteOrder: async ({ facilityId, orderId }) => (await httpsCallable(functions, "deleteOrder")({ facilityId, orderId })).data
+    deleteOrder: async ({ facilityId, orderId }) => (await httpsCallable(functions, "deleteOrder")({ facilityId, orderId })).data,
+    /** 注文の取り消し(注文した本人が、受付の直後の取消可能な時間内だけ。期限はサーバーが判定する) @returns {Promise<{orderId:string, cancelled:true, alreadyCancelled:boolean}>} */
+    cancelOrder: async ({ facilityId, orderId }) => (await httpsCallable(functions, "cancelOrder")({ facilityId, orderId })).data
   };
 }

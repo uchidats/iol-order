@@ -11,6 +11,7 @@ import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/f
 import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-testing";
 import { doc, getDoc, getDocs, setDoc, collection, collectionGroup, query, where } from "firebase/firestore";
 import { createOrderService } from "../../functions/src/orders.js";
+import { createOrderCancelService } from "../../functions/src/order-cancel.js";
 import { managerPolicyError } from "../../functions/src/dealer-portal.js";
 import { parseTestAccess, TEST_MODE_MAX_MS } from "../../functions/src/dealer-portal.js";
 import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf, weekDatesOf, surgeryDatesOf } from "../../functions/src/dealer-portal.js";
@@ -1521,6 +1522,39 @@ test("試験用の会社(testOnly): 施設の発注先との関連付け・閲�
   await assertFails(setDoc(doc(opDb, `dealerCompanies/${T}`), { testOnly: false }, { merge: true }));
   // 運営者の一覧に試験用の印を返す
   assert.equal((await op("overview")).companies.find(c => c.companyId === T).testOnly, true);
+});
+
+test("注文の取り消し: 受信の索引は取消可能な時間の後に作る(待つ)。取り消した注文は索引にしない。万一の既存の索引も一覧・週表示・詳細に出さない", async () => {
+  await grant("adminA", "fA", "dA1");
+  const slept = [];
+  const p2 = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath, isEnabled: () => true, now: () => Date.now(), sleep: async (ms) => { slept.push(ms); } });
+  const cancelSvc = createOrderCancelService({ db, FieldValue });
+  const create = async () => (await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1" })] } }));
+  const undo = (orderId) => cancelSvc.cancelOrder({ auth: auth("ordA"), data: { facilityId: "fA", orderId } });
+  const event = (orderId) => p2.indexOrderEvent({ facilityId: "fA", orderId, eventTime: new Date().toISOString() });
+  // 取り消さない注文: 取消の期限 + 余裕まで待ってから作る
+  const a = await create();
+  await event(a.orderId);
+  assert.equal(slept.length, 1);
+  assert.ok(slept[0] > 10000 && slept[0] <= 12000, `取消の期限の後まで待つ(${slept[0]}ms)`);
+  assert.equal((await list("x1")).items.length, 1);
+  // 取消可能な時間内に取り消した注文: 索引を作らない
+  const b = await create();
+  await undo(b.orderId);
+  assert.deepEqual(await event(b.orderId), { created: 0, skipped: 1 });
+  assert.equal((await list("x1")).items.length, 1);
+  // 万一、取り消しの前に索引ができていた: 取り消しで印を付け、一覧・週表示・詳細のどれにも出さない
+  const c = await create();
+  await portal.indexOrder("fA", c.orderId);
+  const before = (await list("x1")).items.map(i => i.orderNumber);
+  assert.ok(before.includes(c.orderNumber));
+  const rid = (await db.collection(`dealerCompanies/${C.X}/receipts`).where("sourceOrderId", "==", c.orderId).get()).docs[0].id;
+  await undo(c.orderId);
+  assert.equal((await db.doc(`dealerCompanies/${C.X}/receipts/${rid}`).get()).get("cancelled"), true);
+  assert.deepEqual((await list("x1")).items.map(i => i.orderNumber), [a.orderNumber]);
+  await rejects(api("x1", "get", { receiptId: rid }), "not-found");
+  const wk = await api("x1", "week", { weekStart: (() => { const d = new Date(surgery() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7); return d.toISOString().slice(0, 10); })(), facilityFilter: { mode: "all" } });
+  assert.ok(!JSON.stringify(wk).includes(c.orderNumber), "週表示にも出さない");
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {

@@ -379,6 +379,9 @@ async function handleExecuteOrder() {
     // サーバーで検証して保存する(テスト注文か・ディーラーへ送るかはサーバーが決める)
     if (!orderApi) throw Object.assign(new Error("サーバーに接続できません"), { code: "failed-precondition" });   // 送信していない
     const r = await orderApi.createOrder(request);
+    // 取消可能な時間(サーバーが返した期限と現在時刻の差。端末の時計は使わない)。受け取った時点から数える
+    const cancelWindowMs = Number.isFinite(r.cancelUntilMs) && Number.isFinite(r.serverNowMs) ? Math.min(r.cancelUntilMs - r.serverNowMs, 60 * 1000) : 0;
+    const cancelDeadline = performance.now() + cancelWindowMs;
     if (pendingStore) pendingStore.clear();
 
     // サーバーが受付番号を返した場合のみ完了扱い。表示はサーバーが保存した注文の内容から作る
@@ -390,6 +393,7 @@ async function handleExecuteOrder() {
     hideConfirmModal();
     if (draft) { draft.clear(); draft.setReady(false); }   // 注文が正常に完了したときだけ、下書きを削除する(失敗したときは下の catch に入り、下書きは残る)
     showCompleteModal(saved, { orderNumber: r.orderNumber, replayed: r.replayed === true });
+    if (r.replayed !== true && cancelWindowMs > 0) showCancelButton({ facilityId: request.facilityId, orderId: r.orderId, deadline: cancelDeadline });
   } catch (err) {
     console.error("注文送信エラー:", err);
     if (pendingStore && isDefinitiveRejection(err)) pendingStore.clear();   // サーバーが拒否した(注文は作られていない)
@@ -414,6 +418,9 @@ async function handleExecuteOrder() {
  * 読み込めなかった場合は受付番号だけを出し、注文履歴での確認を案内する。
  */
 function showCompleteModal(saved, { orderNumber, replayed }) {
+  removeCancelButton();
+  const prevMsg = document.getElementById("completeCancelMsg");
+  if (prevMsg) prevMsg.remove();
   // 受付(accepted)まで。メールはこの後に送るので「発注済み」とは表示しない。テスト注文はディーラーへ送らない
   const test = saved ? saved.testOrder === true : appConfig.orderMode !== ORDER_MODES.SERVER;
   if (test) {
@@ -430,7 +437,7 @@ function showCompleteModal(saved, { orderNumber, replayed }) {
     ${o.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml([l.maker, l.model].filter(Boolean).join(" / "))} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)} / 担当医 ${escapeHtml(l.doctorName)} / ${escapeHtml(l.dealerName ? `発注先 ${l.dealerName}` : "発注先未設定")}</div>`).join("")}
     <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(o.lineCount)}件・合計${escapeHtml(o.totalQuantity)}枚</div>
     <div style="margin-bottom: 4px; white-space: pre-wrap;"><strong>備考:</strong> ${escapeHtml(o.notes || "（なし）")}</div>
-    <div style="margin-bottom: 4px;"><strong>状態:</strong> ${escapeHtml(o.statusLabel)}</div>` : `
+    <div style="margin-bottom: 4px;"><strong>状態:</strong> <span data-f="completeStatus">${escapeHtml(o.statusLabel)}</span></div>` : `
     <div style="margin-bottom: 4px;">保存された注文の内容を読み込めませんでした。注文履歴で内容を確認してください。</div>`}
   `;
 
@@ -438,7 +445,56 @@ function showCompleteModal(saved, { orderNumber, replayed }) {
   document.body.style.overflow = "hidden";
 }
 
+/**
+ * 完了画面の「取り消す」(受付の直後の取消可能な時間だけ表示し、過ぎたら自動で消す。カウントダウン・残り秒数は出さない)。
+ * 期限・送信の開始との競合はサーバー(cancelOrder)が判定する。期限の後に届いた要求は「取り消せませんでした」と表示する
+ */
+let cancelTimer = null;
+function removeCancelButton() {
+  clearTimeout(cancelTimer); cancelTimer = null;
+  const b = document.getElementById("btnCancelOrder");
+  if (b) b.remove();
+}
+function showCancelMessage(text, { error = false } = {}) {
+  let p = document.getElementById("completeCancelMsg");
+  if (!p) { p = document.createElement("p"); p.id = "completeCancelMsg"; p.setAttribute("role", "status"); el.completeDetails.after(p); }
+  p.className = error ? "error-message complete-cancel-msg" : "form-hint complete-cancel-msg";
+  p.textContent = text;
+}
+function showCancelButton({ facilityId, orderId, deadline }) {
+  removeCancelButton();
+  const remaining = deadline - performance.now();
+  if (!orderApi || typeof orderApi.cancelOrder !== "function" || remaining <= 0) return;
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "btn btn-secondary"; btn.id = "btnCancelOrder"; btn.textContent = "取り消す";
+  const footer = el.completeModal.querySelector(".modal-footer");
+  footer.insertBefore(btn, footer.firstChild);
+  cancelTimer = setTimeout(removeCancelButton, remaining);
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    clearTimeout(cancelTimer); cancelTimer = null;   // 結果が出るまで消さない(押した後に時間が過ぎても、結果を必ず表示する)
+    try {
+      await orderApi.cancelOrder({ facilityId, orderId });
+      $("completeTitle").textContent = "注文を取り消しました";
+      $("completeSubtitle").textContent = "ディーラーへの注文メールは送信していません。この注文は注文履歴に「取消済み」として残ります。";
+      const st = el.completeDetails.querySelector('[data-f="completeStatus"]');
+      if (st) st.textContent = "取消済み";
+    } catch (e) {
+      const code = String((e && e.code) || "");
+      const late = code.endsWith("failed-precondition") || code.endsWith("not-found");
+      showCancelMessage(late ? "取り消せませんでした。取り消せる時間を過ぎたため、注文は受け付けられ、ディーラーへ送信されます。"
+        : "取り消せたか確認できませんでした。通信状況を確認し、注文履歴で注文の状態を確認してください。", { error: true });
+    } finally {
+      removeCancelButton();
+    }
+  });
+}
+
 function handleResetForNewOrder() {
+  removeCancelButton();
+  const cm = document.getElementById("completeCancelMsg");
+  if (cm) cm.remove();
   el.completeModal.classList.add("hidden");
   document.body.style.overflow = "";
   currentPendingOrderData = null;

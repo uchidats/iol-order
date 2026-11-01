@@ -67,7 +67,8 @@ const STATUS_LABELS = Object.freeze({
   accepted: "受付済み（ディーラー未通知）",
   notification_pending: "ディーラーへ送信中",
   notified: "ディーラーへの送信受付済み",
-  notification_failed: "ディーラーへの送信に失敗あり"
+  notification_failed: "ディーラーへの送信に失敗あり",
+  cancelled: "取消済み（ディーラーへは送信していません）"   // 注文した本人が受付の直後に取り消した
 });
 export const orderStatusLabel = (status) => STATUS_LABELS[status] || (status ? String(status) : "（記録なし）");
 

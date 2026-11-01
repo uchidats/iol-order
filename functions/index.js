@@ -16,6 +16,7 @@ import { createFacilityApplicationService, createApplicationNotifier, createAppl
 import { createFacilityPreregistrationService } from "./src/facility-preregistrations.js";
 import { createOrderService } from "./src/orders.js";
 import { createOrderDeletionService } from "./src/order-deletion.js";
+import { createOrderCancelService } from "./src/order-cancel.js";
 import { createOrderSurgeryIndexService } from "./src/order-surgery-index.js";
 import { createMemberService } from "./src/members.js";
 import { getAuth } from "firebase-admin/auth";
@@ -45,8 +46,13 @@ const ORDER_INTAKE_UNRESTRICTED = defineBoolean("ORDER_INTAKE_UNRESTRICTED", { d
 // 許可リストでの受付をテスト注文(testOrder: true。メールはテスト用の宛先だけ)として保存するか。false で、許可リストのまま本番の注文として保存する
 const ORDER_TEST_MODE = defineBoolean("ORDER_TEST_MODE", { default: true });
 const csv = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean);
+// 受付の直後の取消可能な時間(= メールの保留)。本番は常に ORDER_CANCEL.windowMs(10秒)。エミュレータの E2E(demo- のプロジェクト)だけ、
+// ORDER_CANCEL_WINDOW_MS_TEST で短くできる(エミュレータはトリガーを順番に処理するため、待つ処理が後続のトリガーを遅らせる)。本番では読まない
+const demoProject = String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").startsWith("demo-");
+const testWindow = demoProject ? Number.parseInt(String(process.env.ORDER_CANCEL_WINDOW_MS_TEST ?? ""), 10) : NaN;
 const orderService = createOrderService({
   db: getFirestore(), FieldValue,
+  ...(Number.isInteger(testWindow) && testWindow >= 0 ? { cancelWindowMs: testWindow } : {}),
   isEnabled: () => ORDER_INTAKE_ENABLED.value(),
   getPolicy: () => ({
     unrestricted: ORDER_INTAKE_UNRESTRICTED.value(),
@@ -100,6 +106,8 @@ export const checkFacilityName = onCall(options, wrap(service.checkFacilityName)
 export const createOrder = onCall(options, wrap(orderService.createOrder));
 // 注文の削除(論理削除。施設の管理者・副管理者のみ)。注文受付のスイッチとは独立。未送信のメールは送信を中止し(送信中なら削除しない)、送信済みは残す
 export const deleteOrder = onCall(options, wrap(createOrderDeletionService({ db: getFirestore(), FieldValue }).deleteOrder));
+// 注文の取り消し(注文した本人が、受付の直後の取消可能な時間内だけ。メールはその時間の後に送る)。受付の停止スイッチとは独立
+export const cancelOrder = onCall(options, wrap(createOrderCancelService({ db: getFirestore(), FieldValue }).cancelOrder));
 // 注文履歴の手術日順の索引(注文の作成をきっかけに別の処理で作る。冪等なので再試行してよい。注文の受付・メール送信には関与しない)
 const orderSurgeryIndex = createOrderSurgeryIndexService({ db: getFirestore() });
 export const indexOrderSurgeryDates = onDocumentCreated({ region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, retry: true, document: "facilities/{facilityId}/orders/{orderId}" },
@@ -159,7 +167,7 @@ const mailDispatch = createMailDispatchService({
 const mailOptions = { region: REGION, maxInstances: 5, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [RESEND_API_KEY, MAIL_TEST_RECIPIENT] };
 // 送信待ちのメールが作られたら送る(再試行はこの関数ではなく、定期実行が状態を見て行う)
 export const sendOrderMail = onDocumentCreated({ ...mailOptions, document: "facilities/{facilityId}/orders/{orderId}/mails/{mailId}" },
-  (event) => (event.data ? mailDispatch.processMail(event.data.ref) : null));
+  (event) => (event.data ? mailDispatch.processMailWhenDue(event.data.ref) : null));   // 取消可能な時間の後に送る(待つ間の取消は送らない)
 // 施設の登録申請を運営者に通知する(申請の作成時に1回。失敗しても申請は残り、結果を申請に記録する)。送信の可否・テスト用の宛先は注文メールと同じ設定
 const OPERATOR_NOTIFY_RECIPIENT = defineSecret("OPERATOR_NOTIFY_RECIPIENT");      // 運営者の通知先(カンマ区切り)。個人のアドレスなので Secret Manager
 const applicationNotifier = createApplicationNotifier({

@@ -16,9 +16,11 @@ export function summarizeHistoryOrder(order) {
   return {
     ...s,
     deleted: order.deleted === true,   // 論理削除(施設の管理者・副管理者が削除した注文。通常の一覧には出さない)
+    cancelled: order.cancelled === true,   // 注文した本人が受付の直後に取り消した注文(一覧に「取消済み」として残す)
     // 削除の確認に使う件数(送信済みは取り消せない・未送信は送信を中止する。実際の判定はサーバーがメールの状態で行う)
     mailCounts: { sent: count(["accepted"]), unsent: count(UNSENT), sending: count(["sending"]) },
-    notifications: s.notifications.map((n, i) => (notes[i] && notes[i].status === "cancelled" ? { ...n, statusLabel: "未送信（注文の削除により送信を中止）" } : n)),
+    notifications: s.notifications.map((n, i) => (notes[i] && notes[i].status === "cancelled"
+      ? { ...n, statusLabel: order.cancelled === true ? "未送信（注文の取消により送信を中止）" : "未送信（注文の削除により送信を中止）" } : n)),
     lines: s.lines.map((l, i) => {
       const r = raw[i] || {};
       return { ...l, doctorKey: (r.doctor && (r.doctor.id || r.doctor.name)) || "", dealerKey: (r.dealer && r.dealer.id) || r.dealerId || "" };

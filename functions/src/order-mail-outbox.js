@@ -24,7 +24,8 @@ export const MAIL_STATUS = Object.freeze({
   FAILED: "failed", HELD: "held", SKIPPED_TEST: "skipped_test", NOT_SENT: "not_sent"
 });
 export const DELIVERY = Object.freeze({ DELIVERED: "delivered", DELAYED: "delayed", BOUNCED: "bounced", COMPLAINED: "complained", FAILED: "failed" });
-export const MAIL_LIMITS = Object.freeze({ maxAttempts: 5, leaseMs: 5 * 60 * 1000, backoffMs: Object.freeze([5, 15, 60, 180].map(m => m * 60 * 1000)), errorMax: 300 });
+export const MAIL_LIMITS = Object.freeze({ maxAttempts: 5, leaseMs: 5 * 60 * 1000, backoffMs: Object.freeze([5, 15, 60, 180].map(m => m * 60 * 1000)), errorMax: 300,
+  holdMaxWaitMs: 30 * 1000, holdMarginMs: 200 });   // 送信の開始の時刻まで、送信の処理の中で待つ上限と、時刻の境目の余裕
 
 // API の段階で決着した状態(注文控えは、ディーラー宛てがすべてこのどれかになってから送る)
 const SETTLED = new Set([MAIL_STATUS.ACCEPTED, MAIL_STATUS.FAILED, MAIL_STATUS.HELD, MAIL_STATUS.SKIPPED_TEST]);
@@ -74,9 +75,11 @@ export function orderSummaryText(order) {
  * @param {object} p.order 保存する注文(lines・notes・createdBy・orderNumber・facilityName・testOrder)
  * @param {Array<{id:string,name:string,orderEmails?:string[],mailName?:string}>} p.dealers 注文時点の登録ディーラー
  * @param {{copyEnabled?:boolean, copyEmail?:string, signature?:string}|null} p.mailSettings 注文時点の施設のメール設定
+ * @param {number} [p.sendAfterMs] この時刻まで送らない(受付の直後に注文を取り消せる時間。createOrder がサーバーの時計で決める)
  * @returns {{notifications:Array<object>, mails:Array<{id:string, data:object}>}}
  */
-export function buildOrderOutbox({ facilityId, orderId, order, dealers, mailSettings }) {
+export function buildOrderOutbox({ facilityId, orderId, order, dealers, mailSettings, sendAfterMs }) {
+  const hold = Number.isFinite(sendAfterMs) ? { sendAfterMs } : {};
   const profile = profileFromSettings(mailSettings, dealers);
   const preview = buildOrderMailPreview(order, { facilityName: order.facilityName, dealers: Object.fromEntries(dealers.map(d => [d.id, d])), profile });
   const copyTo = copyRecipient(mailSettings);
@@ -89,14 +92,14 @@ export function buildOrderOutbox({ facilityId, orderId, order, dealers, mailSett
     const base = { id, kind: "dealer", dealerId: m.dealerId, dealerName: m.dealerName, lineNos: m.lineNos };
     if (m.status !== "ready") { notifications.push({ ...base, status: MAIL_STATUS.NOT_SENT, reason: m.blockedReason }); continue; }
     notifications.push({ ...base, status: MAIL_STATUS.PENDING });
-    mails.push({ id, data: { ...base, to: m.to, replyTo, fromName, subject: m.subject, text: m.body, status: MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, id) } });
+    mails.push({ id, data: { ...base, to: m.to, replyTo, fromName, subject: m.subject, text: m.body, status: MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, id), ...hold } });
   }
   if (preview.unrouted.length) {
     notifications.push({ id: "unrouted", kind: "dealer", dealerId: null, dealerName: "（発注先未設定）", lineNos: preview.unrouted.map(u => u.lineNo), status: MAIL_STATUS.NOT_SENT, reason: "dealer-unset" });
   }
   if (copyTo) {
     const waiting = mails.length > 0;   // ディーラー宛てがあれば、その結果が出てから送る
-    const data = { id: "copy", kind: "copy", dealerName: "注文控え", to: [copyTo], replyTo: null, fromName, summary: orderSummaryText(order), status: waiting ? MAIL_STATUS.WAITING : MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, "copy") };
+    const data = { id: "copy", kind: "copy", dealerName: "注文控え", to: [copyTo], replyTo: null, fromName, summary: orderSummaryText(order), status: waiting ? MAIL_STATUS.WAITING : MAIL_STATUS.PENDING, attempts: 0, testOrder, idempotencyKey: idempotencyKey(facilityId, orderId, "copy"), ...hold };
     if (!waiting) Object.assign(data, buildCopyContent(order, data.summary, [], notifications));
     notifications.push({ id: "copy", kind: "copy", dealerName: "注文控え", status: data.status });
     mails.push({ id: "copy", data });
@@ -223,7 +226,8 @@ const EVENT_DELIVERY = { "email.delivered": "delivered", "email.delivery_delayed
  * @param {() => string} [deps.testRecipient] テスト注文の送信先(空なら送らない)
  * @param {() => number} [deps.now]
  */
-export function createMailDispatchService({ db, FieldValue, Timestamp, getSender, isEnabled, testRecipient = () => "", testOnly = () => false, now = Date.now }) {
+export function createMailDispatchService({ db, FieldValue, Timestamp, getSender, isEnabled, testRecipient = () => "", testOnly = () => false, now = Date.now,
+  sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
   // testOnly(MAIL_TEST_ONLY): true の間は、テスト注文でなくても、すべてのメールをテスト用の宛先だけに送る(ディーラー・注文控えの宛先には送らない)
   const asTest = (m) => m.testOrder === true || testOnly() === true;
   const ms = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : 0);
@@ -236,7 +240,8 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
       const snap = await tx.get(mailRef);
       if (!snap.exists) return null;
       const m = snap.data();
-      const due = m.status === MAIL_STATUS.PENDING
+      // 送信待ちでも、送信の開始の時刻(sendAfterMs: 注文の取消可能な時間の終わり)より前は送らない(この間は取り消せる)
+      const due = (m.status === MAIL_STATUS.PENDING && !(typeof m.sendAfterMs === "number" && m.sendAfterMs > t))
         || (m.status === MAIL_STATUS.RETRY && ms(m.nextAttemptAt) <= t)
         || (m.status === MAIL_STATUS.SENDING && ms(m.leaseUntil) <= t);   // 送信中のまま処理が止まった(冪等キーで二重送信にならない)
       if (!due) return null;
@@ -274,6 +279,18 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
     return r.ok ? "accepted" : (r.retryable && m.attempts < MAIL_LIMITS.maxAttempts ? "retry" : "failed");
   }
 
+  /**
+   * 送信待ちが作られたとき(sendOrderMail)。送信の開始の時刻(取消可能な時間の終わり)まで待ってから送る。待っている間に取り消されれば、
+   * processMail が状態を確かめて送らない。この処理が途中で止まっても、定期実行(processDue)が時刻の後に送る
+   */
+  async function processMailWhenDue(mailRef) {
+    const snap = await mailRef.get();
+    const after = snap.exists && snap.get("status") === MAIL_STATUS.PENDING ? snap.get("sendAfterMs") : null;
+    const wait = typeof after === "number" ? after - now() : 0;
+    if (wait > 0) await sleep(Math.min(wait, MAIL_LIMITS.holdMaxWaitMs) + MAIL_LIMITS.holdMarginMs);
+    return processMail(mailRef);
+  }
+
   /** 注文の notifications・status を、メールの状態に合わせる。ディーラー宛てが決着したら注文控えを送信待ちにする */
   async function syncOrder(orderRef) {
     const copyRef = await db.runTransaction(async (tx) => {
@@ -302,7 +319,8 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
         if (i >= 0) notifications[i] = { ...notifications[i], status: MAIL_STATUS.PENDING };
         release = copy.ref;
       }
-      tx.update(orderRef, { notifications, status: overallOrderStatus(notifications), statusUpdatedAt: FieldValue.serverTimestamp() });
+      // 取り消した注文は「取消済み」のまま(送信の状態で上書きしない)
+      tx.update(orderRef, { notifications, status: order.cancelled === true ? order.status : overallOrderStatus(notifications), statusUpdatedAt: FieldValue.serverTimestamp() });
       return release;
     });
     if (copyRef) await processMail(copyRef);
@@ -339,5 +357,5 @@ export function createMailDispatchService({ db, FieldValue, Timestamp, getSender
     return changed ? "recorded" : "ignored";
   }
 
-  return { processMail, syncOrder, processDue, handleDeliveryEvent };
+  return { processMail, processMailWhenDue, syncOrder, processDue, handleDeliveryEvent };
 }

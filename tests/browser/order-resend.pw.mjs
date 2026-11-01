@@ -41,7 +41,19 @@ const orderApi = { async createOrder(req) {
   }
   put(s);
   if (s.mode !== "ok") throw Object.assign(new Error("timeout"), { code: "functions/deadline-exceeded" });
-  return { orderId: id, orderNumber: s.orders[id].orderNumber, status: "accepted", replayed };
+  // 取消可能な時間(サーバーが返す期限と現在時刻)。cancelWindowMs を指定したときだけ返す(既定は従来どおり返さない)
+  const t = Date.now();
+  return { orderId: id, orderNumber: s.orders[id].orderNumber, status: "accepted", replayed, ...(s.cancelWindowMs ? { cancelUntilMs: t + s.cancelWindowMs, serverNowMs: t } : {}) };
+},
+async cancelOrder(req) {
+  const s = srv();
+  (s.cancels = s.cancels || []).push(req);
+  put(s);
+  if (s.cancelMode === "late") throw Object.assign(new Error("取り消せる時間を過ぎたため、取り消せませんでした"), { code: "functions/failed-precondition", details: { reason: "too-late" } });
+  if (s.cancelMode === "network") throw Object.assign(new Error("timeout"), { code: "functions/deadline-exceeded" });
+  s.orders[req.orderId] = { ...s.orders[req.orderId], status: "cancelled", cancelled: true };
+  put(s);
+  return { orderId: req.orderId, cancelled: true, alreadyCancelled: false };
 } };
 await initOrderForm({ config: { orderMode: "server-dev" }, repository, facilityId: "f1", facility: { id: "f1", name: "テスト施設" }, orderApi,
   user: { uid: "u1", email: "u1@example.jp", emailVerified: true } });
@@ -324,6 +336,70 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const s = await srv(page);
       assert.notEqual(s.calls[1].requestId, s.calls[0].requestId, "内容が違う注文は新しい requestId");
       assert.equal(Object.keys(s.orders).length, 2);
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`注文完了画面の「取り消す」: 取消可能な間だけ表示して自動で消える(カウントダウンなし)。成功で「注文を取り消しました」、期限後・通信の失敗は明確に表示。再送の受付済みには出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const setSrv = (page, patch) => page.evaluate((p) => { const s = JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"calls":[]}'); Object.assign(s, p); localStorage.setItem("__srv", JSON.stringify(s)); }, patch);
+      const submit = async (page, notes, power) => {
+        await fillOrder(page, notes);
+        await page.locator(".lens-line").first().locator("[data-f=power]").selectOption(power);   // 過去の注文との重複にしない
+        await page.click("#btnConfirm");
+        await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+        await page.click("#btnModalSubmit");
+        await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+      };
+      const { page, errors } = await open(browser);
+      // 1) 取消可能な時間(短く 1.5 秒)を過ぎると、ボタンは自動で消える。カウントダウン・残り秒数は出さない
+      await setSrv(page, { mode: "ok", cancelWindowMs: 1500, real: true });
+      await submit(page, "自動で消える", "+20.0D");
+      const btn = page.locator("#completeModal #btnCancelOrder");
+      assert.equal(await btn.innerText(), "取り消す");
+      assert.ok(!/d+s*秒|残り/.test(await page.locator("#completeModal").innerText()), "残り秒数を出さない");
+      assert.equal(await page.locator("#completeModal progress, #completeModal [role=progressbar]").count(), 0, "プログレスバーを出さない");
+      assert.equal(await page.locator("#completeModal #btnNewOrder").isVisible(), true, "既存のボタンはそのまま");
+      await btn.waitFor({ state: "detached", timeout: 5000 });
+      assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
+      await page.click("#btnNewOrder");
+      // 2) 取消可能な間に押す: 成功の表示。状態は「取消済み」。ボタンは消える
+      await setSrv(page, { cancelWindowMs: 10000 });
+      await submit(page, "取り消す", "+20.5D");
+      await btn.click();
+      await page.waitForFunction(() => document.getElementById("completeTitle").textContent === "注文を取り消しました");
+      assert.equal(await page.locator('#completeDetails [data-f="completeStatus"]').innerText(), "取消済み");
+      assert.equal(await btn.count(), 0);
+      const s1 = await srv(page);
+      assert.deepEqual(Object.keys(s1.cancels.at(-1)).sort(), ["facilityId", "orderId"]);
+      assert.equal(s1.cancels.at(-1).facilityId, "f1");
+      await page.click("#btnNewOrder");
+      // 3) 期限の後に届いた(サーバーが拒否): 取り消せなかったことを明確に表示。完了の表示はそのまま
+      await setSrv(page, { cancelMode: "late" });
+      await submit(page, "期限の後", "+21.0D");
+      await btn.click();
+      await page.locator("#completeCancelMsg").waitFor();
+      assert.match(await page.locator("#completeCancelMsg").innerText(), /^取り消せませんでした。取り消せる時間を過ぎたため、注文は受け付けられ、ディーラーへ送信されます。/);
+      assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
+      assert.equal(await btn.count(), 0);
+      await page.click("#btnNewOrder");
+      // 4) 通信の失敗: 取り消せたか分からないことを表示し、注文履歴での確認を案内
+      await setSrv(page, { cancelMode: "network" });
+      await submit(page, "通信の失敗", "+21.5D");
+      await btn.click();
+      await page.locator("#completeCancelMsg").waitFor();
+      assert.match(await page.locator("#completeCancelMsg").innerText(), /取り消せたか確認できませんでした/);
+      await page.click("#btnNewOrder");
+      assert.equal(await page.locator("#completeCancelMsg").count(), 0, "次の注文には前の表示を残さない");
+      // 5) 期限を返さない(旧いサーバー・再送の受付済み)ときは出さない
+      await setSrv(page, { cancelWindowMs: 0, cancelMode: null });
+      await submit(page, "期限なし", "+22.0D");
+      assert.equal(await btn.count(), 0);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

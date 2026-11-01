@@ -25,7 +25,7 @@ before(async () => {
   if (!getApps().length) initializeApp({ projectId: PROJECT });
   db = getFirestore();
   clock = { t: Date.parse("2026-10-26T00:00:00Z") };
-  orders = createOrderService({ db, FieldValue, now: () => clock.t, isEnabled: () => true });
+  orders = createOrderService({ db, FieldValue, now: () => clock.t, isEnabled: () => true, cancelWindowMs: 0 });   // 取消時間の保留は order-cancel.test.js で確かめる
   deletion = createOrderDeletionService({ db, FieldValue });
   surgeryIndex = createOrderSurgeryIndexService({ db });
   dispatch = createMailDispatchService({ db, FieldValue, Timestamp, now: () => clock.t, isEnabled: () => enabled,

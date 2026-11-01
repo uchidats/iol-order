@@ -31,8 +31,14 @@ export const ORDER_STATUS = Object.freeze({
   ACCEPTED: "accepted",                            // サーバーで検証・保存済み(ディーラー未通知)
   NOTIFICATION_PENDING: "notification_pending",    // 通知待ち(将来)
   NOTIFIED: "notified",                            // ディーラー通知成功(将来)
-  NOTIFICATION_FAILED: "notification_failed"       // 通知失敗(将来)
+  NOTIFICATION_FAILED: "notification_failed",      // 通知失敗(将来)
+  CANCELLED: "cancelled"                          // 注文した本人が、受付の直後の取消可能な時間内に取り消した(order-cancel.js)
 });
+/**
+ * 注文の受付の直後に取り消せる時間(サーバーの時計で決める)。この時間はディーラー宛て・注文控えのメールを送らない(sendAfterMs)。
+ * 取消可能な時間とメールの送信の保留は同じ値(取消の期限 = 送信の開始の時刻)
+ */
+export const ORDER_CANCEL = Object.freeze({ windowMs: 10 * 1000 });
 
 export const ORDER_LIMITS = Object.freeze({
   notesMax: 1000,
@@ -212,8 +218,9 @@ export function validateLens(model, input) {
  *   保存される注文には testOrder: true が付く(メールはテスト用の宛先だけ)。testMode: false は、許可リストのまま本番の注文として保存する。
  *   この制限はサーバー側で強制する(画面の設定には依存しない)。
  * @param {Array<object>} [deps.catalog]
+ * @param {number} [deps.cancelWindowMs] 受付の直後に取り消せる時間(= メールの送信の保留)。既定は ORDER_CANCEL.windowMs(テストで 0 にすると従来どおり即時)
  */
-export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, getPolicy = () => ({ unrestricted: true }), catalog = IOL_MODELS }) {
+export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, getPolicy = () => ({ unrestricted: true }), catalog = IOL_MODELS, cancelWindowMs = ORDER_CANCEL.windowMs }) {
   async function consumeRate(uid) {
     const ref = db.doc(`rateLimits/${uid}_createOrder`);
     await db.runTransaction(async (tx) => {
@@ -310,6 +317,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           dispatch                            // 実メール送信の可否。allowed=false の明細は、将来も送信してはいけない
         };
       });
+      const t = now();
+      const cancelUntilMs = t + cancelWindowMs;   // 取消の期限 = メールの送信を始めてよい時刻(サーバーの時計)
       const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
       const orderNumber = `IOL-${day}-${String(seq).padStart(2, "0")}`;   // 連番は最低2桁(100件目以降は3桁以上)。保存済みの注文番号(旧4桁)は変えない
 
@@ -333,13 +342,15 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         // 実際に発注したログインユーザー(担当医とは別の情報。サーバーが認証情報から記録し、クライアントの申告は受け取らない)
         // role: 注文時点の入力者の役割(admin/subadmin/orderer/proxy)。代行入力者の注文を区別する(担当医は lines[].doctor)
         createdBy: { uid: user.uid, email: user.email, displayName: user.displayName, role: mem.get("role") },
-        createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp(), acceptedAt: FieldValue.serverTimestamp(), statusUpdatedAt: FieldValue.serverTimestamp(),
+        cancelUntilMs   // 注文した本人が取り消せる期限(order-cancel.js)。この時刻まではメールを送らない
       };
       // 送るメール(送信待ち)と、発注先ごとの状態の要約(notifications。アドレス・本文は含めない)
-      const outbox = buildOrderOutbox({ facilityId: input.facilityId, orderId, order: orderDoc, dealers: dealerDocs, mailSettings: mailSettingsSnap.exists ? mailSettingsSnap.data() : null });
+      const outbox = buildOrderOutbox({ facilityId: input.facilityId, orderId, order: orderDoc, dealers: dealerDocs, mailSettings: mailSettingsSnap.exists ? mailSettingsSnap.data() : null, sendAfterMs: cancelUntilMs });
       tx.create(orderRef, { ...orderDoc, notifications: outbox.notifications });
       for (const m of outbox.mails) tx.create(orderRef.collection("mails").doc(m.id), { ...m.data, createdAt: FieldValue.serverTimestamp(), statusAt: FieldValue.serverTimestamp() });
-      return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false, lineCount: lines.length, totalQuantity: input.totalQuantity };
+      // 取消の期限とサーバーの現在時刻(画面は差だけを使い、端末の時計のずれに左右されない)
+      return { orderId, orderNumber, status: ORDER_STATUS.ACCEPTED, replayed: false, lineCount: lines.length, totalQuantity: input.totalQuantity, cancelUntilMs, serverNowMs: t };
     });
   }
 

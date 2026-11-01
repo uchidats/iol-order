@@ -144,3 +144,16 @@ test("削除の確認に使うメールの件数(送信済み・未送信・送�
   assert.equal(c.notifications[0].statusLabel, "未送信（注文の削除により送信を中止）");
   assert.deepEqual(summarizeHistoryOrder(v1).mailCounts, { sent: 0, unsent: 0, sending: 0 });
 });
+
+test("取消済みの注文(受付の直後に本人が取り消した): 状態は「取消済み」、メールは「注文の取消により送信を中止」。一覧から隠さない(論理削除とは別)", () => {
+  const order = { id: "o1", orderNumber: "IOL-20261101-03", status: "cancelled", cancelled: true, createdAt: Date.parse("2026-11-01T00:00:00Z"), notes: "",
+    lines: [{ lineNo: 1, surgeryDate: "2026-11-10", item: { manufacturer: "J&J", model: "DIB00V", power: "+20.0D", quantity: 1 }, doctor: { name: "山田" }, dealer: { id: "d1", name: "A商会" } }],
+    notifications: [{ id: "d_d1", kind: "dealer", dealerName: "A商会", status: "cancelled" }, { id: "copy", kind: "copy", dealerName: "注文控え", status: "cancelled" }] };
+  const s = summarizeHistoryOrder(order);
+  assert.equal(s.cancelled, true);
+  assert.equal(s.statusLabel, "取消済み（ディーラーへは送信していません）");
+  assert.deepEqual(s.notifications.map(n => n.statusLabel), ["未送信（注文の取消により送信を中止）", "未送信（注文の取消により送信を中止）"]);
+  assert.equal(visibleOrders([order]).length, 1, "一覧に残す");
+  const deleted = summarizeHistoryOrder({ ...order, cancelled: undefined, deleted: true, status: "accepted" });
+  assert.equal(deleted.notifications[0].statusLabel, "未送信（注文の削除により送信を中止）", "論理削除の文言は従来どおり");
+});

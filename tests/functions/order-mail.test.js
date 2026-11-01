@@ -22,7 +22,7 @@ before(async () => {
   if (!getApps().length) initializeApp({ projectId: PROJECT });
   db = getFirestore();
   clock = { t: Date.parse("2026-10-26T00:00:00Z") };
-  orders = createOrderService({ db, FieldValue, now: () => clock.t });
+  orders = createOrderService({ db, FieldValue, now: () => clock.t, cancelWindowMs: 0 });   // 取消時間の保留は order-cancel.test.js で確かめる
   dispatch = createMailDispatchService({
     db, FieldValue, Timestamp, now: () => clock.t,
     isEnabled: () => enabled, testRecipient: () => testTo,
@@ -168,7 +168,7 @@ test("送信停止中(MAIL_SENDING_ENABLED=false): 送らずに held。自動で
 });
 
 test("テスト注文(開発用受付): テスト用の宛先がなければ送らない。あればその宛先だけに送り、ディーラーには送らない", async () => {
-  const testOrders = createOrderService({ db, FieldValue, now: () => clock.t, getPolicy: () => ({ facilityIds: [F], uids: ["ord"] }) });
+  const testOrders = createOrderService({ db, FieldValue, now: () => clock.t, getPolicy: () => ({ facilityIds: [F], uids: ["ord"] }), cancelWindowMs: 0 });
   const r = await testOrders.createOrder({ auth: user("ord"), data: { facilityId: F, requestId: crypto.randomUUID(), lines: [line()] } });
   await dispatch.processMail(ref(r.orderId, "d_dA"));
   assert.equal(sent.length, 0);
