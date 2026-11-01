@@ -42,14 +42,14 @@ const STAFF = { user: { uid: "x1", email: "x1@corp.example.jp", emailVerified: t
 
 /**
  * 偽のサーバー(dealerPortalApi)。scenario: "staff"(確認済み)/ "unverified"(この認証主体は未確認)/ "pendingInvite"(確認済み+新しい参加の案内)/
- * "multi"(2社)/ "none"(未招待)/ "disabled"(機能の停止中)。確認コードは偽: 12345678(確認すると端末の値 "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" を返す)
+ * "multi"(2社)/ "single"(閲覧可能な施設が1件)/ "none"(未招待)/ "disabled"(機能の停止中)。確認コードは偽: 12345678(確認すると端末の値 "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" を返す)
  */
 function installFakeServer(page, scenario) {
   return page.addInitScript((scenario) => {
     const deny = (msg) => Object.assign(new Error(msg), { code: "functions/permission-denied" });
     const facilities = [{ id: "fB", name: "B眼科", assigned: true }, { id: "fA", name: "<img src=x onerror=\"window.__xss=1\">A眼科", assigned: false }];
     const receipts = [
-      { receiptId: "rcp-a", facilityId: "fA", facilityName: facilities[1].name, orderNumber: "IOL-20261027-01", orderedAt: "2026-10-27T01:00:00.000Z", lineCount: 2, totalQuantity: 3 },
+      { receiptId: "rcp-a", facilityId: "fA", facilityName: facilities[1].name, orderNumber: "IOL-20261027-01", orderedAt: "2026-10-27T01:00:00.000Z", lineCount: 2, totalQuantity: 3, doctorNames: ["山田", "<b>佐藤</b>"] },
       { receiptId: "rcp-b", facilityId: "fB", facilityName: "B眼科", orderNumber: "IOL-20261027-02", orderedAt: "2026-10-27T02:00:00.000Z", lineCount: 1, totalQuantity: 1 }
     ];
     let verified = !["unverified", "none"].includes(scenario);
@@ -119,7 +119,7 @@ function installFakeServer(page, scenario) {
         if (d.action === "context") return {
           ...(scenario === "testMode" ? { testMode: true } : {}),
           company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: myRole, branch: { id: "br-1", name: "東京支店" } },
-          facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
+          facilities: scenario === "single" ? facilities.slice(0, 1) : facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
           defaultRange: { from: "2026-09-28", to: "2026-10-27" }, limits: { rangeDaysMax: 366, pageMax: 100 }
         };
         if (d.action === "list") {
@@ -141,11 +141,12 @@ function installFakeServer(page, scenario) {
 }
 /** 端末の値の保存(キーは UID・ログイン方法・主体ごと。iolDealerDevice.{uid}.…) */
 const deviceStored = (page, uid = "x1") => page.evaluate((u) => Object.keys(localStorage).filter(k => k.startsWith(`iolDealerDevice.${u}.`)).map(k => [k.split(".").length, localStorage.getItem(k)]), uid);
-/** 初期表示(手術日の週)を待ってから「注文日順」に切り替え、一覧を待つ */
+/** 初期表示(手術日の週)を待ってから「一覧表示」に切り替え、一覧を待つ。続く操作のため「絞り込み」(折りたたみ)を開いておく */
 async function openOrdered(page) {
   await page.waitForFunction(() => (window.__calls || []).some(([n, d]) => n === "dealerPortalApi" && d.action === "week") && document.querySelector('[data-view="ordered"]'));
   await page.click('[data-view="ordered"]');
   await page.locator(".dealer-row").first().waitFor();
+  await page.locator("#dealerListFilter > summary").click();
 }
 const calls = (page, action) => page.evaluate((a) => (window.__calls || []).filter(([n, d]) => n === "dealerPortalApi" && d.action === a).map(([, d]) => d), action);
 
@@ -212,6 +213,77 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 }
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面の受注一覧の並び: 医療機関 → 表示の切り替え → 絞り込み(一覧表示だけ)→ 受注。説明はⓘ(タップで開く)。施設1件なら一括の選択ボタンを出さない。一覧の行に担当医: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [320, 390, 1100]) {
+        const context = await newFakeContext(browser, base, width, STAFF);
+        const page = await context.newPage();
+        await installFakeServer(page, "staff");
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await page.goto(`${base}dealer.html`);
+        await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+        // 並び(画面の上から): 医療機関の枠 → 表示の切り替え → 週 / 一覧
+        const order = await page.evaluate(() => {
+          const els = [".dealer-facility-box", ".dealer-view", "#dealerWeekArea", "#dealerOrderedArea"].map(q => document.querySelector(q));
+          return els.every(Boolean) && els.every((el, i) => i === 0 || (els[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+        });
+        assert.ok(order, "医療機関 → 切り替え → 受注");
+        assert.equal(await page.locator(".dealer-facility-box .dealer-view").count(), 0, "切り替えは医療機関の枠の外");
+        assert.equal(await page.locator("#dealerOrderedArea #dealerListFilter").count(), 1, "絞り込みは一覧表示の中だけ");
+        assert.deepEqual(await page.locator(".dealer-view [data-view]").allInnerTexts(), ["手術日（週）", "一覧表示"]);
+        assert.equal(await page.locator(".dealer-view.history-sort .history-sort-btn").count(), 2, "既存の切り替えボタンのデザイン");
+        // 説明文は常時表示しない(見出しの右のⓘ)。医療機関名・検索範囲は表示したまま
+        const text = await page.locator("#dealerPanel").innerText();
+        assert.ok(!text.includes("自社宛ての明細だけを表示"), "説明文は常時表示しない");
+        assert.ok(text.includes("B眼科") && /検索範囲: 担当施設\(1施設\)/.test(text));
+        const titleTip = page.locator(".dealer-title-row .info-tip-btn");
+        assert.equal(await titleTip.count(), 1, "「受注一覧」の見出しの右にⓘ");
+        await titleTip.click();
+        assert.match(await page.locator(".dealer-title-row .info-tip-pop").innerText(), /自社宛ての明細だけを表示します/);
+        await page.keyboard.press("Escape");
+        assert.equal(await page.locator(".dealer-title-row .info-tip-pop").isHidden(), true);
+        assert.equal(await page.locator(".dealer-facility-box .info-tip-btn").count(), 2, "医療機関・担当施設の保存の説明もⓘ");
+        // 医療機関の選択(施設2件): 担当施設のみ / すべて選択 / すべて解除。担当施設の保存は区切った別の行
+        assert.deepEqual(await page.locator(".dealer-facility-box [data-select]").allInnerTexts(), ["担当施設のみ", "すべて選択", "すべて解除"]);
+        assert.equal(await page.locator(".dealer-assign-row [data-act=\"saveAssigned\"]").count(), 1);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+        // 一覧表示: 絞り込みは閉じている。行に担当医(複数。文字として表示)、旧い索引(担当医なし)は省略
+        await page.click('[data-view="ordered"]');
+        await page.locator(".dealer-row").first().waitFor();
+        assert.equal(await page.locator("#dealerListFilter").evaluate(d => d.open), false, "絞り込みは閉じている");
+        assert.equal(await page.locator("#dealerFrom").inputValue(), "", "期間は指定しない");
+        await page.click('[data-select="all"]');
+        await page.locator("#dealerListFilter > summary").click();
+        await page.click("#btnDealerSearch");
+        await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 2);
+        assert.deepEqual(await page.locator(".dealer-row-number").allInnerTexts(), ["IOL-20261027-02", "IOL-20261027-01"], "新しい順");
+        assert.deepEqual((await page.locator(".dealer-row-doctor").allInnerTexts()).map(x => x.trim()), ["・ 担当医 山田、<b>佐藤</b>"], "担当医のない行は省略");
+        assert.equal(await page.locator(".dealer-results b").count(), 0);
+        const fetchedText = await page.locator(".dealer-fetched").innerText();
+        assert.ok(/検索時点: [0-9]{4}[/][0-9]{2}[/][0-9]{2}/.test(fetchedText) && !fetchedText.includes("注文メールとは別に"), "検索時点は表示し、補足はⓘ");
+        assert.equal(await page.locator(".dealer-fetched .info-tip-btn").count(), 1);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 一覧が横にはみ出さない`);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+      // 閲覧可能な施設が1件: 一括の選択ボタンは出さない(チェックボックス・担当施設の保存は残す)
+      const context = await newFakeContext(browser, base, 390, STAFF);
+      const page = await context.newPage();
+      await installFakeServer(page, "single");
+      await page.goto(`${base}dealer.html`);
+      await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+      assert.equal(await page.locator("[data-select]").count(), 0);
+      assert.equal(await page.locator(".dealer-facility input").count(), 1);
+      assert.equal(await page.locator('[data-act="saveAssigned"]').count(), 1);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`ディーラー画面: 条件を変えたら続きを破棄(古い条件の「さらに表示」をしない・通信中の変更も)。走査途中の0件は「該当なし」としない。再検索の案内: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
@@ -260,7 +332,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 期間・注文番号・選択ボタンの変更でも破棄
       for (const change of [
         () => page.fill("#dealerOrderNumber", "X-1"),
-        () => page.fill("#dealerFrom", "2026-10-01"),
+        async () => { await page.fill("#dealerFrom", "2026-10-01"); await page.fill("#dealerTo", "2026-10-31"); },   // 期間は両方(片方だけは案内を出して検索しない)
         () => page.click('[data-select="all"]')
       ]) {
         await page.click("#btnDealerSearch");
@@ -286,7 +358,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator("#btnDealerMore").isHidden(), false);
       // 検索の途中で索引が反映された: 先頭からの再検索を案内し、続きは出さない
       await page.click("#btnDealerMore");
-      await page.waitForFunction(() => /先頭から検索し直してください/.test(document.querySelector("#dealerListMsg").textContent));
+      await page.waitForFunction(() => /先頭から表示し直してください/.test(document.querySelector("#dealerListMsg").textContent));
       assert.equal(await page.locator("#btnDealerMore").isHidden(), true);
       assert.deepEqual(errors, []);
       await context.close();

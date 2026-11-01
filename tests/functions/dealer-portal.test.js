@@ -1605,6 +1605,48 @@ test("施設の論理削除: この発注先へ送った注文は削除後も出
   assert.ok((await list("x1")).items.some(i => i.orderNumber === e.orderNumber));
 });
 
+test("一覧表示: 期間なし(全期間)で注文日時の新しい順に20件ずつ、続きはカーソル。担当医(複数・重複なし)を返し、記録のない旧い索引は空。取消・未送信の削除は従来どおり出さない。期間は両方か、なし", async () => {
+  await grant("adminA", "fA", "dA1");
+  await db.doc("facilities/fA/orderers/o2").set({ facilityId: "fA", name: "佐藤" });
+  const page = (over = {}) => api("x1", "list", { facilityFilter: { mode: "all" }, limit: 20, ...over });
+  // 複数の担当医の注文(自社宛ての明細の担当医だけ。重複なし・初出順)
+  const multi = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" }), line({ dealerId: "dA1", doctorId: "o2", power: "+21.0D" }), line({ dealerId: "dA1", power: "+22.0D" }), line({ dealerId: "dA2", doctorId: "o2", power: "+23.0D" })]);
+  const ids = [multi.orderNumber];
+  for (let i = 0; i < 23; i++) ids.push((await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: `+${(10 + i * 0.5).toFixed(1)}D` })])).orderNumber);
+  // 期間なし: 新しい順に20件 + 続き
+  const p1 = await page();
+  assert.equal(p1.items.length, 20);
+  assert.ok(p1.nextCursor, "続きがある");
+  const times = p1.items.map(i => Date.parse(i.orderedAt));
+  assert.deepEqual(times, [...times].sort((a, b) => b - a), "注文日時の新しい順");
+  const p2 = await page({ cursor: p1.nextCursor });
+  assert.equal(p2.items.length, 4);
+  assert.equal(p2.nextCursor, null);
+  const all = [...p1.items, ...p2.items];
+  assert.deepEqual(new Set(all.map(i => i.orderNumber)), new Set(ids), "1注文1行・重複なし・欠けなし");
+  const m = all.find(i => i.orderNumber === multi.orderNumber);
+  assert.deepEqual([m.doctorNames, m.lineCount, m.totalQuantity], [["A眼科の山田", "佐藤"], 3, 3], "自社宛ての明細の担当医だけ(他社宛ての明細の担当医も同じ名前なら1回)");
+  assert.ok(all.filter(i => i !== m).every(i => i.doctorNames.length === 1 && i.doctorNames[0] === "A眼科の山田"));
+  // 担当医の記録がない旧い索引: 空(画面は表示を省略)
+  const rid = m.receiptId;
+  await db.doc(`dealerCompanies/${C.X}/receipts/${rid}`).update({ doctorNames: FieldValue.delete(), projectionVersion: 1 });
+  assert.deepEqual((await page()).items.concat((await page({ cursor: (await page()).nextCursor })).items).find(i => i.receiptId === rid).doctorNames, []);
+  // 取消・未送信の削除の印がある索引は出さない(期間なしでも)
+  await db.doc(`dealerCompanies/${C.X}/receipts/${p1.items[0].receiptId}`).update({ cancelled: true });
+  await db.doc(`dealerCompanies/${C.X}/receipts/${p1.items[1].receiptId}`).update({ deletedUnsent: true });
+  const after = [...(await page()).items, ...(await page({ limit: 100 })).items];
+  assert.ok(!after.some(i => i.receiptId === p1.items[0].receiptId || i.receiptId === p1.items[1].receiptId));
+  assert.equal((await page({ limit: 100 })).items.length, 22);
+  // 期間: 両方なら従来どおり(最長366日)。片方だけは入力の誤り
+  assert.equal((await page({ ...range(), limit: 100 })).items.length, 22, "期間の指定は従来どおり");
+  await rejects(page({ from: today() }), "invalid-argument");
+  await rejects(page({ to: today() }), "invalid-argument");
+  // 期間なしと期間ありのカーソルは別の検索(混ぜない)
+  await rejects(page({ ...range(), cursor: p1.nextCursor }), "invalid-argument");
+  // 他社(ワイ医療)からは見えない(閲覧の許可のない会社)
+  assert.deepEqual((await api("y1", "list", { facilityFilter: { mode: "all" }, limit: 20 })).items, []);
+});
+
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
   const email = "x1@corp.example.jp", staffId = sid(C.X, "x1");
   const g = googleAuth("ug1", email, "g-x1"), m = msAuth("um1", email, "m-x1");

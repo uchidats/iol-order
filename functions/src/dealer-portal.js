@@ -111,6 +111,19 @@ export const receiptIdOf = (grantId, facilityId, orderId) => "rcp-" + hash(`${gr
  * - 送っていない(削除で送信を中止した・失敗・未送信)注文は出さない(届いていない注文を、画面だけで手配させない)
  * @param {object} order 注文 @param {{exists:boolean, get:(k:string)=>any}|null} mail この発注先宛てのメール(d_{発注先})
  */
+/** 自社宛ての明細の担当医名(初出順・重複なし。一覧の表示用。名前は詳細で見せている明細の情報と同じ) */
+export function doctorNamesFromLines(lines) {
+  const out = [];
+  for (const l of lines || []) {
+    const n = l && l.doctor && typeof l.doctor.name === "string" ? l.doctor.name.trim().slice(0, 50) : "";
+    if (n && !out.includes(n)) out.push(n);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+/** 受信の索引の担当医名(旧い索引にはない: 空) */
+export const doctorNamesOf = (r) => (Array.isArray(r && r.doctorNames) ? r.doctorNames.filter(n => typeof n === "string" && n).slice(0, 5) : []);
+
 export function deletedAndNotSent(order, mail) {
   return !!order && order.deleted === true && !(mail && mail.exists && mail.get("status") === "accepted");
 }
@@ -685,10 +698,16 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   /** 検索条件の正規化: 期間(日本時間の日付・最大366日)・施設(selected/all)・注文番号(完全一致) */
   function parseQuery(data, scope) {
-    const fromMs = jstDayStartMs(data.from), toStart = jstDayStartMs(data.to);
-    if (fromMs === null || toStart === null) throw badInput("期間を確認してください");
-    const toMs = toStart + DAY_MS;
-    if (toMs <= fromMs || (toMs - fromMs) / DAY_MS > PORTAL_LIMITS.rangeDaysMax) throw badInput(`期間は${PORTAL_LIMITS.rangeDaysMax}日以内で指定してください`);
+    // 期間は任意(一覧表示の既定は期間なし = 全期間を新しい順)。指定するときは両方(従来どおり最長366日)
+    const noRange = (data.from === undefined || data.from === null || data.from === "") && (data.to === undefined || data.to === null || data.to === "");
+    let fromMs = null, toMs = null;
+    if (!noRange) {
+      fromMs = jstDayStartMs(data.from);
+      const toStart = jstDayStartMs(data.to);
+      if (fromMs === null || toStart === null) throw badInput("期間を確認してください");
+      toMs = toStart + DAY_MS;
+      if (toMs <= fromMs || (toMs - fromMs) / DAY_MS > PORTAL_LIMITS.rangeDaysMax) throw badInput(`期間は${PORTAL_LIMITS.rangeDaysMax}日以内で指定してください`);
+    }
     const { facilities, mode } = parseFacilityFilter(data.facilityFilter, scope);
     let orderNumber = null;
     if (data.orderNumber !== undefined && data.orderNumber !== null && data.orderNumber !== "") {
@@ -750,14 +769,14 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       return Boolean(s && selected.has(r.facilityId) && r.grantId === s.grantId && r.localDealerId === s.localDealerId
         && r.cancelled !== true   // 取り消した注文の索引(通常は作らない。order-cancel.js が印を付ける)
         && r.deletedUnsent !== true   // 施設が削除し、この発注先へ送っていない注文(order-deletion.js が印を付ける。送った注文は印を付けない)
-        && t !== null && t >= q.fromMs && t < q.toMs && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
+        && t !== null && (q.fromMs === null || (t >= q.fromMs && t < q.toMs)) && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
     };
     // 検索時点(最初のページを読んだ時点)を固定し、続きのページも同じ時点の内容を読む(読み取り専用トランザクションの readTime)。
     // 検索中に索引が追加されても、ページの間で欠けたり重なったりしない。検索時点より後に反映された注文は、newSinceSearch で知らせる(再検索で表示)
     const pinned = cursor ? new Timestamp(cursor.as[0], cursor.as[1]) : null;
-    const base = receipts
-      .where("orderedAt", ">=", Timestamp.fromMillis(q.fromMs)).where("orderedAt", "<", Timestamp.fromMillis(q.toMs))
-      .orderBy("orderedAt", "desc").orderBy(FieldPath.documentId(), "desc");
+    const ranged = q.fromMs === null ? receipts
+      : receipts.where("orderedAt", ">=", Timestamp.fromMillis(q.fromMs)).where("orderedAt", "<", Timestamp.fromMillis(q.toMs));
+    const base = ranged.orderBy("orderedAt", "desc").orderBy(FieldPath.documentId(), "desc");
     const { asOf, last, exhausted } = await db.runTransaction(async (tx) => {
       let after = cursor ? [new Timestamp(cursor.s, cursor.n), cursor.id] : null;
       // 走査: 新しい順に少しずつ読み、各行を認可・絞り込み。読み終えた位置をカーソルにする(走査の上限に達したら続きを返す)
@@ -777,7 +796,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
             items.push({
               receiptId: d.id, facilityId: r.facilityId, facilityName: scope.get(r.facilityId).facilityName,
               orderNumber: String(r.orderNumber || ""), orderedAt: isoOf(r.orderedAt),
-              lineCount: Number(r.lineCount) || 0, totalQuantity: Number(r.totalQuantity) || 0
+              lineCount: Number(r.lineCount) || 0, totalQuantity: Number(r.totalQuantity) || 0,
+              doctorNames: doctorNamesOf(r)   // 自社宛ての明細の担当医(索引に記録がなければ空。画面は表示を省略する)
             });
             if (items.length >= q.limit) break scan;
           }
@@ -1451,7 +1471,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
           orderNumber: String(order.orderNumber || ""), orderedAt: order.createdAt,
           lineNos: own.map(l => l.lineNo).filter(n => Number.isInteger(n)),
           lineCount: own.length, totalQuantity: own.reduce((s, l) => s + (Number(l.item && l.item.quantity) || 0), 0),
-          surgeryDates, projectionVersion: 1, createdAt: FieldValue.serverTimestamp()
+          surgeryDates, doctorNames: doctorNamesFromLines(own), projectionVersion: 2, createdAt: FieldValue.serverTimestamp()
         });
         return true;
       }).catch((e) => { errors.push(e); return null; });
