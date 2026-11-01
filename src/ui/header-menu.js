@@ -6,6 +6,9 @@ import { openShareDialog } from "./share-site.js";
  * 施設選択UIを常時表示しないため、切り替えはここからのみ行う。「使い方・ヘルプ」「サイトを共有」は、ログインしていなくても(施設に入る前でも)使える。
  * @param {{onOpenHistory:()=>void, onSwitchFacility:()=>void, onOpenSettings:()=>void, onRegisterFacility:()=>void, onOpenHelp:()=>void, onSignOut:()=>void}} handlers
  */
+/** 注文フォームのメニューから開くディーラー用受注一覧(戻り先の案内を出すための印だけを付ける。権限には関係しない) */
+export const DEALER_PORTAL_FROM_ORDER = "dealer.html?from=order";
+
 export function createHeaderMenu(handlers) {
   const inner = document.querySelector(".header-inner");
   const wrap = document.createElement("div");
@@ -53,6 +56,7 @@ export function createHeaderMenu(handlers) {
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
         ${info.canPreregister ? '<button type="button" role="menuitem" class="header-menu-item" id="menuPreregistrations">施設を事前登録</button>' : ""}
         ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerOperator">ディーラー管理</button>' : ""}
+        ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerPortal">ディーラー用受注一覧</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${info.canAbout ? '<button type="button" role="menuitem" class="header-menu-item" id="menuAbout">IOL Orderについて</button>' : ""}
         ${share}
@@ -69,6 +73,9 @@ export function createHeaderMenu(handlers) {
       if (pr) pr.addEventListener("click", () => { setOpen(false); handlers.onOpenPreregistrations(); });
       const dop = panel.querySelector("#menuDealerOperator");   // 運営者(platformAdmin)だけ(表示のみ。権限はサーバーが確認する)
       if (dop) dop.addEventListener("click", () => { setOpen(false); handlers.onOpenDealerOperator(); });
+      // ディーラー用受注一覧(dealer.html。運営者だけに表示。移動するだけで、ディーラー画面のログイン・閲覧の許可は従来どおり別に確認する)
+      const dpo = panel.querySelector("#menuDealerPortal");
+      if (dpo) dpo.addEventListener("click", () => { setOpen(false); window.location.assign(DEALER_PORTAL_FROM_ORDER); });
       const ab = panel.querySelector("#menuAbout");   // サービス紹介(当面は運営者だけ。表示のみ。本文は Rules で platformAdmin だけが読める)
       if (ab) ab.addEventListener("click", () => { setOpen(false); handlers.onOpenAbout(); });
       panel.querySelector("#menuRegisterFacility").addEventListener("click", () => { setOpen(false); handlers.onRegisterFacility(); });

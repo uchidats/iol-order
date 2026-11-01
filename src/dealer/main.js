@@ -10,7 +10,28 @@ import { createDealerApp } from "./dealer-app.js";
  * ログイン(Google・Microsoft・メールリンク)の後は、確認コードで担当者に紐付けた認証主体だけをサーバーが通す(UID・メールの一致だけでは通さない)。
  * メールリンクの戻り先は同じドメインの dealer.html に固定する(任意の URL へは戻さない)。
  */
+/**
+ * 注文フォームのメニュー(運営者だけに表示)から開いたときだけ、「IOL注文フォームに戻る」を出す(このタブの間は、メールリンクのログインで戻ってきても出す)。
+ * 表示だけの判定で、ログイン・閲覧の許可・権限には関係しない(受注はこれまでどおり、ディーラーのログインと施設の許可がある場合だけ)
+ */
+function showBackToOrder() {
+  const KEY = "iolDealerFromOrder";
+  let from = false;
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.get("from") === "order") {
+      sessionStorage.setItem(KEY, "1");
+      url.searchParams.delete("from");
+      history.replaceState(null, "", url.pathname + url.search + url.hash);   // 印だけを外す(メールリンクの値などはそのまま)
+    }
+    from = sessionStorage.getItem(KEY) === "1";
+  } catch { /* 保存できない環境では出さない */ }
+  const row = document.getElementById("dealerBackRow");
+  if (row) row.hidden = !from;
+}
+
 async function bootstrap() {
+  showBackToOrder();
   const mount = document.getElementById("dealerMain");
   const subtitle = document.getElementById("dealerCompany");
   const setSubtitle = (t) => { subtitle.textContent = t || ""; subtitle.hidden = !t; };

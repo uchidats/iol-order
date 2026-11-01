@@ -180,3 +180,60 @@ test("IOL Orderについて(運営者・原稿の未登録): 案内だけを表�
     await context.close();
   } finally { await browser.close(); }
 });
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー用受注一覧への移動: メニューは運営者だけ(一般利用者・未ログインには出さない)。開くと dealer.html、戻るボタンで注文フォームへ。直接開いたときは戻るボタンを出さない。スマートフォン: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      // 未ログイン・一般利用者(施設の管理者・注文者)には出さない
+      let context = await newFakeContext(browser, base, 390, null);
+      let page = await context.newPage();
+      await page.goto(base);
+      await page.getByText("ログインが必要です", { exact: true }).waitFor();
+      assert.ok(!(await menuItems(page)).includes("ディーラー用受注一覧"));
+      await context.close();
+      for (const s of [ADMIN, session("ord", "orderer", {})]) {
+        context = await newFakeContext(browser, base, 390, s);
+        page = await context.newPage();
+        await page.goto(base);
+        await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();
+        assert.ok(!(await menuItems(page)).includes("ディーラー用受注一覧"), `${s.user.uid}: メニューに出ない`);
+        assert.equal(await page.locator("#menuDealerPortal").count(), 0);
+        await context.close();
+      }
+      // 運営者: 「ディーラー管理」の次に出る。押すと dealer.html(戻る印は URL から外す)、戻るボタンで注文フォームへ
+      context = await newFakeContext(browser, base, 390, OPERATOR);
+      page = await context.newPage();
+      await page.goto(base);
+      await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();
+      const items = await menuItems(page);
+      assert.equal(items[items.indexOf("ディーラー管理") + 1], "ディーラー用受注一覧", "既存のメニュー(ディーラー管理)の次");
+      await page.click("#btnHeaderMenu");
+      assert.equal(await page.locator("#menuDealerPortal").getAttribute("class"), "header-menu-item", "他の項目と同じ見た目");
+      await page.click("#menuDealerPortal");
+      await page.waitForURL(/\/dealer\.html/);
+      await page.locator("#dealerBackRow:not([hidden])").waitFor();
+      assert.ok(!page.url().includes("from=order"), "戻る印は URL に残さない");
+      const back = page.locator("#dealerBackToOrder");
+      assert.equal(await back.innerText(), "IOL注文フォームに戻る");
+      assert.match(await back.getAttribute("class"), /\bbtn btn-secondary\b/, "他の画面の「注文画面に戻る」と同じボタン");
+      assert.ok(await noOverflow(page), "スマートフォンで横にはみ出さない");
+      // 受注は従来どおり、ディーラーのログイン・閲覧の許可がある場合だけ(このリンクで受注一覧は開かない)
+      assert.equal(await page.locator("#dealerWeekArea, .dealer-day").count(), 0);
+      await page.reload();
+      await page.locator("#dealerBackRow:not([hidden])").waitFor();   // 同じタブの間は出す(メールリンクのログインで戻ったとき)
+      await back.click();
+      await page.waitForURL(base);
+      await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();
+      await context.close();
+      // dealer.html を直接開いた(一般のディーラー): 戻るボタンは出さない
+      context = await newFakeContext(browser, base, 390, null);
+      page = await context.newPage();
+      await page.goto(`${base}dealer.html`);
+      await page.locator("#dealerPanel").waitFor();
+      assert.equal(await page.locator("#dealerBackRow").isVisible(), false);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
