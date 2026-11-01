@@ -195,11 +195,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 初期表示: 担当施設(B)だけを選択して検索
         assert.deepEqual((await calls(page, "list"))[0].facilityFilter, { mode: "selected", facilityIds: ["fB"] });
         assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => [c.value, c.checked])), [["fB", true], ["fA", false]], "担当施設を先頭に");
-        assert.match(await page.locator(".dealer-scope").innerText(), /担当施設\(1施設\)/);
+        assert.equal(await page.locator(".dealer-scope").count(), 0, "「検索範囲: …」の行は出さない");
+        assert.ok(!(await page.locator("#dealerPanel").innerText()).includes("検索範囲"));
         assert.deepEqual(await page.locator(".dealer-row-number").allInnerTexts(), ["IOL-20261027-02"]);
         // すべて選択 → 検索(複数施設)
         await page.click('[data-select="all"]');
-        assert.match(await page.locator(".dealer-scope").innerText(), /閲覧可能な全施設\(2施設\)/);
+        assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => c.checked)), [true, true], "すべて選択(検索範囲の文言はなし)");
         await page.click("#btnDealerSearch");
         await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 2);
         assert.deepEqual((await calls(page, "list")).at(-1).facilityFilter.facilityIds.sort(), ["fA", "fB"]);
@@ -281,7 +282,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(order, "医療機関 → 切り替え → 受注");
         assert.equal(await page.locator(".dealer-facility-box .dealer-view").count(), 0, "切り替えは医療機関の枠の外");
         assert.equal(await page.locator("#dealerOrderedArea #dealerListFilter").count(), 1, "絞り込みは一覧表示の中だけ");
-        assert.deepEqual(await page.locator(".dealer-view [data-view]").allInnerTexts(), ["手術日（週）", "一覧表示"]);
+        assert.deepEqual(await page.locator(".dealer-view [data-view]").allInnerTexts(), ["手術週", "一覧表示"]);
         assert.equal(await page.locator(".dealer-view.history-sort .history-sort-btn").count(), 2, "既存の切り替えボタンのデザイン");
         // 切り替えの外枠はボタン2つ分の幅だけ(右の余白まで広げない)。選択中は青、未選択は白
         const bar = await page.locator(".dealer-view").evaluate(el => {
@@ -294,10 +295,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(bar.right <= bar.vw, `${width}: 切り替えが画面内`);
         assert.notEqual(bar.pressed, bar.other);
         assert.equal(bar.other, "rgb(255, 255, 255)");
-        // 説明文は常時表示しない(見出しの右のⓘ)。医療機関名・検索範囲は表示したまま
+        // 説明文は常時表示しない(見出しの右のⓘ)。医療機関名・「担当」の印は表示したまま。「検索範囲: …」の行は出さない
         const text = await page.locator("#dealerPanel").innerText();
         assert.ok(!text.includes("自社宛ての明細だけを表示"), "説明文は常時表示しない");
-        assert.ok(text.includes("B眼科") && /検索範囲: 担当施設\(1施設\)/.test(text));
+        assert.ok(text.includes("B眼科") && text.includes("担当") && !text.includes("検索範囲"));
         const titleTip = page.locator(".dealer-title-row .info-tip-btn");
         assert.equal(await titleTip.count(), 1, "「受注一覧」の見出しの右にⓘ");
         await titleTip.click();
@@ -732,7 +733,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.goto(`${base}dealer.html`);
         await page.locator(".dealer-day").first().waitFor();
         const thisWeek = mondayOf(jstDateOfDealer(Date.now()));
-        assert.equal(await page.locator('[data-view="week"]').getAttribute("aria-pressed"), "true", "初期表示は手術日(週)");
+        assert.equal(await page.locator('[data-view="week"]').getAttribute("aria-pressed"), "true", "初期表示は手術週");
         const w0 = (await calls(page, "week"))[0];
         assert.deepEqual([w0.weekStart, w0.facilityFilter], [thisWeek, { mode: "selected", facilityIds: ["fB"] }], "今週・担当施設");
         assert.equal(await page.locator("#dealerWeekLabel").innerText(), weekLabelOf(thisWeek));
@@ -771,7 +772,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.locator(".dealer-lines tbody tr").first().waitFor();
         await page.click('[data-act="back"]');
         assert.equal(await page.locator("#dealerWeekArea").isVisible(), true);
-        // 注文日順へ切り替え(従来の一覧)→ 手術日(週)へ戻す
+        // 注文日順へ切り替え(従来の一覧)→ 手術週へ戻す
         await page.click('[data-view="ordered"]');
         await page.locator(".dealer-row").first().waitFor();
         assert.equal(await page.locator("#dealerWeekArea").isHidden(), true);
@@ -813,7 +814,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.goto(`${base}dealer.html`);
         await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
         assert.equal(await page.locator("[data-tab], .dealer-tabs").count(), 0, "「受注一覧／担当者・支店」の切り替えはない");
-        assert.equal(await page.locator(".dealer-view [data-view]").count(), 2, "「手術日（週）／一覧表示」は残す");
+        assert.equal(await page.locator(".dealer-view [data-view]").count(), 2, "「手術週／一覧表示」は残す");
         // 一覧表示に切り替えてから設定を開き、戻ったときに残っているか確かめる
         await page.click('[data-view="ordered"]');
         await page.locator(".dealer-row").first().waitFor();
@@ -1157,6 +1158,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await sec.locator('.theme-swatch[data-color="#0f766e"]').click();
         await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "setTheme"));
         assert.deepEqual((await calls(page, "setTheme")).at(-1), { action: "setTheme", companyId: "dco-x", color: "#0f766e", gradient: true, darkText: false });
+        // 「初期設定に戻す」は施設設定の「追加」と同じ寸法(高さ36px・0.9rem・左右14px・小さい角丸)。ディーラー画面のボタンの寸法の指定より優先。1行に収まる
+        assert.deepEqual(await sec.locator('[data-act="theme-reset"]').evaluate(e => { const c = getComputedStyle(e); return [e.getBoundingClientRect().height, Math.round(parseFloat(c.fontSize) * 10) / 10, c.padding, c.borderRadius, e.scrollWidth <= e.clientWidth]; }),
+          [36, 14.4, "0px 14px", "6px", true], `${width}: 初期設定に戻す`);
         let bg = await headerBg(page);
         assert.ok(/15, 118, 110|#0f766e/i.test(bg.image + bg.inline), `${width}: ヘッダーに反映 ${JSON.stringify(bg)}`);
         assert.equal(bg.dark, false);

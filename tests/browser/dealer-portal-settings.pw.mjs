@@ -106,9 +106,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.waitForFunction(() => window.__ready);
         await section(page).locator(".dealer-portal-item").first().waitFor();
         assert.equal(await section(page).isVisible(), true);
-        assert.match(await section(page).locator(".dealer-portal-notice").innerText(), /有効な全担当者が、許可後の新規注文のうち、自社宛ての明細を閲覧できます/);
-        assert.deepEqual(await section(page).locator(".dealer-portal-name").allInnerTexts(), ["エックス商事A窓口"], "関連付けのない発注先(ワイ医療)は出さない");
-        assert.match(await section(page).locator(".dealer-portal-meta").innerText(), /エックス商事.*未許可/);
+        // 主画面は簡潔に: 長い説明文は出さず、見出しのⓘにまとめる(共有の範囲・許可中の変更の制限)
+        assert.equal(await section(page).locator(".dealer-portal-notice, [data-lock-note]").count(), 0, "説明文は常時表示しない");
+        assert.ok(!/有効な全担当者|変更と削除はできません|会社: /.test(await section(page).innerText()), "長文・「会社:」は主画面に出さない");
+        await section(page).locator(".settings-heading .info-tip-btn").click();
+        const headHelp = await section(page).locator(".settings-heading .info-tip-pop").innerText();
+        assert.match(headHelp, /有効な全担当者が、許可後の新規注文のうち、自社宛ての明細を閲覧できます/);
+        assert.match(headHelp, /名称・宛名・発注用メールの変更と削除はできません/);
+        await page.keyboard.press("Escape");
+        assert.deepEqual(await section(page).locator(".dealer-portal-name > span:first-child").allInnerTexts(), ["エックス商事A窓口"], "関連付けのない発注先(ワイ医療)は出さない");
+        assert.equal(await section(page).locator(".dealer-portal-state").innerText(), "未許可", "状態は短いバッジ");
+        assert.equal(await section(page).locator(".dealer-portal-meta").innerText(), "エックス商事", "会社名は発注先の名称と違うときだけ(「会社:」なし)");
+        assert.equal(await section(page).locator(".dealer-portal-item .info-tip-btn").count(), 0, "未許可の行には詳細のⓘなし");
         // 許可: 確認ダイアログに共有範囲の説明。キャンセルなら何もしない
         await section(page).locator('[data-act="grant"]').click();
         const dlg = page.locator(".confirm-dialog");
@@ -120,7 +129,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.locator('.confirm-dialog [data-act="ok"]').click();
         await section(page).locator(".dealer-portal-state.is-active").waitFor();
         assert.deepEqual(await page.evaluate(() => window.__calls.filter(c => c[0] === "grant").map(c => c[1])), [{ facilityId: "fA", localDealerId: "dA1", revision: 1 }]);
-        assert.match(await section(page).locator(".dealer-portal-meta").innerText(), /許可中\(2026\/10\/27 12:00 以降の新規注文\)/);
+        // 「許可中」のバッジだけ。許可の日時は行のⓘ。「取り消す」は従来どおり行の右
+        assert.equal(await section(page).locator(".dealer-portal-state").innerText(), "許可中");
+        assert.ok(!(await section(page).innerText()).includes("2026/10/27"), "許可の日時は主画面に出さない");
+        await section(page).locator(".dealer-portal-item .info-tip-btn").click();
+        assert.match(await section(page).locator(".dealer-portal-item .info-tip-pop").innerText(), /2026\/10\/27 12:00 以降の新規注文が表示の対象です/);
+        await page.keyboard.press("Escape");
+        assert.equal(await section(page).locator('[data-act="revoke"]').innerText(), "取り消す");
         // 取消
         await section(page).locator('[data-act="revoke"]').click();
         await page.locator('.confirm-dialog [data-act="ok"]').click();
@@ -145,7 +160,10 @@ test("施設設定: 許可の後に発注先の名称・宛先が変わったら
     const st = section(page).locator(".dealer-portal-state");
     await st.waitFor();
     assert.equal(await st.getAttribute("data-state"), "stale");
-    assert.match(await st.innerText(), /停止中.*発注先の名称・宛先が変更された.*取り消してから、改めて許可してください/);
+    assert.equal(await st.innerText(), "停止中", "状態は短いバッジ。理由は行のⓘ");
+    await section(page).locator(".dealer-portal-item .info-tip-btn").click();
+    assert.match(await section(page).locator(".dealer-portal-item .info-tip-pop").innerText(), /発注先の名称・宛先が変更された.*取り消してから、改めて許可してください/);
+    await page.keyboard.press("Escape");
     assert.equal(await section(page).locator('[data-act="revoke"]').count(), 1, "取消できる");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.close();
@@ -161,7 +179,7 @@ test("施設設定: 機能の停止中は、許可中の発注先の取消だけ
     await page.waitForFunction(() => window.__ready);
     await section(page).locator(".dealer-portal-item").first().waitFor();
     assert.equal(await section(page).locator("[data-stop-note]").isVisible(), true);
-    assert.deepEqual(await section(page).locator(".dealer-portal-name").allInnerTexts(), ["エックス商事A窓口"], "許可中だけ(未許可の発注先は出さない)");
+    assert.deepEqual(await section(page).locator(".dealer-portal-name > span:first-child").allInnerTexts(), ["エックス商事A窓口"], "許可中だけ(未許可の発注先は出さない)");
     assert.equal(await section(page).locator('[data-act="grant"]').count(), 0);
     await section(page).locator('[data-act="revoke"]').click();
     await page.locator('.confirm-dialog [data-act="ok"]').click();

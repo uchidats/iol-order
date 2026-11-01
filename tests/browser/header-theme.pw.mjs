@@ -96,6 +96,17 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await headerBg(page)).inline, "linear-gradient(135deg, rgb(14, 83, 40) 0%, rgb(21, 128, 61) 100%)");
       assert.deepEqual(await calls(page), [["save", { color: "#15803d", gradient: true, darkText: false }]]);
       assert.equal(await sec.locator('.theme-swatch[data-color="#15803d"]').getAttribute("aria-pressed"), "true");
+      // 「初期設定に戻す」「注文画面に戻る」は担当医の「追加」と同じ高さ・文字の大きさ・余白・角丸・色(幅は文字に合わせる)。PC・スマホ
+      const btnLook = (sel) => page.evaluate((q) => { const e = document.querySelector(q), c = getComputedStyle(e), b = e.getBoundingClientRect();
+        return { h: b.height, fs: c.fontSize, fw: c.fontWeight, pad: c.padding, radius: c.borderRadius, border: c.border, bg: c.backgroundColor, color: c.color, oneLine: e.scrollWidth <= e.clientWidth }; }, sel);
+      for (const w of [1100, 390, 320]) {
+        await page.setViewportSize({ width: w, height: 1200 });
+        const add = await btnLook('.settings-actions [data-act="add"]');
+        assert.deepEqual(await btnLook('[data-section="theme"] [data-act="theme-reset"]'), add, `${w}px: 初期設定に戻す`);
+        assert.deepEqual(await btnLook("#btnSettingsClose"), add, `${w}px: 注文画面に戻る`);
+        assert.equal(add.h, 36);
+      }
+      await page.setViewportSize({ width: 1100, height: 1200 });
 
       // 2行目(黒文字向け)の色見本を選ぶと、文字も黒に自動で設定。1行目に戻すと白に戻る。チェックボックスで手動でも変えられる
       await sec.locator('.theme-swatch[data-color="#fdba74"]').click();

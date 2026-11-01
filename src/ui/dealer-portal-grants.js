@@ -1,5 +1,5 @@
 import { h } from "./markdown-view.js";
-import { createSectionHeading } from "./info-tip.js";
+import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { isPortalUnavailable } from "../data/dealer-portal-api.js";
@@ -16,10 +16,14 @@ export function createDealerPortalSection({ api }) {
   const list = h("div", { "data-list": "" });
   const msg = h("p", { class: "form-hint", "data-msg": "", role: "status" });
   const stopNote = h("p", { class: "form-hint", "data-stop-note": "", hidden: true }, "ディーラー画面は現在停止しています。許可中の発注先の取消だけができます(取り消すと、その発注先の名称・発注用メールを変更できます)。");
+  // 説明(目的・共有の範囲・許可中の発注先の変更の制限)は見出しのⓘにまとめる(主画面には長文を出さない。他の設定項目と同じ)
   const section = h("section", { class: "settings-section dealer-portal-section", "data-section": "dealerPortal", hidden: true },
-    createSectionHeading("ディーラー画面での閲覧", `ディーラーが専用画面で、この施設の注文のうち自社宛ての明細を閲覧できるようにします。運営者がディーラーの会社を登録した発注先だけが対象です。許可は管理者・副管理者が行えます。\n\n${DEALER_ACCESS_NOTICE}`),
-    h("p", { class: "form-hint dealer-portal-notice" }, DEALER_ACCESS_NOTICE),
-    h("p", { class: "form-hint", "data-lock-note": "" }, "閲覧を許可している間は、その発注先の名称・宛名・発注用メールの変更と削除はできません。変更するときは、先に閲覧を取り消してください(改めて許可すると、その後の新しい注文から表示されます)。"),
+    createSectionHeading("ディーラー画面での閲覧", [
+      "ディーラーが専用画面で、この施設の注文のうち自社宛ての明細を閲覧できるようにします。運営者がディーラーの会社を登録した発注先だけが対象です。許可は管理者・副管理者が行えます。",
+      DEALER_ACCESS_NOTICE,
+      "閲覧を許可している間は、その発注先の名称・宛名・発注用メールの変更と削除はできません。変更するときは、先に閲覧を取り消してください(改めて許可すると、その後の新しい注文から表示されます)。",
+      "許可中の発注先は、右のⓘで表示の対象になる注文(許可した日時以降の新規注文)を確認できます。"
+    ].join("\n\n")),
     stopNote, list, msg);
   let facilityId = null;
   let busy = false;
@@ -27,14 +31,20 @@ export function createDealerPortalSection({ api }) {
   function row(d) {
     const l = d.link;
     const stale = l.status === "active" && l.grant && l.grant.stale === true;
-    const state = stale ? "停止中(許可の後に発注先の名称・宛先が変更されたため、表示を止めています。取り消してから、改めて許可してください)"
-      : l.status === "active" && l.grant ? `許可中(${formatJstDateTime(l.grant.effectiveFrom)} 以降の新規注文)` : (STATUS_LABEL[l.status] || "未許可");
+    // 状態は短いバッジ(許可中・未許可・停止中)。許可の日時・停止中の理由は、行の右のⓘ(必要なときだけ読む)
+    const state = stale ? "停止中" : l.status === "active" && l.grant ? "許可中" : (STATUS_LABEL[l.status] || "未許可");
+    const detail = stale ? "許可の後に発注先の名称・宛先が変更されたため、表示を止めています。取り消してから、改めて許可してください。"
+      : l.status === "active" && l.grant ? `${formatJstDateTime(l.grant.effectiveFrom)} 以降の新規注文が表示の対象です。` : null;
     const btn = h("button", { type: "button", class: l.status === "active" ? "btn btn-outline-sm" : "btn btn-outline-sm btn-portal-grant", "data-act": l.status === "active" ? "revoke" : "grant", disabled: !l.companyActive && l.status !== "active" }, l.status === "active" ? "取り消す" : "許可する");
     btn.addEventListener("click", () => act(d, btn.dataset.act));
+    // 会社名は、発注先の名称と違うときだけ控えめに添える(同じ名前を2回出さない)
+    const company = l.companyName && l.companyName !== d.dealerName ? l.companyName : "";
     return h("div", { class: "dealer-portal-item", "data-dealer": d.localDealerId },
       h("div", { class: "dealer-portal-main" },
-        h("div", { class: "dealer-portal-name" }, d.dealerName),
-        h("div", { class: "dealer-portal-meta" }, `会社: ${l.companyName || "—"} ・ `, h("span", { class: stale ? "dealer-portal-state is-stale" : l.status === "active" ? "dealer-portal-state is-active" : "dealer-portal-state", "data-state": stale ? "stale" : l.status }, state))),
+        h("div", { class: "dealer-portal-name" }, h("span", {}, d.dealerName),
+          h("span", { class: `member-role-badge dealer-portal-state${stale ? " is-stale" : l.status === "active" ? " is-active" : ""}`, "data-state": stale ? "stale" : l.status }, state),
+          detail ? createInfoTip(detail, { label: `「${d.dealerName}」の閲覧の状態` }).root : null),
+        company ? h("div", { class: "dealer-portal-meta" }, company) : null),
       btn);
   }
 

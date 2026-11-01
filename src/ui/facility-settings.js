@@ -1106,7 +1106,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   nameCancel.addEventListener("click", () => setRenameOpen(false));
   nameInput.addEventListener("input", () => { nameConfirm.hidden = true; });
   nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitRename(false); } });
-  const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnSettingsClose" }, "注文画面に戻る");
+  // 「担当医」などの「追加」ボタンと同じ見た目・大きさ(btn-outline-sm と styles.css の共通の寸法)。幅は文字に合わせる
+  const closeBtn = h("button", { type: "button", class: "btn btn-outline-sm", id: "btnSettingsClose" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
   root.append(
     // 「施設設定」の右横に、各設定項目と同じⓘ(説明つき)。説明は常時表示しない

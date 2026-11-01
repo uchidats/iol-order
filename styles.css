@@ -2259,8 +2259,12 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .member-item .member-role-edit { margin: 6px 0 2px; }
 @media (max-width: 640px) { .member-edit.is-pending-edit { grid-template-columns: minmax(0, 1fr); } }
 
-/* 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理で共通): 幅60px・高さ36pxのコンパクトな大きさ。PC・スマホ共通 */
-.settings-actions > .btn[data-act="add"] {
+/* 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理で共通)と、見出しの「注文画面に戻る」・テーマカラーの「初期設定に戻す」
+   (施設設定・ディーラー設定で共通)・ディーラー画面の「IOL注文フォームに戻る」: 幅60px以上(文字に合わせる)・高さ36pxのコンパクトな大きさ。PC・スマホ共通 */
+.settings-actions > .btn[data-act="add"],
+#btnSettingsClose,
+#dealerBackToOrder,
+.settings-section[data-section="theme"] .btn[data-act="theme-reset"] {
   min-width: 60px;
   min-height: 36px;
   height: 36px;
@@ -2468,7 +2472,6 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-facility-list { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; }   /* 長い施設名は折り返す(スマホ幅で横にはみ出さない) */
 .dealer-facility span, .dealer-row-facility, .dealer-row-number { overflow-wrap: anywhere; min-width: 0; }
-.dealer-scope { margin: 0; font-weight: 600; color: var(--text-main); }
 /* 受注一覧の見出しと右のⓘ */
 .dealer-title-main { display: inline-flex; align-items: center; gap: 2px; position: relative; margin-right: auto; min-width: 0; }
 .dealer-list-count { margin: 0; font-size: 0.8rem; }   /* 件数は一覧の直前に控えめに */
@@ -2543,11 +2546,14 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-portal-notice { margin: 0 0 8px; }
 .dealer-portal-item { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 0; border-top: 1px solid var(--border-light); flex-wrap: wrap; }
 .dealer-portal-item:first-child { border-top: none; }
-.dealer-portal-main { min-width: 0; }
-.dealer-portal-name { font-weight: 600; }
+.dealer-portal-main { min-width: 0; flex: 1 1 auto; }
+/* 発注先の名称 + 状態のバッジ(許可中・未許可・停止中)+ 詳細のⓘ。会社名は違うときだけ下に控えめに。説明は見出しのⓘ(段落ごとに改行) */
+.dealer-portal-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; position: relative; font-weight: 600; overflow-wrap: anywhere; }
 .dealer-portal-meta { font-size: 0.85rem; color: var(--text-muted); overflow-wrap: anywhere; }
-.dealer-portal-state.is-active { color: #15803d; font-weight: 600; }
-.dealer-portal-state.is-stale { color: #b45309; font-weight: 600; }
+.dealer-portal-state { color: #475569; border-color: #cbd5e1; background: #f8fafc; }   /* 未許可・取消済み: 控えめなグレー */
+.dealer-portal-state.is-active { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+.dealer-portal-state.is-stale { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+.dealer-portal-section .info-tip-pop { white-space: pre-line; }
 .dealer-operator-body { display: flex; flex-direction: column; gap: 16px; }
 .dealer-operator-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dealer-operator-title h3 { margin: 0; }

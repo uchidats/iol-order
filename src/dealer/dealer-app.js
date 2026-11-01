@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { createDealerManage } from "./dealer-manage.js";
 import { createInfoTip } from "../ui/info-tip.js";
 import { readHeaderTheme } from "../domain/header-theme.js";
@@ -243,7 +243,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const from = h("input", { class: "form-control", type: "date", id: "dealerFrom", "aria-label": "注文日(から)" });
     const to = h("input", { class: "form-control", type: "date", id: "dealerTo", "aria-label": "注文日(まで)" });
     const number = h("input", { class: "form-control", type: "text", id: "dealerOrderNumber", maxlength: "40", placeholder: "例: IOL-20261027-01", "aria-label": "注文番号(完全一致)", autocomplete: "off" });
-    const scope = h("p", { class: "form-hint dealer-scope", role: "status" });
     const checks = h("div", { class: "dealer-facility-list", role: "group", "aria-label": "医療機関" });
     const selectBar = h("div", { class: "dealer-select-actions", role: "group", "aria-label": "医療機関の選択" });
     const renderChecks = () => {
@@ -254,10 +253,9 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       checks.replaceChildren(...(ctx.facilities.length ? ctx.facilities.map(f => {
         const cb = h("input", { type: "checkbox", value: f.id, "data-facility": f.id });
         cb.checked = selected.has(f.id);
-        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; remember(); facilitiesChanged(); });
+        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); remember(); facilitiesChanged(); });
         return h("label", { class: "settings-check dealer-facility" }, cb, h("span", {}, f.name), f.assigned ? h("span", { class: "member-role-badge" }, "担当") : null);
       }) : [h("p", { class: "form-hint" }, "閲覧を許可している医療機関はまだありません。")]));
-      scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`;
     };
     const selBtn = (kind, label) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-select": kind }, label);
@@ -280,7 +278,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
 
-    // ---- 表示の切り替え: 手術日(週)/ 一覧表示(注文日時の新しい順。1注文1行) ----
+    // ---- 表示の切り替え: 手術週/ 一覧表示(注文日時の新しい順。1注文1行) ----
     let view = "week";
     let weekStart = mondayOf(jstDate(Date.now()));   // 初期表示は今週(日本時間の月曜〜日曜)
     let weekGen = 0;
@@ -291,7 +289,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       b.addEventListener("click", () => setView(v));
       return b;
     };
-    const viewBar = h("div", { class: "history-sort dealer-view", role: "group", "aria-label": "表示" }, viewBtn("week", "手術日（週）"), viewBtn("ordered", "一覧表示"));
+    const viewBar = h("div", { class: "history-sort dealer-view", role: "group", "aria-label": "表示" }, viewBtn("week", "手術週"), viewBtn("ordered", "一覧表示"));
     function setView(v) {
       if (view === v) return;
       view = v;
@@ -462,7 +460,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     searchArea.append(
       h("div", { class: "dealer-filters dealer-facility-box" },
         h("div", { class: "form-label dealer-login-head" }, h("span", {}, "医療機関"), tip(facilityHelp, "医療機関の選択の説明")),
-        selectBar, checks, scope),
+        selectBar, checks),   // 「検索範囲: …」の行は出さない(選択はチェックボックスと「担当」の印で分かる)
       viewBar,
       weekArea, orderedArea);
     // 担当者・支店の管理は、☰メニューの「ディーラー設定」(会社管理者・支店管理者)から開く(openSettings)

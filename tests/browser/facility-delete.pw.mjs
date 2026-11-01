@@ -84,6 +84,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const [oe, od] = await look('.orderer-actions [data-act="edit"], .orderer-actions [data-act="delete"]');
         assert.deepEqual([fe, fd], [oe, od], `${w}px: 担当医の鉛筆・ゴミ箱と同じ`);
         assert.equal(await gapOf("#btnRenameFacility", "#btnDeleteFacility"), await gapOf('.orderer-actions [data-act="edit"]', '.orderer-actions [data-act="delete"]'), `${w}px: ボタンの間隔も同じ`);
+        // 「注文画面に戻る」は担当医の「追加」と同じ高さ・文字の大きさ・余白・角丸・色(幅は文字に合わせる。1行に収まる)
+        const btnLook = (sel) => pg.evaluate((q) => { const e = document.querySelector(q), c = getComputedStyle(e), b = e.getBoundingClientRect();
+          return { h: b.height, fs: c.fontSize, fw: c.fontWeight, pad: c.padding, radius: c.borderRadius, border: c.border, bg: c.backgroundColor, color: c.color }; }, sel);
+        assert.deepEqual(await btnLook("#btnSettingsClose"), await btnLook('[data-section="orderers"] .settings-actions [data-act="add"]'), `${w}px: 「追加」と同じ見た目`);
+        assert.ok(await pg.evaluate(() => { const e = document.querySelector("#btnSettingsClose"); return e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().height <= 36.5; }), `${w}px: 文字が1行に収まる`);
         assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}px: 横にはみ出さない`);
       }
       await pg.setViewportSize({ width: 390, height: 900 });
