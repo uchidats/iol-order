@@ -117,9 +117,15 @@ test("週表示の日付: 月曜の算出(日曜は前の月曜)・週の移動�
   assert.deepEqual(["2026-11-02", "2026-11-04", "2026-11-08", "2026-11-09"].map(mondayOf), ["2026-11-02", "2026-11-02", "2026-11-02", "2026-11-09"]);
   assert.deepEqual([addDays("2026-11-02", 7), addDays("2026-11-02", -7), addDays("2026-12-28", 7)], ["2026-11-09", "2026-10-26", "2027-01-04"]);
   assert.deepEqual([formatDayHead("2026-11-02"), formatDayHead("2026-11-08"), formatDayHead("bad")], ["11月2日(月)", "11月8日(日)", "—"]);
-  assert.equal(weekLabel("2026-11-02"), "2026年11月2日(月)〜11月8日(日)");
-  assert.equal(weekLabel("2026-12-28"), "2026年12月28日(月)〜2027年1月3日(日)");
-  assert.equal(shortDate("2026-11-12"), "11/12");
+  // 手術週の見出し: 今年(日本時間)は年を省略。同じ月は終わりの月も省略。月をまたぐときは両方の月。今年以外は年。年をまたぐ週は両方に年
+  const today = "2026-11-02";
+  assert.equal(weekLabel("2026-11-02", today), "11月2日(月)〜8日(日)");
+  assert.equal(weekLabel("2026-11-30", today), "11月30日(月)〜12月6日(日)");
+  assert.equal(weekLabel("2026-12-28", today), "2026年12月28日(月)〜2027年1月3日(日)");
+  assert.equal(weekLabel("2025-12-29", today), "2025年12月29日(月)〜2026年1月4日(日)", "今年に入る週も年をまたげば両方に年");
+  assert.equal(weekLabel("2025-11-03", today), "2025年11月3日(月)〜9日(日)");
+  assert.equal(weekLabel("2027-03-29", today), "2027年3月29日(月)〜4月4日(日)");
+  assert.equal(weekLabel("2027-01-04", "2027-01-01"), "1月4日(月)〜10日(日)", "今年の判定は today の年");  assert.equal(shortDate("2026-11-12"), "11/12");
   for (const d of ["2026-11-04", "2026-12-31", "2027-03-01"]) {
     const w = weekDatesOf(mondayOf(d));
     assert.ok(w && w.includes(d) && w[0] === mondayOf(d) && w[6] === addDays(mondayOf(d), 6), d);

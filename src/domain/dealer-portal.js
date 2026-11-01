@@ -36,11 +36,21 @@ export function formatDayHead(date) {
   const d = new Date(utcOf(date));
   return Number.isFinite(d.getTime()) ? `${d.getUTCMonth() + 1}月${d.getUTCDate()}日(${WEEKDAY[d.getUTCDay()]})` : "—";
 }
-/** 「2026年11月2日(月)〜11月8日(日)」(年をまたぐ週は終わりにも年) */
-export function weekLabel(weekStart) {
+/**
+ * 手術週の見出し(表示だけ。週の計算は mondayOf・addDays)。今年(日本時間)は年を省略し、同じ月なら終わりの月も省略する。
+ *   今年・同じ月「11月2日(月)〜8日(日)」/ 今年・月をまたぐ「11月30日(月)〜12月6日(日)」/
+ *   今年以外「2025年11月2日(月)〜8日(日)」/ 年をまたぐ「2026年12月28日(月)〜2027年1月3日(日)」(両方に年)
+ * @param {string} weekStart 月曜(YYYY-MM-DD)
+ * @param {string} [today] 今日(日本時間の YYYY-MM-DD。今年の判定に使う)
+ */
+export function weekLabel(weekStart, today = jstDate(Date.now())) {
   const end = addDays(weekStart, 6);
-  const y = (d) => d.slice(0, 4);
-  return `${y(weekStart)}年${formatDayHead(weekStart)}〜${y(end) !== y(weekStart) ? `${y(end)}年` : ""}${formatDayHead(end)}`;
+  const y = (d) => d.slice(0, 4), m = (d) => d.slice(5, 7);
+  const crossYear = y(end) !== y(weekStart);
+  const startYear = crossYear || y(weekStart) !== y(today) ? `${y(weekStart)}年` : "";
+  const endHead = formatDayHead(end);
+  const endText = crossYear ? `${y(end)}年${endHead}` : m(end) === m(weekStart) ? endHead.replace(/^\d+月/, "") : endHead;
+  return `${startYear}${formatDayHead(weekStart)}〜${endText}`;
 }
 /** 「11/12」(ほかの手術日の案内) */
 export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
