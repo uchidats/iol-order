@@ -178,3 +178,17 @@ test("受注詳細の注文メール: 通常(送信済み・配信済み/結果�
   assert.equal(mailStatusText({ label: "送信済み", at: "x", delivery: { label: "配信済み" } }, () => "2026/10/27 10:01"), "送信済み(2026/10/27 10:01) ・ 配信済み");
   assert.equal(mailStatusText(null, String), "—");
 });
+
+test("医療機関のチェックの記憶: キーはユーザー×会社。今の閲覧可能な施設だけ復元。空は選択なしのまま。未保存・壊れた値・すべて閲覧できない施設は従来の初期選択", async () => {
+  const { facilityViewKey, restoreFacilitySelection } = await import("../src/domain/dealer-portal.js");
+  assert.equal(facilityViewKey("u1", "dco-x"), "iolDealerFacilityView.u1.dco-x");
+  const fs2 = [{ id: "fB", assigned: true }, { id: "fA", assigned: false }];
+  const fb = ["fB"];
+  assert.deepEqual(restoreFacilitySelection(null, fs2, fb), { ids: ["fB"], restored: false });
+  assert.deepEqual(restoreFacilitySelection("{bad", fs2, fb), { ids: ["fB"], restored: false });
+  assert.deepEqual(restoreFacilitySelection(JSON.stringify({ a: 1 }), fs2, fb), { ids: ["fB"], restored: false });
+  assert.deepEqual(restoreFacilitySelection(JSON.stringify([1]), fs2, fb), { ids: ["fB"], restored: false });
+  assert.deepEqual(restoreFacilitySelection("[]", fs2, fb), { ids: [], restored: true });
+  assert.deepEqual(restoreFacilitySelection(JSON.stringify(["fA", "gone", "fA"]), fs2, fb), { ids: ["fA"], restored: true });
+  assert.deepEqual(restoreFacilitySelection(JSON.stringify(["gone"]), fs2, fb), { ids: ["fB"], restored: false });
+});

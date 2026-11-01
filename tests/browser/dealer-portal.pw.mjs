@@ -191,11 +191,30 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.click("#btnDealerSearch");
         await page.waitForFunction(() => document.querySelector("#dealerListMsg").textContent.includes("該当する注文はありません"));
         assert.deepEqual((await calls(page, "list")).at(-1).facilityFilter.facilityIds, []);
-        // 担当施設の保存(表示用)
+        // チェックは端末に自動で記憶する(ログインユーザー × 会社ごと。施設 ID だけ)。すべて解除も「選択なし」のまま保持
+        assert.equal(await page.locator('[data-act="saveAssigned"]').count(), 0, "担当施設の保存ボタンはない");
+        const viewStored = () => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith("iolDealerFacilityView.")).map(k => [k, JSON.parse(localStorage.getItem(k))]));
+        assert.deepEqual(await viewStored(), [["iolDealerFacilityView.x1.dco-x", []]]);
+        await page.reload();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => c.checked)), [false, false], "選択なしを復元(担当施設に戻さない)");
+        assert.deepEqual((await calls(page, "week"))[0].facilityFilter.facilityIds, []);
+        // 1施設だけ(担当でない施設)→ 次回も同じ
+        await page.locator('.dealer-facility input[value="fA"]').check();
+        assert.deepEqual(await viewStored(), [["iolDealerFacilityView.x1.dco-x", ["fA"]]]);
+        await page.reload();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => [c.value, c.checked])), [["fB", false], ["fA", true]]);
+        assert.match(await page.locator(".dealer-facility-box").innerText(), /担当/, "担当の印は残す");
+        // 今は閲覧できない施設の ID は復元しない(残りがなければ従来の初期選択)
+        await page.evaluate(() => localStorage.setItem("iolDealerFacilityView.x1.dco-x", JSON.stringify(["gone"])));
+        await page.reload();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => [c.value, c.checked])), [["fB", true], ["fA", false]]);
+        // チェックの操作では担当施設の登録(setAssignments)を呼ばない
         await page.click('[data-select="all"]');
-        await page.click('[data-act="saveAssigned"]');
-        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "setAssignments"));
-        assert.deepEqual((await calls(page, "setAssignments"))[0].facilityIds.sort(), ["fA", "fB"]);
+        await page.click('[data-select="assigned"]');
+        assert.deepEqual(await calls(page, "setAssignments"), []);
         // 注文のデータは端末に保存しない
         const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
         assert.ok(!/IOL-2026|rcp-|B眼科/.test(stored), "注文番号・施設名を保存しない");
@@ -245,10 +264,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.match(await page.locator(".dealer-title-row .info-tip-pop").innerText(), /自社宛ての明細だけを表示します/);
         await page.keyboard.press("Escape");
         assert.equal(await page.locator(".dealer-title-row .info-tip-pop").isHidden(), true);
-        assert.equal(await page.locator(".dealer-facility-box .info-tip-btn").count(), 2, "医療機関・担当施設の保存の説明もⓘ");
-        // 医療機関の選択(施設2件): 担当施設のみ / すべて選択 / すべて解除。担当施設の保存は区切った別の行
+        assert.equal(await page.locator(".dealer-facility-box .info-tip-btn").count(), 1, "医療機関の説明はⓘ(担当施設の保存の説明はない)");
+        // 医療機関の選択(施設2件): 担当施設のみ / すべて選択 / すべて解除。担当施設の保存ボタン・説明はない(登録の変更は「担当者・支店」)
         assert.deepEqual(await page.locator(".dealer-facility-box [data-select]").allInnerTexts(), ["担当施設のみ", "すべて選択", "すべて解除"]);
-        assert.equal(await page.locator(".dealer-assign-row [data-act=\"saveAssigned\"]").count(), 1);
+        assert.equal(await page.locator('[data-act="saveAssigned"], .dealer-assign-row').count(), 0);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
         // 一覧表示: 絞り込みは閉じている。行に担当医(複数。文字として表示)、旧い索引(担当医なし)は省略
         await page.click('[data-view="ordered"]');
@@ -300,7 +319,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
       assert.equal(await page.locator("[data-select]").count(), 0);
       assert.equal(await page.locator(".dealer-facility input").count(), 1);
-      assert.equal(await page.locator('[data-act="saveAssigned"]').count(), 1);
+      assert.equal(await page.locator('[data-act="saveAssigned"]').count(), 0);
       await context.close();
     } finally { await browser.close(); }
   });

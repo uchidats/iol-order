@@ -2456,9 +2456,8 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; }   /* 長い施設名は折り返す(スマホ幅で横にはみ出さない) */
 .dealer-facility span, .dealer-row-facility, .dealer-row-number { overflow-wrap: anywhere; min-width: 0; }
 .dealer-scope { margin: 0; font-weight: 600; color: var(--text-main); }
-/* 受注一覧の見出しと右のⓘ / 担当施設の保存(絞り込みと区別するため、枠の中で点線で区切る) */
+/* 受注一覧の見出しと右のⓘ */
 .dealer-title-main { display: inline-flex; align-items: center; gap: 2px; position: relative; margin-right: auto; min-width: 0; }
-.dealer-assign-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; position: relative; padding-top: 8px; border-top: 1px dashed var(--border-light); }
 .dealer-fetched { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; position: relative; }
 .dealer-fetched[hidden] { display: none; }
 /* 一覧表示の行: 医療機関側の注文履歴(.history-row)と同じ3列(注文日時 / 医療機関・担当医・注文番号 / 件数・合計枚数)。スマホは注文履歴と同じく2段 */

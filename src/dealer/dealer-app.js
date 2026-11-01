@@ -1,12 +1,13 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { createDealerManage } from "./dealer-manage.js";
 import { createInfoTip } from "../ui/info-tip.js";
 
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
  * 注文のデータは画面のメモリだけに置き、端末(localStorage など)には保存しない。権限エラー・ログアウトでは表示を破棄する。
+ * 端末に記憶するのは医療機関のチェック(表示の絞り込み。施設 ID だけ)。担当施設の登録・閲覧の権限は変えない(担当施設の変更は「担当者・支店」)。
  * 閲覧の範囲(会社・施設の許可・自社宛ての明細)はサーバーが毎回確認する。画面の施設の選択は検索の絞り込みだけ。
  *
  * @param {object} deps
@@ -14,11 +15,12 @@ import { createInfoTip } from "../ui/info-tip.js";
  * @param {object} deps.api data/dealer-portal-api.js
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
+ * @param {{ load:(companyId:string)=>string|null, save:(companyId:string, ids:string[])=>void }} [deps.facilityView] 医療機関のチェックの記憶
  */
 /** 一覧表示の1回の取得件数(医療機関側の注文履歴と同じ20件。「もっと見る」で続き) */
 const LIST_PAGE = 20;
 
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {} }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, facilityView = { load: () => null, save: () => {} } }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -173,9 +175,13 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
 
   async function showPortal(context) {
     ctx = context;
-    selected = new Set(ctx.selectedFacilityIds);
+    selected = new Set();
     setSubtitle(ctx.company.name);
     if (ctx.testMode) return showTestMode();
+    // 医療機関のチェック: 端末に記憶した選択(今の閲覧可能な施設だけ)。未保存ならサーバーの初期選択(担当施設 → 全施設)
+    const restored = restoreFacilitySelection(facilityView.load(ctx.company.id), ctx.facilities || [], ctx.selectedFacilityIds || []);
+    selected = new Set(restored.ids);
+    const remember = () => facilityView.save(ctx.company.id, [...selected]);   // 担当施設の登録(setAssignments)は呼ばない
     // 一覧表示の絞り込み(任意。既定は期間なし = 全期間を新しい順)
     const from = h("input", { class: "form-control", type: "date", id: "dealerFrom", "aria-label": "注文日(から)" });
     const to = h("input", { class: "form-control", type: "date", id: "dealerTo", "aria-label": "注文日(まで)" });
@@ -191,30 +197,16 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       checks.replaceChildren(...(ctx.facilities.length ? ctx.facilities.map(f => {
         const cb = h("input", { type: "checkbox", value: f.id, "data-facility": f.id });
         cb.checked = selected.has(f.id);
-        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; facilitiesChanged(); });
+        cb.addEventListener("change", () => { if (cb.checked) selected.add(f.id); else selected.delete(f.id); scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`; remember(); facilitiesChanged(); });
         return h("label", { class: "settings-check dealer-facility" }, cb, h("span", {}, f.name), f.assigned ? h("span", { class: "member-role-badge" }, "担当") : null);
       }) : [h("p", { class: "form-hint" }, "閲覧を許可している医療機関はまだありません。")]));
       scope.textContent = `検索範囲: ${scopeLabel([...selected], ctx.facilities)}`;
     };
     const selBtn = (kind, label) => {
       const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-select": kind }, label);
-      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); facilitiesChanged(); });
+      b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); remember(); facilitiesChanged(); });
       return b;
     };
-    // 担当施設の保存は絞り込みとは別の操作(次回の初期選択の設定)。枠の下に区切って置く
-    const saveAssigned = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "saveAssigned" }, "今の選択を担当施設に保存");
-    const assignMsg = h("p", { class: "form-hint", role: "status" });
-    saveAssigned.addEventListener("click", async () => {
-      saveAssigned.disabled = true; assignMsg.textContent = "";
-      try {
-        const r = await api.setMyAssignments({ companyId: ctx.company.id, facilityIds: [...selected] });
-        const assigned = new Set(r.assignedFacilityIds);
-        ctx.facilities = ctx.facilities.map(f => ({ ...f, assigned: assigned.has(f.id) }));
-        renderChecks();
-        assignMsg.textContent = "担当施設を保存しました。";
-      } catch (e) { assignMsg.textContent = describeCallableError(e); }
-      finally { saveAssigned.disabled = false; }
-    });
     const search = h("button", { type: "button", class: "btn btn-primary", id: "btnDealerSearch" }, "この条件で表示");
     const clear = h("button", { type: "button", class: "btn btn-secondary", id: "btnDealerClear" }, "条件をクリア");
     const listBox = h("div", { class: "dealer-results", id: "dealerResults" });
@@ -406,15 +398,12 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       fetched, listMsg, listBox, more);
     // 補足の説明はⓘ(共通の info-tip。タップ・クリックで開く)。医療機関名・検索範囲・メッセージは常に表示する
     const tip = (text, label) => createInfoTip(text, { label }).root;
-    const facilityHelp = "チェックした医療機関の受注を表示します。「担当」は保存した担当施設で、次回この画面を開いたときの初期選択に使います(閲覧できる範囲は変わりません)。"
-      + (ctx.selection === "all-unassigned" ? "担当施設が未設定のため、閲覧可能な全施設を選択しています。" : "");
+    const facilityHelp = "チェックした医療機関の受注を表示します。チェックはこの端末に自動で記憶し、次回も同じ選択で開きます(閲覧できる範囲・担当施設は変わりません)。「担当」は会社の管理者が登録した担当施設です。"
+      + (!restored.restored && ctx.selection === "all-unassigned" ? "担当施設が未設定のため、閲覧可能な全施設を選択しています。" : "");
     searchArea.append(
       h("div", { class: "dealer-filters dealer-facility-box" },
         h("div", { class: "form-label dealer-login-head" }, h("span", {}, "医療機関"), tip(facilityHelp, "医療機関の選択の説明")),
-        selectBar, checks, scope,
-        h("div", { class: "dealer-assign-row" }, saveAssigned,
-          tip("今チェックしている医療機関を、あなたの担当施設として保存します。次回の初期選択と「担当」の表示に使います。閲覧できる範囲は変わりません。", "担当施設の保存の説明")),
-        assignMsg),
+        selectBar, checks, scope),
       viewBar,
       weekArea, orderedArea);
     // 会社管理者・支店管理者: 「担当者・支店」タブ(閲覧者には出さない。操作の可否はサーバーが確認する)

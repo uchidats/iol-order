@@ -85,6 +85,27 @@ export function selectionFor(kind, facilities) {
   return [];
 }
 
+/**
+ * 医療機関のチェック(表示の絞り込み)の記憶。ログインユーザー × 会社ごとに端末へ保存する。保存するのは施設 ID の配列だけ。
+ * 担当施設の登録(staff.facilityAssignments)・閲覧の権限とは別のもの。
+ */
+export const facilityViewKey = (uid, companyId) => `iolDealerFacilityView.${uid}.${companyId}`;
+/**
+ * 保存したチェックの復元。今の閲覧可能な施設だけに絞る。
+ * 未保存・壊れた値はサーバーの初期選択(fallback)。空(すべて解除)は「選択なし」のまま。
+ * 保存していた施設がすべて閲覧できなくなったときは、選択なしにせず初期選択に戻す。
+ * @returns {{ ids: string[], restored: boolean }}
+ */
+export function restoreFacilitySelection(raw, facilities, fallback) {
+  let saved = null;
+  try { saved = raw == null ? null : JSON.parse(raw); } catch (e) { saved = null; }
+  if (!Array.isArray(saved) || saved.some(x => typeof x !== "string")) return { ids: [...fallback], restored: false };
+  if (!saved.length) return { ids: [], restored: true };
+  const allowed = new Set(facilities.map(f => f.id));
+  const ids = [...new Set(saved)].filter(id => allowed.has(id));
+  return ids.length ? { ids, restored: true } : { ids: [...fallback], restored: false };
+}
+
 /** 現在の検索範囲の説明 */
 export function scopeLabel(selectedIds, facilities) {
   const sel = new Set(selectedIds);

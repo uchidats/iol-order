@@ -1,7 +1,7 @@
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "../firebase/firebase-config.js";
 import { setupAppCheck } from "../firebase/app-check.js";
 import { createDealerPortalApi } from "../data/dealer-portal-api.js";
-import { dealerEntryUrl } from "../domain/dealer-portal.js";
+import { dealerEntryUrl, facilityViewKey } from "../domain/dealer-portal.js";
 import { createDealerApp } from "./dealer-app.js";
 
 /**
@@ -91,7 +91,12 @@ async function bootstrap() {
   const ui = createDealerApp({
     mount, api, setSubtitle,
     onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
-    setRememberDevice: (v) => { remember = v !== false; }   // 本人確認の画面の「この端末を記憶する」
+    setRememberDevice: (v) => { remember = v !== false; },   // 本人確認の画面の「この端末を記憶する」
+    // 医療機関のチェックの記憶(ログインユーザー × 会社ごと。施設 ID だけ。保存できない環境では記憶しない)
+    facilityView: {
+      load: (companyId) => { try { return uid && storage ? storage.getItem(facilityViewKey(uid, companyId)) : null; } catch (e) { return null; } },
+      save: (companyId, ids) => { try { if (uid && storage) storage.setItem(facilityViewKey(uid, companyId), JSON.stringify(ids)); } catch (e) { /* 保存できなくても表示は続ける */ } }
+    }
   });
 
   let error = "";
