@@ -336,13 +336,13 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         h("h3", { class: "dealer-day-head" }, formatDayHead(d.date)),
         h("ul", { class: "dealer-week-list" }, d.orders.map(o => {
           const b = h("button", { type: "button", class: "dealer-week-order", "data-receipt": o.receiptId, "data-date": d.date },
-            h("div", { class: "dealer-week-top" }, h("span", { class: "dealer-week-facility" }, o.facilityName), h("span", { class: "dealer-week-number" }, `注文番号 ${o.orderNumber}`)),
+            // 注文番号・注文日時はカードに出さない(詳細に表示)。医療機関・メーカー・モデル・度数・枚数
+            h("div", { class: "dealer-week-top" }, h("span", { class: "dealer-week-facility" }, o.facilityName)),
             h("ul", { class: "dealer-week-lines" }, o.lines.map(l => h("li", {},
               h("span", { class: "summary-maker" }, l.manufacturer), h("span", { class: "summary-model" }, l.toricModel || l.model),
               h("span", { class: "summary-power" }, l.power), h("span", { class: "summary-qty" }, `${l.quantity}枚`)))),
-            // 同じ注文がほかの手術日にもある: 注文番号は同じ(重複発注ではない)ことを示す
-            h("p", { class: "dealer-week-note" }, `注文 ${formatJstDateTime(o.orderedAt)}`,
-              o.otherDates.length ? ` ・ 同じ注文のほかの手術日: ${o.otherDates.map(shortDate).join("、")}（自社宛て 全${o.ownLineCount}件）` : ""));
+            // 同じ注文がほかの手術日にもある: 同じ注文(重複発注ではない)ことを示す
+            o.otherDates.length ? h("p", { class: "dealer-week-note" }, `同じ注文のほかの手術日: ${o.otherDates.map(shortDate).join("、")}（自社宛て 全${o.ownLineCount}件）`) : null);
           b.addEventListener("click", () => openDetail(o.receiptId));
           return h("li", {}, b);
         })))));
@@ -401,14 +401,12 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     function renderList() {
       more.hidden = !cursor;
       listBox.replaceChildren(...(items.length ? [h("ul", { class: "history-list dealer-list" }, items.map(it => {
-        // 医療機関側の注文履歴と同じ並び: 注文日時 / 医療機関・担当医(・控えめに注文番号) / 件数・合計枚数。担当医の記録がない旧い索引は省略
+        // 医療機関・担当医 / 件数・合計枚数(並びは注文日時の新しい順)。注文番号・注文日時は詳細に表示。担当医の記録がない旧い索引は省略
         const doctors = Array.isArray(it.doctorNames) ? it.doctorNames.filter(Boolean) : [];
         const b = h("button", { type: "button", class: "history-row dealer-row", "data-receipt": it.receiptId },
-          h("span", { class: "history-date" }, formatJstDateTime(it.orderedAt)),
           h("span", { class: "history-by" },
             h("span", { class: "dealer-row-facility" }, it.facilityName),
-            doctors.length ? h("span", { class: "dealer-row-doctor" }, ` ・ 担当医 ${doctors.join("、")}`) : null,
-            h("span", { class: "history-sub" }, " ・ ", h("span", { class: "dealer-row-number" }, it.orderNumber))),
+            doctors.length ? h("span", { class: "dealer-row-doctor" }, ` ・ 担当医 ${doctors.join("、")}`) : null),
           h("span", { class: "history-count" }, `${it.lineCount}件・合計${it.totalQuantity}枚`));
         b.addEventListener("click", () => openDetail(it.receiptId));
         return h("li", {}, b);

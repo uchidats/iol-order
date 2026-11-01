@@ -197,7 +197,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => [c.value, c.checked])), [["fB", true], ["fA", false]], "担当施設を先頭に");
         assert.equal(await page.locator(".dealer-scope").count(), 0, "「検索範囲: …」の行は出さない");
         assert.ok(!(await page.locator("#dealerPanel").innerText()).includes("検索範囲"));
-        assert.deepEqual(await page.locator(".dealer-row-number").allInnerTexts(), ["IOL-20261027-02"]);
+        assert.deepEqual(await page.locator(".dealer-row").evaluateAll(rs => rs.map(r => r.dataset.receipt)), ["rcp-b"]);
         // すべて選択 → 検索(複数施設)
         await page.click('[data-select="all"]');
         assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => c.checked)), [true, true], "すべて選択(検索範囲の文言はなし)");
@@ -273,7 +273,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const errors = [];
         page.on("pageerror", e => errors.push(String(e)));
         await page.goto(`${base}dealer.html`);
-        await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week") && document.querySelector("#dealerWeekMsg").textContent !== "読み込み中…");   // 週表示を読み終えた(該当ありのときは案内の文は空)
         // 並び(画面の上から): 医療機関の枠 → 表示の切り替え → 週 / 一覧
         const order = await page.evaluate(() => {
           const els = [".dealer-facility-box", ".dealer-view", "#dealerWeekArea", "#dealerOrderedArea"].map(q => document.querySelector(q));
@@ -319,7 +319,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.locator("#dealerListFilter > summary").click();
         await page.click("#btnDealerSearch");
         await page.waitForFunction(() => document.querySelectorAll(".dealer-row").length === 2);
-        assert.deepEqual(await page.locator(".dealer-row-number").allInnerTexts(), ["IOL-20261027-02", "IOL-20261027-01"], "新しい順");
+        assert.deepEqual(await page.locator(".dealer-row").evaluateAll(rs => rs.map(r => r.dataset.receipt)), ["rcp-b", "rcp-a"], "新しい順(注文番号・注文日時は行に出さない)");
+        assert.ok(!/IOL-2026|2026[/]10[/]27/.test(await page.locator("#dealerResults").innerText()), "注文番号・注文日時は一覧に出さない");
         assert.deepEqual((await page.locator(".dealer-row-doctor").allInnerTexts()).map(x => x.trim()), ["・ 担当医 山田、<b>佐藤</b>"], "担当医のない行は省略");
         assert.equal(await page.locator(".dealer-results b").count(), 0);
         // 検索時点の日時は常時表示しない。件数は一覧の直前に控えめに。検索時点の説明は「絞り込み」のⓘ(ⓘだけが単独で残らない)
@@ -368,7 +369,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const page = await context.newPage();
       await installFakeServer(page, "single");
       await page.goto(`${base}dealer.html`);
-      await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week") && document.querySelector("#dealerWeekMsg").textContent !== "読み込み中…");   // 週表示を読み終えた(該当ありのときは案内の文は空)
       assert.equal(await page.locator("[data-select]").count(), 0);
       assert.equal(await page.locator(".dealer-facility input").count(), 1);
       assert.equal(await page.locator('[data-act="saveAssigned"]').count(), 0);
@@ -400,7 +401,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         };
       });
       const listCalls = () => calls(page, "list");
-      const rows = () => page.locator(".dealer-row-number").allInnerTexts();
+      const rows = () => page.locator(".dealer-row").evaluateAll(rs => rs.map(r => r.dataset.receipt.replace(/^r-/, "")));
       // 施設Aだけで検索 → 続きあり
       await page.click('[data-select="none"]');
       await page.locator('[data-facility="fA"]').check();
@@ -746,13 +747,15 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.click('[data-select="all"]');
         await page.waitForFunction(() => document.querySelectorAll(".dealer-day").length === 2);
         const cards = await page.locator(".dealer-week-order").evaluateAll(cs => cs.map(c => c.innerText.replace(/\s+/g, " ").trim()));
-        assert.match(cards[0], /A眼科 注文番号 IOL-20261027-01 J&J DIB00V \+21\.0D 2枚 J&J DIW300 \+18\.5D 1枚 注文 2026\/10\/27 10:00 ・ 同じ注文のほかの手術日: \d+\/\d+（自社宛て 全3件）/);
-        assert.match(cards[1], /B眼科とても長い名前の医療法人社団眼科クリニック 注文番号 IOL-20261027-02 J&J DIB00V \+20\.0D 1枚 注文 2026\/10\/27 11:00$/);
+        // カードは医療機関・メーカー・モデル・度数・枚数(注文番号・注文日時は出さない。詳細に表示)
+        assert.match(cards[0], /A眼科 J&J DIB00V \+21\.0D 2枚 J&J DIW300 \+18\.5D 1枚 同じ注文のほかの手術日: \d+\/\d+（自社宛て 全3件）$/);
+        assert.match(cards[1], /^B眼科とても長い名前の医療法人社団眼科クリニック J&J DIB00V \+20\.0D 1枚$/);
+        assert.ok(!cards.some(c => /注文番号|IOL-2026|2026\/10\/27/.test(c)), "注文番号・注文日時はカードに出さない");
         assert.equal(await page.locator("#dealerWeek img").count(), 0, "施設名の HTML は文字のまま");
         assert.match(await page.locator(".dealer-day-head").first().innerText(), /^\d+月\d+日\(火\)$/);
         // 文字が重ならない・横にはみ出さない(320・390・PC)
         const overlap = await page.locator(".dealer-week-order").evaluateAll(cs => cs.some(c => {
-          const parts = [...c.querySelectorAll(".dealer-week-facility, .dealer-week-number, .dealer-week-lines li > span, .dealer-week-note")].map(e => e.getBoundingClientRect());
+          const parts = [...c.querySelectorAll(".dealer-week-facility, .dealer-week-lines li > span, .dealer-week-note")].map(e => e.getBoundingClientRect());
           return parts.some((a, i) => parts.some((b, j) => j > i && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5));
         }));
         assert.equal(overlap, false, `${width}: 週表示の文字が重ならない`);
@@ -798,7 +801,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       let page = await context.newPage();
       await installFakeServer(page, "staff");
       await page.goto(`${base}dealer.html`);
-      await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week") && document.querySelector("#dealerWeekMsg").textContent !== "読み込み中…");   // 週表示を読み終えた(該当ありのときは案内の文は空)
       await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
       assert.equal(await page.locator("[data-tab], .dealer-tabs, #dealerSettings").count(), 0, "閲覧者には管理の画面を出さない");
       await page.click("#btnHeaderMenu");
@@ -1046,7 +1049,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 確認はそのまま進む
         await page.fill('[data-f="code"]', "12345678");
         await page.click('[data-act="verifyCode"]');
-        await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week") && document.querySelector("#dealerWeekMsg").textContent !== "読み込み中…");   // 週表示を読み終えた(該当ありのときは案内の文は空)
         assert.deepEqual(errors, []);
         await context.close();
       }

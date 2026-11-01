@@ -2470,7 +2470,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-select-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dealer-facility-list { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .dealer-facility { align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; }   /* 長い施設名は折り返す(スマホ幅で横にはみ出さない) */
-.dealer-facility span, .dealer-row-facility, .dealer-row-number { overflow-wrap: anywhere; min-width: 0; }
+.dealer-facility span, .dealer-row-facility { overflow-wrap: anywhere; min-width: 0; }
 /* 受注一覧の見出しと右のⓘ */
 .dealer-title-main { display: inline-flex; align-items: center; gap: 2px; position: relative; margin-right: auto; min-width: 0; }
 .dealer-list-count { margin: 0; font-size: 0.8rem; }   /* 件数は一覧の直前に控えめに */
@@ -2519,16 +2519,18 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-week { display: flex; flex-direction: column; gap: 14px; }
 .dealer-day-head { margin: 0 0 6px; padding-bottom: 2px; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; font-weight: 700; color: #334155; }
 .dealer-week-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.dealer-week-order { display: block; width: 100%; padding: 10px 12px; background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-sm); text-align: left; font: inherit; color: inherit; cursor: pointer; }
+/* 手術週のカード: 医療機関 / 明細(メーカー・モデル・度数・枚数)。注文番号・注文日時は詳細だけ。余白は少し詰める */
+.dealer-week-order { display: block; width: 100%; padding: 8px 12px; background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-sm); text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .dealer-week-order:hover { background: #f8fafc; }
 .dealer-week-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
 .dealer-week-facility { font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
-.dealer-week-number { font-size: 0.85rem; color: #475569; overflow-wrap: anywhere; min-width: 0; }
-.dealer-week-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.dealer-week-lines { list-style: none; margin: 4px 0 0; padding: 0; }
 .dealer-week-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .dealer-week-lines .summary-model { overflow-wrap: anywhere; min-width: 0; }
-.dealer-week-note { margin: 6px 0 0; font-size: 0.8rem; color: #64748b; overflow-wrap: anywhere; }
-.dealer-row-number { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.dealer-week-note { margin: 4px 0 0; font-size: 0.8rem; color: #64748b; overflow-wrap: anywhere; }
+/* 一覧表示の行: 医療機関・担当医 | 件数・合計枚数 の2列(注文番号・注文日時は詳細だけ)。スマホも同じ並び(長い名前は折り返す) */
+.history-row.dealer-row { grid-template-columns: minmax(0, 1fr) auto; }
+@media (max-width: 480px) { .dealer-row .history-by { grid-column: auto; grid-row: auto; } }
 .dealer-detail { display: flex; flex-direction: column; gap: 10px; }
 .dealer-detail > .btn { align-self: flex-start; }
 .dealer-detail-meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
