@@ -56,7 +56,7 @@ export function createHeaderMenu(handlers) {
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
         ${info.canPreregister ? '<button type="button" role="menuitem" class="header-menu-item" id="menuPreregistrations">施設を事前登録</button>' : ""}
         ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerOperator">ディーラー管理</button>' : ""}
-        ${info.canDealerAdmin ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerPortal">ディーラー用受注一覧</button>' : ""}
+        ${info.canDealerPortal ? '<button type="button" role="menuitem" class="header-menu-item" id="menuDealerPortal">ディーラー用受注一覧</button>' : ""}
         <button type="button" role="menuitem" class="header-menu-item" id="menuRegisterFacility">新しい施設を登録</button>
         ${info.canAbout ? '<button type="button" role="menuitem" class="header-menu-item" id="menuAbout">IOL Orderについて</button>' : ""}
         ${share}
@@ -73,7 +73,7 @@ export function createHeaderMenu(handlers) {
       if (pr) pr.addEventListener("click", () => { setOpen(false); handlers.onOpenPreregistrations(); });
       const dop = panel.querySelector("#menuDealerOperator");   // 運営者(platformAdmin)だけ(表示のみ。権限はサーバーが確認する)
       if (dop) dop.addEventListener("click", () => { setOpen(false); handlers.onOpenDealerOperator(); });
-      // ディーラー用受注一覧(dealer.html。運営者だけに表示。移動するだけで、ディーラー画面のログイン・閲覧の許可は従来どおり別に確認する)
+      // ディーラー用受注一覧(dealer.html。運営者とテスト眼科の利用者だけに表示。移動するだけで、ディーラー画面のログイン・閲覧の許可は従来どおり別に確認する)
       const dpo = panel.querySelector("#menuDealerPortal");
       if (dpo) dpo.addEventListener("click", () => { setOpen(false); window.location.assign(DEALER_PORTAL_FROM_ORDER); });
       const ab = panel.querySelector("#menuAbout");   // サービス紹介(当面は運営者だけ。表示のみ。本文は Rules で platformAdmin だけが読める)

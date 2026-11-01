@@ -99,3 +99,11 @@ export function scopeLabel(selectedIds, facilities) {
 
 /** ディーラー画面の入口(メールリンクの戻り先。同じドメインの dealer.html に固定する) */
 export const dealerEntryUrl = (origin) => `${origin}/dealer.html`;
+
+/**
+ * 注文フォームのメニュー「ディーラー用受注一覧」を出すか(表示だけ。ディーラー画面のログイン・閲覧の許可は別に確認する)。
+ * 運営者(platformAdmin)と、検証用の施設「テスト眼科」(施設名ではなく施設 ID で判定)に所属する利用者だけ
+ */
+export const DEALER_PORTAL_MENU_FACILITY_IDS = Object.freeze(["fac-4313b230edb2bb033859d315"]);   // テスト眼科
+export const canOpenDealerPortalMenu = ({ isPlatformAdmin = false, memberships = [] } = {}) =>
+  isPlatformAdmin === true || (memberships || []).some(m => m && DEALER_PORTAL_MENU_FACILITY_IDS.includes(m.facilityId));

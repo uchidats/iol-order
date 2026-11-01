@@ -12,6 +12,7 @@ import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
 import { createDealerPortalApi } from "./data/dealer-portal-api.js";
+import { canOpenDealerPortalMenu } from "./domain/dealer-portal.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
 import { confirmDialog } from "./ui/confirm-dialog.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
@@ -402,6 +403,7 @@ async function bootstrapWithFirebase(config) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
         canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
+        canDealerPortal: canOpenDealerPortalMenu({ isPlatformAdmin, memberships: access.memberships }),   // ディーラー用受注一覧(運営者・テスト眼科の利用者。表示だけ)
         canAbout: canViewIntroduction({ isPlatformAdmin })
       });
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま

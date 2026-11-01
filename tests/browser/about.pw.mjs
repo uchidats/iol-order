@@ -182,7 +182,7 @@ test("IOL Orderについて(運営者・原稿の未登録): 案内だけを表�
 });
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`ディーラー用受注一覧への移動: メニューは運営者だけ(一般利用者・未ログインには出さない)。開くと dealer.html、戻るボタンで注文フォームへ。直接開いたときは戻るボタンを出さない。スマートフォン: ${name}`, async (t) => {
+  test(`ディーラー用受注一覧への移動: メニューは運営者とテスト眼科(施設 ID)の利用者だけ(ほかの施設の利用者・未ログインには出さない)。開くと dealer.html、戻るボタンで注文フォームへ。直接開いたときは戻るボタンを出さない。スマートフォン: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
@@ -202,6 +202,34 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.locator("#menuDealerPortal").count(), 0);
         await context.close();
       }
+      // テスト眼科(施設 ID で判定)に所属する利用者: 運営者でなくても出す。押すと dealer.html、戻るボタンで注文フォームへ
+      const TG = "fac-4313b230edb2bb033859d315";
+      for (const role of ["orderer", "admin"]) {
+        const tg = { user: { uid: `tg-${role}`, email: `tg-${role}@example.jp`, emailVerified: true, displayName: `検証 ${role}` }, claims: {},
+          db: { [`facilities/${TG}`]: { name: "検証用の施設(名前は問わない)", status: "active" }, [`facilities/${TG}/members/tg-${role}`]: { uid: `tg-${role}`, role, name: role } } };
+        context = await newFakeContext(browser, base, 390, tg);
+        page = await context.newPage();
+        await page.goto(base);
+        await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();
+        const tgItems = await menuItems(page);
+        assert.ok(tgItems.includes("ディーラー用受注一覧"), `テスト眼科の${role}: 出す`);
+        assert.ok(!tgItems.includes("ディーラー管理"), "運営者のメニュー(ディーラー管理)は出さない");
+        await page.click("#btnHeaderMenu");
+        await page.click("#menuDealerPortal");
+        await page.waitForURL(/\/dealer\.html/);
+        await page.locator("#dealerBackRow:not([hidden])").waitFor();
+        await page.locator("#dealerBackToOrder").click();
+        await page.waitForURL(base);
+        await context.close();
+      }
+      // 名前が「テスト眼科」でも、施設 ID が違えば出さない(この画面のテストの施設 f1 は名前が「テスト眼科」)
+      context = await newFakeContext(browser, base, 390, ADMIN);
+      page = await context.newPage();
+      await page.goto(base);
+      await page.locator("#iolOrderForm:not(.hidden) #lensLines .lens-line").waitFor();
+      assert.equal(await page.locator("#headerFacility").innerText(), "テスト眼科");
+      assert.ok(!(await menuItems(page)).includes("ディーラー用受注一覧"), "施設名では判定しない");
+      await context.close();
       // 運営者: 「ディーラー管理」の次に出る。押すと dealer.html(戻る印は URL から外す)、戻るボタンで注文フォームへ
       context = await newFakeContext(browser, base, 390, OPERATOR);
       page = await context.newPage();

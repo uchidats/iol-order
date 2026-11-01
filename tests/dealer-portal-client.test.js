@@ -154,3 +154,15 @@ test("担当者・支店の管理: 画面に出す操作(staffActions)は、サ�
   assert.deepEqual(calls, [["dealerPortalApi", { action: "manageUpdateStaff", companyId: "c", staffId: "s", facilityIds: ["fB"] }],
     ["dealerPortalApi", { action: "manageBranch", companyId: "c", name: "東京支店" }]]);
 });
+
+test("メニュー「ディーラー用受注一覧」の表示: 運営者と、テスト眼科(施設 ID)に所属する利用者だけ。施設名は使わない", async () => {
+  const { canOpenDealerPortalMenu, DEALER_PORTAL_MENU_FACILITY_IDS } = await import("../src/domain/dealer-portal.js");
+  const TG = "fac-4313b230edb2bb033859d315";
+  assert.deepEqual([...DEALER_PORTAL_MENU_FACILITY_IDS], [TG]);
+  assert.equal(canOpenDealerPortalMenu({ isPlatformAdmin: true, memberships: [] }), true);
+  for (const role of ["admin", "subadmin", "orderer", "proxy"]) assert.equal(canOpenDealerPortalMenu({ memberships: [{ facilityId: TG, role }] }), true, role);
+  assert.equal(canOpenDealerPortalMenu({ memberships: [{ facilityId: "f1", role: "admin" }, { facilityId: TG, role: "orderer" }] }), true, "複数の施設の1つ");
+  assert.equal(canOpenDealerPortalMenu({ memberships: [{ facilityId: "f1", role: "admin", name: "テスト眼科" }] }), false, "ほかの施設(名前に関係なく)");
+  assert.equal(canOpenDealerPortalMenu({ isPlatformAdmin: "true", memberships: [] }), false, "運営者の印は真偽値だけ");
+  assert.equal(canOpenDealerPortalMenu(), false);
+});
