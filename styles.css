@@ -2478,7 +2478,9 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-operator .btn-outline-sm.orderer-icon { min-height: 32px; height: 32px; min-width: 32px; padding-left: 8px; padding-right: 8px; }
 .dealer-row-facility { font-weight: 600; }
 /* ディーラー画面の「担当者・支店」(会社管理者・支店管理者)。一覧は1人1行の見出し+小さな補足+操作。スマホは折り返し */
-.dealer-tabs { margin: 0; }
+/* 切り替え(受注一覧／担当者・支店、手術日（週）／一覧表示): 縦積みの親(align-items: stretch)に広げず、ボタン2つ分の幅だけ。狭い画面でもはみ出さない */
+.dealer-tabs, .dealer-view { margin: 0; align-self: flex-start; width: max-content; max-width: 100%; }
+.dealer-tabs .history-sort-btn, .dealer-view .history-sort-btn { flex: 0 1 auto; min-width: 0; }
 .dealer-manage { display: flex; flex-direction: column; gap: 12px; }
 .dealer-manage-section { margin: 0; }
 .dealer-manage-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0 8px; }
@@ -2503,7 +2505,6 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-manage-branch .dealer-manage-actions { margin: 0 0 0 auto; }
 .dealer-search-area, .dealer-week-area, .dealer-ordered-area { display: flex; flex-direction: column; gap: 10px; }
 /* 手術日の週表示: 週の移動(スマホは週の表示を上の行に)、手術日ごとの見出し、注文ごとのカード(文字は折り返し、重ねない) */
-.dealer-view { margin: 0; }
 .dealer-week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .dealer-week-label { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .dealer-week-label { flex-basis: 100%; } }

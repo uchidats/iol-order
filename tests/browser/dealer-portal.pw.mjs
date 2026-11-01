@@ -254,6 +254,17 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.locator("#dealerOrderedArea #dealerListFilter").count(), 1, "絞り込みは一覧表示の中だけ");
         assert.deepEqual(await page.locator(".dealer-view [data-view]").allInnerTexts(), ["手術日（週）", "一覧表示"]);
         assert.equal(await page.locator(".dealer-view.history-sort .history-sort-btn").count(), 2, "既存の切り替えボタンのデザイン");
+        // 切り替えの外枠はボタン2つ分の幅だけ(右の余白まで広げない)。選択中は青、未選択は白
+        const bar = await page.locator(".dealer-view").evaluate(el => {
+          const [a, b] = [...el.querySelectorAll(".history-sort-btn")];
+          const r = el.getBoundingClientRect(), p = el.parentElement.getBoundingClientRect();
+          const bg = x => getComputedStyle(x).backgroundColor;
+          return { width: r.width, buttons: a.getBoundingClientRect().width + b.getBoundingClientRect().width, parent: p.width, right: r.right, vw: document.documentElement.clientWidth, pressed: bg(el.querySelector('[aria-pressed="true"]')), other: bg(el.querySelector('[aria-pressed="false"]')) };
+        });
+        assert.ok(bar.width <= bar.buttons + 4 && bar.width < bar.parent - 40, `${width}: 切り替えはボタン2つ分の幅 ${JSON.stringify(bar)}`);
+        assert.ok(bar.right <= bar.vw, `${width}: 切り替えが画面内`);
+        assert.notEqual(bar.pressed, bar.other);
+        assert.equal(bar.other, "rgb(255, 255, 255)");
         // 説明文は常時表示しない(見出しの右のⓘ)。医療機関名・検索範囲は表示したまま
         const text = await page.locator("#dealerPanel").innerText();
         assert.ok(!text.includes("自社宛ての明細だけを表示"), "説明文は常時表示しない");
@@ -741,6 +752,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await installFakeServer(page, "companyAdmin");
         await page.goto(`${base}dealer.html`);
         await page.locator('[data-tab="manage"]').waitFor();
+        // 「受注一覧／担当者・支店」の外枠はボタン2つ分の幅だけ(右の余白まで広げない)。画面内に収まる
+        const tabBar = await page.locator(".dealer-tabs").evaluate(el => {
+          const [a, b] = [...el.querySelectorAll(".history-sort-btn")];
+          const r = el.getBoundingClientRect();
+          return { width: r.width, buttons: a.getBoundingClientRect().width + b.getBoundingClientRect().width, parent: el.parentElement.getBoundingClientRect().width, right: r.right, vw: document.documentElement.clientWidth };
+        });
+        assert.ok(tabBar.width <= tabBar.buttons + 4 && tabBar.width < tabBar.parent - 40 && tabBar.right <= tabBar.vw, `${width}: 切り替えはボタン2つ分の幅 ${JSON.stringify(tabBar)}`);
         await page.click('[data-tab="manage"]');
         await page.locator(".dealer-manage-staff").first().waitFor();
         assert.equal(await page.locator("#dealerWeekArea").isVisible(), false, "受注一覧は隠す");
