@@ -292,9 +292,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await page.locator(".dealer-row-number").allInnerTexts(), ["IOL-20261027-02", "IOL-20261027-01"], "新しい順");
         assert.deepEqual((await page.locator(".dealer-row-doctor").allInnerTexts()).map(x => x.trim()), ["・ 担当医 山田、<b>佐藤</b>"], "担当医のない行は省略");
         assert.equal(await page.locator(".dealer-results b").count(), 0);
-        const fetchedText = await page.locator(".dealer-fetched").innerText();
-        assert.ok(/検索時点: [0-9]{4}[/][0-9]{2}[/][0-9]{2}/.test(fetchedText) && !fetchedText.includes("注文メールとは別に"), "検索時点は表示し、補足はⓘ");
-        assert.equal(await page.locator(".dealer-fetched .info-tip-btn").count(), 1);
+        // 検索時点の日時は常時表示しない。件数は一覧の直前に控えめに。検索時点の説明は「絞り込み」のⓘ(ⓘだけが単独で残らない)
+        const orderedText = await page.locator("#dealerOrderedArea").innerText();
+        assert.ok(!orderedText.includes("検索時点") && !orderedText.includes("注文メールとは別に"), "検索時点・補足は常時表示しない");
+        assert.equal(await page.locator(".dealer-fetched").count(), 0);
+        assert.equal(await page.locator("#dealerListMsg").innerText(), "2件");
+        assert.ok(await page.evaluate(() => document.querySelector("#dealerListMsg").nextElementSibling === document.querySelector("#dealerResults")), "件数は一覧の直前");
+        assert.equal(await page.locator("#dealerOrderedArea .info-tip-btn").count(), 1, "一覧表示のⓘは絞り込みの1つだけ");
+        const wasOpen = await page.locator("#dealerListFilter").evaluate(d => d.open);
+        await page.locator("#dealerListFilter > summary .info-tip-btn").click();
+        const filterHelp = await page.locator("#dealerListFilter > summary .info-tip-pop").innerText();
+        assert.ok(/検索時点/.test(filterHelp) && /もっと見る/.test(filterHelp) && /注文メールとは別に/.test(filterHelp), filterHelp);
+        assert.equal(await page.locator("#dealerListFilter").evaluate(d => d.open), wasOpen, "ⓘの操作で絞り込みを開閉しない");
+        await page.keyboard.press("Escape");
+        assert.equal(await page.locator("#dealerListFilter > summary .info-tip-pop").isHidden(), true);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 一覧が横にはみ出さない`);
         // 受注詳細: 通常の注文メール(送信済み)は出さない。説明と詳しい状況は見出しのⓘ。下部の説明文はない
         await page.locator('[data-receipt="rcp-a"]').click();

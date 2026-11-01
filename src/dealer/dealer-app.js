@@ -25,7 +25,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
   let gen = 0;             // 検索の世代。条件を変えたら進め、古い条件の応答・続きを新しい条件に混ぜない
-  let searchedAt = null;   // 検索時点(サーバーが最初のページを読んだ時点)
   let choices = [];        // 本人の有効な所属会社(2社以上なら会社を選ぶ)
 
   const panel = h("section", { class: "feature-card dealer-panel", id: "dealerPanel" });
@@ -216,11 +215,15 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const clear = h("button", { type: "button", class: "btn btn-secondary", id: "btnDealerClear" }, "条件をクリア");
     const listBox = h("div", { class: "dealer-results", id: "dealerResults" });
     const more = h("button", { type: "button", class: "btn btn-secondary history-more", id: "btnDealerMore", hidden: true }, "もっと見る");
-    const listMsg = h("p", { class: "form-hint", role: "status", id: "dealerListMsg" });
-    // 検索時点(常に表示)と、反映の時間差の補足(ⓘ)
-    const fetchedAt = h("span", {});
-    const fetched = h("p", { class: "form-hint dealer-fetched", hidden: true }, fetchedAt,
-      createInfoTip("注文メールとは別に反映されるため、表示まで少し時間がかかることがあります。", { label: "検索時点の説明" }).root);
+    // 件数・状態(一覧の直前に控えめに表示)
+    const listMsg = h("p", { class: "form-hint dealer-list-count", role: "status", id: "dealerListMsg" });
+    // 「絞り込み」の右のⓘ: 絞り込みの使い方と、検索時点・反映の時間差の説明(検索時点の日時は常時表示しない)
+    const filterTip = createInfoTip([
+      "期間(開始日と終了日)と注文番号で絞り込めます。指定しない場合は、全期間を注文日時の新しい順に表示します。",
+      "一覧は「この条件で表示」を押した時点(検索時点)の内容です。「もっと見る」の続きも同じ時点の内容で表示します。",
+      "注文メールとは別に反映されるため、新しい注文が一覧に出るまで少し時間がかかることがあります。"
+    ].join("\n"), { label: "絞り込みと検索時点の説明" }).root;
+    filterTip.addEventListener("click", (e) => e.preventDefault(), true);   // ⓘの操作で絞り込みを開閉しない(summary の中のため)
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
 
@@ -330,9 +333,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         renderList();
         listMsg.textContent = items.length ? `${items.length}件${cursor ? "(続きがあります)" : ""}`
           : cursor ? "ここまでに該当する注文は見つかりませんでした。「もっと見る」で続きを検索できます。" : "該当する注文はありません。";
-        // 続きのページも、最初のページを読んだ時点(検索時点)の内容で表示する。その後に反映された注文は再検索で表示
-        if (!append) searchedAt = r.asOf || new Date().toISOString();
-        fetchedAt.textContent = `検索時点: ${formatJstDateTime(searchedAt)}`; fetched.hidden = false;
+        // 続きのページも、最初のページを読んだ時点(検索時点)の内容で表示する(サーバーがカーソルで固定)。その後に反映された注文は再検索で表示
         if (r.newSinceSearch) listMsg.textContent += " 表示の後に反映された注文があります。「この条件で表示」を押すと最新の内容を表示します。";
       } catch (e) {
         if (my !== gen) { listMsg.textContent = CHANGED; return; }
@@ -395,12 +396,12 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
 
     orderedArea.append(
       // 絞り込み(折りたたみ。既定は閉じて、期間なし)
-      h("details", { class: "dealer-list-filter", id: "dealerListFilter" }, h("summary", {}, "絞り込み"),
+      h("details", { class: "dealer-list-filter", id: "dealerListFilter" }, h("summary", {}, "絞り込み", filterTip),
         h("div", { class: "dealer-filters" },
           h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), from, h("span", {}, "〜"), to),
           h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerOrderNumber" }, "注文番号"), number),
           h("div", { class: "onboarding-actions" }, search, clear))),
-      fetched, listMsg, listBox, more);
+      listMsg, listBox, more);
     // 補足の説明はⓘ(共通の info-tip。タップ・クリックで開く)。医療機関名・検索範囲・メッセージは常に表示する
     const tip = (text, label) => createInfoTip(text, { label }).root;
     const facilityHelp = "チェックした医療機関の受注を表示します。チェックはこの端末に自動で記憶し、次回も同じ選択で開きます(閲覧できる範囲・担当施設は変わりません)。「担当」は会社の管理者が登録した担当施設です。"
