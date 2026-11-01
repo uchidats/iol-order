@@ -176,7 +176,7 @@ test("同じ注文の中の重複: 入力の誤りにせず、確認画面で警
     assert.equal(s.calls.length, 1);
     assert.equal(s.calls[0].duplicateAcknowledged, true);
     assert.deepEqual(s.calls[0].lines.map(l => [l.modelId, l.power, l.quantity]), [["jj-dib00v", "+20.0D", 2], ["jj-dib00v", "+20.0D", 2]]);
-    assert.match(await page.locator("#completeDetails").innerText(), /2件・合計4枚/);
+    assert.equal(await page.locator("#completeDetails").isVisible(), false, "完了画面に注文の内容(合計など)は出さない");
 
     // 同じ内容でもう一度(追加注文): 過去の注文との重複の警告 → 確認して続行 → 同じ注文の中の重複も確認して送信できる
     await page.click("#btnNewOrder");
@@ -217,7 +217,26 @@ test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さ
     await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
     assert.equal(await iconAfterText(), true, "送信後に戻したボタン");
     assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
-    assert.match(await page.locator("#completeSubtitle").innerText(), /ディーラーへ注文メールを送信します[\s\S]*注文履歴で確認/);
+    // 簡潔な完了画面: チェック・見出しとⓘ・ボタンだけ。受付番号・明細・合計・備考・状態は出さない。送信の説明はⓘ(受付と配信の完了は別)
+    for (const width of [390, 1100]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.locator("#completeModal .complete-icon").isVisible(), true);
+      assert.equal(await page.locator("#completeSubtitle").isVisible(), false, "送信の説明は常時表示しない");
+      assert.equal(await page.locator("#completeDetails").isVisible(), false, "注文の内容は出さない");
+      const text = await page.locator("#completeModal").innerText();
+      assert.ok(!/受付番号|IOL-2099|合計|備考|状態:|担当医|発注先|本番/.test(text), `${width}: 注文の内容を出さない`);
+      const tip = page.locator("#completeTitleRow .info-tip-btn");
+      assert.equal(await tip.isVisible(), true, "見出しの右にⓘ");
+      const [t1, i1] = [await page.locator("#completeTitle").boundingBox(), await tip.boundingBox()];
+      assert.ok(i1.x >= t1.x + t1.width - 1 && Math.abs((i1.y + i1.height / 2) - (t1.y + t1.height / 2)) < 12, `${width}: ⓘは見出しの右`);
+      await tip.click();
+      const help = await page.locator("#completeTitleRow .info-tip-pop").innerText();
+      assert.match(help, /ディーラーへの注文メールを送信します/);
+      assert.match(help, /注文の受付と、メールの配信の完了は別です。送信の結果\(受付・配信・失敗\)は、注文履歴で確認できます/);
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator("#completeModal #btnNewOrder").isVisible(), true, "「新しい注文を入力する」はそのまま");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+    }
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
@@ -247,10 +266,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.click("#btnConfirm");
       await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
       assert.equal(await page.locator("#completeTitle").innerText(), "この注文は受け付け済みです（開発用）");
-      const details = await page.locator("#completeDetails").innerText();
-      assert.match(details, /IOL-20991231-0001/);
-      assert.match(details, /担当医 山田\(保存値\).*発注先 A商会\(保存値\)/s, "完了画面はサーバーが保存した内容");
-      assert.match(details, /備考A/);
+      // 完了画面は保存済みの注文として表示(注文の内容は出さない)。開発用の受付は案内を表示し、送信の説明のⓘは出さない
+      assert.equal(await page.locator("#completeDetails").isVisible(), false);
+      assert.match(await page.locator("#completeSubtitle").innerText(), /開発用受付・ディーラー未通知/);
+      assert.equal(await page.locator("#completeTitleRow .info-tip-btn").isVisible(), false);
       s = await srv(page);
       assert.equal(s.calls.length, 1, "同じ注文を再送していない");
       assert.equal(Object.keys(s.orders).length, 1, "二重に登録されていない");

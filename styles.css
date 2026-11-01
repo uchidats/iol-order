@@ -969,6 +969,13 @@ input[type="date"].form-control {
   justify-content: center;
 }
 
+/* 「注文を受け付けました」と右のⓘ(説明は見出しの下に開く。段落ごとに改行)。注文の内容は表示しないので、ボタンとの間を少し空ける */
+.complete-title-row { position: relative; display: flex; align-items: center; justify-content: center; gap: 2px; width: 100%; }
+.complete-title-row .info-tip-pop { white-space: pre-line; left: 50%; transform: translateX(-50%); }
+.complete-title-row .info-tip[hidden] { display: none; }
+.modal-complete .modal-footer { margin-top: 20px; }
+.modal-complete .complete-details[hidden], .modal-complete .modal-subtitle[hidden] { display: none; }
+
 .complete-details {
   width: 100%;
   background-color: #f8fafc;

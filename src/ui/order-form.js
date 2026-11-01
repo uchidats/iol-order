@@ -14,9 +14,9 @@ import { ORDER_MODES, sendsOrders } from "../config.js";
 import { buildCreateOrderRequest } from "../domain/order-request.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { pendingOrderKey, createPendingOrderStore, deriveOrderId, reconcilePendingOrder, isDefinitiveRejection } from "../domain/pending-order.js";
-import { summarizeOrder } from "../domain/order-history.js";
+import { createInfoTip } from "./info-tip.js";
 import { surgeryDateRange } from "../domain/surgery-date.js";
-import { $, escapeHtml, setFieldError, clearFieldError, showToast } from "./dom.js";
+import { $, setFieldError, clearFieldError, showToast } from "./dom.js";
 
 // 現在の状態
 let appConfig = null;
@@ -415,33 +415,40 @@ async function handleExecuteOrder() {
   }
 }
 
+/** 完了画面の見出しの右のⓘ(注文メールの送信の説明。受付とメールの配信の完了は別)。初めて開いたときに作る */
+let completeTip = null;
+function completeInfoTip() {
+  if (!completeTip) {
+    completeTip = createInfoTip("ディーラーへの注文メールを送信します。\n注文の受付と、メールの配信の完了は別です。送信の結果(受付・配信・失敗)は、注文履歴で確認できます。", { label: "注文メールの送信について" });
+    $("completeTitleRow").append(completeTip.root);
+  }
+  return completeTip;
+}
+
 /**
- * 完了画面。内容はサーバーが保存した注文(saved)から表示する(画面の入力内容は使わない)。
- * 読み込めなかった場合は受付番号だけを出し、注文履歴での確認を案内する。
+ * 完了画面。注文の内容(受付番号・明細・合計・備考・状態)は確認画面で確認済みのため表示しない(注文履歴で確認できる)。
+ * 見出し・ⓘ・ボタンだけ。利用者の対応が必要な案内(開発用の受付・保存した内容を読み込めなかった・取り消しの結果)は表示する。
+ * 受付の判定・保存・メール送信・注文履歴・取り消しは変えない(saved はサーバーが保存した注文)。
  */
-function showCompleteModal(saved, { orderNumber, replayed }) {
+function showCompleteModal(saved, { replayed }) {
   removeCancelButton();
   const prevMsg = document.getElementById("completeCancelMsg");
   if (prevMsg) prevMsg.remove();
   // 受付(accepted)まで。メールはこの後に送るので「発注済み」とは表示しない。テスト注文はディーラーへ送らない
   const test = saved ? saved.testOrder === true : appConfig.orderMode !== ORDER_MODES.SERVER;
+  const subtitle = $("completeSubtitle");
   if (test) {
     $("completeTitle").textContent = replayed ? "この注文は受け付け済みです（開発用）" : "注文を受け付けました（開発用）";
-    $("completeSubtitle").innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+    subtitle.innerHTML = "<strong>開発用受付・ディーラー未通知</strong><br>サーバーに保存しました。ディーラーへの発注・メール送信は行われていません。";
+    subtitle.hidden = false;
   } else {
     $("completeTitle").textContent = replayed ? "この注文は受け付け済みです" : "注文を受け付けました";
-    $("completeSubtitle").innerHTML = "<strong>ディーラーへ注文メールを送信します</strong><br>送信の結果(受付・配信・失敗)は、注文履歴で確認してください。";
+    subtitle.textContent = ""; subtitle.hidden = true;   // 送信の説明はⓘ
   }
-  const o = saved ? summarizeOrder(saved) : null;
-  el.completeDetails.innerHTML = `
-    <div style="margin-bottom: 8px;"><strong>受付番号:</strong> ${escapeHtml((o && o.orderNumber) || orderNumber || "—")}</div>
-    ${o ? `
-    ${o.lines.map(l => `<div style="margin-bottom: 4px;">${escapeHtml(l.lineNo)}. ${escapeHtml([l.maker, l.model].filter(Boolean).join(" / "))} / ${escapeHtml(l.power)} / ${escapeHtml(l.quantity)}枚 / 手術日 ${escapeHtml(l.surgeryDate)} / 担当医 ${escapeHtml(l.doctorName)} / ${escapeHtml(l.dealerName ? `発注先 ${l.dealerName}` : "発注先未設定")}</div>`).join("")}
-    <div style="margin-bottom: 4px;"><strong>合計:</strong> ${escapeHtml(o.lineCount)}件・合計${escapeHtml(o.totalQuantity)}枚</div>
-    <div style="margin-bottom: 4px; white-space: pre-wrap;"><strong>備考:</strong> ${escapeHtml(o.notes || "（なし）")}</div>
-    <div style="margin-bottom: 4px;"><strong>状態:</strong> <span data-f="completeStatus">${escapeHtml(o.statusLabel)}</span></div>` : `
-    <div style="margin-bottom: 4px;">保存された注文の内容を読み込めませんでした。注文履歴で内容を確認してください。</div>`}
-  `;
+  completeInfoTip().root.hidden = test;   // 開発用はディーラーへ送らないため、送信の説明は出さない
+  // 保存した注文を読み込めなかったときだけ、注文履歴での確認を案内する
+  el.completeDetails.textContent = saved ? "" : "保存された注文の内容を読み込めませんでした。注文履歴で内容を確認してください。";
+  el.completeDetails.hidden = Boolean(saved);
 
   el.completeModal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -481,9 +488,10 @@ function showCancelButton({ facilityId, orderId, deadline, submittedForm = null 
       // サーバーが取り消しを確定したときだけ、送信した内容のまま注文入力画面へ戻す(修正して、新しい注文として送り直せる)
       if (submittedForm) { returnToFormAfterCancel(submittedForm); return; }
       $("completeTitle").textContent = "注文を取り消しました";
-      $("completeSubtitle").textContent = "ディーラーへの注文メールは送信していません。この注文は注文履歴に「取消済み」として残ります。";
-      const st = el.completeDetails.querySelector('[data-f="completeStatus"]');
-      if (st) st.textContent = "取消済み";
+      const subtitle = $("completeSubtitle");
+      subtitle.textContent = "ディーラーへの注文メールは送信していません。この注文は注文履歴に「取消済み」として残ります。";
+      subtitle.hidden = false;   // 取り消しの結果は表示する(送信の説明のⓘは出さない)
+      completeInfoTip().root.hidden = true;
     } catch (e) {
       const code = String((e && e.code) || "");
       const late = code.endsWith("failed-precondition") || code.endsWith("not-found");
