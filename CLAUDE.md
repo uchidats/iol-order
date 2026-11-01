@@ -35,6 +35,7 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - 3 では、施設管理者のみが操作できる項目に `{*}`(画面では赤い *)を付け、末尾に「{*} 施設管理者のみ操作できます。」と書く。
 - 当面、マニュアルにはサービス名「IOL Order」とサイトの URL を載せない(「本システム」などと書く。テストが検出する)。
 - `docs/introduction/` はマニュアルの作業では変更しない。
+- **ディーラー画面(`dealer.html`)の「使い方・ヘルプ」は別の原稿 `docs/dealer-manual/`**(README.md = 目次、01 ログインと本人確認 / 02 受注一覧 / 03 ディーラー設定 / 04 よくある質問)。医療機関用に依存させず、ディーラーの利用者目線で書く(共通の操作は同じ説明文でよい)。`src/manual/dealer-manual-pages.js` は同じ `scripts/build-manual.mjs` の自動生成(`tests/dealer-manual.test.js` が一致を確認)。表示の部品(`src/ui/manual-view.js`)は共通。担当者は全員、全ページを読める。会社管理者のみの項目に `{*}` を付け、03 の末尾に「{*} 会社管理者のみ操作できます。」。ディーラー画面の機能・文言を変えたら同じ作業で更新し、上と同じ方針(未実装の機能・「IOL Order」・URL・運営者専用の操作は書かない)に従う。
 
 ## 紹介ページ「IOL Orderについて」(当面は運営者 platformAdmin だけ)
 - 原稿の正式な管理元は `docs/introduction/service-introduction-web.md`(元原稿 `service-introduction.md` は変更しない)。**git に入れない**(公開サイトはリポジトリのファイルをそのまま配信するため、入れると誰でも読める)。

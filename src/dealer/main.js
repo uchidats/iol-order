@@ -3,6 +3,7 @@ import { setupAppCheck } from "../firebase/app-check.js";
 import { createDealerPortalApi } from "../data/dealer-portal-api.js";
 import { dealerEntryUrl, facilityViewKey } from "../domain/dealer-portal.js";
 import { createDealerApp } from "./dealer-app.js";
+import { createDealerHeaderMenu } from "./dealer-header-menu.js";
 
 /**
  * ディーラー専用画面(dealer.html)の起動。医療機関の画面(index.html)とは別の入口。
@@ -34,7 +35,14 @@ async function bootstrap() {
   showBackToOrder();
   const mount = document.getElementById("dealerMain");
   const subtitle = document.getElementById("dealerCompany");
-  const setSubtitle = (t) => { subtitle.textContent = t || ""; subtitle.hidden = !t; };
+  // ヘッダー: 受注一覧を開いた後(サーバーが所属を確かめた後)は「受注一覧」と会社名(医療機関の画面の「IOL 注文フォーム」と施設名と同じ形)。
+  // ログイン前・本人確認・会社の選択の間は、従来どおり「受注一覧(ディーラー用)」だけ(会社名は出さない)
+  const titleEl = document.querySelector(".header-title");
+  const defaultTitle = titleEl ? titleEl.textContent : "";
+  const setSubtitle = (t) => {
+    subtitle.textContent = t || ""; subtitle.hidden = !t;
+    if (titleEl) titleEl.textContent = t ? "受注一覧" : defaultTitle;
+  };
   const fatal = (text) => { mount.replaceChildren(Object.assign(document.createElement("p"), { className: "error-message", textContent: text })); };
   if (!isFirebaseConfigured(FIREBASE_CONFIG)) { fatal("システムの設定が不足しているため、表示できません。"); return; }
 
@@ -88,9 +96,46 @@ async function bootstrap() {
     return `${user.uid}.${provider}.${digest}`;
   }
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
-  const ui = createDealerApp({
-    mount, api, setSubtitle,
-    onSignOut: async () => { try { await service.signOut(); } finally { location.reload(); } },   // 表示中のデータもメモリごと破棄する
+  const signOut = async () => { try { await service.signOut(); } finally { location.reload(); } };   // 表示中のデータもメモリごと破棄する
+  // ---------- 使い方・ヘルプ(ディーラー用マニュアル。医療機関の画面と同じ表示の部品。URL のハッシュ #help/… で開く) ----------
+  // 表示中は main の他の画面を CSS で隠すだけ(受注一覧・ディーラー設定の状態はそのまま)。担当者は全員、全ページを読める
+  let manual = null;
+  let signedIn = false;
+  const helpBackLabel = () => {
+    const view = ui ? ui.currentView() : "other";
+    if (view === "settings") return "ディーラー設定に戻る";
+    if (view === "portal") return "受注一覧に戻る";
+    return signedIn ? "元の画面に戻る" : "ログイン画面に戻る";
+  };
+  async function syncHelp() {
+    const [{ pageIdFromHash, createManualView }, { DEALER_MANUAL_PAGES }] = await Promise.all([import("../ui/manual-view.js"), import("../manual/dealer-manual-pages.js")]);
+    const pageId = pageIdFromHash(location.hash, DEALER_MANUAL_PAGES);
+    if (pageId === null) { if (manual && manual.isOpen()) manual.close(); return; }
+    if (!manual) {
+      manual = manual || createManualView({ mount, backLabel: helpBackLabel, onBack: () => closeHelp(), pages: DEALER_MANUAL_PAGES,
+        canView: () => true, markTitle: "会社管理者のみ" });
+    }
+    manual.show(pageId);
+  }
+  /** ハッシュを外して閉じる(元の画面に戻る) */
+  function closeHelp() {
+    if (/^#help(?:\/|$)/.test(location.hash)) history.pushState(null, "", location.pathname + location.search);
+    if (manual && manual.isOpen()) manual.close();
+  }
+  const openHelp = () => { if (location.hash === "#help") syncHelp(); else location.hash = "#help"; };   // hashchange で開く
+  window.addEventListener("hashchange", () => { syncHelp(); });
+
+  // ヘッダーの「☰」メニュー(医療機関の画面と同じ見た目・動作)。使い方・ヘルプはログイン前から。ほかの項目は受注一覧を開いた後
+  let ui = null;
+  const menu = createDealerHeaderMenu({
+    onSignOut: signOut,
+    onSwitchCompany: () => { closeHelp(); if (ui) ui.switchCompany(); },
+    onOpenSettings: () => { closeHelp(); if (ui) ui.openSettings(); },
+    onOpenHelp: openHelp
+  });
+  ui = createDealerApp({
+    mount, api, setSubtitle, setMenu: (info) => menu.update(info),
+    onSignOut: signOut,
     setRememberDevice: (v) => { remember = v !== false; },   // 本人確認の画面の「この端末を記憶する」
     // 医療機関のチェックの記憶(ログインユーザー × 会社ごと。施設 ID だけ。保存できない環境では記憶しない)
     facilityView: {
@@ -118,9 +163,12 @@ async function bootstrap() {
       return;
     }
     uid = user.uid;
+    signedIn = true;
     deviceScope = await scopeOf(user);
     await ui.enter();
+    if (manual && manual.isOpen()) manual.updateBackLabel();   // ヘルプを開いたままログインした場合の戻り先の文言
   });
+  if (/^#help(?:\/|$)/.test(location.hash)) syncHelp();   // #help/… の URL で開いたとき(共有されたリンクなど)
 }
 
 bootstrap().catch((e) => {

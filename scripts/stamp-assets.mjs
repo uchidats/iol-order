@@ -47,9 +47,9 @@ export function stampHtml(html) {
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
-  // マニュアルの表示データ(src/manual/manual-pages.js)を先に作り直す(原稿 docs/manual の変更もバージョンに反映する)
-  const { writeManualModule } = await import("./build-manual.mjs");
-  if (writeManualModule()) console.log("src/manual/manual-pages.js を更新しました");
+  // マニュアルの表示データを先に作り直す(医療機関用 docs/manual・ディーラー用 docs/dealer-manual の変更もバージョンに反映する)
+  const { writeManualModule, MANUALS } = await import("./build-manual.mjs");
+  for (const m of Object.values(MANUALS)) if (writeManualModule(m)) console.log(`${m.outPath} を更新しました`);
   for (const name of ["index.html", "dealer.html"]) {   // dealer.html: ディーラー専用画面の入口
     const file = rootPath(name);
     const html = fs.readFileSync(file, "utf8");

@@ -1,7 +1,7 @@
 import { MANUAL_PAGES } from "../manual/manual-pages.js";
 import { externalLink } from "../manual/markdown.js";
 import { h, renderMarkdown } from "./markdown-view.js";
-import { canViewManualPage, visibleManualPages } from "../domain/manual-access.js";
+import { canViewManualPage } from "../domain/manual-access.js";
 
 /** マニュアルのページの URL(ハッシュ)。目次は #help、各ページは #help/<ページID> */
 export const manualHash = (pageId) => (!pageId || pageId === "index" ? "#help" : `#help/${pageId}`);
@@ -9,27 +9,30 @@ export const manualHash = (pageId) => (!pageId || pageId === "index" ? "#help" :
 /** 統合した旧ページの URL → 新しいページ(以前の #help/03-subadmin・#help/04-admin の共有リンクを案内する。閲覧範囲の判定は移動先で行う) */
 export const MANUAL_PAGE_ALIASES = Object.freeze({ "03-subadmin": "03-managers", "04-admin": "03-managers" });
 
-/** #help・#help/<ページID> ならページID(目次は "index"、旧ページは統合先)。それ以外は null */
-export function pageIdFromHash(hash) {
+/**
+ * #help・#help/<ページID> ならページID(目次は "index"、旧ページは統合先)。それ以外は null。
+ * pages を渡すと、そのマニュアル(ディーラー用など)のページで判定する(旧ページの統合先は医療機関用だけ)
+ */
+export function pageIdFromHash(hash, pages = MANUAL_PAGES) {
   const m = String(hash || "").match(/^#help(?:\/([A-Za-z0-9_-]+))?\/?$/);
   if (!m) return null;
-  const id = MANUAL_PAGE_ALIASES[m[1]] || m[1] || "index";
-  return MANUAL_PAGES.some(p => p.id === id) ? id : "index";
+  const id = (pages === MANUAL_PAGES && MANUAL_PAGE_ALIASES[m[1]]) || m[1] || "index";
+  return pages.some(p => p.id === id) ? id : "index";
 }
 
 /** 原稿どうしのリンク(./02-orderer.md など)はマニュアルのページへ、http(s) は別のタブへ。それ以外はリンクにしない */
-export function resolveManualLink(url) {
+export function resolveManualLink(url, pages = MANUAL_PAGES) {
   const m = String(url).match(/^(?:\.\/)?([A-Za-z0-9_-]+)\.md$/);
   if (m) {
-    const page = MANUAL_PAGES.find(p => p.file === `${m[1]}.md`);
+    const page = pages.find(p => p.file === `${m[1]}.md`);
     return page ? { kind: "page", href: manualHash(page.id) } : null;
   }
   return externalLink(url);
 }
 
 /** Markdown を表示用の要素にする(HTMLとして解釈しない。リンクは resolveManualLink で解決できるものだけ) */
-export function renderManualMarkdown(markdown) {
-  const out = renderMarkdown(markdown, { resolveLink: resolveManualLink });
+export function renderManualMarkdown(markdown, pages = MANUAL_PAGES) {
+  const out = renderMarkdown(markdown, { resolveLink: (url) => resolveManualLink(url, pages) });
   // 「注文者」と「代行入力者」の比較表(2. の冒頭): スマホで列幅を保って横にスクロールする(styles.css の .manual-table-roles。表示だけ)
   for (const wrap of out.querySelectorAll(".manual-table-wrap")) {
     const head = [...wrap.querySelectorAll("thead th")].map(th => th.textContent.trim());
@@ -68,8 +71,11 @@ function pruneHiddenLinks(article, canView, isIndex) {
  * @param {() => string} deps.backLabel 戻るボタンの文言(注文画面に戻る・ログイン画面に戻る など)
  * @param {() => void} deps.onBack 戻るボタン
  * @param {() => (string|null)} [deps.audience] 閲覧範囲(未指定は未ログインと同じ)
+ * @param {Array<{id:string,file:string,label:string,markdown:string}>} [deps.pages] 表示するマニュアル(未指定は医療機関用。ディーラー画面はディーラー用)
+ * @param {(pageId:string, audience:(string|null)) => boolean} [deps.canView] ページの表示範囲(未指定は医療機関用の役割による範囲)
+ * @param {string} [deps.markTitle] 原稿の {*}(赤い *)に重ねる説明(未指定は「施設管理者のみ」。ディーラー用は「会社管理者のみ」)
  */
-export function createManualView({ mount, backLabel, onBack, audience = () => "guest" }) {
+export function createManualView({ mount, backLabel, onBack, audience = () => "guest", pages: allPages = MANUAL_PAGES, canView = canViewManualPage, markTitle = null }) {
   const root = h("section", { id: "manualView", class: "settings-view manual-view", hidden: true, "aria-labelledby": "manualHeading" });
   mount.insertBefore(root, mount.firstChild);
   let current = null;     // 表示中のページ
@@ -91,8 +97,8 @@ export function createManualView({ mount, backLabel, onBack, audience = () => "g
   function show(pageId) {
     const aud = audience();
     shownFor = aud;
-    requested = MANUAL_PAGES.some(p => p.id === pageId) ? pageId : "index";
-    if (!canViewManualPage(requested, aud)) {
+    requested = allPages.some(p => p.id === pageId) ? pageId : "index";
+    if (!canView(requested, aud)) {
       if (aud === null) {   // 確認中: 本文は出さずに待つ(updateAudience で表示し直す)
         current = requested;
         root.replaceChildren(head(), h("p", { class: "form-hint", role: "status" }, "読み込んでいます…"));
@@ -102,15 +108,16 @@ export function createManualView({ mount, backLabel, onBack, audience = () => "g
       history.replaceState(null, "", location.pathname + location.search + manualHash("index"));   // 範囲外: 閲覧できる目次へ
       requested = "index";
     }
-    const pages = visibleManualPages(MANUAL_PAGES, aud);
+    const pages = allPages.filter(p => canView(p.id, aud));
     const page = pages.find(p => p.id === requested) || pages[0];
     current = page.id;
     // 旧ページ・知らないページの URL は、表示したページの URL に置き換える(履歴は増やさない)
     if (/^#help(?:\/|$)/.test(location.hash) && location.hash !== manualHash(page.id)) history.replaceState(null, "", location.pathname + location.search + manualHash(page.id));
     const nav = h("nav", { class: "manual-nav", "aria-label": "マニュアルのページ" },
       pages.map(p => h("a", { href: manualHash(p.id), class: "manual-nav-link", "aria-current": p.id === page.id ? "page" : null }, p.label)));
-    const article = h("article", { class: "manual-body", tabindex: "-1" }, renderManualMarkdown(page.markdown));
-    pruneHiddenLinks(article, (id) => canViewManualPage(id, aud), page.id === "index");
+    const article = h("article", { class: "manual-body", tabindex: "-1" }, renderManualMarkdown(page.markdown, allPages));
+    pruneHiddenLinks(article, (id) => canView(id, aud), page.id === "index");
+    if (markTitle) for (const m of article.querySelectorAll(".manual-admin-mark")) m.title = markTitle;
     const idx = pages.indexOf(page);
     const prev = idx > 0 ? pages[idx - 1] : null;
     const next = idx < pages.length - 1 ? pages[idx + 1] : null;

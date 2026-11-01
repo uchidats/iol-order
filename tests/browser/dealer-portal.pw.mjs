@@ -164,6 +164,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.goto(`${base}dealer.html`);
         await openOrdered(page);
         assert.equal(await page.locator("#dealerCompany").innerText(), "エックス商事");
+        // ヘッダーの「☰」メニュー(医療機関の画面と同じ部品の見た目): 氏名・所属会社・ログアウト。受注一覧の中のログアウト・会社名と氏名の行はない
+        assert.equal(await page.locator(".app-header .header-inner .header-menu .header-menu-btn").isVisible(), true);
+        assert.equal(await page.locator("#headerMenuPanel").isHidden(), true);
+        assert.equal(await page.locator('#dealerPanel [data-act="signout"], #dealerPanel [data-act="switchCompany"], #dealerPanel .feature-desc').count(), 0);
+        assert.ok(!(await page.locator("#dealerPanel").innerText()).includes("担当x1"), "氏名は受注一覧に重ねて出さない");
+        await page.click("#btnHeaderMenu");
+        assert.equal(await page.locator("#btnHeaderMenu").getAttribute("aria-expanded"), "true");
+        assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-label").allInnerTexts(), ["ログイン中", "所属会社"]);
+        assert.deepEqual([await page.locator('[data-f="menuName"]').innerText(), await page.locator('[data-f="menuCompany"]').innerText()], ["担当x1", "エックス商事 東京支店"]);
+        assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["使い方・ヘルプ", "ログアウト"], "閲覧者: ディーラー設定はない。1社だけなら会社の切り替えは出さない");
+        assert.equal(await page.locator(".app-header .header-title").innerText(), "受注一覧", "受注一覧では「(ディーラー用)」を外す");
+        const menuBox = await page.locator("#headerMenuPanel").boundingBox();
+        assert.ok(menuBox.x >= 0 && menuBox.x + menuBox.width <= width, `${width}: メニューが画面内`);
+        await page.locator(".header-title").click();   // 外側のクリックで閉じる(ⓘのない場所)
+        assert.equal(await page.locator("#headerMenuPanel").isHidden(), true);
+        await page.click("#btnHeaderMenu");
+        await page.keyboard.press("Escape");   // Esc で閉じる
+        assert.equal(await page.locator("#headerMenuPanel").isHidden(), true);
         // 初期表示: 担当施設(B)だけを選択して検索
         assert.deepEqual((await calls(page, "list"))[0].facilityFilter, { mode: "selected", facilityIds: ["fB"] });
         assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => [c.value, c.checked])), [["fB", true], ["fA", false]], "担当施設を先頭に");
@@ -186,6 +204,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.locator(".dealer-detail b, .dealer-detail img").count(), 0);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 詳細が横にはみ出さない`);
         await page.click('[data-act="back"]');
+        await page.mouse.move(0, 0);   // 戻った後の位置にⓘがあると、マウスのホバーで説明が開くため離す
         // 選択を解除 → 0件(自動で全選択に戻さない)
         await page.click('[data-select="none"]');
         await page.click("#btnDealerSearch");
@@ -446,8 +465,16 @@ test("ディーラー画面: 有効な所属が2社なら会社を選ぶ。選�
     assert.equal(await page.locator("#dealerCompany").innerText(), "ワイ医療");
     assert.deepEqual((await calls(page, "context"))[0], { action: "context", companyId: "dco-y" });
     assert.equal((await calls(page, "list"))[0].companyId, "dco-y");
-    await page.click('[data-act="switchCompany"]');
+    // 会社の切り替えはヘッダーの「☰」メニューから(2社以上のときだけ)
+    await page.click("#btnHeaderMenu");
+    assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["会社を切り替える", "使い方・ヘルプ", "ログアウト"]);
+    assert.equal(await page.locator('[data-f="menuCompany"]').innerText(), "ワイ医療 東京支店");
+    await page.click("#menuSwitchCompany");
     await page.getByText("会社の選択", { exact: true }).waitFor();
+    await page.click("#btnHeaderMenu");
+    assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["使い方・ヘルプ"], "会社の選択の画面: メニューは使い方・ヘルプだけ(ログアウトはカードのボタン)");
+    assert.equal(await page.locator("#headerMenuPanel .header-menu-info").count(), 0);
+    await page.keyboard.press("Escape");
     assert.equal(await page.locator(".dealer-row").count(), 0, "切り替えでは前の会社の表示を残さない");
     await context.close();
   } finally { await browser.close(); }
@@ -477,6 +504,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const panelText = await page.locator("#dealerPanel").innerText();
         for (const t of ["医療機関から閲覧を許可された", "Google アカウント(Google Workspace など)", "ログイン用のリンクが届きます"]) assert.ok(!panelText.includes(t), `${width}: 「${t}」は常時表示しない`);
         assert.equal(await page.locator("#dealerPanel .feature-desc, #dealerPanel .dealer-login-block .form-hint").count(), 0, "見出しの下の説明文はない");
+        await page.click("#btnHeaderMenu");
+        assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["使い方・ヘルプ"], "ログイン前: メニューは使い方・ヘルプだけ");
+        await page.keyboard.press("Escape");
+        assert.equal(await page.locator(".app-header .header-title").innerText(), "受注一覧(ディーラー用)", "ログイン前の見出しはそのまま");
+        assert.equal(await page.locator("#dealerCompany").isHidden(), true);
         const tips = [["#dealerPanel .feature-title-row", /医療機関から閲覧を許可された、自社宛ての注文を確認する画面です。招待された勤務先メールアドレスのアカウントでログインしてください。/],
           ['[data-login="accounts"] .dealer-login-head', /招待されたメールアドレスの Google アカウント.*確認コードで本人確認をします。/s],
           ['[data-login="email"] .dealer-login-head', /招待された勤務先メールアドレスを入力すると、ログイン用のリンクが届きます。/]];
@@ -558,6 +590,10 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.getByText("本人確認", { exact: true }).waitFor();
     assert.ok(!/エックス商事|B眼科|A眼科|IOL-2026/.test(await page.locator("main").innerText()), "確認するまで会社名・施設名を出さない");
     assert.equal(await page.locator('[data-act="signout"]').count(), 1);
+    await page.click("#btnHeaderMenu");
+    assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["使い方・ヘルプ"], "本人確認の間: メニューは使い方・ヘルプだけ(会社名も出さない)");
+    assert.equal(await page.locator("#headerMenuPanel .header-menu-info").count(), 0);
+    await page.keyboard.press("Escape");
     assert.equal(await page.locator('[data-act="later"]').count(), 0);
     assert.equal(await page.locator('[data-f="code"]').isVisible(), false, "コード欄は送るまで出さない");
     await page.click('[data-act="sendCode"]');
@@ -740,18 +776,21 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 }
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`ディーラー画面の「担当者・支店」: 会社管理者・支店管理者だけに表示。支店の絞り込み・役割に合わせた操作・招待・編集・支店の追加/名称変更/無効化。ⓘで説明。320/390/PCで重ならない: ${name}`, async (t) => {
+  test(`ディーラー画面の「担当者・支店」: ☰メニューの「ディーラー設定」(会社管理者・支店管理者だけ)から開き、受注一覧に戻ると状態が残る。支店の絞り込み・役割に合わせた操作・招待・編集・支店の追加/名称変更/無効化。ⓘで説明。320/390/PCで重ならない: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
     try {
-      // 閲覧者: タブを出さない
+      // 閲覧者: 「ディーラー設定」を出さない(切り替えのタブもない)。管理の API も呼ばない
       let context = await newFakeContext(browser, base, 390, STAFF);
       let page = await context.newPage();
       await installFakeServer(page, "staff");
       await page.goto(`${base}dealer.html`);
       await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
       await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
-      assert.equal(await page.locator("[data-tab]").count(), 0, "閲覧者には管理の画面を出さない");
+      assert.equal(await page.locator("[data-tab], .dealer-tabs, #dealerSettings").count(), 0, "閲覧者には管理の画面を出さない");
+      await page.click("#btnHeaderMenu");
+      assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["使い方・ヘルプ", "ログアウト"]);
+      assert.deepEqual(await calls(page, "manage"), []);
       await context.close();
 
       for (const width of [320, 390, 1100]) {
@@ -762,17 +801,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         page.on("dialog", d => d.accept());
         await installFakeServer(page, "companyAdmin");
         await page.goto(`${base}dealer.html`);
-        await page.locator('[data-tab="manage"]').waitFor();
-        // 「受注一覧／担当者・支店」の外枠はボタン2つ分の幅だけ(右の余白まで広げない)。画面内に収まる
-        const tabBar = await page.locator(".dealer-tabs").evaluate(el => {
-          const [a, b] = [...el.querySelectorAll(".history-sort-btn")];
-          const r = el.getBoundingClientRect();
-          return { width: r.width, buttons: a.getBoundingClientRect().width + b.getBoundingClientRect().width, parent: el.parentElement.getBoundingClientRect().width, right: r.right, vw: document.documentElement.clientWidth };
-        });
-        assert.ok(tabBar.width <= tabBar.buttons + 4 && tabBar.width < tabBar.parent - 40 && tabBar.right <= tabBar.vw, `${width}: 切り替えはボタン2つ分の幅 ${JSON.stringify(tabBar)}`);
-        await page.click('[data-tab="manage"]');
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        assert.equal(await page.locator("[data-tab], .dealer-tabs").count(), 0, "「受注一覧／担当者・支店」の切り替えはない");
+        assert.equal(await page.locator(".dealer-view [data-view]").count(), 2, "「手術日（週）／一覧表示」は残す");
+        // 一覧表示に切り替えてから設定を開き、戻ったときに残っているか確かめる
+        await page.click('[data-view="ordered"]');
+        await page.locator(".dealer-row").first().waitFor();
+        await page.mouse.move(0, 0);
+        // ☰メニューの「ディーラー設定」(会社管理者): 施設設定と同じ見出しの行(見出し・ⓘ・受注一覧に戻る)
+        await page.click("#btnHeaderMenu");
+        assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["ディーラー設定", "使い方・ヘルプ", "ログアウト"]);
+        await page.click("#menuDealerSettings");
         await page.locator(".dealer-manage-staff").first().waitFor();
-        assert.equal(await page.locator("#dealerWeekArea").isVisible(), false, "受注一覧は隠す");
+        assert.equal(await page.locator("#dealerPanel").isVisible(), false, "受注一覧は隠す");
+        assert.equal(await page.locator("#dealerSettings .settings-head h2").innerText(), "ディーラー設定");
+        assert.equal(await page.locator("#dealerSettings .settings-head .info-tip-btn").count(), 1);
+        assert.equal(await page.locator("#btnDealerSettingsClose").innerText(), "受注一覧に戻る");
+        assert.equal(await page.locator(".app-header .header-title").innerText(), "受注一覧");
+        assert.equal(await page.locator("#dealerCompany").innerText(), "エックス商事", "ヘッダーは「受注一覧」と会社名");
         const names = () => page.locator(".dealer-manage-staff .dealer-manage-name").allInnerTexts();
         const filter = page.locator('[data-f="branchFilter"]');
         assert.deepEqual(await filter.locator("option").allInnerTexts(), ["すべての支店", "支店未設定", "東京支店", "大阪支店"]);
@@ -842,10 +888,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         }));
         assert.equal(overlap, false, `${width}: 文字が重ならない`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
-        // 受注一覧に戻る
-        await page.click('[data-tab="orders"]');
-        assert.equal(await page.locator("#dealerWeekArea").isVisible(), true);
-        assert.equal(await page.locator(".dealer-manage").isVisible(), false);
+        // 受注一覧に戻る(一覧表示のまま。もう一度開いても読み直さない)
+        await page.click("#btnDealerSettingsClose");
+        assert.equal(await page.locator("#dealerSettings").isVisible(), false);
+        assert.equal(await page.locator("#dealerOrderedArea").isVisible(), true, "戻ると一覧表示のまま");
+        assert.equal(await page.locator('[data-view="ordered"]').getAttribute("aria-pressed"), "true");
+        assert.ok(await page.locator(".dealer-row").count() > 0);
+        const manageCalls = (await calls(page, "manage")).length;
+        await page.click("#btnHeaderMenu");
+        await page.click("#menuDealerSettings");
+        assert.equal(await page.locator("#dealerSettings").isVisible(), true);
+        assert.equal((await calls(page, "manage")).length, manageCalls, "開き直しでは読み直さない");
+        await page.click("#btnDealerSettingsClose");
         assert.deepEqual(errors, []);
         await context.close();
       }
@@ -859,9 +913,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         page.on("pageerror", e => errors.push(String(e)));
         await installFakeServer(page, "branchAdmin");
         await page.goto(`${base}dealer.html`);
-        await page.locator('[data-tab="manage"]').waitFor();
-        assert.equal(await page.locator('[data-tab="manage"]').innerText(), "担当者");
-        await page.click('[data-tab="manage"]');
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        await page.click("#btnHeaderMenu");
+        assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["ディーラー設定", "使い方・ヘルプ", "ログアウト"], "支店管理者も「ディーラー設定」");
+        await page.click("#menuDealerSettings");
         await page.locator(".dealer-manage-staff").first().waitFor();
         const row = (id) => page.locator(`.dealer-manage-staff[data-staff="${id}"]`);
         assert.deepEqual(await page.locator(".dealer-manage-staff").evaluateAll(rs => rs.map(r => r.dataset.staff).sort()), ["s-inv", "s-me", "s-r1"]);
@@ -982,6 +1037,83 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(errors, []);
         await context.close();
       }
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面の「使い方・ヘルプ」: ☰メニューから開く(ログイン前も)。ディーラー用のマニュアル(医療機関用とは別)。ページの移動・戻る・会社管理者のみの印。320/390/1100px で横にはみ出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [320, 390, 1100]) {
+        // ログイン前: メニューは「使い方・ヘルプ」だけ。戻るとログイン画面
+        let context = await newFakeContext(browser, base, width, null);
+        let page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await installFakeServer(page, "staff");
+        await page.goto(`${base}dealer.html`);
+        await page.locator("#btnDealerGoogle").waitFor();
+        await page.click("#btnHeaderMenu");
+        await page.click("#menuHelp");
+        await page.locator("#manualView .manual-body h1").waitFor();
+        assert.equal(await page.evaluate(() => location.hash), "#help");
+        assert.equal(await page.locator("#manualView .manual-body h1").innerText(), "ディーラー用マニュアル");
+        assert.equal(await page.locator("#dealerPanel").isVisible(), false, "ヘルプの間はログイン画面を隠す");
+        assert.deepEqual(await page.locator(".manual-nav-link").allInnerTexts(), ["目次", "1. ログインと本人確認", "2. 受注一覧", "3. ディーラー設定", "4. よくある質問"], "全ページを表示(担当者は全員が読める)");
+        const body = await page.locator("#manualView").innerText();
+        assert.ok(!/IOL\s*Order|注文フォーム|施設設定|代行入力者/.test(body), "医療機関用の内容を含まない");
+        assert.equal(await page.locator(".manual-back").first().innerText(), "ログイン画面に戻る");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 目次が横にはみ出さない`);
+        // ページの移動(目次のリンク)。3. は会社管理者のみの印(赤い *)と、その説明
+        await page.locator('.manual-body a[href="#help/03-settings"]').click();
+        await page.waitForFunction(() => location.hash === "#help/03-settings");
+        assert.match(await page.locator(".manual-body h1").innerText(), /^3\. ディーラー設定/);
+        assert.ok(await page.locator(".manual-body .manual-admin-mark").count() > 0);
+        assert.equal(await page.locator(".manual-body .manual-admin-mark").first().getAttribute("title"), "会社管理者のみ");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 3. が横にはみ出さない`);
+        await page.locator(".manual-back").first().click();
+        await page.locator("#btnDealerGoogle").waitFor();
+        assert.equal(await page.evaluate(() => location.hash), "");
+        assert.equal(await page.locator("#manualView").isHidden(), true);
+        assert.deepEqual(errors, []);
+        await context.close();
+
+        // 受注一覧から(閲覧者): 開いて戻ると、表示はそのまま(一覧表示)
+        context = await newFakeContext(browser, base, width, STAFF);
+        page = await context.newPage();
+        await installFakeServer(page, "staff");
+        await page.goto(`${base}dealer.html`);
+        await openOrdered(page);
+        await page.click("#btnHeaderMenu");
+        await page.click("#menuHelp");
+        await page.locator("#manualView .manual-body h1").waitFor();
+        assert.equal(await page.locator(".manual-back").first().innerText(), "受注一覧に戻る");
+        assert.equal(await page.locator(".app-header .header-title").innerText(), "受注一覧");
+        await page.locator(".manual-back").first().click();
+        assert.equal(await page.locator("#dealerOrderedArea").isVisible(), true, "戻ると一覧表示のまま");
+        await context.close();
+      }
+      // ディーラー設定から開いたら、戻るとディーラー設定。URL(#help/…)で直接開ける
+      const context = await newFakeContext(browser, base, 390, STAFF);
+      const page = await context.newPage();
+      await installFakeServer(page, "companyAdmin");
+      await page.goto(`${base}dealer.html#help/04-faq`);
+      await page.locator("#manualView .manual-body h1").waitFor();
+      assert.equal(await page.locator("#manualView .manual-body h1").innerText(), "4. よくある質問");
+      await page.locator(".manual-back").first().click();
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+      await page.click("#btnHeaderMenu");
+      await page.click("#menuDealerSettings");
+      await page.locator("#dealerSettings").waitFor();
+      await page.click("#btnHeaderMenu");
+      await page.click("#menuHelp");
+      await page.locator("#manualView .manual-body h1").waitFor();
+      assert.equal(await page.locator(".manual-back").first().innerText(), "ディーラー設定に戻る");
+      await page.locator(".manual-back").first().click();
+      assert.equal(await page.locator("#dealerSettings").isVisible(), true);
+      await context.close();
     } finally { await browser.close(); }
   });
 }

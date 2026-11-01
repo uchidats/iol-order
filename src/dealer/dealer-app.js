@@ -7,7 +7,7 @@ import { createInfoTip } from "../ui/info-tip.js";
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
  * 注文のデータは画面のメモリだけに置き、端末(localStorage など)には保存しない。権限エラー・ログアウトでは表示を破棄する。
- * 端末に記憶するのは医療機関のチェック(表示の絞り込み。施設 ID だけ)。担当施設の登録・閲覧の権限は変えない(担当施設の変更は「担当者・支店」)。
+ * 端末に記憶するのは医療機関のチェック(表示の絞り込み。施設 ID だけ)。担当施設の登録・閲覧の権限は変えない(担当施設の変更は「ディーラー設定」)。
  * 閲覧の範囲(会社・施設の許可・自社宛ての明細)はサーバーが毎回確認する。画面の施設の選択は検索の絞り込みだけ。
  *
  * @param {object} deps
@@ -15,12 +15,14 @@ import { createInfoTip } from "../ui/info-tip.js";
  * @param {object} deps.api data/dealer-portal-api.js
  * @param {() => void} deps.onSignOut
  * @param {(text:string) => void} [deps.setSubtitle] ヘッダーの会社名
+ * @param {(info:null|{name:string, companyName:string, branchName:string, canSwitch:boolean, canSettings:boolean}) => void} [deps.setMenu] ヘッダーの「☰」メニューの項目
+ *   (受注一覧・試験モードの間は氏名・所属会社など。ほかの画面は null = 使い方・ヘルプだけで、ログアウトはカードのボタン)
  * @param {{ load:(companyId:string)=>string|null, save:(companyId:string, ids:string[])=>void }} [deps.facilityView] 医療機関のチェックの記憶
  */
 /** 一覧表示の1回の取得件数(医療機関側の注文履歴と同じ20件。「もっと見る」で続き) */
 const LIST_PAGE = 20;
 
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, facilityView = { load: () => null, save: () => {} } }) {
+export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, setMenu = () => {}, facilityView = { load: () => null, save: () => {} } }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -30,19 +32,50 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   const panel = h("section", { class: "feature-card dealer-panel", id: "dealerPanel" });
   mount.replaceChildren(panel);
 
+  // ---------- ディーラー設定(会社管理者・支店管理者。☰メニューから開く) ----------
+  // 施設設定と同じ見出しの行(.settings-head: 見出し・ⓘ・戻るボタン)。開いている間は受注一覧のカードを隠すだけで、
+  // 戻ると選択・表示中の週や一覧はそのまま。中身は既存の担当者・支店の管理(dealer-manage.js)。受注一覧を開き直すたびに作り直す
+  let settingsView = null;
+  function dropSettings() {
+    if (settingsView) settingsView.remove();
+    settingsView = null;
+    panel.hidden = false;
+  }
+  function closeSettings() {
+    if (settingsView) settingsView.hidden = true;
+    panel.hidden = false;
+    window.scrollTo(0, 0);
+  }
+  function openSettings() {
+    if (!ctx || ctx.testMode || !isDealerManager(ctx.me.role)) return;   // 閲覧者は開けない(表示だけの判定。操作の可否はサーバーが確認する)
+    if (!settingsView) {
+      const manage = createDealerManage({ api, companyId: ctx.company.id, onAuthError: manageAuthError });
+      const back = h("button", { type: "button", class: "btn btn-secondary", id: "btnDealerSettingsClose" }, "受注一覧に戻る");
+      back.addEventListener("click", closeSettings);
+      const help = ctx.me.role === "companyAdmin"
+        ? "自社の担当者・支店を管理します。この画面は会社管理者・支店管理者だけが利用できます。注文を閲覧できる範囲は会社単位で、ここでの設定では変わりません。"
+        : "自分の支店の担当者を管理します。この画面は会社管理者・支店管理者だけが利用できます。注文を閲覧できる範囲は会社単位で、ここでの設定では変わりません。";
+      settingsView = h("section", { class: "feature-card dealer-panel dealer-settings", id: "dealerSettings", hidden: true },
+        h("div", { class: "settings-head" },
+          h("div", { class: "settings-heading" }, h("h2", {}, "ディーラー設定"), createInfoTip(help, { label: "ディーラー設定の説明" }).root),
+          h("span", { class: "settings-facility" }), back),
+        manage.root);
+      mount.append(settingsView);
+      manage.load();
+    }
+    panel.hidden = true;
+    settingsView.hidden = false;
+    window.scrollTo(0, 0);
+  }
+
   const signOutBtn = () => {
     const b = h("button", { type: "button", class: "btn btn-secondary", "data-act": "signout" }, "ログアウト");
     b.addEventListener("click", () => onSignOut());
     return b;
   };
-  const switchBtn = () => {
-    const b = h("button", { type: "button", class: "btn btn-secondary", "data-act": "switchCompany" }, "会社を切り替える");
-    b.addEventListener("click", () => showCompanyChoice());
-    return b;
-  };
   /** 表示中のデータを破棄して案内だけを出す */
   function showMessage(title, text, { error = false, withSignOut = true } = {}) {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings();
     panel.replaceChildren(...[h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, title)),
       h("p", { class: error ? "error-message" : "feature-desc", role: error ? "alert" : "status" }, text),
       withSignOut ? h("div", { class: "onboarding-actions" }, signOutBtn()) : null].filter(Boolean));
@@ -69,6 +102,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
    * 初めて使うログイン方法(参加を含む)・新しい端末(ブラウザ)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
    */
   function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
+    setMenu(null); dropSettings();
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
     const microsoft = onMicrosoft ? h("button", { type: "button", class: "btn btn-primary dealer-login-microsoft", id: "btnDealerMicrosoft" }, "Microsoftでログイン") : null;
     const providers = google || microsoft;
@@ -116,7 +150,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
    * @param {{onLater?: () => void}} [opts] onLater: すでに使える会社があるとき、新しい参加の案内を後回しにする
    */
   function showVerify({ onLater = null } = {}) {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings();
     const send = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendCode" }, "確認コードを送る");
     const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "code" });
     const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyCode" }, "確認する");
@@ -168,8 +202,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   async function showTestMode() {
     const manage = isDealerManager(ctx.me.role) ? createDealerManage({ api, companyId: ctx.company.id, onAuthError: manageAuthError }) : null;
     panel.replaceChildren(...[
-      h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "試験モード"), ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
-      h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
+      h("div", { class: "feature-title-row dealer-title-row" }, h("span", { class: "feature-title" }, "試験モード")),
       h("p", { class: "form-hint", "data-notice": "test-mode" }, "運営者の試験モードです(ディーラー画面は停止中)。ログイン・参加・担当者の管理だけを確認できます。受注一覧と医療機関の閲覧の許可は停止しています。"),
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
       manage ? manage.root : null].filter(Boolean));
@@ -180,7 +213,11 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   async function showPortal(context) {
     ctx = context;
     selected = new Set();
+    dropSettings();
     setSubtitle(ctx.company.name);
+    // 氏名・所属会社・ディーラー設定(会社管理者・支店管理者)・会社の切り替え・ログアウトはヘッダーの「☰」メニュー(サーバーが確かめた context の値)
+    setMenu({ name: ctx.me.name || "", companyName: ctx.company.name, branchName: ctx.me.branch ? ctx.me.branch.name : "",
+      canSwitch: choices.length > 1, canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
     if (ctx.testMode) return showTestMode();
     // 医療機関のチェック: 端末に記憶した選択(今の閲覧可能な施設だけ)。未保存ならサーバーの初期選択(担当施設 → 全施設)
     const restored = restoreFacilitySelection(facilityView.load(ctx.company.id), ctx.facilities || [], ctx.selectedFacilityIds || []);
@@ -412,44 +449,20 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         selectBar, checks, scope),
       viewBar,
       weekArea, orderedArea);
-    // 会社管理者・支店管理者: 「担当者・支店」タブ(閲覧者には出さない。操作の可否はサーバーが確認する)
-    let tabs = null;
-    if (isDealerManager(ctx.me.role)) {
-      const ordersArea = [searchArea];
-      let manage = null;
-      const tab = (k, label) => {
-        const b = h("button", { type: "button", class: "history-sort-btn", "data-tab": k, "aria-pressed": String(k === "orders") }, label);
-        b.addEventListener("click", () => {
-          tabs.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.tab === k)));
-          const onManage = k === "manage";
-          ordersArea.forEach(el => { el.hidden = onManage; });
-          if (onManage) { detail.hidden = true; detail.replaceChildren(); }
-          if (onManage && !manage) {
-            manage = createDealerManage({ api, companyId: ctx.company.id, onAuthError: manageAuthError });
-            panel.append(manage.root);
-            manage.load();
-          }
-          if (manage) manage.root.hidden = !onManage;
-        });
-        return b;
-      };
-      tabs = h("div", { class: "history-sort dealer-tabs", role: "group", "aria-label": "画面" }, tab("orders", "受注一覧"), tab("manage", ctx.me.role === "companyAdmin" ? "担当者・支店" : "担当者"));
-    }
+    // 担当者・支店の管理は、☰メニューの「ディーラー設定」(会社管理者・支店管理者)から開く(openSettings)
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row dealer-title-row" },
         h("span", { class: "dealer-title-main" }, h("span", { class: "feature-title" }, "受注一覧"),
-          tip("医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。", "受注一覧の説明")),
-        ...(choices.length > 1 ? [switchBtn()] : []), signOutBtn()),
-      h("p", { class: "feature-desc" }, `${ctx.company.name}${ctx.me.branch ? ` ${ctx.me.branch.name}` : ""} ・ ${ctx.me.name || "担当者"}`),
+          tip("医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。", "受注一覧の説明"))),
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
-      tabs, searchArea, detail].filter(Boolean));
+      searchArea, detail].filter(Boolean));
     renderChecks();
     await loadWeek();   // 初期表示は今週の手術日(注文日順は切り替えて表示)
   }
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */
   function showCompanyChoice() {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle("");
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings();
     const msg = h("p", { class: "error-message", role: "alert" });
     const list = h("ul", { class: "pending-invite-list" }, choices.map(c => {
       const b = h("button", { type: "button", class: "btn btn-primary", "data-company": c.companyId }, "この会社で開く");
@@ -483,5 +496,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     }
   }
 
-  return { showLogin, showMessage, enter };
+  /** 今の画面(使い方・ヘルプの戻るボタンの文言に使う) */
+  const currentView = () => (settingsView && !settingsView.hidden ? "settings" : ctx && !ctx.testMode ? "portal" : "other");
+
+  return { showLogin, showMessage, enter, switchCompany: () => showCompanyChoice(), openSettings, currentView };
 }
