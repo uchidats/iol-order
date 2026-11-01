@@ -539,7 +539,7 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     assert.equal(await page.locator('[data-act="later"]').count(), 0);
     assert.equal(await page.locator('[data-f="code"]').isVisible(), false, "コード欄は送るまで出さない");
     await page.click('[data-act="sendCode"]');
-    await page.getByText(/ログインしたメールアドレスが登録されていれば、確認コードを送ります/).waitFor();
+    await page.getByText(/確認コードを送りました\(10分間有効\)/).waitFor();
     assert.deepEqual(await calls(page, "sendCode"), [{ action: "sendCode" }], "送り先は画面から送らない");
     await page.fill('[data-f="code"]', "00000000");
     await page.click('[data-act="verifyCode"]');
@@ -624,7 +624,11 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
     await page.goto(`${base}dealer.html`);
     await page.getByText("本人確認", { exact: true }).waitFor();
     await page.click('[data-act="sendCode"]');
+    await page.getByText(/確認コードを送りました/).waitFor();
+    // 届かない場合の案内は見出しのⓘ(未招待でも同じ応答)
+    await page.locator(".dealer-verify-title .info-tip-btn").click();
     await page.getByText(/届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください/).waitFor();
+    await page.keyboard.press("Escape");
     await page.fill('[data-f="code"]', "12345678");
     await page.click('[data-act="verifyCode"]');
     await page.getByText(/確認コードが違います/).waitFor();
@@ -897,9 +901,29 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await installFakeServer(page, "unverified");
         await page.goto(`${base}dealer.html`);
         await page.getByText("本人確認", { exact: true }).waitFor();
+        // 説明は見出しのⓘ(2段落)。常時表示の説明文はない
+        assert.equal(await page.locator("#dealerPanel .feature-desc").count(), 0, "見出しの下の長い説明は出さない");
+        assert.equal(await page.locator(".dealer-verify-title .info-tip-btn").count(), 1);
+        await page.locator(".dealer-verify-title .info-tip-btn").click();
+        const help = (await page.locator(".dealer-verify-title .info-tip-pop").innerText()).split("\n").map(x => x.trim()).filter(Boolean);
+        assert.equal(help.length, 2);
+        assert.match(help[0], /^本人の確認のため/);
+        assert.match(help[1], /届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください/);
+        await page.keyboard.press("Escape");
         await page.click('[data-act="sendCode"]');
         const row = page.locator("label.dealer-remember");
         await row.waitFor();
+        // 縦積みの並びと間隔: 送る → 入力欄 → 確認する → 端末の記憶 →(送信の結果の短い状態)→ ログアウト。重ならず、間隔は 8〜24px
+        const stack = await page.evaluate(() => {
+          const els = ['[data-act="sendCode"]', '[data-f="code"]', '[data-act="verifyCode"]', "label.dealer-remember", '#dealerPanel [role="status"]', '[data-act="signout"]'].map(q => document.querySelector(q).getBoundingClientRect());
+          const gaps = els.slice(1).map((r, i) => Math.round(r.top - els[i].bottom));
+          return { gaps, lefts: els.map(r => Math.round(r.left)), rights: els.map(r => Math.round(r.right)), scroll: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth };
+        });
+        assert.ok(stack.gaps.every(g => g >= 8 && g <= 24), `${width}: 縦の間隔 ${JSON.stringify(stack.gaps)}`);
+        assert.ok(stack.scroll <= stack.vw, `${width}: 横にはみ出さない`);
+        assert.ok(stack.rights.every(r => r <= stack.vw), `${width}: 画面内に収まる`);
+        assert.ok(stack.lefts.slice(0, 4).every(l => l === stack.lefts[0]), `${width}: 左端がそろう ${JSON.stringify(stack.lefts)}`);
+        assert.ok(!(await page.locator("#dealerPanel").innerText()).includes("届かない場合は"), "届かない場合の案内は常時表示しない");
         const m = await row.evaluate(l => {
           const cb = l.querySelector('input[type="checkbox"]'), tx = l.querySelector(".dealer-remember-text");
           const [L, C, T] = [l, cb, tx].map(e => e.getBoundingClientRect());

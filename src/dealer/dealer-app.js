@@ -126,15 +126,16 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     rememberBox.checked = true;
     // この行専用の並び(共通の .settings-check は1行固定のため使わない): チェックボックスは左に固定、文は右で折り返す。文全体のタップで切り替わる(label で包む)
     const remember = h("label", { class: "dealer-remember" }, rememberBox, h("span", { class: "dealer-remember-text" }, "この端末(ブラウザ)を記憶する(共用のパソコンでは外してください。外すと、次のログインでも確認コードが必要です)"));
-    const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify, remember);
+    // 送った後に出す入力の段(縦積み: 入力欄 → 確認する → 端末の記憶)。説明は見出しのⓘに置き、常時表示は操作に必要なものだけ
+    const codeRow = h("div", { class: "dealer-verify-step dealer-join-row", hidden: true }, code, verify, remember);
     const lock = (v) => { send.disabled = verify.disabled = v; };
     send.addEventListener("click", async () => {
       lock(true); note.className = "form-hint"; note.textContent = "";
       try {
         const r = await api.sendCode();
         codeRow.hidden = false;
-        // 登録の有無で応答を変えない(未招待には送らない)ので、届かない場合の案内も添える
-        note.textContent = `ログインしたメールアドレスが登録されていれば、確認コードを送ります(届くまで少し時間がかかることがあります。${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから、コードを入力してください。届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください。`;
+        // 登録の有無で応答を変えない(未招待には送らない)。届かない場合の案内はⓘ
+        note.textContent = `確認コードを送りました(${(r && r.expiresInMinutes) || 10}分間有効)。メールに書かれた会社名を確かめてから入力してください。`;
         code.focus();
       } catch (e) { note.className = "error-message"; note.textContent = describeCallableError(e); }
       finally { lock(false); }
@@ -148,12 +149,16 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     });
     const later = onLater ? h("button", { type: "button", class: "btn btn-secondary", "data-act": "later" }, "あとで(受注一覧へ)") : null;
     if (later) later.addEventListener("click", onLater);
-    panel.replaceChildren(...[h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, onLater ? "参加の確認" : "本人確認")),
-      h("p", { class: "feature-desc" }, onLater
-        ? "新しい会社から、ディーラー画面への参加の案内が届いています。本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると参加できます。"
-        : "本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると、受注一覧を表示できます(初めて使うログイン方法・新しい端末(ブラウザ)で必要です)。招待されたメールアドレス以外のアカウントでは使えません。"),
-      h("div", { class: "form-row" }, send), codeRow, note,
-      h("div", { class: "onboarding-actions" }, ...[later, signOutBtn()].filter(Boolean))].filter(Boolean));
+    // 説明は共通のⓘ(タップで開く)。常時表示は見出し・送るボタン・入力欄・確認ボタン・端末の記憶・ログアウトだけ
+    const help = [onLater
+      ? "新しい会社から、ディーラー画面への参加の案内が届いています。本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると参加できます。"
+      : "本人の確認のため、ログインしたメールアドレスに確認コードを送ります。コードを入力すると、受注一覧を表示できます(初めて使うログイン方法・新しい端末(ブラウザ)で必要です)。招待されたメールアドレス以外のアカウントでは使えません。",
+      "確認コードは、ログインしたメールアドレスが登録されている場合に送ります(届くまで少し時間がかかることがあります)。メールに書かれた会社名を確かめてから、コードを入力してください。届かない場合は、招待されたメールアドレスのアカウントでログインしているか確かめてください。"
+    ].join("\n");
+    panel.replaceChildren(...[h("div", { class: "feature-title-row dealer-login-head dealer-verify-title" },
+        h("span", { class: "feature-title" }, onLater ? "参加の確認" : "本人確認"), createInfoTip(help, { label: `${onLater ? "参加の確認" : "本人確認"}の説明` }).root),
+      h("div", { class: "dealer-verify-step" }, send), codeRow, note,
+      h("div", { class: "onboarding-actions dealer-verify-actions" }, ...[later, signOutBtn()].filter(Boolean))].filter(Boolean));
   }
 
   // ---------- 受注一覧 ----------
