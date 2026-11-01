@@ -105,6 +105,15 @@ export const branchIdOf = (companyId, name) => "br-" + hash(`${companyId}:${name
 /** 担当者の ID(会社×承認済みのメール。同じ会社・同じメールの担当者は1人だけ。UID に依存しない) */
 export const staffIdOf = (companyId, email) => "dstf_" + hash(`${companyId}:${normEmail(email)}`, 32);
 export const receiptIdOf = (grantId, facilityId, orderId) => "rcp-" + hash(`${grantId}|${facilityId}|${orderId}`, 32);
+/**
+ * 施設が論理削除した注文を、この発注先のディーラーに出さないか(純粋関数)。論理削除は施設の履歴の整理で、注文の取り消しではない。
+ * - この発注先への注文メールを送った(配信サービスが受け付けた accepted)注文は、削除後も出す(受け取った注文を、取り消されたように見せない)
+ * - 送っていない(削除で送信を中止した・失敗・未送信)注文は出さない(届いていない注文を、画面だけで手配させない)
+ * @param {object} order 注文 @param {{exists:boolean, get:(k:string)=>any}|null} mail この発注先宛てのメール(d_{発注先})
+ */
+export function deletedAndNotSent(order, mail) {
+  return !!order && order.deleted === true && !(mail && mail.exists && mail.get("status") === "accepted");
+}
 const newGrantId = () => "dgr-" + randomBytes(12).toString("hex");
 
 const millisOf = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : null);
@@ -740,6 +749,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const t = millisOf(r.orderedAt);
       return Boolean(s && selected.has(r.facilityId) && r.grantId === s.grantId && r.localDealerId === s.localDealerId
         && r.cancelled !== true   // 取り消した注文の索引(通常は作らない。order-cancel.js が印を付ける)
+        && r.deletedUnsent !== true   // 施設が削除し、この発注先へ送っていない注文(order-deletion.js が印を付ける。送った注文は印を付けない)
         && t !== null && t >= q.fromMs && t < q.toMs && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
     };
     // 検索時点(最初のページを読んだ時点)を固定し、続きのページも同じ時点の内容を読む(読み取り専用トランザクションの readTime)。
@@ -814,6 +824,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const order = os.data();
     const orderedMs = millisOf(order.createdAt);
     if (order.testOrder === true || order.cancelled === true || order.facilityId !== r.facilityId || orderedMs === null || orderedMs < s.effectiveFromMs) return null;   // 取り消した注文は出さない
+    if (deletedAndNotSent(order, mail)) return null;   // 施設が削除し、この発注先へ送っていない注文は出さない(送った注文は削除後も出す)
     // 注文時点の発注先が、許可した時点と同じか(現在の発注先の値が同じでも、途中で別の会社宛てだった注文は返さない)
     if (!orderMatchesGrant(order, mail, s.localDealerId, s.grant)) return null;
     const view = buildDealerOrderView(order, s.localDealerId, { receiptId, facilityId: r.facilityId });
@@ -1413,8 +1424,10 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       if (!own || !own.length) { skipped++; continue; }   // 発注先の矛盾(推測で公開しない)
       // 1社の失敗で残りの会社を止めない。失敗は最後にまとめて投げ、トリガーの再試行に任せる(ID が冪等なので、作成済みの会社は重複しない)
       const ok = await db.runTransaction(async (tx) => {
-        const [link, fd, mail] = await Promise.all([tx.get(linkRef(facilityId, lid)), tx.get(db.doc(`facilities/${facilityId}/facilityDealers/${lid}`)),
-          tx.get(db.doc(`facilities/${facilityId}/orders/${orderId}/mails/d_${lid}`))]);
+        const [link, fd, mail, cur] = await Promise.all([tx.get(linkRef(facilityId, lid)), tx.get(db.doc(`facilities/${facilityId}/facilityDealers/${lid}`)),
+          tx.get(db.doc(`facilities/${facilityId}/orders/${orderId}/mails/d_${lid}`)), tx.get(db.doc(`facilities/${facilityId}/orders/${orderId}`))]);
+        // 注文はトランザクションの中で読み直す(取り消し・削除と同時に起きても、印の付け漏れになる索引を作らない)
+        if (!cur.exists || cur.get("cancelled") === true || deletedAndNotSent(cur.data(), mail)) return false;
         if (!link.exists || link.get("status") !== "active" || !isId(link.get("currentGrantId"))) return false;
         const g = await tx.get(grantRef(link.get("currentGrantId")));
         if (!g.exists || g.get("status") !== "active" || g.get("facilityId") !== facilityId || g.get("localDealerId") !== lid || g.get("companyId") !== link.get("companyId")) return false;

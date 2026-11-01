@@ -14,6 +14,7 @@
 import { RegistrationError, assertVerifiedUser } from "./registration.js";
 import { isManagerRole } from "./roles.js";
 import { MAIL_STATUS } from "./order-mail-outbox.js";
+import { receiptIdOf } from "./dealer-portal.js";
 
 export const CANCELLED = "cancelled";   // 注文の削除で送信を中止したメール(送信の処理の対象外)
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -38,10 +39,11 @@ export function createOrderDeletionService({ db, FieldValue }) {
     const { facilityId, orderId } = d;
     const orderRef = db.doc(`facilities/${facilityId}/orders/${orderId}`);
     return db.runTransaction(async (tx) => {
-      const [fac, mem, order, mailsSnap, idxSnap] = await Promise.all([
+      const [fac, mem, order, mailsSnap, idxSnap, grants] = await Promise.all([
         tx.get(db.doc(`facilities/${facilityId}`)), tx.get(db.doc(`facilities/${facilityId}/members/${user.uid}`)), tx.get(orderRef),
         tx.get(orderRef.collection("mails")),
-        tx.get(db.collection(`facilities/${facilityId}/orderSurgeryIndex`).where("orderId", "==", orderId))]);
+        tx.get(db.collection(`facilities/${facilityId}/orderSurgeryIndex`).where("orderId", "==", orderId)),
+        tx.get(db.collection("dealerPortalGrants").where("facilityId", "==", facilityId).where("status", "==", "active"))]);
       // 所属・役割はサーバーで確認する(他施設・所属なし・注文者・代行入力者は区別なく拒否)
       if (!fac.exists || fac.get("status") !== "active" || !mem.exists || !isManagerRole(mem.get("role"))) {
         throw new RegistrationError("permission-denied", NOT_MANAGER);
@@ -57,6 +59,9 @@ export function createOrderDeletionService({ db, FieldValue }) {
         throw new RegistrationError("failed-precondition", "メールの状態を確認できないため、削除できません");
       }
       const cancel = mails.filter(m => CANCELLABLE.has(m.status));
+      // ディーラー画面: この発注先へ送っていない注文の受信の索引に印を付け、出さない(送った accepted の発注先には付けない。削除は取り消しではない)
+      const receipts = await Promise.all(grants.docs.map(g => tx.get(db.doc(`dealerCompanies/${g.get("companyId")}/receipts/${receiptIdOf(g.id, facilityId, orderId)}`))));
+      const statusOf = new Map(mails.map(m => [m.id, m.status]));
       for (const m of cancel) {
         tx.update(m.ref, { status: CANCELLED, previousStatus: m.status, cancelledAt: FieldValue.serverTimestamp(), cancelledBy: user.uid, statusAt: FieldValue.serverTimestamp() });
       }
@@ -67,6 +72,7 @@ export function createOrderDeletionService({ db, FieldValue }) {
       const by = { uid: user.uid, role, ...(user.displayName ? { displayName: String(user.displayName).slice(0, 100) } : {}) };
       tx.update(orderRef, { deleted: true, deletedAt: FieldValue.serverTimestamp(), deletedBy: by, notifications });
       for (const i of idxSnap.docs) tx.update(i.ref, { deleted: true });
+      for (const r of receipts) if (r.exists && statusOf.get(`d_${r.get("localDealerId")}`) !== MAIL_STATUS.ACCEPTED) tx.update(r.ref, { deletedUnsent: true });
       const keptMails = mails.length - cancel.length;
       tx.create(db.collection(`facilities/${facilityId}/auditLogs`).doc(), {
         action: "order.delete", orderId, orderNumber: order.get("orderNumber") || "", testOrder: order.get("testOrder") === true,

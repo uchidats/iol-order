@@ -12,6 +12,7 @@ import { initializeTestEnvironment, assertFails } from "@firebase/rules-unit-tes
 import { doc, getDoc, getDocs, setDoc, collection, collectionGroup, query, where } from "firebase/firestore";
 import { createOrderService } from "../../functions/src/orders.js";
 import { createOrderCancelService } from "../../functions/src/order-cancel.js";
+import { createOrderDeletionService } from "../../functions/src/order-deletion.js";
 import { managerPolicyError } from "../../functions/src/dealer-portal.js";
 import { parseTestAccess, TEST_MODE_MAX_MS } from "../../functions/src/dealer-portal.js";
 import { createDealerPortalService, buildDealerOrderView, ownLinesOf, jstDateOf, initialFacilitySelection, receiptIdOf, staffIdOf, weekDatesOf, surgeryDatesOf } from "../../functions/src/dealer-portal.js";
@@ -1555,6 +1556,53 @@ test("注文の取り消し: 受信の索引は取消可能な時間の後に作
   await rejects(api("x1", "get", { receiptId: rid }), "not-found");
   const wk = await api("x1", "week", { weekStart: (() => { const d = new Date(surgery() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7); return d.toISOString().slice(0, 10); })(), facilityFilter: { mode: "all" } });
   assert.ok(!JSON.stringify(wk).includes(c.orderNumber), "週表示にも出さない");
+});
+
+test("施設の論理削除: この発注先へ送った注文は削除後も出す(取り消しとして扱わない)。送っていない注文は一覧・週表示・詳細に出さず、削除の後は索引も作らない", async () => {
+  await grant("adminA", "fA", "dA1");
+  const deletion = createOrderDeletionService({ db, FieldValue });
+  const del = (orderId) => deletion.deleteOrder({ auth: auth("adminA"), data: { facilityId: "fA", orderId } });
+  const ridOf = async (orderId) => ((await db.collection(`dealerCompanies/${C.X}/receipts`).where("sourceOrderId", "==", orderId).get()).docs[0] || {}).id;
+  const mailOf = (orderId) => db.doc(`facilities/fA/orders/${orderId}/mails/d_dA1`);
+  const weekStart = (() => { const d = new Date(surgery() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7); return d.toISOString().slice(0, 10); })();
+  const week = async () => JSON.stringify(await api("x1", "week", { weekStart, facilityFilter: { mode: "all" } }));
+  // A: ディーラーへ送った(配信サービスが受付済み)後に、施設が履歴から削除 → ディーラーには従来どおり出す(取消済みの表示にもしない)
+  const a = await placeOrder("fA", "ordA", [line({ dealerId: "dA1" })]);
+  await mailOf(a.orderId).update({ status: "accepted", statusAt: FieldValue.serverTimestamp() });
+  await del(a.orderId);
+  const ra = await ridOf(a.orderId);
+  assert.equal((await db.doc(`dealerCompanies/${C.X}/receipts/${ra}`).get()).get("deletedUnsent"), undefined, "送った注文には印を付けない");
+  assert.ok((await list("x1")).items.some(i => i.orderNumber === a.orderNumber), "一覧に出す");
+  const da = await api("x1", "get", { receiptId: ra });
+  assert.equal(da.orderNumber, a.orderNumber);
+  assert.ok(!/取消|削除/.test(JSON.stringify(da)), "取消・削除の表示にしない");
+  assert.ok((await week()).includes(a.orderNumber));
+  // B: 送る前に施設が削除(送信を中止) → 一覧・週表示・詳細のどれにも出さない
+  const b = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+21.0D" })]);
+  const rb = await ridOf(b.orderId);
+  assert.ok((await list("x1")).items.some(i => i.orderNumber === b.orderNumber), "削除の前は出る");
+  await del(b.orderId);
+  assert.equal((await mailOf(b.orderId).get()).get("status"), "cancelled");
+  assert.equal((await db.doc(`dealerCompanies/${C.X}/receipts/${rb}`).get()).get("deletedUnsent"), true);
+  assert.ok(!(await list("x1")).items.some(i => i.orderNumber === b.orderNumber), "一覧に出さない");
+  await rejects(api("x1", "get", { receiptId: rb }), "not-found");
+  assert.ok(!(await week()).includes(b.orderNumber), "週表示に出さない");
+  // C: 送信に失敗した(ディーラーに届いていない)注文の削除も、出さない
+  const c = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+22.0D" })]);
+  await mailOf(c.orderId).update({ status: "failed" });
+  await del(c.orderId);
+  assert.ok(!(await list("x1")).items.some(i => i.orderNumber === c.orderNumber));
+  // D: 索引の前に削除(送信前) → 索引を作らない(作り直しでも作らない)
+  const d = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1", power: "+23.0D" })] } });
+  await del(d.orderId);
+  assert.deepEqual(await portal.indexOrder("fA", d.orderId), { created: 0, skipped: 1 });
+  assert.equal(await ridOf(d.orderId), undefined);
+  // 送った注文の削除は、作り直し(索引がない状態)でも出す
+  const e = await orders.createOrder({ auth: auth("ordA"), data: { facilityId: "fA", requestId: crypto.randomUUID(), notes: "", lines: [line({ dealerId: "dA1", power: "+24.0D" })] } });
+  await mailOf(e.orderId).update({ status: "accepted" });
+  await del(e.orderId);
+  assert.deepEqual(await portal.indexOrder("fA", e.orderId), { created: 1, skipped: 0 });
+  assert.ok((await list("x1")).items.some(i => i.orderNumber === e.orderNumber));
 });
 
 test("無効化・再有効化・再招待: 無効化で Google・Microsoft・メールリンクの紐付けを一度に失効(世代)。有効に戻しても確認し直すまで使えない。再招待の前の紐付けは使えない", async () => {
