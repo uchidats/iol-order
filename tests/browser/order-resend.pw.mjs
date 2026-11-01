@@ -23,8 +23,9 @@ const srv = () => JSON.parse(localStorage.getItem("__srv") || '{"orders":{},"cal
 const put = (s) => localStorage.setItem("__srv", JSON.stringify(s));
 const repository = {
   listAdoptedIols: async () => IOL_MODELS.map(m => ({ id: m.id, catalogIolId: m.id, enabled: true })),
-  listOrderers: async () => [{ id: "o1", name: "山田" }],
-  listDealers: async () => [{ id: "d1", name: "A商会", orderEmails: ["a@example.jp"] }],
+  // multi: 担当医・発注先を2つずつ(複数レンズの復元の確認用。既定は従来どおり1つずつ)
+  listOrderers: async () => [{ id: "o1", name: "山田" }, ...(srv().multi ? [{ id: "o2", name: "佐藤" }] : [])],
+  listDealers: async () => [{ id: "d1", name: "A商会", orderEmails: ["a@example.jp"] }, ...(srv().multi ? [{ id: "d2", name: "B医療", orderEmails: ["b@example.jp"] }] : [])],
   listOrders: async () => Object.values(srv().orders),
   getOrder: async (fid, id) => srv().orders[id] || null
 };
@@ -367,17 +368,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await btn.waitFor({ state: "detached", timeout: 5000 });
       assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
       await page.click("#btnNewOrder");
-      // 2) 取消可能な間に押す: 成功の表示。状態は「取消済み」。ボタンは消える
+      // 2) 取消可能な間に押す: 取り消せたら「注文を取り消しました」と知らせ、送信した内容のまま注文入力画面へ戻る(完了画面は閉じる)
       await setSrv(page, { cancelWindowMs: 10000 });
       await submit(page, "取り消す", "+20.5D");
       await btn.click();
-      await page.waitForFunction(() => document.getElementById("completeTitle").textContent === "注文を取り消しました");
-      assert.equal(await page.locator('#completeDetails [data-f="completeStatus"]').innerText(), "取消済み");
-      assert.equal(await btn.count(), 0);
+      await page.waitForFunction(() => document.getElementById("completeModal").classList.contains("hidden"));
+      await page.getByText("注文を取り消しました。内容を修正して、もう一度送信できます").waitFor();
+      assert.deepEqual([await page.locator("#notesInput").inputValue(), await page.locator(".lens-line [data-f=power]").first().inputValue()], ["取り消す", "+20.5D"]);
       const s1 = await srv(page);
       assert.deepEqual(Object.keys(s1.cancels.at(-1)).sort(), ["facilityId", "orderId"]);
       assert.equal(s1.cancels.at(-1).facilityId, "f1");
-      await page.click("#btnNewOrder");
       // 3) 期限の後に届いた(サーバーが拒否): 取り消せなかったことを明確に表示。完了の表示はそのまま
       await setSrv(page, { cancelMode: "late" });
       await submit(page, "期限の後", "+21.0D");
@@ -400,6 +400,76 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await submit(page, "期限なし", "+22.0D");
       assert.equal(await btn.count(), 0);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`取り消し後の再注文: 複数レンズ(モデル・度数・枚数・手術日・担当医・発注先)と備考を送信時のまま復元し、一部を直して新しい受付番号で再注文。元の注文は取消済みで残る。取り消せなければ戻さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const { page, errors } = await open(browser);
+      await page.evaluate(() => localStorage.setItem("__srv", JSON.stringify({ orders: {}, calls: [], mode: "ok", multi: true, real: true, cancelWindowMs: 10000 })));
+      await page.reload();
+      await page.waitForFunction(() => window.__ready);
+      const day = (n) => new Date(Date.now() + (9 * 3600 + n * 86400) * 1000).toISOString().slice(0, 10);
+      // 2本のレンズ(条件をすべて変える)と備考
+      const want = [
+        { model: "jj-dib00v", toric: false, power: "+20.0D", quantity: "1", date: day(20), doctor: "o1", dealer: "d1" },
+        { model: "jj-dib00v", toric: false, power: "+22.5D", quantity: "2", date: day(27), doctor: "o2", dealer: "d2" }];
+      for (const [i, w] of want.entries()) {
+        while (await page.locator(".lens-line").count() <= i) await page.click("#btnAddLine");
+        const l = page.locator(".lens-line").nth(i);
+        await l.locator("[data-f=model]").selectOption(w.model);
+        await l.locator("[data-f=power]").selectOption(w.power);
+        await l.locator(".quantity-option", { hasText: `${w.quantity} 枚` }).click();
+        await l.locator("[data-f=date]").fill(w.date);
+        await l.locator("[data-f=doctor]").selectOption(w.doctor);
+        await l.locator("[data-f=dealer]").selectOption(w.dealer);
+      }
+      await page.fill("#notesInput", "元の備考\n2行目");
+      const read = () => page.evaluate(() => ({ notes: document.getElementById("notesInput").value, lines: [...document.querySelectorAll(".lens-line")].map(l => ({
+        model: l.querySelector("[data-f=model]").value, toric: l.querySelector("[data-f=toric]").checked, power: l.querySelector("[data-f=power]").value,
+        quantity: (l.querySelector("[data-f=quantity]:checked") || {}).value, date: l.querySelector("[data-f=date]").value,
+        doctor: l.querySelector("[data-f=doctor]").value, dealer: l.querySelector("[data-f=dealer]").value })) }));
+      const before = await read();
+      assert.deepEqual(before, { notes: "元の備考\n2行目", lines: want });
+      const send = async () => {
+        await page.click("#btnConfirm");
+        await page.waitForFunction(() => !document.getElementById("confirmModal").classList.contains("hidden"));
+        await page.click("#btnModalSubmit");
+        await page.waitForFunction(() => !document.getElementById("completeModal").classList.contains("hidden"));
+      };
+      await send();
+      const first = (await srv(page)).calls.at(-1);
+      // 取り消し(成功) → 送信時のまま入力画面へ
+      await page.locator("#btnCancelOrder").click();
+      await page.waitForFunction(() => document.getElementById("completeModal").classList.contains("hidden"));
+      assert.deepEqual(await read(), before, "全明細・備考を送信時のまま復元");
+      // 必要な箇所だけ直して、通常どおり再注文(確認画面を通る)
+      await page.locator(".lens-line").nth(1).locator("[data-f=power]").selectOption("+23.0D");
+      await send();
+      const s = await srv(page);
+      const second = s.calls.at(-1);
+      assert.notEqual(second.requestId, first.requestId, "新しい注文として送る(同じ識別子で取消済みの注文を返さない)");
+      assert.deepEqual(second.lines.map(l => [l.power, l.quantity, l.surgeryDate, l.doctorId, l.dealerId]),
+        [["+20.0D", 1, want[0].date, "o1", "d1"], ["+23.0D", 2, want[1].date, "o2", "d2"]]);
+      assert.equal(second.notes, "元の備考\n2行目");
+      const list = Object.values(s.orders);
+      assert.equal(list.length, 2);
+      assert.deepEqual(list.map(o => o.status).sort(), ["accepted", "cancelled"], "元の注文は取消済みで残り、新しい注文が受け付けられる");
+      assert.notEqual(list[0].orderNumber, list[1].orderNumber, "新しい受付番号");
+      // 取り消せなかった: 完了画面のまま(入力画面へ戻さない)
+      await page.evaluate(() => { const v = JSON.parse(localStorage.getItem("__srv")); v.cancelMode = "late"; localStorage.setItem("__srv", JSON.stringify(v)); });
+      await page.locator("#btnCancelOrder").click();
+      await page.locator("#completeCancelMsg").waitFor();
+      assert.equal(await page.locator("#completeModal").evaluate(e => e.classList.contains("hidden")), false, "完了画面のまま");
+      // 取り消さずに「新しい注文を入力する」: 従来どおり新規入力(1明細・空)
+      await page.click("#btnNewOrder");
+      const fresh = await read();
+      assert.deepEqual([fresh.notes, fresh.lines.length, fresh.lines[0].power], ["", 1, ""]);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

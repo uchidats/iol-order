@@ -379,6 +379,8 @@ async function handleExecuteOrder() {
     // サーバーで検証して保存する(テスト注文か・ディーラーへ送るかはサーバーが決める)
     if (!orderApi) throw Object.assign(new Error("サーバーに接続できません"), { code: "failed-precondition" });   // 送信していない
     const r = await orderApi.createOrder(request);
+    // 送信した入力内容(全明細の状態・備考)。受付の直後に取り消せたときだけ、この内容で注文入力画面に戻す(下書きの復元と同じ形)
+    const submittedForm = lensLines ? { lines: lensLines.snapshot(), notes: el.notesInput.value } : null;
     // 取消可能な時間(サーバーが返した期限と現在時刻の差。端末の時計は使わない)。受け取った時点から数える
     const cancelWindowMs = Number.isFinite(r.cancelUntilMs) && Number.isFinite(r.serverNowMs) ? Math.min(r.cancelUntilMs - r.serverNowMs, 60 * 1000) : 0;
     const cancelDeadline = performance.now() + cancelWindowMs;
@@ -393,7 +395,7 @@ async function handleExecuteOrder() {
     hideConfirmModal();
     if (draft) { draft.clear(); draft.setReady(false); }   // 注文が正常に完了したときだけ、下書きを削除する(失敗したときは下の catch に入り、下書きは残る)
     showCompleteModal(saved, { orderNumber: r.orderNumber, replayed: r.replayed === true });
-    if (r.replayed !== true && cancelWindowMs > 0) showCancelButton({ facilityId: request.facilityId, orderId: r.orderId, deadline: cancelDeadline });
+    if (r.replayed !== true && cancelWindowMs > 0) showCancelButton({ facilityId: request.facilityId, orderId: r.orderId, deadline: cancelDeadline, submittedForm });
   } catch (err) {
     console.error("注文送信エラー:", err);
     if (pendingStore && isDefinitiveRejection(err)) pendingStore.clear();   // サーバーが拒否した(注文は作られていない)
@@ -461,7 +463,7 @@ function showCancelMessage(text, { error = false } = {}) {
   p.className = error ? "error-message complete-cancel-msg" : "form-hint complete-cancel-msg";
   p.textContent = text;
 }
-function showCancelButton({ facilityId, orderId, deadline }) {
+function showCancelButton({ facilityId, orderId, deadline, submittedForm = null }) {
   removeCancelButton();
   const remaining = deadline - performance.now();
   if (!orderApi || typeof orderApi.cancelOrder !== "function" || remaining <= 0) return;
@@ -476,6 +478,8 @@ function showCancelButton({ facilityId, orderId, deadline }) {
     clearTimeout(cancelTimer); cancelTimer = null;   // 結果が出るまで消さない(押した後に時間が過ぎても、結果を必ず表示する)
     try {
       await orderApi.cancelOrder({ facilityId, orderId });
+      // サーバーが取り消しを確定したときだけ、送信した内容のまま注文入力画面へ戻す(修正して、新しい注文として送り直せる)
+      if (submittedForm) { returnToFormAfterCancel(submittedForm); return; }
       $("completeTitle").textContent = "注文を取り消しました";
       $("completeSubtitle").textContent = "ディーラーへの注文メールは送信していません。この注文は注文履歴に「取消済み」として残ります。";
       const st = el.completeDetails.querySelector('[data-f="completeStatus"]');
@@ -489,6 +493,26 @@ function showCancelButton({ facilityId, orderId, deadline }) {
       removeCancelButton();
     }
   });
+}
+
+/**
+ * 取り消した注文の内容のまま、注文入力画面へ戻す(完了画面を閉じ、全明細・備考を送信時の状態に戻す)。
+ * 再送は通常の注文として、確認画面・重複警告を通り、新しい受付番号になる(入力の確認のたびに新しい requestId を作る)。
+ * 取り消せなかったときは呼ばない(完了画面のまま。二重注文を防ぐ)
+ */
+function returnToFormAfterCancel(submittedForm) {
+  removeCancelButton();
+  const cm = document.getElementById("completeCancelMsg");
+  if (cm) cm.remove();
+  el.completeModal.classList.add("hidden");
+  document.body.style.overflow = "";
+  currentPendingOrderData = null;
+  lensLines.restore(submittedForm.lines);
+  el.notesInput.value = submittedForm.notes;
+  if (draft) { draft.setReady(true); draft.save(); }   // 戻した内容を下書きとして保存する(画面を閉じても続きから直せる)
+  updateAlconGuide();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  showToast("注文を取り消しました。内容を修正して、もう一度送信できます");
 }
 
 function handleResetForNewOrder() {
