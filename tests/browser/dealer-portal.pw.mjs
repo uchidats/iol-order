@@ -769,3 +769,52 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`本人確認の「この端末(ブラウザ)を記憶する」: スマホ/PCで横にはみ出さず、チェックは左・文は右で折り返す。文のタップで切り替わり、確認はそのまま進む: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      for (const width of [320, 390, 430, 1100]) {
+        const context = await newFakeContext(browser, base, width, STAFF);
+        const page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await installFakeServer(page, "unverified");
+        await page.goto(`${base}dealer.html`);
+        await page.getByText("本人確認", { exact: true }).waitFor();
+        await page.click('[data-act="sendCode"]');
+        const row = page.locator("label.dealer-remember");
+        await row.waitFor();
+        const m = await row.evaluate(l => {
+          const cb = l.querySelector('input[type="checkbox"]'), tx = l.querySelector(".dealer-remember-text");
+          const [L, C, T] = [l, cb, tx].map(e => e.getBoundingClientRect());
+          const lh = parseFloat(getComputedStyle(tx).lineHeight);
+          return { right: L.right, vw: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, cbLeftOfText: C.right <= T.left + 0.5,
+            cbTopGap: C.top - T.top, lineHeight: lh, lines: Math.round(T.height / lh), clipped: tx.scrollWidth > tx.clientWidth + 1 || l.scrollWidth > l.clientWidth + 1,
+            textInside: T.right <= L.right + 0.5 && T.left >= L.left - 0.5, white: getComputedStyle(l).whiteSpace };
+        });
+        assert.ok(m.scroll <= m.vw && m.right <= m.vw + 0.5, `${width}: 横にはみ出さない ${JSON.stringify(m)}`);
+        assert.equal(m.clipped, false, `${width}: 文が切れない`);
+        assert.ok(m.cbLeftOfText && m.textInside, `${width}: チェックは左・文は右`);
+        assert.ok(m.cbTopGap >= -1 && m.cbTopGap < m.lineHeight, `${width}: チェックは1行目の高さ(上揃え) ${m.cbTopGap}`);
+        assert.notEqual(m.white, "nowrap");
+        if (width < 560) assert.ok(m.lines >= 2, `${width}: 文は折り返す(${m.lines}行)`);
+        t.diagnostic(`${width}px: ${m.lines}行`);
+        // 文のタップで切り替わる(既定は記憶する)
+        const box = page.locator('[data-f="remember"]');
+        assert.equal(await box.isChecked(), true);
+        await page.locator(".dealer-remember-text").click();
+        assert.equal(await box.isChecked(), false, `${width}: 文のタップで外れる`);
+        await page.locator(".dealer-remember-text").click();
+        assert.equal(await box.isChecked(), true, `${width}: もう一度で付く`);
+        // 確認はそのまま進む
+        await page.fill('[data-f="code"]', "12345678");
+        await page.click('[data-act="verifyCode"]');
+        await page.locator(".dealer-day, #dealerWeekMsg").first().waitFor();
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+    } finally { await browser.close(); }
+  });
+}

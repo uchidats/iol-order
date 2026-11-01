@@ -119,7 +119,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const note = h("p", { class: "form-hint", role: "status" });
     const rememberBox = h("input", { type: "checkbox", "data-f": "remember" });
     rememberBox.checked = true;
-    const remember = h("label", { class: "settings-check" }, rememberBox, h("span", {}, "この端末(ブラウザ)を記憶する(共用のパソコンでは外してください。外すと、次のログインでも確認コードが必要です)"));
+    // この行専用の並び(共通の .settings-check は1行固定のため使わない): チェックボックスは左に固定、文は右で折り返す。文全体のタップで切り替わる(label で包む)
+    const remember = h("label", { class: "dealer-remember" }, rememberBox, h("span", { class: "dealer-remember-text" }, "この端末(ブラウザ)を記憶する(共用のパソコンでは外してください。外すと、次のログインでも確認コードが必要です)"));
     const codeRow = h("div", { class: "form-row dealer-join-row", hidden: true }, code, verify, remember);
     const lock = (v) => { send.disabled = verify.disabled = v; };
     send.addEventListener("click", async () => {
