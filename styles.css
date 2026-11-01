@@ -2518,6 +2518,10 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-detail-meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
 .dealer-detail-meta dt { color: var(--text-muted); }
 .dealer-detail-meta dd { margin: 0; overflow-wrap: anywhere; }
+/* 受注詳細の見出しとⓘ(自社宛ての明細だけの説明・注文メールの詳しい状況。用語ごとに改行) / 注意が必要な注文メールの状態だけ常時表示 */
+.dealer-detail-title { margin: 0; }
+.dealer-detail-title .info-tip-pop { white-space: pre-line; }
+.dealer-mail-attention { color: #b45309; font-weight: 600; }
 .dealer-lines { border-collapse: collapse; font-size: 0.88rem; min-width: 100%; }
 .dealer-lines th, .dealer-lines td { padding: 6px 8px; border: 1px solid var(--border-light); text-align: left; vertical-align: top; }
 .dealer-lines th { background: #f8fafc; white-space: nowrap; }

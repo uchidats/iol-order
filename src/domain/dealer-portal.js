@@ -97,6 +97,18 @@ export function scopeLabel(selectedIds, facilities) {
   return `選択した施設(${n}施設)`;
 }
 
+/** 受注詳細の注文メールの状態の文言(「送信済み(配信サービスが受付)(日時) ・ 配信済み」)。状態がなければ "—" */
+export const mailStatusText = (mail, fmt) => (mail ? `${mail.label}${mail.at ? `(${fmt(mail.at)})` : ""}${mail.delivery ? ` ・ ${mail.delivery.label}` : ""}` : "—");
+/**
+ * 受注詳細で注文メールの状態を常時表示するか。通常(送信済み=配信サービスが受付、配信の結果なし・配信済み)は出さず(ⓘで確認)、
+ * 送信待ち・送信処理中・未送信・送信停止中・送信できなかった・配信の遅延/失敗・状態不明 は出す
+ */
+export function mailNeedsAttention(mail) {
+  if (!mail) return false;
+  if (mail.status !== "accepted") return true;
+  return !!mail.delivery && mail.delivery.status !== "delivered";
+}
+
 /** ディーラー画面の入口(メールリンクの戻り先。同じドメインの dealer.html に固定する) */
 export const dealerEntryUrl = (origin) => `${origin}/dealer.html`;
 

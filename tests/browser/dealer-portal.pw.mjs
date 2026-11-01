@@ -128,7 +128,7 @@ function installFakeServer(page, scenario) {
         }
         if (d.action === "get") return {
           receiptId: d.receiptId, facilityId: "fA", facilityName: facilities[1].name, orderNumber: "IOL-20261027-01", orderedAt: "2026-10-27T01:00:00.000Z",
-          lineCount: 2, totalQuantity: 3, mail: { status: "accepted", label: "送信済み(配信サービスが受付)", at: "2026-10-27T01:01:00.000Z", delivery: null },
+          lineCount: 2, totalQuantity: 3, mail: window.__mailOverride || { status: "accepted", label: "送信済み(配信サービスが受付)", at: "2026-10-27T01:01:00.000Z", delivery: null },
           lines: [
             { no: 1, manufacturer: "J&J", model: "DIB00V", toricModel: "", isToric: false, isMultifocal: false, power: "+21.0D", quantity: 2, surgeryDate: "2026-11-06", doctorName: "<b>山田</b>" },
             { no: 2, manufacturer: "J&J", model: "DIB00V", toricModel: "", isToric: false, isMultifocal: false, power: "+22.0D", quantity: 1, surgeryDate: "2026-11-07", doctorName: "山田" }]
@@ -266,6 +266,29 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(/検索時点: [0-9]{4}[/][0-9]{2}[/][0-9]{2}/.test(fetchedText) && !fetchedText.includes("注文メールとは別に"), "検索時点は表示し、補足はⓘ");
         assert.equal(await page.locator(".dealer-fetched .info-tip-btn").count(), 1);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 一覧が横にはみ出さない`);
+        // 受注詳細: 通常の注文メール(送信済み)は出さない。説明と詳しい状況は見出しのⓘ。下部の説明文はない
+        await page.locator('[data-receipt="rcp-a"]').click();
+        await page.locator(".dealer-lines tbody tr").first().waitFor();
+        const detailText = await page.locator(".dealer-detail").innerText();
+        assert.ok(!detailText.includes("注文メール") && !detailText.includes("自社宛ての明細だけ"), "通常の状態・説明文は常時表示しない");
+        assert.equal(await page.locator(".dealer-detail-title .info-tip-btn").count(), 1);
+        await page.locator(".dealer-detail-title .info-tip-btn").click();
+        const help = await page.locator(".dealer-detail-title .info-tip-pop").innerText();
+        assert.deepEqual(help.split("\n").map(x => x.trim()), ["この画面には自社宛ての明細だけを表示しています。", "注文メール: 送信済み(配信サービスが受付)(2026/10/27 10:01)", "注文メールの状態は送信・配信の状況で、受注の確定を示すものではありません。"]);
+        await page.keyboard.press("Escape");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 詳細が横にはみ出さない`);
+        await page.click('[data-act="back"]');
+        // 注意が必要な状態(送信できなかった・配信できなかった)は常時表示
+        for (const [mail, expected] of [
+          [{ status: "failed", label: "送信できませんでした", at: null, delivery: null }, "送信できませんでした"],
+          [{ status: "accepted", label: "送信済み(配信サービスが受付)", at: null, delivery: { status: "bounced", label: "配信できませんでした", at: null } }, "送信済み(配信サービスが受付) ・ 配信できませんでした"]]) {
+          await page.evaluate((m) => { window.__mailOverride = m; }, mail);
+          await page.locator('[data-receipt="rcp-a"]').click();
+          await page.locator(".dealer-mail-attention").waitFor();
+          assert.equal(await page.locator(".dealer-mail-attention").innerText(), expected);
+          await page.click('[data-act="back"]');
+        }
+        await page.evaluate(() => { window.__mailOverride = null; });
         assert.deepEqual(errors, []);
         await context.close();
       }

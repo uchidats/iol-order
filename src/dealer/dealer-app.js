@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager } from "../domain/dealer-portal.js";
 import { createDealerManage } from "./dealer-manage.js";
 import { createInfoTip } from "../ui/info-tip.js";
 
@@ -375,18 +375,21 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         const rows = v.lines.map(l => h("tr", {},
           h("td", {}, String(l.no)), h("td", {}, `${l.manufacturer} ${l.model}`), h("td", {}, l.toricModel || "—"),
           h("td", {}, l.power), h("td", {}, `${l.quantity}枚`), h("td", {}, formatDate(l.surgeryDate)), h("td", {}, l.doctorName || "—")));
-        const mail = v.mail ? `${v.mail.label}${v.mail.at ? `(${formatJstDateTime(v.mail.at)})` : ""}${v.mail.delivery ? ` ・ ${v.mail.delivery.label}` : ""}` : "—";
+        // 注文メール: 通常(送信済み)は出さない。注意が必要な状態だけ常時表示し、詳しい状況は見出しのⓘで確認する
+        const mail = mailStatusText(v.mail, formatJstDateTime);
+        const attention = mailNeedsAttention(v.mail);
+        const help = ["この画面には自社宛ての明細だけを表示しています。", `注文メール: ${mail}`, "注文メールの状態は送信・配信の状況で、受注の確定を示すものではありません。"].join("\n");
         detail.replaceChildren(back,
+          h("div", { class: "form-label dealer-login-head dealer-detail-title" }, h("span", {}, "受注詳細"), createInfoTip(help, { label: "受注詳細の説明(注文メールの状況)" }).root),
           h("dl", { class: "dealer-detail-meta" },
             h("dt", {}, "医療機関"), h("dd", {}, v.facilityName),
             h("dt", {}, "注文番号"), h("dd", {}, v.orderNumber),
             h("dt", {}, "注文日時"), h("dd", {}, formatJstDateTime(v.orderedAt)),
             h("dt", {}, "自社宛て"), h("dd", {}, `${v.lineCount}件・合計${v.totalQuantity}枚`),
-            h("dt", {}, "注文メール"), h("dd", {}, mail)),
+            ...(attention ? [h("dt", {}, "注文メール"), h("dd", { class: "dealer-mail-attention", "data-mail": v.mail.status }, mail)] : [])),
           h("div", { class: "manual-table-wrap is-wide" }, h("table", { class: "dealer-lines" },
             h("thead", {}, h("tr", {}, ["No", "メーカー・モデル", "トーリック型番", "度数", "枚数", "手術日", "担当医"].map(t => h("th", {}, t)))),
-            h("tbody", {}, rows))),
-          h("p", { class: "form-hint" }, "この画面には自社宛ての明細だけを表示しています。注文メールの状態は送信・配信の状況で、受注の確定を示すものではありません。"));
+            h("tbody", {}, rows))));
       } catch (e) {
         detail.replaceChildren(back, h("p", { class: "error-message", role: "alert" }, describeCallableError(e)));
         if (String((e && e.code) || "").endsWith("permission-denied")) showMessage("ディーラー画面", describeCallableError(e), { error: true });

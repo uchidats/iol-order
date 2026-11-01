@@ -166,3 +166,15 @@ test("メニュー「ディーラー用受注一覧」の表示: 運営者と、
   assert.equal(canOpenDealerPortalMenu({ isPlatformAdmin: "true", memberships: [] }), false, "運営者の印は真偽値だけ");
   assert.equal(canOpenDealerPortalMenu(), false);
 });
+
+test("受注詳細の注文メール: 通常(送信済み・配信済み/結果なし)は常時表示しない。送信待ち・未送信・失敗・配信の遅延/失敗・不明は表示する", async () => {
+  const { mailNeedsAttention, mailStatusText } = await import("../src/domain/dealer-portal.js");
+  const m = (status, delivery = null) => ({ status, label: status, at: null, delivery: delivery ? { status: delivery, label: delivery } : null });
+  assert.equal(mailNeedsAttention(m("accepted")), false);
+  assert.equal(mailNeedsAttention(m("accepted", "delivered")), false);
+  for (const d of ["delayed", "bounced", "complained", "failed"]) assert.equal(mailNeedsAttention(m("accepted", d)), true, d);
+  for (const st of ["pending", "sending", "retry", "failed", "held", "not_sent", "unknown"]) assert.equal(mailNeedsAttention(m(st)), true, st);
+  assert.equal(mailNeedsAttention(null), false);
+  assert.equal(mailStatusText({ label: "送信済み", at: "x", delivery: { label: "配信済み" } }, () => "2026/10/27 10:01"), "送信済み(2026/10/27 10:01) ・ 配信済み");
+  assert.equal(mailStatusText(null, String), "—");
+});
