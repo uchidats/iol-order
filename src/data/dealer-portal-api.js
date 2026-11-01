@@ -43,6 +43,9 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     manageCancelInvite: (a) => portal({ action: "manageCancelInvite", ...pick(a, ["companyId", "staffId"]) }),
     manageUpdateStaff: (a) => portal({ action: "manageUpdateStaff", ...pick(a, ["companyId", "staffId", "name", "role", "branchId", "status", "facilityIds"]) }),
     manageBranch: (a) => portal({ action: "manageBranch", ...pick(a, ["companyId", "branchId", "name", "status"]) }),
+    // 会社のテーマカラー(会社で共通。会社管理者のみ。サーバーが役割・値を確かめる)
+    setTheme: (a) => portal({ action: "setTheme", ...pick(a, ["companyId", "color", "gradient", "darkText"]) }),
+    resetTheme: (a) => portal({ action: "resetTheme", ...pick(a, ["companyId"]) }),
     listWeek: (a) => portal({ action: "week", ...pick(a, ["companyId", "weekStart", "facilityFilter"]) }),   // 手術日の週表示(月曜〜日曜)
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),

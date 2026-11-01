@@ -1299,6 +1299,52 @@ test("会社管理者・支店管理者: 他社の担当者・支店は操作で
   enabled.v = true;
 });
 
+test("テーマカラー(会社で共通): 会社管理者だけが保存・初期化できる。全担当者が context で同じ色を受け取る。支店管理者・閲覧者・他社・無効な担当者は拒否。値は厳密に確かめる。医療機関のテーマには影響しない", async () => {
+  const { S, m, sidOf } = await setupSenju();
+  const themeOf = async (uid) => (await m(uid, "context", { companyId: S })).headerTheme;
+  assert.equal(await themeOf("r1"), null, "未設定は null(標準の青)");
+  const t = { color: "#0f766e", gradient: false, darkText: true };
+  assert.deepEqual(await m("sadm", "setTheme", { companyId: S, ...t }), { ok: true, headerTheme: t });
+  for (const u of ["sadm", "tadm", "oadm", "r1", "r2"]) assert.deepEqual(await themeOf(u), t, `${u}: 全担当者に同じ色`);
+  // 支店管理者・閲覧者は変更できない(保存・初期化とも)
+  for (const u of ["tadm", "oadm", "r1"]) {
+    await deniedBy(m(u, "setTheme", { companyId: S, ...t, color: "#000000" }));
+    await deniedBy(m(u, "resetTheme", { companyId: S }));
+  }
+  // 他社の会社管理者(エックス商事の x1)は、この会社を指定しても変更できない
+  await rejects(api("x1", "setTheme", { companyId: S, ...t, color: "#000000" }), "permission-denied");
+  // 値は厳密に: 大文字・形式違い・真偽値でない・項目の不足・余分な項目は拒否
+  for (const bad of [{ color: "#0F766E" }, { color: "red" }, { color: "#12345" }, { color: "url(x)" }, { gradient: "yes" }, { darkText: 1 }, { extra: true }]) {
+    await rejects(m("sadm", "setTheme", { companyId: S, ...t, ...bad }), "invalid-argument");
+  }
+  await rejects(m("sadm", "setTheme", { companyId: S, color: t.color, gradient: true }), "invalid-argument");
+  await rejects(m("sadm", "resetTheme", { companyId: S, color: "#000000" }), "invalid-argument");
+  assert.deepEqual(await themeOf("r1"), t, "拒否された変更は保存しない");
+  // 医療機関側のテーマカラー(facilities/*/displaySettings/headerTheme)には書かない
+  for (const fid of ["fA", "fB"]) assert.equal((await db.doc(`facilities/${fid}/displaySettings/headerTheme`).get()).exists, false);
+  // 初期設定に戻す(項目を消す)
+  assert.deepEqual(await m("sadm", "resetTheme", { companyId: S }), { ok: true, headerTheme: null });
+  assert.equal(await themeOf("tadm"), null);
+  assert.equal((await db.doc(`dealerCompanies/${S}`).get()).get("headerTheme"), undefined);
+  // 監査ログ(保存・初期化)
+  const logs = (await db.collection("dealerPortalAuditLogs").where("companyId", "==", S).get()).docs.map(d => d.data()).filter(d => String(d.action).startsWith("company.theme"));
+  assert.deepEqual(logs.map(l => [l.action, l.staffId]).sort(), [["company.theme", sidOf("sadm")], ["company.themeReset", sidOf("sadm")]]);
+  // 壊れた保存値は未設定として返す(画面に任意の文字列を渡さない)
+  await db.doc(`dealerCompanies/${S}`).update({ headerTheme: { color: "javascript:alert(1)", gradient: true, darkText: false } });
+  assert.equal(await themeOf("r1"), null);
+  // 会社名の変更(運営者)では消えない
+  await m("sadm", "setTheme", { companyId: S, ...t });
+  await op("updateCompany", { companyId: S, name: "せんじゅメディカル株式会社" });
+  assert.deepEqual(await themeOf("r1"), t);
+  // 無効化された会社管理者は変更できない
+  await db.doc(`dealerStaff/${sidOf("sadm")}`).update({ status: "disabled" });
+  await assert.rejects(m("sadm", "resetTheme", { companyId: S }));
+  assert.deepEqual(await themeOf("r1"), t);
+  // 機能の停止中は使えない(試験モードの操作にも含めない)
+  enabled.v = false;
+  await rejects(m("tadm", "setTheme", { companyId: S, ...t }), "failed-precondition");
+});
+
 test("会社管理者・支店管理者の招待の上限: 24時間の招待の数を超えると断る(運営者は対象外)", async () => {
   const S = (await op("createCompany", { name: "上限テスト", requestId: crypto.randomUUID() })).companyId;
   const b = (await op("upsertBranch", { companyId: S, name: "本店" })).branchId;

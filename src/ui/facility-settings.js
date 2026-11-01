@@ -15,7 +15,9 @@ import { lensBadgeElements } from "./lens-badges.js";
 import { isValidEmail } from "../domain/order-validation.js";
 import { MAIL_SETTINGS_LIMITS, dealerSubjectExample } from "../domain/order-mail-profiles.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { HEADER_THEME_PALETTE, validateHeaderTheme, readHeaderTheme, isReadable } from "../domain/header-theme.js";
+import { readHeaderTheme } from "../domain/header-theme.js";
+import { createThemeColorSection } from "./theme-color-section.js";
+import { createAutoSaver, setSectionMessage } from "./settings-autosave.js";
 import { applyHeaderTheme, cacheHeaderTheme } from "./header-theme.js";
 import { pencilIcon, trashIcon } from "./action-icons.js";
 
@@ -68,63 +70,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   let open = false;
   const markDirty = () => { dirty = true; };
 
-  /**
-   * 自動保存(採用IOL・担当医)。変更のたびに request() を呼ぶと、画面の最新の状態を、1件ずつ順番に保存する。
-   *  - 保存中に続けて操作しても、保存は直列(同時に2つ走らない)。保存の時点の画面の状態を保存するので、古い内容で上書きしない。続けて操作した分は1回にまとめる。
-   *  - 成功の通知は出さない。失敗したときだけエラーと「再試行」を表示し、画面の変更は消さない(次の操作か再試行で、最新の状態をもう一度保存する)。
-   *  - exclusive(): 保存と同時に走らせてはいけない処理(削除)を、保存の合間に実行する。
-   * @param {HTMLElement} section 表示先(メッセージ・再試行ボタン)
-   * @param {() => Promise<void>} run 保存の実体(既存のサーバー・データベースへの保存処理)
-   */
-  function createAutoSaver(section, run) {
-    let again = false, running = false;
-    const waiters = [];
-    const api = { failed: false };
-    const settle = () => waiters.splice(0).forEach(r => r());
-    const showError = () => {
-      message(section, "保存できませんでした。変更はまだ保存されていません。通信状態や権限を確認して、再試行してください。", true);
-      if (!section.querySelector('[data-act="retry-autosave"]')) {
-        const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "retry-autosave" }, "再試行");
-        b.addEventListener("click", () => api.request());
-        section.querySelector("[data-msg]").after(b);
-      }
-    };
-    const clearError = () => {
-      const b = section.querySelector('[data-act="retry-autosave"]');
-      if (b) b.remove();
-      const p = section.querySelector("[data-msg]");
-      if (p && p.classList.contains("error-message")) message(section, "");
-    };
-    async function pump() {
-      if (running) return;
-      running = true;
-      try {
-        while (again) {
-          again = false;
-          try { await run(); if (api.failed) { api.failed = false; clearError(); } }
-          catch (e) { console.error("自動保存に失敗しました:", e); api.failed = true; again = false; showError(); break; }
-        }
-      } finally { running = false; settle(); if (again && !api.failed) pump(); }
-    }
-    api.request = () => { again = true; pump(); };
-    api.idle = () => (running || again ? new Promise(r => waiters.push(r)) : Promise.resolve());
-    api.exclusive = async (task) => {
-      while (running) await new Promise(r => waiters.push(r));
-      running = true;
-      try { return await task(); } finally { running = false; settle(); if (again) pump(); }
-    };
-    return api;
-  }
+  // 自動保存(採用IOL・担当医など)は共通の部品(./settings-autosave.js。ディーラー設定のテーマカラーと共通)
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
   let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
   const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver, built.relatedLinks?._related.saver].filter(Boolean);
 
-  const message = (container, text, isError = false) => {
-    const p = container.querySelector("[data-msg]");
-    p.textContent = text || "";
-    p.className = isError ? "error-message" : "form-hint";
-  };
+  const message = setSectionMessage;
 
   async function load() {
     const [orderers, adopted, dealers] = await Promise.all([
@@ -758,67 +710,13 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーション + 白い文字に戻す(設定を削除)。
   // 背景色は明るさに関係なく選べる。文字は白(既定)か黒。読みにくい組み合わせは控えめに案内するだけで、反映・保存は止めない。
   function themeSection() {
-    const DEFAULT_COLOR = "#1d4ed8";
-    // 色見本: 行ごとに「白文字向け」「黒文字向け」の小さな見出し。選ぶと文字の色もその行に合わせる(後から「フォントを黒にする」で変更できる)
-    const swatches = h("div", { class: "theme-palette", role: "group", "aria-label": "色見本" },
-      HEADER_THEME_PALETTE.flatMap(row => [
-        h("span", { class: "theme-row-label" }, row.label),
-        h("div", { class: "theme-swatches" }, row.colors.map(c => h("button", { type: "button", class: "theme-swatch", "data-color": c, "data-dark-text": String(row.darkText),
-          title: `${c}(${row.label})`, "aria-label": `${c}(${row.label})`, "aria-pressed": "false", style: `background:${c}` })))]));
-    const picker = h("input", { type: "color", class: "theme-picker", "data-f": "themePicker", "aria-label": "その他の色" });
-    const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": "themeHex", placeholder: "#1d4ed8", "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
-    const chk = h("input", { type: "checkbox", "data-f": "themeGradient" });
-    const dark = h("input", { type: "checkbox", "data-f": "themeDarkText" });
-    const advice = h("p", { class: "theme-advice", "data-f": "themeAdvice", hidden: true }, "文字が読みやすい配色を推奨します");
-    const reset = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "theme-reset" }, "初期設定に戻す");
-    const section = h("section", { class: "settings-section", "data-section": "theme" },
-      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。"),
-      swatches,
-      h("div", { class: "theme-custom" }, h("span", { class: "form-label" }, "その他の色"), picker, hexIn),
-      h("label", { class: "settings-check" }, chk, h("span", {}, "グラデーションを使用する")),
-      h("label", { class: "settings-check" }, dark, h("span", {}, "フォントを黒にする")),
-      advice,
-      h("div", {}, reset),
-      h("p", { class: "form-hint", "data-msg": "" }));
-    const show = () => {
-      const t = data.headerTheme;
-      for (const b of swatches.querySelectorAll(".theme-swatch")) b.setAttribute("aria-pressed", String(Boolean(t) && b.dataset.color === t.color));
-      picker.value = t ? t.color : DEFAULT_COLOR;
-      hexIn.value = t ? t.color : "";
-      chk.checked = t ? t.gradient : true;
-      dark.checked = Boolean(t && t.darkText);
-      advice.hidden = isReadable(t);
-      reset.disabled = !t;
-    };
-    const use = (theme) => {   // ヘッダーにすぐ反映し、自動保存する
-      data.headerTheme = theme;
-      applyHeaderTheme(theme);
-      cacheHeaderTheme(facility.id, theme);
-      show();
-      themeSaver.request();
-    };
-    const choose = (color, darkText = dark.checked) => {
-      const v = validateHeaderTheme({ color, gradient: chk.checked, darkText });
-      if (!v.ok) { message(section, v.error, true); return; }   // 形式違い(#RRGGBB でない)だけは反映も保存もしない
-      message(section, "");
-      use(v.theme);
-    };
-    swatches.addEventListener("click", (e) => { const b = e.target.closest(".theme-swatch"); if (b) choose(b.dataset.color, b.dataset.darkText === "true"); });
-    picker.addEventListener("change", () => choose(picker.value));
-    hexIn.addEventListener("change", () => choose(hexIn.value));
-    chk.addEventListener("change", () => { if (data.headerTheme) use({ ...data.headerTheme, gradient: chk.checked }); });
-    // 未設定(標準の青)のまま黒い文字にしたときは、標準の青を基準にした設定として保存する
-    dark.addEventListener("change", () => use({ ...(data.headerTheme || { color: DEFAULT_COLOR, gradient: chk.checked }), darkText: dark.checked }));
-    reset.addEventListener("click", () => { message(section, ""); use(null); });
-    let saved = null;   // 最後に保存した内容(同じ内容は保存しない)
-    themeSaver = createAutoSaver(section, async () => {
-      const t = data.headerTheme;
-      if (JSON.stringify(t) === JSON.stringify(saved)) return;
-      if (t) await settingsApi.saveHeaderTheme(facility.id, t);
-      else await settingsApi.resetHeaderTheme(facility.id);
-      saved = t;
+    const { section, saver } = createThemeColorSection({
+      description: "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。",
+      get: () => data.headerTheme,
+      use: (theme) => { data.headerTheme = theme; applyHeaderTheme(theme); cacheHeaderTheme(facility.id, theme); },
+      save: async (t) => { if (t) await settingsApi.saveHeaderTheme(facility.id, t); else await settingsApi.resetHeaderTheme(facility.id); }
     });
-    section._render = () => { saved = data.headerTheme; message(section, ""); show(); };
+    themeSaver = saver;
     return section;
   }
 

@@ -116,8 +116,18 @@ function installFakeServer(page, scenario) {
           return { weekStart: day(0), weekEnd: day(6), truncated: false,
             days: Array.from({ length: 7 }, (_, i) => ({ date: day(i), orders: (byDate[day(i)] || []).filter(o => sel.has(o.facilityId)) })) };
         }
+        // 会社のテーマカラー(偽: 端末をまたいで共通の保存先の代わりに localStorage。会社管理者でなければ拒否)
+        const themeStore = () => { try { return JSON.parse(localStorage.getItem("__fakeCompanyTheme") || "null"); } catch { return null; } };
+        if (d.action === "setTheme" || d.action === "resetTheme") {
+          if (myRole !== "companyAdmin") throw deny("テーマカラーの変更は、会社管理者のみ行えます");
+          if (window.__themeFail) throw Object.assign(new Error("保存できません"), { code: "functions/unavailable" });
+          const t = d.action === "setTheme" ? { color: d.color, gradient: d.gradient, darkText: d.darkText } : null;
+          localStorage.setItem("__fakeCompanyTheme", JSON.stringify(t));
+          return { ok: true, headerTheme: t };
+        }
         if (d.action === "context") return {
           ...(scenario === "testMode" ? { testMode: true } : {}),
+          headerTheme: themeStore(),
           company: d.companyId === "dco-y" ? { id: "dco-y", name: "ワイ医療" } : { id: "dco-x", name: "エックス商事" }, me: { name: "担当x1", role: myRole, branch: { id: "br-1", name: "東京支店" } },
           facilities: scenario === "single" ? facilities.slice(0, 1) : facilities, assignedFacilityIds: ["fB"], selectedFacilityIds: ["fB"], selection: "assigned",
           defaultRange: { from: "2026-09-28", to: "2026-10-27" }, limits: { rangeDaysMax: 366, pageMax: 100 }
@@ -1114,6 +1124,119 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator(".manual-back").first().click();
       assert.equal(await page.locator("#dealerSettings").isVisible(), true);
       await context.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー設定のテーマカラー(会社で共通): 会社管理者だけに欄を出す。選ぶとすぐヘッダーに反映して自動保存。初期設定に戻す・保存の失敗の表示。閲覧者にも会社の色。ログイン前・本人確認中は標準の青。320/390/1100px: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    const headerBg = (page) => page.evaluate(() => { const hd = document.querySelector(".app-header"); return { inline: hd.style.background, dark: hd.classList.contains("is-dark-text"), image: getComputedStyle(hd).backgroundImage, color: getComputedStyle(hd).backgroundColor }; });
+    const openSettings = async (page) => {
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+      await page.click("#btnHeaderMenu");
+      await page.click("#menuDealerSettings");
+      await page.locator("#dealerSettings").waitFor();
+    };
+    try {
+      for (const width of [320, 390, 1100]) {
+        const context = await newFakeContext(browser, base, width, STAFF);
+        const page = await context.newPage();
+        const errors = [];
+        page.on("pageerror", e => errors.push(String(e)));
+        await installFakeServer(page, "companyAdmin");
+        await page.goto(`${base}dealer.html`);
+        await openSettings(page);
+        const sec = page.locator('#dealerSettings [data-section="theme"]');
+        await sec.waitFor();
+        assert.equal(await sec.locator(".theme-swatch").count(), 20, "色見本20色(施設設定と同じ)");
+        assert.equal((await headerBg(page)).inline, "", "未設定は標準の青");
+        assert.equal(await sec.locator('[data-act="theme-reset"]').isDisabled(), true);
+        // 色見本(白文字向けのティール)→ すぐヘッダーに反映し、自動保存
+        await sec.locator('.theme-swatch[data-color="#0f766e"]').click();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "setTheme"));
+        assert.deepEqual((await calls(page, "setTheme")).at(-1), { action: "setTheme", companyId: "dco-x", color: "#0f766e", gradient: true, darkText: false });
+        let bg = await headerBg(page);
+        assert.ok(/15, 118, 110|#0f766e/i.test(bg.image + bg.inline), `${width}: ヘッダーに反映 ${JSON.stringify(bg)}`);
+        assert.equal(bg.dark, false);
+        // グラデーションなし・フォントを黒(黒文字向けの色見本)
+        await sec.locator('[data-f="themeGradient"]').uncheck();
+        await sec.locator('.theme-swatch[data-color="#fdba74"]').click();
+        await page.waitForFunction(() => (window.__calls || []).filter(([, d]) => d.action === "setTheme").some(([, d]) => d.color === "#fdba74"));
+        assert.deepEqual((await calls(page, "setTheme")).at(-1), { action: "setTheme", companyId: "dco-x", color: "#fdba74", gradient: false, darkText: true });
+        bg = await headerBg(page);
+        assert.equal(bg.color, "rgb(253, 186, 116)");
+        assert.equal(bg.dark, true, "フォントを黒にする");
+        assert.equal(await sec.locator('[data-f="themeDarkText"]').isChecked(), true);
+        // 自由な色(HEX)。形式違いは反映も保存もしない
+        const before = (await calls(page, "setTheme")).length;
+        await sec.locator('[data-f="themeHex"]').fill("blue");
+        await sec.locator('[data-f="themeHex"]').press("Enter");
+        await sec.locator('[data-f="themeHex"]').blur();
+        await sec.locator("[data-msg].error-message").waitFor();
+        assert.equal((await calls(page, "setTheme")).length, before);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
+        // 受注一覧に戻っても色はそのまま。再読み込みしても(サーバーの値で)同じ色
+        await page.click("#btnDealerSettingsClose");
+        assert.equal((await headerBg(page)).color, "rgb(253, 186, 116)");
+        await page.reload();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+        assert.equal((await headerBg(page)).color, "rgb(253, 186, 116)", "再読み込み後も会社の色");
+        // 初期設定に戻す(標準の青・白い文字)
+        await openSettings(page);
+        await page.locator('#dealerSettings [data-act="theme-reset"]').click();
+        await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "resetTheme"));
+        bg = await headerBg(page);
+        assert.deepEqual([bg.inline, bg.dark], ["", false], "初期設定に戻す");
+        // 保存の失敗: エラーと「再試行」を表示し、画面の変更は消さない
+        await page.evaluate(() => { window.__themeFail = true; });
+        await page.locator('#dealerSettings .theme-swatch[data-color="#7e22ce"]').click();
+        await page.locator('#dealerSettings [data-section="theme"] [data-act="retry-autosave"]').waitFor();
+        assert.match(await page.locator('#dealerSettings [data-section="theme"] [data-msg]').innerText(), /保存できませんでした/);
+        await page.evaluate(() => { window.__themeFail = false; });
+        await page.locator('#dealerSettings [data-section="theme"] [data-act="retry-autosave"]').click();
+        await page.waitForFunction(() => !document.querySelector('#dealerSettings [data-section="theme"] [data-act="retry-autosave"]'));
+        assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem("__fakeCompanyTheme"))).color, "#7e22ce");
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+
+      // 支店管理者: ディーラー設定はあるが、テーマカラーの欄はない。会社の色は表示する
+      let context = await newFakeContext(browser, base, 390, STAFF);
+      let page = await context.newPage();
+      await page.addInitScript(() => localStorage.setItem("__fakeCompanyTheme", JSON.stringify({ color: "#15803d", gradient: false, darkText: false })));
+      await installFakeServer(page, "branchAdmin");
+      await page.goto(`${base}dealer.html`);
+      await openSettings(page);
+      await page.locator(".dealer-manage-staff").first().waitFor();
+      assert.equal(await page.locator('[data-section="theme"]').count(), 0, "支店管理者には出さない");
+      assert.equal((await headerBg(page)).color, "rgb(21, 128, 61)", "会社の色は表示する");
+      await context.close();
+
+      // 閲覧者: ディーラー設定はない。会社の色で表示する
+      context = await newFakeContext(browser, base, 390, STAFF);
+      page = await context.newPage();
+      await page.addInitScript(() => localStorage.setItem("__fakeCompanyTheme", JSON.stringify({ color: "#15803d", gradient: false, darkText: false })));
+      await installFakeServer(page, "staff");
+      await page.goto(`${base}dealer.html`);
+      await page.waitForFunction(() => (window.__calls || []).some(([, d]) => d.action === "week"));
+      assert.equal((await headerBg(page)).color, "rgb(21, 128, 61)", "閲覧者にも会社の色");
+      assert.equal(await page.locator('[data-section="theme"], #dealerSettings').count(), 0);
+      await context.close();
+
+      // ログイン前・本人確認中は標準の青(会社の色を出さない)
+      for (const [user, scenario] of [[null, "staff"], [STAFF, "unverified"]]) {
+        context = await newFakeContext(browser, base, 390, user);
+        page = await context.newPage();
+        await page.addInitScript(() => localStorage.setItem("__fakeCompanyTheme", JSON.stringify({ color: "#15803d", gradient: false, darkText: true })));
+        await installFakeServer(page, scenario);
+        await page.goto(`${base}dealer.html`);
+        await page.locator(user ? '[data-act="sendCode"]' : "#btnDealerGoogle").waitFor();
+        const b = await headerBg(page);
+        assert.deepEqual([b.inline, b.dark], ["", false], `${scenario}: 標準の青`);
+        await context.close();
+      }
     } finally { await browser.close(); }
   });
 }
