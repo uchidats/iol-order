@@ -329,8 +329,9 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     function renderWeek(r) {
       const days = (r.days || []).filter(d => d.orders.length);
       const count = days.reduce((n, d) => n + d.orders.length, 0);
-      weekMsg.textContent = (count ? `この週に手術予定の注文明細: ${days.length}日・${count}件` : "この週に手術予定の自社宛ての注文はありません。")
-        + (r.truncated ? " 件数が多いため一部だけを表示しています。医療機関を絞り込んでください。" : "");
+      // 件数の集計(「この週に手術予定の注文明細: …日・…件」)は出さない。該当なし・一部だけの表示の案内だけ
+      weekMsg.textContent = [count ? "" : "この週に手術予定の自社宛ての注文はありません。",
+        r.truncated ? "件数が多いため一部だけを表示しています。医療機関を絞り込んでください。" : ""].filter(Boolean).join(" ");
       weekBox.replaceChildren(...days.map(d => h("section", { class: "dealer-day", "data-date": d.date },
         h("h3", { class: "dealer-day-head" }, formatDayHead(d.date)),
         h("ul", { class: "dealer-week-list" }, d.orders.map(o => {

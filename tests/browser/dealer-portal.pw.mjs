@@ -738,8 +738,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual([w0.weekStart, w0.facilityFilter], [thisWeek, { mode: "selected", facilityIds: ["fB"] }], "今週・担当施設");
         assert.equal(await page.locator("#dealerWeekLabel").innerText(), weekLabelOf(thisWeek));
         assert.equal(await page.locator("#dealerOrderedArea").isHidden(), true, "注文日の条件は週表示では出さない");
-        // 担当施設(B)だけ: 木曜に1件
+        // 担当施設(B)だけ: 木曜に1件。件数の集計文(「この週に手術予定の注文明細: …日・…件」)は出さない
         assert.deepEqual(await page.locator(".dealer-day").evaluateAll(ds => ds.map(d => d.dataset.date)), [addDaysOf(thisWeek, 3)]);
+        assert.equal(await page.locator("#dealerWeekMsg").innerText(), "", "集計文は出さない");
+        assert.ok(!(await page.locator("#dealerWeekArea").innerText()).includes("注文明細"));
         // すべての施設: 火曜(A)・木曜(B)。A の注文は翌週にも手術日 → 同じ注文番号で、ほかの手術日を示す
         await page.click('[data-select="all"]');
         await page.waitForFunction(() => document.querySelectorAll(".dealer-day").length === 2);

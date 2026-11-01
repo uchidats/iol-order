@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex">
   <title>受注一覧(ディーラー用)</title>
-  <link rel="stylesheet" href="styles.css?v=60bd14eadb">
+  <link rel="stylesheet" href="styles.css?v=b0113e66a2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -26,10 +26,10 @@
       "./src/data/registration-api.js": "./src/data/registration-api.js?v=bcff07525e",
       "./src/data/schema.js": "./src/data/schema.js?v=b1f0b3e260",
       "./src/data/static-repository.js": "./src/data/static-repository.js?v=d1620275ba",
-      "./src/dealer/dealer-app.js": "./src/dealer/dealer-app.js?v=a9501a3296",
+      "./src/dealer/dealer-app.js": "./src/dealer/dealer-app.js?v=bab612d282",
       "./src/dealer/dealer-header-menu.js": "./src/dealer/dealer-header-menu.js?v=90d90ca50e",
       "./src/dealer/dealer-manage.js": "./src/dealer/dealer-manage.js?v=d5b72af7cc",
-      "./src/dealer/main.js": "./src/dealer/main.js?v=e5ebf8d2f1",
+      "./src/dealer/main.js": "./src/dealer/main.js?v=afa548b5b0",
       "./src/domain/access.js": "./src/domain/access.js?v=ce87ba6b9f",
       "./src/domain/dealer-portal.js": "./src/domain/dealer-portal.js?v=b3009b43b5",
       "./src/domain/dealer-selection.js": "./src/domain/dealer-selection.js?v=9b02c5c29f",
@@ -112,11 +112,11 @@
       </div>
     </header>
     <!-- 注文フォームのメニュー(運営者だけに表示)から開いたときだけ表示する戻り先(表示だけ。ログイン・閲覧の許可には関係しない) -->
-    <div class="dealer-back-row" id="dealerBackRow" hidden><a class="btn btn-outline-sm" id="dealerBackToOrder" href="./">IOL注文フォームに戻る</a></div>
+    <div class="dealer-back-row" id="dealerBackRow" hidden><button type="button" class="btn btn-outline-sm" id="dealerBackToOrder">IOL注文フォームに戻る</button></div>
     <main class="main-content dealer-main" id="dealerMain">
       <p class="form-hint" role="status">読み込み中…</p>
     </main>
   </div>
-  <script type="module" src="src/dealer/main.js?v=e5ebf8d2f1"></script>
+  <script type="module" src="src/dealer/main.js?v=afa548b5b0"></script>
 </body>
 </html>

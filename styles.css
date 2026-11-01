@@ -2260,10 +2260,9 @@ input[type="date"], .lens-line select { color-scheme: light; }
 @media (max-width: 640px) { .member-edit.is-pending-edit { grid-template-columns: minmax(0, 1fr); } }
 
 /* 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理で共通)と、見出しの「注文画面に戻る」・テーマカラーの「初期設定に戻す」
-   (施設設定・ディーラー設定で共通)・ディーラー画面の「IOL注文フォームに戻る」: 幅60px以上(文字に合わせる)・高さ36pxのコンパクトな大きさ。PC・スマホ共通 */
+   (施設設定・ディーラー設定で共通): 幅60px以上(文字に合わせる)・高さ36pxのコンパクトな大きさ。PC・スマホ共通 */
 .settings-actions > .btn[data-act="add"],
 #btnSettingsClose,
-#dealerBackToOrder,
 .settings-section[data-section="theme"] .btn[data-act="theme-reset"] {
   min-width: 60px;
   min-height: 36px;
@@ -2482,7 +2481,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-list-filter > summary .info-tip { vertical-align: middle; margin-left: 2px; }
 .dealer-list-filter > summary .info-tip-pop { white-space: pre-line; cursor: auto; }   /* 段落ごとに改行。説明は絞り込みの行の下に出す */
 .dealer-list-filter[open] > summary { margin-bottom: 6px; }
-.dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }
+.dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm, #dealerBackToOrder { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }   /* 「IOL注文フォームに戻る」は受注一覧の「今週」などと同じ大きさ */
 /* 運営者の会社の鉛筆・ゴミ箱は、施設設定の「担当医」のアイコンボタン(.orderer-icon)と同じ寸法に戻す */
 .dealer-operator .btn-outline-sm.orderer-icon { min-height: 32px; height: 32px; min-width: 32px; padding-left: 8px; padding-right: 8px; }
 .dealer-row-facility { font-weight: 600; }

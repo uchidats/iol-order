@@ -245,10 +245,15 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.ok(!page.url().includes("from=order"), "戻る印は URL に残さない");
       const back = page.locator("#dealerBackToOrder");
       assert.equal(await back.innerText(), "IOL注文フォームに戻る");
-      // 施設設定の「追加」「注文画面に戻る」と同じ見た目(高さ36px・0.9rem・左右14px・小さい角丸)。幅は文字に合わせ、1行に収まる
+      // 受注一覧の「今週」と同じグレーのボタン(高さ・文字の大きさ・余白・角丸・背景・文字色が同じ)。テキストのリンクではない。幅は文字に合わせ、1行に収まる
+      assert.equal(await back.evaluate(e => e.tagName), "BUTTON");
       assert.match(await back.getAttribute("class"), /\bbtn btn-outline-sm\b/);
-      assert.deepEqual(await back.evaluate(e => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return [b.height, Math.round(parseFloat(c.fontSize) * 10) / 10, c.padding, c.borderRadius, e.scrollWidth <= e.clientWidth, b.width < 220]; }),
-        [36, 14.4, "0px 14px", "6px", true, true], "「追加」と同じ寸法");
+      const look = (l) => l.evaluate(e => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return { h: b.height, fs: c.fontSize, fw: c.fontWeight, pad: c.padding, radius: c.borderRadius, bg: c.backgroundColor, color: c.color, border: c.border, deco: c.textDecorationLine }; });
+      // 「今週」と同じ組み立て(受注一覧のカードの中の btn btn-outline-sm)の見本を一時的に置いて比べる(この画面はログイン前のため)
+      await page.evaluate(() => { const s = document.createElement("section"); s.className = "dealer-panel"; s.id = "__probe"; s.innerHTML = '<button type="button" class="btn btn-outline-sm" data-week="this">今週</button>'; document.querySelector("#dealerMain").append(s); });
+      assert.deepEqual(await look(back), await look(page.locator('#__probe [data-week="this"]')), "「今週」と同じ見た目");
+      await page.evaluate(() => document.querySelector("#__probe").remove());
+      assert.ok(await back.evaluate(e => e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().width < 220), "1行に収まる");
       assert.ok(await noOverflow(page), "スマートフォンで横にはみ出さない");
       // 受注は従来どおり、ディーラーのログイン・閲覧の許可がある場合だけ(このリンクで受注一覧は開かない)
       assert.equal(await page.locator("#dealerWeekArea, .dealer-day").count(), 0);

@@ -29,6 +29,9 @@ function showBackToOrder() {
   } catch { /* 保存できない環境では出さない */ }
   const row = document.getElementById("dealerBackRow");
   if (row) row.hidden = !from;
+  // 受注一覧の「今週」と同じボタン(リンクの見た目にしない)。遷移先は従来どおり注文フォーム(./)
+  const back = document.getElementById("dealerBackToOrder");
+  if (back) back.addEventListener("click", () => location.assign("./"));
 }
 
 async function bootstrap() {
