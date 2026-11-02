@@ -91,6 +91,29 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(await pg.evaluate(() => { const e = document.querySelector("#btnSettingsClose"); return e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().height <= 36.5; }), `${w}px: 文字が1行に収まる`);
         assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}px: 横にはみ出さない`);
       }
+      // スマホ(320〜430px): 1行目「施設設定」ⓘ / 2行目 施設名＋右端に鉛筆・ゴミ箱 / 3行目「注文画面に戻る」。施設名は縦に1文字ずつ折り返さない
+      const headBoxes = () => pg.evaluate(() => Object.fromEntries(Object.entries({ hd: "#facilitySettings .settings-head > .settings-heading", name: ".settings-facility", pen: "#btnRenameFacility", trash: "#btnDeleteFacility", back: "#btnSettingsClose" })
+        .map(([k, q]) => { const b = document.querySelector(q).getBoundingClientRect(); return [k, { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height }]; })));
+      const original = await pg.locator(".settings-facility").innerText();
+      for (const name of [original, "医療法人社団 とても長い名前のテスト眼科クリニック 本院 第二手術センター"]) {
+        await pg.locator(".settings-facility").evaluate((e, n) => { e.textContent = n; }, name);
+        for (const w of [320, 360, 390, 430]) {
+          await pg.setViewportSize({ width: w, height: 900 });
+          const x = await headBoxes(), fs = await pg.locator(".settings-facility").evaluate(e => parseFloat(getComputedStyle(e).fontSize));
+          const tag = `${w}px「${name.slice(0, 8)}」`;
+          assert.ok(x.hd.b <= x.name.t + 1 && x.hd.b <= x.pen.t + 1, `${tag}: 「施設設定」が1行目`);
+          assert.ok(x.pen.t < x.name.b && x.pen.b > x.name.t && Math.abs(x.pen.t - x.trash.t) < 1, `${tag}: 鉛筆・ゴミ箱は施設名と同じ行`);
+          assert.ok(x.name.r <= x.pen.l && x.pen.r <= x.trash.l, `${tag}: 施設名の右に鉛筆→ゴミ箱`);
+          assert.ok(x.back.t >= Math.max(x.name.b, x.trash.b) - 1, `${tag}: 「注文画面に戻る」は3行目`);
+          assert.ok(x.name.w >= w * 0.5, `${tag}: 施設名の幅を確保(${x.name.w}px)`);
+          if (name === original) assert.ok(x.name.h <= fs * 2, `${tag}: 短い施設名は1行(${x.name.h}px)`);
+          assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: 横にはみ出さない`);
+        }
+      }
+      await pg.locator(".settings-facility").evaluate((e, n) => { e.textContent = n; }, original);
+      // PC: 従来どおり「施設設定」・施設名・鉛筆・ゴミ箱・「注文画面に戻る」が1行
+      await pg.setViewportSize({ width: 1100, height: 900 });
+      { const x = await headBoxes(); assert.ok([x.name, x.pen, x.trash, x.back].every(b => b.t < x.hd.b && b.b > x.hd.t), "PC: 見出しは1行"); }
       await pg.setViewportSize({ width: 390, height: 900 });
       const trashColor = await trash.evaluate(e => getComputedStyle(e).color);
       assert.equal(trashColor, await pencil.evaluate(e => getComputedStyle(e).color), "ゴミ箱は鉛筆・担当医のゴミ箱と同じ色(赤くない)");
