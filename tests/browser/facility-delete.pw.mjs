@@ -68,7 +68,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await pg.locator("#btnSettingsMore").count(), 0);
       assert.equal(await box.isHidden(), true);
       const [pb, tb, cb] = [await pencil.boundingBox(), await trash.boundingBox(), await closeBtn.boundingBox()];
-      assert.ok(Math.abs(pb.y - tb.y) < 3 && pb.x + pb.width <= tb.x && tb.x + tb.width <= cb.x + 1 || tb.y < cb.y, "鉛筆→ゴミ箱→戻る の順");
+      assert.ok(Math.abs(pb.y - tb.y) < 3 && pb.x + pb.width <= tb.x && (tb.x + tb.width <= cb.x + 1 || cb.y + cb.height <= tb.y + 1), "鉛筆→ゴミ箱の順。戻るは右隣(PC)か上の行(スマホ)");
       assert.ok(Math.abs(pb.width - tb.width) < 1 && Math.abs(pb.height - tb.height) < 1, "鉛筆と同じ大きさ");
       const bgOf = (l) => l.evaluate(e => getComputedStyle(e).backgroundColor);
       assert.equal(await bgOf(trash), await bgOf(pencil), "背景色は鉛筆と同じ");
@@ -91,7 +91,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(await pg.evaluate(() => { const e = document.querySelector("#btnSettingsClose"); return e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().height <= 36.5; }), `${w}px: 文字が1行に収まる`);
         assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}px: 横にはみ出さない`);
       }
-      // スマホ(320〜430px): 1行目「施設設定」ⓘ / 2行目 施設名＋右端に鉛筆・ゴミ箱 / 3行目「注文画面に戻る」。施設名は縦に1文字ずつ折り返さない
+      // スマホ(320〜430px): 1行目 左に「施設設定」ⓘ・右端に「注文画面に戻る」 / 2行目 左に施設名・右端に鉛筆・ゴミ箱。施設名は縦に1文字ずつ折り返さない
       const headBoxes = () => pg.evaluate(() => Object.fromEntries(Object.entries({ hd: "#facilitySettings .settings-head > .settings-heading", name: ".settings-facility", pen: "#btnRenameFacility", trash: "#btnDeleteFacility", back: "#btnSettingsClose" })
         .map(([k, q]) => { const b = document.querySelector(q).getBoundingClientRect(); return [k, { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height }]; })));
       const original = await pg.locator(".settings-facility").innerText();
@@ -104,7 +104,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           assert.ok(x.hd.b <= x.name.t + 1 && x.hd.b <= x.pen.t + 1, `${tag}: 「施設設定」が1行目`);
           assert.ok(x.pen.t < x.name.b && x.pen.b > x.name.t && Math.abs(x.pen.t - x.trash.t) < 1, `${tag}: 鉛筆・ゴミ箱は施設名と同じ行`);
           assert.ok(x.name.r <= x.pen.l && x.pen.r <= x.trash.l, `${tag}: 施設名の右に鉛筆→ゴミ箱`);
-          assert.ok(x.back.t >= Math.max(x.name.b, x.trash.b) - 1, `${tag}: 「注文画面に戻る」は3行目`);
+          assert.ok(x.back.t < x.hd.b && x.back.b > x.hd.t && x.back.b <= Math.min(x.name.t, x.pen.t) + 1, `${tag}: 「注文画面に戻る」は1行目(「施設設定」と同じ行)`);
+          assert.ok(x.hd.r <= x.back.l && Math.abs(x.back.r - x.trash.r) < 1, `${tag}: 「注文画面に戻る」は右端(ゴミ箱と右端がそろう)`);
+          assert.deepEqual(await closeBtn.evaluate(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10, e.scrollWidth <= e.clientWidth]), [36, 14.4, true], `${tag}: 「注文画面に戻る」は36px・0.9rem・1行`);
           assert.ok(x.name.w >= w * 0.5, `${tag}: 施設名の幅を確保(${x.name.w}px)`);
           if (name === original) assert.ok(x.name.h <= fs * 2, `${tag}: 短い施設名は1行(${x.name.h}px)`);
           assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: 横にはみ出さない`);

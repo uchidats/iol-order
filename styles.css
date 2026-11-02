@@ -2207,13 +2207,13 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .facility-rename .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 /* 施設名の右の鉛筆・ゴミ箱: ボタンは「担当医」と同じ .orderer-icon、並びの間隔も .orderer-actions と同じ 4px(PC・スマホ共通) */
 .settings-head-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-/* スマホ: 施設設定の見出しは 1行目「施設設定」ⓘ / 2行目 施設名＋右端に鉛筆・ゴミ箱 / 3行目「注文画面に戻る」。
-   1行に詰めると施設名(flex: 1)が1文字幅まで縮み縦に折り返すため。長い施設名は名前の幅の中で折り返す。PCは従来の1行のまま */
+/* スマホ: 施設設定の見出しは 1行目 左に「施設設定」ⓘ・右端に「注文画面に戻る」 / 2行目 左に施設名・右端に鉛筆・ゴミ箱。
+   1行に詰めると施設名(flex: 1)が1文字幅まで縮み縦に折り返すため。長い施設名は名前の幅の中で折り返す。PCは従来の1行のまま。
+   施設名の基準の幅は「行幅 − 鉛筆・ゴミ箱(68px)と間隔の余裕」: 1行目には入らず、2行目で鉛筆・ゴミ箱と並び、残りの幅をすべて使う */
 @media (max-width: 560px) {
-  #facilitySettings > .settings-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  #facilitySettings > .settings-head > .settings-heading,
-  #facilitySettings > .settings-head > #btnSettingsClose { grid-column: 1 / -1; justify-self: start; }
-  #facilitySettings > .settings-head > .settings-facility { min-width: 0; overflow-wrap: anywhere; }
+  #facilitySettings > .settings-head > #btnSettingsClose { order: 1; margin-left: auto; }
+  #facilitySettings > .settings-head > .settings-facility { order: 2; flex: 1 1 calc(100% - 92px); min-width: 0; overflow-wrap: anywhere; }
+  #facilitySettings > .settings-head > .settings-head-actions { order: 3; margin-left: auto; }
 }
 
 /* 施設設定: 施設削除のダイアログ(ゴミ箱のボタンは .orderer-icon で「担当医」と同じ見た目) */
