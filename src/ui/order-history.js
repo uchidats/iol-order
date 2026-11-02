@@ -3,6 +3,7 @@ import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, histor
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
 import { summaryDateHead, summaryLineMain, formatShortSurgeryDate } from "./confirm-lines.js";
 import { confirmDialog } from "./confirm-dialog.js";
+import { lensDayHead, lensRow as lensRowEl } from "./history-lens.js";
 
 /** 要素生成の小さなヘルパー(表示する文字列は textContent で扱い、HTMLとして解釈しない) */
 function h(tag, attrs = {}, ...children) {
@@ -147,18 +148,9 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
 
   /** 注文の状態のバッジ(取消済み・テスト) */
   const orderBadges = (o) => [o.cancelled ? h("span", { class: "history-cancelled-badge" }, "取消済み") : null, o.testOrder ? h("span", { class: "lens-badge" }, "テスト") : null].filter(Boolean);
-  /** 一覧の手術日の見出し(短い表記) */
-  const dayHead = (date, badges = []) => h("div", { class: "history-card-head" },
-    h("span", { class: "history-card-date" }, date ? formatShortSurgeryDate(date) : "手術日の記録なし"),
-    badges.length ? h("span", { class: "history-card-badges" }, badges) : null);
-  /**
-   * 一覧のレンズ行(注文日順・手術日順で共通): 左に「モデル 度数 枚数」(詳細と同じ部品。一覧ではメーカー名を省く。詳細・確認画面は従来どおり)、
-   * 右に担当医名(長い名前は右の列の中で折り返す)。
-   * badges は左の明細の末尾(手術日順の取消済み・テスト。右の列は担当医名だけにして、明細の幅を確保する)
-   */
-  const lensRow = (tag, attrs, l, badges = []) => h(tag, { ...attrs, class: ["history-line history-lens-row", attrs.class].filter(Boolean).join(" "), "data-line": String(l.lineNo) },
-    h("div", { class: "history-lens-main" }, (() => { const m = summaryLineMain({ manufacturer: l.maker, modelName: l.model, power: l.power, quantity: l.quantity }); m.querySelector(".summary-maker").remove(); if (badges.length) m.append(...badges); return m; })()),
-    h("span", { class: "history-lens-side" }, h("span", { class: "history-lens-doctor" }, historyDoctorLabel(l))));
+  /** 一覧の手術日の見出しとレンズ行(ディーラーの受注一覧と共通の部品 history-lens.js)。担当医は「内田Dr」、記録なしは「担当医の記録なし」 */
+  const dayHead = lensDayHead;
+  const lensRow = (tag, attrs, l, badges = []) => lensRowEl(tag, { lineNo: l.lineNo, model: l.model, power: l.power, quantity: l.quantity }, { doctor: historyDoctorLabel(l), badges, className: attrs.class || "" });
 
   /**
    * 注文日順のカード(押すと詳細)。最上部に注文番号を控えめに(番号に日付が含まれるので注文日時は出さない)、その下に手術日ごとの見出し

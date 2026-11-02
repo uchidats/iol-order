@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createDealerPortalApi, isPortalUnavailable } from "../src/data/dealer-portal-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE, mondayOf, addDays, formatDayHead, weekLabel, shortDate } from "../src/domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE, mondayOf, addDays, formatDayHead, weekLabel, shortDate, spanLabel, weekSpanLabel } from "../src/domain/dealer-portal.js";
 import { weekDatesOf } from "../functions/src/dealer-portal.js";
 import { buildDealerOrderView, ownLinesOf, initialFacilitySelection, jstDayStartMs } from "../functions/src/dealer-portal.js";
 
@@ -197,4 +197,14 @@ test("医療機関のチェックの記憶: キーはユーザー×会社。今�
   assert.deepEqual(restoreFacilitySelection("[]", fs2, fb), { ids: [], restored: true });
   assert.deepEqual(restoreFacilitySelection(JSON.stringify(["fA", "gone", "fA"]), fs2, fb), { ids: ["fA"], restored: true });
   assert.deepEqual(restoreFacilitySelection(JSON.stringify(["gone"]), fs2, fb), { ids: ["fB"], restored: false });
+});
+
+test("手術日順の週の区切り「11月9日〜15日の週」と期間の表示: 今年は年を省略・同じ月は終わりの月を省略・年をまたぐと両方に年", () => {
+  const today = "2026-11-03";
+  assert.equal(weekSpanLabel("2026-11-09", today), "11月9日〜15日の週");
+  assert.equal(weekSpanLabel("2026-11-30", today), "11月30日〜12月6日の週");
+  assert.equal(weekSpanLabel("2026-12-28", today), "2026年12月28日〜2027年1月3日の週");
+  assert.equal(weekSpanLabel("2025-11-03", today), "2025年11月3日〜9日の週");
+  assert.equal(spanLabel("2026-11-09", "2026-12-06", today), "11月9日〜12月6日", "予定のない週が続く期間");
+  assert.equal(spanLabel("2026-11-09", "2026-11-09", today), "11月9日");
 });

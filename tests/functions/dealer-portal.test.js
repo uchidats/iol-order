@@ -1045,7 +1045,8 @@ test("週表示(手術日): 月曜〜日曜の自社宛ての明細を手術日�
   assert.deepEqual(flat(x1), [[W1[1], o.orderNumber, "+20.0Dx1,+22.0Dx2", W2[1]]], "W1 は W1 の自社宛ての明細だけ(ほかの手術日を示す)");
   const item = x1.days[1].orders[0];
   assert.deepEqual(Object.keys(item).sort(), ["facilityId", "facilityName", "lines", "orderNumber", "orderedAt", "otherDates", "ownLineCount", "receiptId"]);
-  assert.deepEqual([item.facilityName, item.ownLineCount, Object.keys(item.lines[0]).sort()], ["A眼科", 3, ["manufacturer", "model", "no", "power", "quantity", "toricModel"]], "返す項目は列挙したものだけ(担当医・他社・備考は返さない)");
+  assert.deepEqual([item.facilityName, item.ownLineCount, Object.keys(item.lines[0]).sort()], ["A眼科", 3, ["doctorName", "manufacturer", "model", "no", "power", "quantity", "toricModel"]], "返す項目は列挙したものだけ(明細の担当医名は返す。他社・備考・入力者は返さない)");
+  assert.deepEqual(item.lines.map(l => l.doctorName), ["A眼科の山田", "A眼科の山田"], "明細ごとの担当医名");
   assert.deepEqual(flat(await week("x1", W2[0])), [[W2[1], o.orderNumber, "+21.0Dx1", W1[1]]], "W2 は同じ注文番号で W2 の明細だけ");
   assert.deepEqual(flat(await week("y1", W1[0])).map(x => x.slice(0, 3)), [[W1[1], o.orderNumber, "+19.0Dx1"]], "他社(Y)は自社宛ての明細だけ");
   assert.deepEqual(flat(await week("y1", W2[0])), []);
@@ -1673,6 +1674,20 @@ test("一覧表示: 期間なし(全期間)で注文日時の新しい順に20�
   const m = all.find(i => i.orderNumber === multi.orderNumber);
   assert.deepEqual([m.doctorNames, m.lineCount, m.totalQuantity], [["A眼科の山田", "佐藤"], 3, 3], "自社宛ての明細の担当医だけ(他社宛ての明細の担当医も同じ名前なら1回)");
   assert.ok(all.filter(i => i !== m).every(i => i.doctorNames.length === 1 && i.doctorNames[0] === "A眼科の山田"));
+  // 一覧のカードの明細: 詳細と同じ確認を通した自社宛ての明細だけ(他社宛ての明細・メーカー名・備考・入力者は返さない)。項目は列挙したものだけ
+  assert.deepEqual(m.lines.map(l => [l.no, l.power, l.doctorName]), [[1, "+20.0D", "A眼科の山田"], [2, "+21.0D", "佐藤"], [3, "+22.0D", "A眼科の山田"]], "自社宛ての3件(他社宛ての +23.0D は返さない。番号は自社分で付け直す)");
+  assert.deepEqual(Object.keys(m.lines[0]).sort(), ["doctorName", "model", "no", "power", "quantity", "surgeryDate", "toricModel"]);
+  assert.deepEqual(Object.keys(m).sort(), ["doctorNames", "facilityId", "facilityName", "lineCount", "lines", "orderNumber", "orderedAt", "receiptId", "totalQuantity"], "一覧の項目は列挙したものだけ");
+  assert.ok(!JSON.stringify(all).includes("notes") && !JSON.stringify(all).includes("createdBy") && !JSON.stringify(all).includes("dA2"), "備考・入力者・他社の情報を含まない");
+  assert.ok(all.every(i => i.lines.length === i.lineCount), "どの行も自社宛ての明細を返す");
+  // 元の注文が取り消された(索引には印がない)注文: 詳細と同じ確認で外す(一覧に出さない)
+  const cancelledSrc = all.find(i => i !== m);
+  const srcId = (await db.doc(`dealerCompanies/${C.X}/receipts/${cancelledSrc.receiptId}`).get()).get("sourceOrderId");
+  await db.doc(`facilities/fA/orders/${srcId}`).update({ cancelled: true });
+  const relisted = [...(await page({ limit: 100 })).items];
+  assert.ok(!relisted.some(i => i.receiptId === cancelledSrc.receiptId), "元の注文が取消済みなら一覧に出さない");
+  assert.equal(relisted.length, 23);
+  await db.doc(`facilities/fA/orders/${srcId}`).update({ cancelled: false });
   // 担当医の記録がない旧い索引: 空(画面は表示を省略)
   const rid = m.receiptId;
   await db.doc(`dealerCompanies/${C.X}/receipts/${rid}`).update({ doctorNames: FieldValue.delete(), projectionVersion: 1 });

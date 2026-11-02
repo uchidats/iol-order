@@ -1,6 +1,8 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, formatDayHead, weekLabel, shortDate, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekSpanLabel, spanLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
+import { historyCardGroups } from "../domain/order-history-view.js";
+import { lensDayHead, lensRow } from "../ui/history-lens.js";
 import { createDealerManage } from "./dealer-manage.js";
 import { createInfoTip } from "../ui/info-tip.js";
 import { readHeaderTheme } from "../domain/header-theme.js";
@@ -22,8 +24,13 @@ import { createThemeColorSection } from "../ui/theme-color-section.js";
  *   (受注一覧・試験モードの間は氏名・所属会社など。ほかの画面は null = 使い方・ヘルプだけで、ログアウトはカードのボタン)
  * @param {{ load:(companyId:string)=>string|null, save:(companyId:string, ids:string[])=>void }} [deps.facilityView] 医療機関のチェックの記憶
  */
-/** 一覧表示の1回の取得件数(医療機関側の注文履歴と同じ20件。「もっと見る」で続き) */
+/** 注文日順の1回の取得件数(医療機関側の注文履歴と同じ20件。「もっと見る」で続き) */
 const LIST_PAGE = 20;
+/** 手術日順の「もっと見る」1回で探す週の数(手術予定のない週を飛ばしながら。見つからなくても、もう一度押せばさらに先を探せる) */
+const SCAN_WEEKS = 4;
+/** 一覧の明細(サーバーの自社宛ての明細)→ 共通のレンズ行の形。トーリックはトーリック型番をモデルとして出す */
+const lensOf = (l) => ({ lineNo: l.no, surgeryDate: l.surgeryDate || "", model: l.toricModel || l.model, power: l.power, quantity: l.quantity, doctorName: l.doctorName || "" });
+const doctorOf = (l) => (l.doctorName ? `${l.doctorName}Dr` : "担当医の記録なし");
 
 export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, setMenu = () => {}, facilityView = { load: () => null, save: () => {} } }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
@@ -278,74 +285,135 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
 
-    // ---- 表示の切り替え: 手術週/ 一覧表示(注文日時の新しい順。1注文1行) ----
-    let view = "week";
-    let weekStart = mondayOf(jstDate(Date.now()));   // 初期表示は今週(日本時間の月曜〜日曜)
-    let weekGen = 0;
-    const weekArea = h("div", { class: "dealer-week-area", id: "dealerWeekArea" });
+    // ---- 並び順の切り替え: 注文日順(1注文1カード・新しい順)/ 手術日順(手術日の早い順に連続。週の区切り → 手術日 → 医療機関 → レンズ) ----
+    // 医療機関側の注文履歴と同じ見た目(history-lens.js・.history-card など)。初期表示は手術日順(今週の月曜から)
+    let view = "surgery";
+    const surgeryArea = h("div", { class: "dealer-surgery-area", id: "dealerSurgeryArea" });
     const orderedArea = h("div", { class: "dealer-ordered-area", id: "dealerOrderedArea", hidden: true });
     const viewBtn = (v, label) => {
       const b = h("button", { type: "button", class: "history-sort-btn", "data-view": v, "aria-pressed": String(view === v) }, label);
       b.addEventListener("click", () => setView(v));
       return b;
     };
-    const viewBar = h("div", { class: "history-sort dealer-view", role: "group", "aria-label": "表示" }, viewBtn("week", "手術週"), viewBtn("ordered", "一覧表示"));
+    const viewBar = h("div", { class: "history-sort dealer-view", role: "group", "aria-label": "並び順" }, viewBtn("ordered", "注文日順"), viewBtn("surgery", "手術日順"));
     function setView(v) {
       if (view === v) return;
       view = v;
       viewBar.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
-      weekArea.hidden = v !== "week"; orderedArea.hidden = v !== "ordered";
-      if (v === "week") loadWeek();
-      else if (!lastQuery && !items.length && ctx.facilities.length) run(false);   // 一覧表示を初めて開いたら、最新の20件を読む
+      surgeryArea.hidden = v !== "surgery"; orderedArea.hidden = v !== "ordered";
+      if (v === "surgery") resetSurgery();
+      else if (!lastQuery && !items.length && ctx.facilities.length) run(false);   // 注文日順を初めて開いたら、最新の20件を読む
     }
-    function facilitiesChanged() { if (view === "week") loadWeek(); else invalidate(); }
-    const weekLabelEl = h("span", { class: "dealer-week-label", id: "dealerWeekLabel", "aria-live": "polite" });
-    const weekNavBtn = (k, label) => {
-      const b = h("button", { type: "button", class: "btn btn-outline-sm", "data-week": k }, label);
-      b.addEventListener("click", () => { weekStart = k === "this" ? mondayOf(jstDate(Date.now())) : addDays(weekStart, k === "prev" ? -7 : 7); loadWeek(); });
-      return b;
-    };
-    const weekMsg = h("p", { class: "form-hint", role: "status", id: "dealerWeekMsg" });
-    const weekBox = h("div", { class: "dealer-week", id: "dealerWeek" });
-    weekArea.append(h("div", { class: "dealer-week-nav" }, weekLabelEl, weekNavBtn("prev", "← 前週"), weekNavBtn("this", "今週"), weekNavBtn("next", "翌週 →")), weekMsg, weekBox);
+    function facilitiesChanged() { if (view === "surgery") resetSurgery(); else invalidate(); }
 
-    /** 週表示を読む(手術日がこの週に入る自社宛ての明細だけ。認可はサーバー) */
-    async function loadWeek() {
-      const my = ++weekGen;
-      weekLabelEl.textContent = weekLabel(weekStart);
-      weekMsg.textContent = "読み込み中…";
-      weekBox.replaceChildren();
-      if (!ctx.facilities.length) { weekMsg.textContent = ""; return; }
+    // ---- 手術日順: 週ごとに listWeek を読む(今週から。下は先の週、上は前の週。週は重ならないので境目で重複・欠落しない) ----
+    let weeks = [];                    // 読み込んだ週(早い順) { weekStart, weekEnd, days, truncated }
+    let nextWeek = null, prevWeek = null;   // 次に読む週の月曜(下・上)
+    let surgeryGen = 0, loadingDown = false, loadingUp = false;
+    let downNote = "", upNote = "";    // 探した週に予定がなかったときの案内
+    const surgeryMsg = h("p", { class: "form-hint", role: "status", id: "dealerSurgeryMsg" });
+    const surgeryBox = h("div", { class: "dealer-surgery", id: "dealerSurgery" });
+    surgeryArea.append(surgeryMsg, surgeryBox);
+    const hasData = (w) => w.days.some(d => d.orders.length);
+
+    function resetSurgery() {
+      surgeryGen++;
+      weeks = []; downNote = ""; upNote = ""; loadingDown = loadingUp = false;
+      nextWeek = mondayOf(jstDate(Date.now()));   // 今週(日本時間の月曜〜日曜)から
+      prevWeek = addDays(nextWeek, -7);
+      renderSurgery();
+      if (ctx.facilities.length) loadWeeks("down", { keepPosition: false });
+    }
+
+    /**
+     * 週を読む(下 = 先の週 / 上 = 前の週)。1回で最大 SCAN_WEEKS 週。手術予定のある週が見つかったら止める。
+     * 上に足したときは、見ているカードの位置を保つ(足す前の位置を覚えて戻す)。認可・自社宛て・取消/削除の除外はサーバー
+     */
+    async function loadWeeks(dir, { keepPosition = dir === "up" } = {}) {
+      if (dir === "down" ? loadingDown : loadingUp) return;
+      const my = surgeryGen;
+      if (dir === "down") loadingDown = true; else loadingUp = true;
+      renderSurgery();
+      const got = [];
       try {
-        const r = await api.listWeek({ companyId: ctx.company.id, weekStart, facilityFilter: facilityFilterOf([...selected]) });
-        if (my !== weekGen) return;   // 週・施設を変えた後に届いた古い結果は表示しない
-        renderWeek(r);
+        for (let i = 0; i < SCAN_WEEKS; i++) {
+          const weekStart = dir === "down" ? nextWeek : prevWeek;
+          const r = await api.listWeek({ companyId: ctx.company.id, weekStart, facilityFilter: facilityFilterOf([...selected]) });
+          if (my !== surgeryGen) return;   // 施設・並び順を変えた後に届いた古い結果は表示しない
+          got.push(r);
+          if (dir === "down") nextWeek = addDays(weekStart, 7); else prevWeek = addDays(weekStart, -7);
+          if (hasData(r)) break;
+        }
+        const span = got.length ? spanLabel(dir === "down" ? got[0].weekStart : got[got.length - 1].weekStart, dir === "down" ? got[got.length - 1].weekEnd : got[0].weekEnd) : "";
+        const note = got.length && !got.some(hasData) ? `${span}に手術予定の受注はありません。${dir === "down" ? "「もっと見る」" : "「過去の注文をもっと見る」"}で、さらに${dir === "down" ? "先" : "前"}を探せます。` : "";
+        if (dir === "down") { weeks = [...weeks, ...got]; downNote = note; } else { weeks = [...got.reverse(), ...weeks]; upNote = note; }
+        surgeryMsg.textContent = "";
       } catch (e) {
-        if (my !== weekGen) return;
-        weekMsg.textContent = describeCallableError(e);
+        if (my !== surgeryGen) return;
+        surgeryMsg.textContent = describeCallableError(e);
         if (String((e && e.code) || "").endsWith("permission-denied")) showMessage("ディーラー画面", describeCallableError(e), { error: true });
+      } finally {
+        if (my === surgeryGen) {
+          if (dir === "down") loadingDown = false; else loadingUp = false;
+          const restore = keepPosition ? keepScrollAnchor(surgeryBox) : () => {};
+          renderSurgery();
+          restore();
+        }
       }
     }
-    function renderWeek(r) {
-      const days = (r.days || []).filter(d => d.orders.length);
-      const count = days.reduce((n, d) => n + d.orders.length, 0);
-      // 件数の集計(「この週に手術予定の注文明細: …日・…件」)は出さない。該当なし・一部だけの表示の案内だけ
-      weekMsg.textContent = [count ? "" : "この週に手術予定の自社宛ての注文はありません。",
-        r.truncated ? "件数が多いため一部だけを表示しています。医療機関を絞り込んでください。" : ""].filter(Boolean).join(" ");
-      weekBox.replaceChildren(...days.map(d => h("section", { class: "dealer-day", "data-date": d.date },
-        h("h3", { class: "dealer-day-head" }, formatDayHead(d.date)),
-        h("ul", { class: "dealer-week-list" }, d.orders.map(o => {
-          const b = h("button", { type: "button", class: "dealer-week-order", "data-receipt": o.receiptId, "data-date": d.date },
-            // 注文番号・注文日時はカードに出さない(詳細に表示)。医療機関・メーカー・モデル・度数・枚数
-            h("div", { class: "dealer-week-top" }, h("span", { class: "dealer-week-facility" }, o.facilityName)),
-            h("ul", { class: "dealer-week-lines" }, o.lines.map(l => h("li", {},
-              h("span", { class: "summary-maker" }, l.manufacturer), h("span", { class: "summary-model" }, l.toricModel || l.model),
-              h("span", { class: "summary-power" }, l.power), h("span", { class: "summary-qty" }, `${l.quantity}枚`)))),
-            // 同じ注文がほかの手術日にもある: 同じ注文(重複発注ではない)ことを示す
-            o.otherDates.length ? h("p", { class: "dealer-week-note" }, `同じ注文のほかの手術日: ${o.otherDates.map(shortDate).join("、")}（自社宛て 全${o.ownLineCount}件）`) : null);
-          b.addEventListener("click", () => openDetail(o.receiptId));
-          return h("li", {}, b);
-        })))));
+
+    /** 手術日順の表示: 週の区切り(件数が多い週は一部だけと明示) → 手術日 → 医療機関 → レンズ行(押すと受注詳細)。予定のない週が続く所は1行にまとめる */
+    function renderSurgery() {
+      if (!ctx.facilities.length) { surgeryBox.replaceChildren(); return; }
+      const rows = [];
+      for (let i = 0; i < weeks.length; i++) {
+        const w = weeks[i];
+        if (!hasData(w)) {
+          let j = i;
+          while (j + 1 < weeks.length && !hasData(weeks[j + 1])) j++;
+          rows.push(h("li", { class: "dealer-week-empty", "data-week": w.weekStart }, `${j === i ? weekSpanLabel(w.weekStart) : `${spanLabel(w.weekStart, weeks[j].weekEnd)}`}: 手術予定の受注はありません`));
+          i = j;
+          continue;
+        }
+        rows.push(h("li", { class: "dealer-week-head", "data-week": w.weekStart }, h("span", {}, weekSpanLabel(w.weekStart)),
+          w.truncated ? h("span", { class: "dealer-week-truncated", role: "alert" }, "この週は件数が多いため、一部だけを表示しています。医療機関を絞り込んでください。") : null));
+        for (const d of w.days.filter(x => x.orders.length)) {
+          // 同じ手術日の中は医療機関ごと(サーバーが医療機関名・注文日時の順に並べている)
+          const byFacility = [];
+          for (const o of d.orders) {
+            const last = byFacility[byFacility.length - 1];
+            if (last && last.facilityId === o.facilityId) last.orders.push(o); else byFacility.push({ facilityId: o.facilityId, facilityName: o.facilityName, orders: [o] });
+          }
+          rows.push(h("li", { class: "history-day", "data-day": d.date }, lensDayHead(d.date),
+            ...byFacility.map(g => h("div", { class: "dealer-day-facility", "data-facility-group": g.facilityId },
+              h("div", { class: "dealer-day-facility-name" }, g.facilityName),
+              h("ul", { class: "history-day-lines" }, g.orders.flatMap(o => o.lines.map(l => {
+                const b = h("button", { type: "button", class: "history-row history-lens-btn", "data-receipt": o.receiptId, "data-date": d.date, "data-line": String(l.no) },
+                  lensRow("div", lensOf(l), { doctor: doctorOf(l) }));
+                b.addEventListener("click", () => openDetail(o.receiptId));
+                return h("li", {}, b);
+              })))))));
+        }
+      }
+      const up = weeks.length || loadingUp ? h("button", { type: "button", class: "btn btn-secondary history-more history-more-past", "data-act": "more-past", disabled: loadingUp }, loadingUp ? "読み込み中…" : "過去の注文をもっと見る") : null;
+      if (up) up.addEventListener("click", () => loadWeeks("up"));
+      const down = weeks.length || !loadingDown ? h("button", { type: "button", class: "btn btn-secondary history-more", "data-act": "more", disabled: loadingDown }, loadingDown ? "読み込み中…" : "もっと見る") : null;
+      if (down) down.addEventListener("click", () => loadWeeks("down"));
+      surgeryBox.replaceChildren(...[up, upNote ? h("p", { class: "form-hint dealer-surgery-note", "data-note": "up" }, upNote) : null,
+        rows.length ? h("ul", { class: "history-list dealer-surgery-list" }, rows) : (loadingDown ? h("p", { class: "form-hint" }, "読み込み中…") : null),
+        downNote ? h("p", { class: "form-hint dealer-surgery-note", "data-note": "down" }, downNote) : null, down].filter(Boolean));
+    }
+
+    /** 上に行を足す前に、画面に見えている先頭の行(レンズ行・週の区切り)の位置を覚え、描き直した後に同じ位置へ戻す関数を返す */
+    function keepScrollAnchor(box) {
+      const hd = document.querySelector(".app-header");
+      const top0 = hd && getComputedStyle(hd).position === "sticky" ? Math.max(0, hd.getBoundingClientRect().bottom) : 0;
+      const key = (e) => e.dataset.week ? `w:${e.dataset.week}` : `${e.dataset.receipt}@${e.dataset.date}#${e.dataset.line}`;
+      const all = () => [...box.querySelectorAll(".history-lens-btn, .dealer-week-head, .dealer-week-empty")];
+      const a = all().find(e => e.getBoundingClientRect().bottom > top0);
+      if (!a) return () => {};
+      const k = key(a), before = a.getBoundingClientRect().top;
+      return () => { const b = all().find(e => key(e) === k); if (b) window.scrollBy(0, b.getBoundingClientRect().top - before); };
     }
 
     /** 検索条件(施設・期間・注文番号)を変えたら、表示中の結果と続きを破棄する。「さらに表示」で古い条件の続きを読まない */
@@ -398,25 +466,26 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     clear.addEventListener("click", () => { from.value = ""; to.value = ""; number.value = ""; run(false); });
     more.addEventListener("click", () => run(true));
 
+    /** 注文日順: 1注文1カード(押すと受注詳細)。先頭に注文番号・医療機関名、その下に手術日ごとのレンズ行を最大5行と「ほかN件」(医療機関側の注文履歴と同じ) */
     function renderList() {
       more.hidden = !cursor;
       listBox.replaceChildren(...(items.length ? [h("ul", { class: "history-list dealer-list" }, items.map(it => {
-        // 医療機関・担当医 / 件数・合計枚数(並びは注文日時の新しい順)。注文番号・注文日時は詳細に表示。担当医の記録がない旧い索引は省略
-        const doctors = Array.isArray(it.doctorNames) ? it.doctorNames.filter(Boolean) : [];
-        const b = h("button", { type: "button", class: "history-row dealer-row", "data-receipt": it.receiptId },
-          h("span", { class: "history-by" },
-            h("span", { class: "dealer-row-facility" }, it.facilityName),
-            doctors.length ? h("span", { class: "dealer-row-doctor" }, ` ・ 担当医 ${doctors.join("、")}`) : null),
-          h("span", { class: "history-count" }, `${it.lineCount}件・合計${it.totalQuantity}枚`));
+        const { groups, hidden } = historyCardGroups((it.lines || []).map(lensOf));
+        const b = h("button", { type: "button", class: "history-row history-card dealer-card", "data-receipt": it.receiptId },
+          h("div", { class: "history-card-no dealer-card-head" }, h("span", { class: "dealer-card-no" }, it.orderNumber), h("span", { class: "dealer-card-facility" }, it.facilityName)),
+          ...groups.map(g => h("div", { class: "history-card-group" }, lensDayHead(g.surgeryDate),
+            h("ul", { class: "history-card-lines" }, g.lines.map(l => lensRow("li", l, { doctor: doctorOf(l), className: "summary-line" }))))),
+          hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null);
         b.addEventListener("click", () => openDetail(it.receiptId));
         return h("li", {}, b);
       }))] : []));
     }
 
     async function openDetail(receiptId) {
+      const listY = window.scrollY;   // 戻ったときに、読み込み済みの一覧と同じ位置へ
       searchArea.hidden = true; detail.hidden = false;
       const back = h("button", { type: "button", class: "btn btn-secondary", "data-act": "back" }, "← 一覧へ戻る");
-      back.addEventListener("click", () => { detail.hidden = true; detail.replaceChildren(); searchArea.hidden = false; });
+      back.addEventListener("click", () => { detail.hidden = true; detail.replaceChildren(); searchArea.hidden = false; window.scrollTo(0, listY); });
       detail.replaceChildren(back, h("p", { class: "form-hint", role: "status" }, "読み込み中…"));
       try {
         const v = await api.getOrder({ companyId: ctx.company.id, receiptId });
@@ -461,7 +530,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         h("div", { class: "form-label dealer-login-head" }, h("span", {}, "医療機関"), tip(facilityHelp, "医療機関の選択の説明")),
         selectBar, checks),   // 「検索範囲: …」の行は出さない(選択はチェックボックスと「担当」の印で分かる)
       viewBar,
-      weekArea, orderedArea);
+      surgeryArea, orderedArea);
     // 担当者・支店の管理は、☰メニューの「ディーラー設定」(会社管理者・支店管理者)から開く(openSettings)
     panel.replaceChildren(...[
       h("div", { class: "feature-title-row dealer-title-row" },
@@ -470,7 +539,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
       searchArea, detail].filter(Boolean));
     renderChecks();
-    await loadWeek();   // 初期表示は今週の手術日(注文日順は切り替えて表示)
+    resetSurgery();   // 初期表示は手術日順(今週の月曜から。注文日順は切り替えて表示)
   }
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */

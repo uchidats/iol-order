@@ -269,6 +269,12 @@ export function buildDealerOrderView(order, localDealerId, { receiptId, facility
 }
 
 /**
+ * 一覧のカードに出す自社宛ての明細(詳細と同じ確認 verifiedView を通した表示データから、一覧に要る項目だけを列挙する)。
+ * メーカー名(一覧では出さない)・他社の明細・備考・入力者などは返さない
+ */
+export const listLinesOf = (view) => view.lines.map(l => ({ no: l.no, surgeryDate: l.surgeryDate, model: l.model, toricModel: l.toricModel, power: l.power, quantity: l.quantity, doctorName: l.doctorName }));
+
+/**
  * 初期表示の施設の選択: 有効な担当施設(保存済み ∩ 現在許可されている施設)があればそれ、なければ許可済みの全施設。
  * 候補の並びは、担当施設を先頭に、それ以外は施設名順。
  */
@@ -762,7 +768,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     return c;
   }
 
-  /** 受信一覧(自社宛て・許可済み施設・期間・施設の複数選択・注文番号)。新しい順。各行を毎回認可する */
+  
+/** 受信一覧(自社宛て・許可済み施設・期間・施設の複数選択・注文番号)。新しい順。各行を毎回認可する */
   async function listOrders(auth, data) {
     strict(data, ["companyId", "from", "to", "facilityFilter", "orderNumber", "limit", "cursor"]);
     const a = await authorizeStaff(auth, data.companyId);
@@ -772,6 +779,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     const cursor = decodeCursor(data.cursor, key);
     const selected = new Set(q.facilities);
     const items = [];
+    const raws = new Map();   // 受信ID → 索引の内容(一覧の明細を、詳細と同じ確認で組み立てるため)
     if (selected.size === 0) return { items, nextCursor: null, complete: true };
     const receipts = db.collection(`dealerCompanies/${a.companyId}/receipts`);
     const matches = (r) => {
@@ -804,6 +812,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
           lastDoc = d;
           const r = d.data();
           if (matches(r)) {
+            raws.set(d.id, r);
             items.push({
               receiptId: d.id, facilityId: r.facilityId, facilityName: scope.get(r.facilityId).facilityName,
               orderNumber: String(r.orderNumber || ""), orderedAt: isoOf(r.orderedAt),
@@ -818,6 +827,13 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       }
       return { asOf: readAt, last: lastDoc, exhausted: done };
     }, pinned ? { readOnly: true, readTime: pinned } : { readOnly: true });
+    // 各行の自社宛ての明細(一覧のカード用)。詳細と同じ確認(許可・関連付け・施設・元注文・取消・削除・注文時点の発注先)を通ったものだけ。
+    // 通らなかった行は出さない(詳細でも見られない注文を一覧に出さない)
+    const views = await Promise.all(items.map(it => verifiedView(it.receiptId, raws.get(it.receiptId), scope)));
+    const shown = [];
+    items.forEach((it, i) => { if (views[i]) shown.push({ ...it, lines: listLinesOf(views[i]) }); });
+    items.length = 0;
+    items.push(...shown);
     // 検索時点より後に反映された、この条件に合う注文があるか(あれば「再検索で最新を表示」と案内する)
     let newSinceSearch = false;
     if (asOf) {
@@ -889,7 +905,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       const allDates = surgeryDatesOf(v.lines);   // この注文の自社宛ての手術日(週の外も含む)
       for (const date of dates) {
         const lines = v.lines.filter(l => l.surgeryDate === date)
-          .map(l => ({ no: l.no, manufacturer: l.manufacturer, model: l.model, toricModel: l.toricModel, power: l.power, quantity: l.quantity }));
+          .map(l => ({ no: l.no, manufacturer: l.manufacturer, model: l.model, toricModel: l.toricModel, power: l.power, quantity: l.quantity, doctorName: l.doctorName }));
         if (!lines.length) continue;
         byDate.get(date).push({ receiptId: v.receiptId, facilityId: v.facilityId, facilityName: v.facilityName, orderNumber: v.orderNumber, orderedAt: v.orderedAt,
           ownLineCount: v.lineCount, otherDates: allDates.filter(d => d !== date), lines });
