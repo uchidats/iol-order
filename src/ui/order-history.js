@@ -148,7 +148,8 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   /**
    * 一覧のカード(押すと詳細)。上に明細(「手術日 + 担当医」ごと。手術日は短い表記。各行は詳細と同じ部品でメーカー・モデル・度数・枚数)を最大5行、
    * 超えた分は「ほか N件」。取消済み・テストのバッジは残す。注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)。
-   * 手術日順はその手術日のレンズだけ(同じ注文のほかの手術日は別のカード)
+   * 注文日順だけ、最上部に注文番号を控えめに(番号に日付が含まれるので注文日時は出さない)。
+   * 手術日順はその手術日のレンズだけ(同じ注文のほかの手術日は別のカード。注文番号は出さない)
    */
   function rowView(r) {
     const o = r.order;
@@ -162,6 +163,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       i === 0 && badges.length ? h("span", { class: "history-card-badges" }, badges) : null);   // 取消済み・テストは1つ目の見出しの右端
     const btn = h("button", { type: "button", class: ["history-row", "history-card", surgery ? "history-row-surgery" : "", o.cancelled ? "is-cancelled" : ""].filter(Boolean).join(" "),
       "data-order": o.id, ...(surgery ? { "data-surgery": r.surgeryDate } : {}) },
+      !surgery && o.orderNumber ? h("div", { class: "history-card-no" }, o.orderNumber) : null,
       groups.map((g, i) => h("div", { class: "history-card-group" }, head(g, i), h("ul", { class: "history-card-lines" }, g.lines.map(lineView)))),
       groups.length ? null : h("div", { class: "history-card-head" }, h("span", {}, "明細の記録なし"), badges.length ? h("span", { class: "history-card-badges" }, badges) : null),
       hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null);

@@ -2048,6 +2048,8 @@ input[type="date"].form-control {
    明細(「手術日 + 担当医」の見出し・メーカー/モデル/度数/枚数を強調)を最大5行と「ほか N件」だけ。注文日時・発注者・件数は詳細で確認する */
 #orderHistory .history-card { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 4px; }
 #orderHistory .history-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 0.9rem; font-weight: 700; color: #334155; }
+/* 注文日順の注文番号(カードの最上部): 小さいグレーの文字で明細より控えめに。下の明細との間は少し空けて、同じ注文のまとまりと分かるように */
+#orderHistory .history-card-no { margin-bottom: 2px; font-size: 0.75rem; font-weight: 500; line-height: 1.3; color: #64748b; overflow-wrap: anywhere; }
 #orderHistory .history-card-date { white-space: nowrap; }
 #orderHistory .history-card-badges { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
 #orderHistory .history-card-group + .history-card-group { margin-top: 4px; }

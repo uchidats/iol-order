@@ -105,12 +105,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "注文日順");
       const rows = await page.locator(".history-row").evaluateAll(rs => rs.map(r => r.innerText.replace(/\s+/g, " ").trim()));
       assert.equal(rows.length, 3);
-      // カード: 明細(「手術日(短い表記) + 担当医」ごと・メーカー/モデル/度数/枚数)とバッジ(テスト・取消済み)だけ。
+      // カード(注文日順): 最上部に注文番号、その下に明細(「手術日(短い表記) + 担当医」ごと・メーカー/モデル/度数/枚数)とバッジ(テスト・取消済み)。
       // 注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)
       assert.deepEqual(rows, [
-        "11/10(火) 山田Dr テスト J&J DIB00V +20.0D 1枚 11/12(木) 佐藤Dr J&J DIW300 +18.5D 2枚",
-        "10/1(木) 旧注文者Dr J&J DIB00V +20.0D 2枚",
-        "9/1(火) 最古注文者Dr J&J DIB00V +20.0D 1枚"]);
+        "IOL-20261025-0001 11/10(火) 山田Dr テスト J&J DIB00V +20.0D 1枚 11/12(木) 佐藤Dr J&J DIW300 +18.5D 2枚",
+        "IOL-20260901-0002 10/1(木) 旧注文者Dr J&J DIB00V +20.0D 2枚",
+        "IOL-20260801-0001 9/1(火) 最古注文者Dr J&J DIB00V +20.0D 1枚"]);
+      // 注文番号: カードの最上部・明細より小さいグレーの文字(太字にしない)。明細との間は詰めすぎない
+      const no = await page.locator('[data-order="new"]').evaluate(b => { const n = b.querySelector(".history-card-no"), g = b.querySelector(".history-card-group"), c = getComputedStyle(n), m = getComputedStyle(b.querySelector(".summary-model"));
+        return { first: b.firstElementChild === n, fs: parseFloat(c.fontSize), line: parseFloat(m.fontSize), fw: Number(c.fontWeight), color: c.color.match(/\d+/g).map(Number), gap: g.getBoundingClientRect().top - n.getBoundingClientRect().bottom }; });
+      assert.ok(no.first && no.fs < no.line && no.fw < 700, JSON.stringify(no));
+      assert.ok(Math.max(...no.color) - Math.min(...no.color) <= 40 && Math.max(...no.color) >= 90, "グレー: " + no.color);
+      assert.ok(no.gap >= 4 && no.gap <= 12, "注文番号と明細の間隔: " + no.gap);
       assert.equal(await page.locator(".history-row").evaluateAll(rs => rs.some(r => /A商会|ログイン太郎|x@example|2026\/|合計|件/.test(r.innerText))), false, "注文日時・発注者・件数・発注先名は一覧に出さない");
       assert.equal(await page.locator("#orderHistory .history-meta, #orderHistory .history-row .history-date, #orderHistory .history-row .history-by, #orderHistory .history-row .history-count").count(), 0);
       // 強調: モデル・度数・枚数は太字
@@ -390,6 +396,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 手術日順のカードは、その手術日のレンズだけ(o02 の 11/2 のレンズは 11/28 のカードに出さない)
       const o02 = (await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText()).replace(/\s+/g, " ").trim();
       assert.match(o02, /^11\/28\(土\) \S+Dr \S+ \S+ [+-]\d+\.\dD 1枚$/, o02);   // 明細だけ(注文日時・件数は出さない)
+      assert.equal(await page.locator("#orderHistory .history-card-no").count(), 0, "手術日順には注文番号を出さない");
       assert.equal(await page.locator('[data-order="o02"][data-surgery="2026-11-28"] .history-line').count(), 1);
       // 「過去分」ON: 先頭から読み直し、今日以降(早い順)と直近の過去分(新しい順に読み、早い順で上へ)を別々に読む。続きも同じ条件
       await page.evaluate(() => { window.__asked = []; });
