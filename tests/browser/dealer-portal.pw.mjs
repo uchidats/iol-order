@@ -746,40 +746,68 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const day = (ws, n) => addDaysOf(ws, n);
       const rowKeys = () => page.locator("#dealerSurgery .history-lens-btn").evaluateAll(bs => bs.map(b => `${b.dataset.receipt}@${b.dataset.date}#${b.dataset.line}`));
       const weekCalls = async () => (await calls(page, "week")).map(d => d.weekStart);
-      // 初期表示: 手術日順・今週(担当施設 B だけ)。週の切替ボタン(前週・翌週・今週)はない
+      // 初期表示: 手術日順・今週・翌週・翌々週の3週(担当施設 B だけ。並行して読み、手術日の昇順に連続)。週の切替ボタン(前週・翌週・今週)はない
       assert.deepEqual(await page.locator("[data-view]").evaluateAll(bs => bs.map(b => [b.textContent, b.getAttribute("aria-pressed")])), [["注文日順", "false"], ["手術日順", "true"]]);
       assert.equal(await page.locator("[data-week='next'], [data-week='prev'], [data-week='this'], #dealerWeekLabel").count(), 0, "週単位の切替はない");
-      const w0 = (await calls(page, "week"))[0];
-      assert.deepEqual([w0.weekStart, w0.facilityFilter], [thisWeek, { mode: "selected", facilityIds: ["fB"] }], "今週・担当施設");
+      const first3 = (await calls(page, "week")).slice(0, 3);
+      assert.deepEqual(first3.map(d => d.weekStart).sort(), [0, 7, 14].map(k => day(thisWeek, k)), "初期表示は今週から3週");
+      assert.equal((await calls(page, "week")).length, 3, "初期表示で読むのは3週だけ");
+      assert.ok(first3.every(d => JSON.stringify(d.facilityFilter) === JSON.stringify({ mode: "selected", facilityIds: ["fB"] })), "担当施設");
+      assert.deepEqual(await page.locator(".dealer-week-head").evaluateAll(hs => hs.map(h => h.dataset.week)), [0, 7, 14].map(k => day(thisWeek, k)), "週の区切りは3つ(早い順)");
       assert.equal((await page.locator(".dealer-week-head").first().innerText()).trim(), weekSpanLabel(thisWeek), "週の区切り「11月9日〜15日の週」");
-      assert.deepEqual(await rowKeys(), [`rcp-c@${day(thisWeek, 1)}#1`, `rcp-b@${day(thisWeek, 3)}#1`], "担当施設(B)の注文だけ");
-      // すべての施設: 火曜(A の2行・B の1行)・木曜(B)。手術日 → 医療機関 → レンズ行(左にモデル・度数・枚数、右に担当医名。メーカー名は出さない)
+      assert.deepEqual(await rowKeys(), [0, 7, 14].flatMap(k => [`rcp-c@${day(thisWeek, k + 1)}#1`, `rcp-b@${day(thisWeek, k + 3)}#1`]), "担当施設(B)の注文だけ・手術日の昇順");
+      // すべての施設: 各週の火曜(A の2行・B の1行)・木曜(B)。手術日 → 医療機関 → レンズ行(左にモデル・度数・枚数、右に担当医名。メーカー名は出さない)
       await page.click('[data-select="all"]');
-      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .history-lens-btn").length === 4);
-      assert.deepEqual(await page.locator("#dealerSurgery .history-day").evaluateAll(ds => ds.map(d => d.dataset.day)), [day(thisWeek, 1), day(thisWeek, 3)], "手術日の昇順");
+      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .history-lens-btn").length === 12);
+      assert.deepEqual(await page.locator("#dealerSurgery .history-day").evaluateAll(ds => ds.map(d => d.dataset.day)), [0, 7, 14].flatMap(k => [day(thisWeek, k + 1), day(thisWeek, k + 3)]), "手術日の昇順");
       const tue = page.locator(`#dealerSurgery .history-day[data-day="${day(thisWeek, 1)}"]`);
       assert.deepEqual(await tue.locator(".dealer-day-facility-name").allInnerTexts(), ['<img src=x onerror="window.__xss=1">A眼科', "B眼科"], "同じ手術日の中は医療機関ごと(施設名の HTML は文字のまま)");
       assert.deepEqual((await tue.locator(".history-lens-btn").allInnerTexts()).map(x => x.replace(/\s+/g, " ").trim()),
         ["DIB00V +21.0D 2枚 山田Dr", "DIW300 +18.5D 1枚 <b>佐藤</b>Dr", "DIB00V +21.0D 2枚 内田Dr"], "トーリックはトーリック型番。別の注文の同じレンズは合算しない");
       assert.equal(await page.locator("#dealerSurgery .summary-maker, #dealerSurgery img, #dealerSurgery b").count(), 0, "メーカー名を出さない・HTML を解釈しない");
-      // 下の「もっと見る」: 翌週を読んで下に足す(週の区切りが増える)
+      // 下の「もっと見る」: 4週目(3週の次)を読んで下に足す
       await page.click('#dealerSurgery [data-act="more"]');
-      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .dealer-week-head").length === 2);
-      assert.deepEqual((await weekCalls()).slice(-1), [day(thisWeek, 7)]);
-      assert.deepEqual(await page.locator(".dealer-week-head").evaluateAll(hs => hs.map(h => h.dataset.week)), [thisWeek, day(thisWeek, 7)]);
+      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .dealer-week-head").length === 4);
+      assert.deepEqual((await weekCalls()).slice(-1), [day(thisWeek, 21)]);
+      assert.deepEqual(await page.locator(".dealer-week-head").evaluateAll(hs => hs.map(h => h.dataset.week)), [0, 7, 14, 21].map(k => day(thisWeek, k)));
       // 予定のない週: 1回で最大4週まで探し、見つからなければ案内(区切りは1行にまとめる)。もう一度押すとさらに先を探せる
-      await page.evaluate((w) => { window.__weekData = { [w]: true }; }, day(thisWeek, 42));
+      await page.evaluate((w) => { window.__weekData = { [w]: true }; }, day(thisWeek, 56));
       let n = (await weekCalls()).length;
       await page.click('#dealerSurgery [data-act="more"]');
       await page.locator('.dealer-surgery-note[data-note="down"]').waitFor();
-      assert.deepEqual((await weekCalls()).slice(n), [14, 21, 28, 35].map(k => day(thisWeek, k)), "4週まで探す");
+      assert.deepEqual((await weekCalls()).slice(n), [28, 35, 42, 49].map(k => day(thisWeek, k)), "4週まで探す");
       assert.match(await page.locator('.dealer-surgery-note[data-note="down"]').innerText(), /に手術予定の受注はありません。「もっと見る」で、さらに先を探せます。$/);
       assert.equal(await page.locator(".dealer-week-empty").count(), 1, "予定のない4週は1行にまとめる");
       n = (await weekCalls()).length;
       await page.click('#dealerSurgery [data-act="more"]');
-      await page.waitForFunction((w) => document.querySelector(`.dealer-week-head[data-week="${w}"]`), day(thisWeek, 42));
-      assert.deepEqual((await weekCalls()).slice(n), [day(thisWeek, 42)], "見つかったら止める");
+      await page.waitForFunction((w) => document.querySelector(`.dealer-week-head[data-week="${w}"]`), day(thisWeek, 56));
+      assert.deepEqual((await weekCalls()).slice(n), [day(thisWeek, 56)], "見つかったら止める");
       assert.equal(await page.locator('.dealer-surgery-note[data-note="down"]').count(), 0);
+      // 初期表示の3週に予定のない週が含まれる: 予定のない週はそのまま1行で示し、予定のある週は区切りと明細(読むのは3週だけ)
+      const reopen = async () => {
+        await page.click('[data-view="ordered"]');
+        await page.locator(".dealer-card").first().waitFor();
+        const k = (await weekCalls()).length;
+        await page.click('[data-view="surgery"]');
+        await page.waitForFunction((k) => (window.__calls || []).filter(([, d]) => d.action === "week").length >= k + 3 && document.querySelector('#dealerSurgery [data-act="more"]:not([disabled])'), k);
+        return k;
+      };
+      await page.evaluate((w) => { window.__weekData = { [w]: true }; }, day(thisWeek, 7));
+      n = await reopen();
+      assert.deepEqual((await weekCalls()).slice(n).sort(), [0, 7, 14].map(k => day(thisWeek, k)));
+      assert.deepEqual(await page.locator("#dealerSurgery .dealer-surgery-list > li").evaluateAll(ls => ls.map(l => [l.className, l.dataset.week || l.dataset.day || ""])).then(x => x.filter(([c]) => c !== "history-day")),
+        [["dealer-week-empty", day(thisWeek, 0)], ["dealer-week-head", day(thisWeek, 7)], ["dealer-week-empty", day(thisWeek, 14)]], "今週・翌々週は予定なしの1行、翌週は区切りと明細");
+      assert.equal(await page.locator('.dealer-surgery-note[data-note="down"]').count(), 0, "予定のある週があれば案内は出さない");
+      // 3週とも予定なし: 1行にまとめて案内し、「もっと見る」で先を探せる
+      await page.evaluate(() => { window.__weekData = {}; });
+      n = await reopen();
+      assert.equal((await weekCalls()).length - n, 3, "初期表示は3週だけ読む(予定がなくても先を自動で探さない)");
+      assert.equal(await page.locator(".dealer-week-empty").count(), 1);
+      assert.match(await page.locator('.dealer-surgery-note[data-note="down"]').innerText(), /に手術予定の受注はありません。「もっと見る」で、さらに先を探せます。$/);
+      assert.equal(await page.locator('#dealerSurgery [data-act="more"]').isEnabled(), true);
+      // 元の予定に戻して読み直す(以下の確認のため)
+      await page.evaluate(() => { window.__weekData = null; });
+      await reopen();
       // 上の「過去の注文をもっと見る」: 前の週を上に足しても、見ているカードの位置を保つ。件数の多い週は一部だけと明示
       await page.evaluate((w) => { window.__weekData = null; window.__weekTruncated = { [w]: true }; window.scrollTo(0, 0); }, day(thisWeek, -7));
       const first = page.locator("#dealerSurgery .history-lens-btn").first();

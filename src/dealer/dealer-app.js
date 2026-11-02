@@ -28,6 +28,8 @@ import { createThemeColorSection } from "../ui/theme-color-section.js";
 const LIST_PAGE = 20;
 /** 手術日順の「もっと見る」1回で探す週の数(手術予定のない週を飛ばしながら。見つからなくても、もう一度押せばさらに先を探せる) */
 const SCAN_WEEKS = 4;
+/** 手術日順の初期表示で読む週の数(今週・翌週・翌々週。並行して読むので、1週分とほぼ同じ待ち時間) */
+const INITIAL_WEEKS = 3;
 /** 一覧の明細(サーバーの自社宛ての明細)→ 共通のレンズ行の形。トーリックはトーリック型番をモデルとして出す */
 const lensOf = (l) => ({ lineNo: l.no, surgeryDate: l.surgeryDate || "", model: l.toricModel || l.model, power: l.power, quantity: l.quantity, doctorName: l.doctorName || "" });
 const doctorOf = (l) => (l.doctorName ? `${l.doctorName}Dr` : "担当医の記録なし");
@@ -322,21 +324,29 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       nextWeek = mondayOf(jstDate(Date.now()));   // 今週(日本時間の月曜〜日曜)から
       prevWeek = addDays(nextWeek, -7);
       renderSurgery();
-      if (ctx.facilities.length) loadWeeks("down", { keepPosition: false });
+      if (ctx.facilities.length) loadWeeks("down", { keepPosition: false, initial: true });
     }
 
     /**
      * 週を読む(下 = 先の週 / 上 = 前の週)。1回で最大 SCAN_WEEKS 週。手術予定のある週が見つかったら止める。
+     * 初期表示(initial)は今週から INITIAL_WEEKS 週を並行して読み、予定のない週があってもそのまま並べる(続きは「もっと見る」)。
      * 上に足したときは、見ているカードの位置を保つ(足す前の位置を覚えて戻す)。認可・自社宛て・取消/削除の除外はサーバー
      */
-    async function loadWeeks(dir, { keepPosition = dir === "up" } = {}) {
+    async function loadWeeks(dir, { keepPosition = dir === "up", initial = false } = {}) {
       if (dir === "down" ? loadingDown : loadingUp) return;
       const my = surgeryGen;
       if (dir === "down") loadingDown = true; else loadingUp = true;
       renderSurgery();
       const got = [];
       try {
-        for (let i = 0; i < SCAN_WEEKS; i++) {
+        if (initial) {
+          const starts = Array.from({ length: INITIAL_WEEKS }, (_, i) => addDays(nextWeek, i * 7));
+          const rs = await Promise.all(starts.map(weekStart => api.listWeek({ companyId: ctx.company.id, weekStart, facilityFilter: facilityFilterOf([...selected]) })));
+          if (my !== surgeryGen) return;   // 施設・並び順を変えた後に届いた古い結果は表示しない
+          got.push(...rs);   // 週の早い順(読んだ順に関係なく starts の順)
+          nextWeek = addDays(starts[starts.length - 1], 7);
+        }
+        for (let i = 0; !initial && i < SCAN_WEEKS; i++) {
           const weekStart = dir === "down" ? nextWeek : prevWeek;
           const r = await api.listWeek({ companyId: ctx.company.id, weekStart, facilityFilter: facilityFilterOf([...selected]) });
           if (my !== surgeryGen) return;   // 施設・並び順を変えた後に届いた古い結果は表示しない
