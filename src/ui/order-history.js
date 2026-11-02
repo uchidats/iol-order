@@ -55,10 +55,10 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   const canSurgery = () => typeof repository.listSurgeryIndexPage === "function" && typeof repository.getOrder === "function";
 
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnHistoryClose" }, "注文画面に戻る");
-  const title = h("span", { class: "settings-facility" });
   const status = h("p", { class: "form-hint", role: "status" });
   const body = h("div", { class: "history-body" });
-  root.append(h("div", { class: "settings-head" }, h("h2", {}, "注文履歴"), title, closeBtn), status, body);
+  // 施設名はヘッダーに出ているため、見出しには出さない(空の .settings-facility は「注文画面に戻る」を右端に寄せる余白。使い方の見出しと同じ)
+  root.append(h("div", { class: "settings-head" }, h("h2", {}, "注文履歴"), h("span", { class: "settings-facility" }), closeBtn), status, body);
   closeBtn.addEventListener("click", () => { close(); onClose(); });
 
   function close() { open = false; selectedId = null; seq++; root.hidden = true; }
@@ -276,7 +276,6 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       facility = fac;
       canDelete = fac.canDelete === true;
       mode = "created";
-      title.textContent = fac.name;
       root.hidden = false;
       open = true;
       await reload();

@@ -108,6 +108,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const w of [320, 390, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+        // 見出しは「注文履歴」と右端の「注文画面に戻る」だけ(施設名はヘッダーに出ているため見出しには出さない)
+        assert.equal((await page.locator("#orderHistory .settings-head").innerText()).replace(/\s+/g, " ").trim(), "注文履歴 注文画面に戻る", `見出しに施設名を出さない ${w}`);
+        assert.ok(await page.evaluate(() => { const h = document.querySelector("#orderHistory .settings-head").getBoundingClientRect(), b = document.querySelector("#btnHistoryClose").getBoundingClientRect(), t = document.querySelector("#orderHistory .settings-head h2").getBoundingClientRect();
+          return Math.abs(b.right - h.right) < 1 && Math.abs((b.top + b.bottom) / 2 - (t.top + t.bottom) / 2) < 2; }), `「注文画面に戻る」は見出しと同じ行の右端 ${w}`);
         const overlap = await page.locator(".history-row").evaluateAll(rs => rs.some(r => {
           const b = ["history-date", "history-count", "history-by"].map(c => r.querySelector("." + c).getBoundingClientRect());
           const hit = (x, y) => x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
@@ -141,6 +145,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 右上の「注文画面に戻る」は「← 一覧へ戻る」と同じ高さ 36px・文字 0.9rem・上下の余白。色・角丸・左右の余白は従来(.btn-secondary)のまま、文字は1行
         const look = (q) => page.evaluate((s) => { const e = document.querySelector(s), c = getComputedStyle(e);
           return { h: e.getBoundingClientRect().height, pt: c.paddingTop, pb: c.paddingBottom, fs: c.fontSize, bg: c.backgroundColor, radius: c.borderRadius, pl: c.paddingLeft, oneLine: e.scrollWidth <= e.clientWidth }; }, q);
+        assert.equal((await page.locator("#orderHistory .settings-head").innerText()).replace(/\s+/g, " ").trim(), "注文履歴 注文画面に戻る", `詳細でも見出しに施設名を出さない ${w}`);
         const [top, back] = [await look("#btnHistoryClose"), await look('[data-act="back"]')];
         assert.deepEqual([top.h, top.pt, top.pb, top.fs, top.bg, top.radius], [back.h, back.pt, back.pb, back.fs, back.bg, back.radius], `${w}px: 「← 一覧へ戻る」と同じ高さ・文字`);
         assert.deepEqual([top.h, top.pl, top.oneLine], [36, "20px", true], `${w}px: 高さ36px・左右の余白は従来どおり`);
@@ -188,7 +193,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         release([late]);
         await first;
       }, lateOrder);
-      assert.equal(await page.locator(".settings-facility").innerText(), "新しい施設");
+      assert.equal(await page.locator("#orderHistory .settings-head").innerText().then(t => t.includes("施設")), false, "見出しに施設名を出さない(施設名はヘッダー)");
       assert.equal(await page.locator(".history-row").count(), 3, "新しい施設の注文だけ");
       assert.equal(await page.locator('[data-order="late"]').count(), 0, "古い施設の注文は出ない");
       // 読み込み中に画面を閉じる → 遅れて届いた結果で再描画しない(閉じたまま)
