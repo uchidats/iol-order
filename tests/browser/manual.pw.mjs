@@ -125,6 +125,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1"));
         await page.goBack();
         await page.waitForFunction(() => location.hash === "#help/01-first-time");
+        // ハッシュが変わった直後は、まだ前のページの見出しのことがある(WebKit)。表示が切り替わるまで待ってから確かめる
+        await page.waitForFunction((title) => document.querySelector(".manual-body h1")?.textContent === title, MANUAL_PAGES[1].title, { timeout: 5000 }).catch(() => {});
         assert.equal(await page.locator(".manual-body h1").innerText(), MANUAL_PAGES[1].title);
         // ログイン画面に戻る
         await page.locator(".manual-foot .manual-back").click();

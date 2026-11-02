@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orderLinesOf, summarizeOrder, sortOrdersNewestFirst, formatDateTimeJst, toMillis, describeLine } from "../src/domain/order-history.js";
-import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer } from "../src/domain/order-history-view.js";
+import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, HISTORY_CARD_LINES } from "../src/domain/order-history-view.js";
+import { formatShortSurgeryDate } from "../src/ui/confirm-lines.js";
 import { orderLinesOf as serverOrderLinesOf } from "../functions/src/orders.js";
 
 const item = (over = {}) => ({ modelId: "jj-dib00v", manufacturer: "J&J", model: "DIB00V", displayName: "J&J / DIB00V", isToric: false, isMultifocal: false, toricModel: "", power: "+20.0D", quantity: 1, ...over });
@@ -156,4 +157,24 @@ test("取消済みの注文(受付の直後に本人が取り消した): 状態�
   assert.equal(visibleOrders([order]).length, 1, "一覧に残す");
   const deleted = summarizeHistoryOrder({ ...order, cancelled: undefined, deleted: true, status: "accepted" });
   assert.equal(deleted.notifications[0].statusLabel, "未送信（注文の削除により送信を中止）", "論理削除の文言は従来どおり");
+});
+
+test("一覧のカード: 明細を「手術日 + 担当医」ごと(詳細と同じ順)にまとめ、合わせて5行まで。超えた分は hidden の件数", () => {
+  const line = (lineNo, surgeryDate, doctorKey, doctorName) => ({ lineNo, surgeryDate, doctorKey, doctorName, maker: "J&J", model: "DIB00V", power: "+20.0D", quantity: 1 });
+  const lines = [line(1, "2026-11-12", "o2", "佐藤"), line(2, "2026-11-10", "o1", "山田"), line(3, "2026-11-10", "o1", "山田"),
+    line(4, "2026-11-10", "o3", "高橋"), line(5, "2026-11-12", "o2", "佐藤"), line(6, "2026-11-12", "o2", "佐藤"), line(7, "2026-11-14", "", "（記録なし）")];
+  assert.equal(HISTORY_CARD_LINES, 5);
+  const { groups, hidden } = historyCardGroups(lines);
+  assert.deepEqual(groups.map(g => [g.surgeryDate, g.doctor, g.hasDoctor, g.lines.map(l => l.lineNo)]),
+    [["2026-11-10", "山田", true, [2, 3]], ["2026-11-10", "高橋", true, [4]], ["2026-11-12", "佐藤", true, [1, 5]]], "手術日の早い順・同じ日は担当医の初出順。5行で打ち切る");
+  assert.equal(hidden, 2);
+  const few = historyCardGroups(lines.slice(6));
+  assert.deepEqual([few.groups.map(g => [g.surgeryDate, g.hasDoctor]), few.hidden], [[["2026-11-14", false]], 0], "担当医の記録なし・超過なし");
+  assert.deepEqual(historyCardGroups([]), { groups: [], hidden: 0 });
+});
+
+test("一覧の手術日の短い表記: 「11/10(火)」。読めなければそのまま", () => {
+  assert.equal(formatShortSurgeryDate("2026-11-10"), "11/10(火)");
+  assert.equal(formatShortSurgeryDate("2027-01-03"), "1/3(日)");
+  assert.equal(formatShortSurgeryDate("不明"), "不明");
 });

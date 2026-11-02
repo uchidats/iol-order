@@ -2038,6 +2038,22 @@ input[type="date"].form-control {
   .history-row-surgery .history-by { grid-row: 3; }
   .history-row-surgery .lens-badge { grid-row: 4; justify-self: start; }
 }
+/* 医療機関側の注文履歴の一覧カード(order-history.js。ディーラー画面の .history-row には影響させないよう #orderHistory に限定):
+   上に明細(「手術日 + 担当医」の見出し・メーカー/モデル/度数/枚数を強調)、最大5行と「ほか N件」。下に注文日時・発注者・件数を小さいグレーで */
+#orderHistory .history-card { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 10px 4px; }
+#orderHistory .history-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 0.9rem; font-weight: 700; color: #334155; }
+#orderHistory .history-card-date { white-space: nowrap; }
+#orderHistory .history-card-badges { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+#orderHistory .history-card-group + .history-card-group { margin-top: 4px; }
+#orderHistory .history-card-lines { margin: 0; padding: 0; list-style: none; }
+#orderHistory .history-card .summary-line { padding: 2px 0; border: 0; }   /* 一覧の行の区切り線(.history-list li + li)をカードの中のレンズには付けない */
+#orderHistory .history-card .summary-maker { font-size: 0.85rem; font-weight: 600; color: #334155; }
+#orderHistory .history-card .summary-power, #orderHistory .history-card .summary-qty { font-weight: 700; }
+#orderHistory .history-card-more { font-size: 0.85rem; color: #64748b; }
+#orderHistory .history-meta { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 0.8rem; color: #64748b; }
+#orderHistory .history-meta > span { font-weight: 400; color: inherit; white-space: normal; overflow-wrap: anywhere; }
+/* 取消済み: 見落としにくいが目立ちすぎない、控えめなグレーのバッジ */
+.history-cancelled-badge { display: inline-block; padding: 1px 8px; font-size: 0.75rem; font-weight: 600; line-height: 1.5; color: #475569; background: #f1f5f9; border: 1px solid #94a3b8; border-radius: 999px; white-space: nowrap; }
 
 /* ディーラー(担当医と同じ行デザイン。編集時はメール欄を縦に並べる) */
 .dealer-edit { grid-template-columns: minmax(0, 1fr); }

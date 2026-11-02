@@ -9,6 +9,12 @@ export function formatSurgeryDate(iso) {
   return isNaN(d) ? iso : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${WEEK[d.getDay()]})`;
 }
 
+/** 「11/10(火)」(注文履歴の一覧のカードなど、狭い場所用)。読めなければそのまま */
+export function formatShortSurgeryDate(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return isNaN(d) ? iso : `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`;
+}
+
 const span = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; };
 
 /** 見出し「手術日 2026年10月29日(木)　高橋Dr」(確認画面のグループ見出しと、入力欄の折りたたみ表示で共通) */

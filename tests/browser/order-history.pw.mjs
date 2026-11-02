@@ -102,9 +102,16 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "注文日順");
       const rows = await page.locator(".history-row").evaluateAll(rs => rs.map(r => r.innerText.replace(/\s+/g, " ").trim()));
       assert.equal(rows.length, 3);
-      assert.match(rows[0], /2026\/10\/25 14:30.*ログイン太郎.*2件・合計3枚.*テスト/);
-      assert.match(rows[1], /2026\/09\/01 09:00.*x@example\.jp.*1件・合計2枚/);
-      assert.match(rows[2], /2026\/08\/01 09:00.*（不明）.*1件・合計1枚/);
+      // カード: 明細(「手術日(短い表記) + 担当医」ごと・メーカー/モデル/度数/枚数)、下に注文日時・発注者・件数。発注先名は出さない
+      assert.deepEqual(rows, [
+        "11/10(火) 山田Dr テスト J&J DIB00V +20.0D 1枚 11/12(木) 佐藤Dr J&J DIW300 +18.5D 2枚 注文 2026/10/25 14:30 ログイン太郎 2件・合計3枚",
+        "10/1(木) 旧注文者Dr J&J DIB00V +20.0D 2枚 注文 2026/09/01 09:00 x@example.jp 1件・合計2枚",
+        "9/1(火) 最古注文者Dr J&J DIB00V +20.0D 1枚 注文 2026/08/01 09:00 （不明） 1件・合計1枚"]);
+      assert.equal(await page.locator(".history-row").evaluateAll(rs => rs.some(r => r.innerText.includes("A商会"))), false, "発注先名は一覧に出さない");
+      // 強調: モデル・度数・枚数は太字、補足(注文日時・発注者・件数)は小さい文字
+      const look = await page.locator('[data-order="new"]').evaluate(b => { const q = (s) => getComputedStyle(b.querySelector(s));
+        return { model: Number(q(".summary-model").fontWeight), power: Number(q(".summary-power").fontWeight), qty: Number(q(".summary-qty").fontWeight), meta: parseFloat(q(".history-meta").fontSize), line: parseFloat(q(".summary-model").fontSize) }; });
+      assert.ok(look.model >= 700 && look.power >= 700 && look.qty >= 700 && look.meta < look.line, JSON.stringify(look));
       for (const w of [320, 390, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
@@ -341,20 +348,23 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual(shown.slice(0, 3), ["o00@2026-11-30", "o28@2026-11-30", "o29@2026-11-29"], "同じ手術日は注文日の新しい順");
       const dates = shown.map(id => id.split("@")[1]);
       assert.deepEqual([...dates].sort().reverse(), dates, "手術日の新しい順");
-      assert.match(await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText(), /手術日 2026年11月28日\(土\)[\s\S]*1件・合計1枚（注文全体 2件）/);
-      // スマホ幅(320・390)では、手術日 / 件数・合計枚数(注文全体) / 発注者・注文日 の縦積みで、文字が重ならない。PC幅は横並び
-      const boxes = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => ["history-date", "history-count", "history-by"].map(c => { const b = r.querySelector("." + c).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; })));
+      // 手術日順のカードは、その手術日のレンズだけ(o02 の 11/2 のレンズは 11/28 のカードに出さない)
+      const o02 = (await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText()).replace(/\s+/g, " ").trim();
+      assert.match(o02, /^11\/28\(土\) \S+Dr .*1枚 注文 .* この日 1件・合計1枚（注文全体 2件）$/, o02);
+      assert.equal(await page.locator('[data-order="o02"][data-surgery="2026-11-28"] .history-line').count(), 1);
+      assert.ok(!o02.includes("11/2("), "ほかの手術日のレンズは出さない");
+      // スマホ(320〜430)・PC: 明細・補足の文字が重ならず、横にはみ出さない
+      const boxes = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => [".history-card-head", ".history-card-lines", ".history-date", ".history-count", ".history-by"].map(c => { const b = r.querySelector(c).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; })));
       const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
-      for (const w of [320, 390]) {
+      for (const w of [320, 390, 430, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
-        for (const [d, c, by] of await boxes()) {
-          assert.ok(!hit(d, c) && !hit(d, by) && !hit(c, by), `${w}: 重なりなし ${JSON.stringify([d, c, by])}`);
-          assert.ok(d.b <= c.t + 0.5 && c.b <= by.t + 0.5, `${w}: 手術日 → 件数 → 発注者の順に縦積み`);
+        for (const bs of await boxes()) {
+          const pairs = bs.flatMap((a, i) => bs.slice(i + 1).map(b => [a, b]));
+          assert.ok(pairs.every(([a, b]) => !hit(a, b)), `${w}: 重なりなし ${JSON.stringify(bs)}`);
+          assert.ok(bs[0].b <= bs[1].t + 0.5 && bs[1].b <= Math.min(bs[2].t, bs[3].t, bs[4].t) + 0.5, `${w}: 見出し → 明細 → 補足の順`);
         }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
       }
-      await page.setViewportSize({ width: 1100, height: 900 });
-      for (const [d, c] of await boxes()) assert.ok(Math.abs(d.t - c.t) < 4 && !hit(d, c), "PC幅は横並び");
       await page.setViewportSize({ width: 390, height: 900 });
       for (let i = 0; i < 3 && await page.locator('[data-act="more"]').count(); i++) {
         const n = (await ids()).length;
@@ -392,6 +402,63 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
         await page.locator('[data-order="m3"]').click();
       }
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+// 取消済みの注文(明細7件・手術日2日)と、通常の注文
+function cardOrders() {
+  const it = (power) => ({ manufacturer: "HOYA", model: "XY1", displayName: "HOYA / XY1", isToric: false, isMultifocal: false, toricModel: "", power, quantity: 1 });
+  const line = (lineNo, surgeryDate, power) => ({ lineNo, item: it(power), surgeryDate, doctor: { id: "o1", name: "山田" }, dealer: { id: "d1", name: "A商会" } });
+  return [
+    { id: "c1", schemaVersion: 3, orderNumber: "IOL-C-1", createdAt: { ms: Date.parse("2026-10-30T00:00:00Z") }, status: "cancelled", cancelled: true, createdBy: { displayName: "発注者" },
+      lines: [line(1, "2026-11-20", "+20.0D"), line(2, "2026-11-20", "+20.5D"), line(3, "2026-11-20", "+21.0D"), line(4, "2026-11-20", "+21.5D"),
+        line(5, "2026-11-21", "+22.0D"), line(6, "2026-11-21", "+22.5D"), line(7, "2026-11-21", "+23.0D")] },
+    { id: "c2", schemaVersion: 3, orderNumber: "IOL-C-2", createdAt: { ms: Date.parse("2026-10-29T00:00:00Z") }, status: "accepted", createdBy: { displayName: "発注者" }, lines: [line(1, "2026-11-22", "+19.0D")] }];
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`注文履歴の一覧カード: 明細は最大5行で「ほかN件」、取消済みはグレーのバッジ、押すと詳細。手術日順はその手術日のレンズだけ: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await page.goto(base);
+      await page.waitForFunction(() => window.__ready);
+      await page.evaluate(async (list) => {
+        window.__data.f5 = list.map(o => ({ ...o, createdAt: { toMillis: () => o.createdAt.ms } }));
+        await window.__h.open({ id: "f5", name: "カードの施設" });
+      }, cardOrders());
+      const card = page.locator('[data-order="c1"]');
+      assert.equal(await card.locator(".history-line").count(), 5, "明細は5行まで");
+      assert.equal(await card.locator(".history-card-more").innerText(), "ほか2件");
+      assert.deepEqual(await card.locator(".history-card-head").evaluateAll(hs => hs.map(h => h.innerText.replace(/\s+/g, " ").trim())), ["11/20(金) 山田Dr 取消済み", "11/21(土) 山田Dr"]);
+      assert.equal(await page.locator('[data-order="c2"] .history-cancelled-badge').count(), 0, "通常の注文には付けない");
+      assert.equal(await page.locator('[data-order="c2"] .history-card-more').count(), 0);
+      // 取消済み: グレー(赤くない)・見出しの右端
+      const badge = await card.locator(".history-cancelled-badge").evaluate(e => { const c = getComputedStyle(e), b = e.getBoundingClientRect(), p = e.closest(".history-card-head").getBoundingClientRect();
+        return { color: c.color.match(/\d+/g).map(Number), bg: c.backgroundColor.match(/\d+/g).map(Number), right: p.right - b.right }; });
+      assert.ok([badge.color, badge.bg].every(c => Math.max(...c.slice(0, 3)) - Math.min(...c.slice(0, 3)) <= 40), "グレー(青みのある灰色。赤・緑などの色ではない): " + JSON.stringify(badge));
+      assert.ok(badge.right < 1, "見出しの右端");
+      for (const w of [320, 390, 430]) {
+        await page.setViewportSize({ width: w, height: 900 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+      }
+      // 押すと既存の詳細(全7件・状態は取消済み)
+      await card.click();
+      assert.equal(await page.locator(".history-line").count(), 7);
+      assert.match(await page.locator(".history-status").innerText(), /取消済み/);
+      await page.click('[data-act="back"]');
+      // 手術日順: 取消済みの注文も手術日ごとのカード(バッジ付き)。その手術日のレンズだけ
+      await page.click('[data-sort="surgery"]');
+      await page.waitForFunction(() => document.querySelectorAll('.history-row[data-surgery]').length === 3);
+      assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-line').count(), 3);
+      assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-20"] .history-line').count(), 4);
+      assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-cancelled-badge').count(), 1);
+      assert.match(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-count').innerText(), /この日 3件・合計3枚（注文全体 7件）/);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

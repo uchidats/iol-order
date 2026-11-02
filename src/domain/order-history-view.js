@@ -3,6 +3,7 @@
  * order-history.js は Cloud Functions の注文メールにも複製して使うため(scripts/sync-catalog.mjs)、画面だけの追加はここに置く。
  */
 import { orderLinesOf, summarizeOrder } from "./order-history.js";
+import { groupLinesByDateAndDoctor } from "./order-lines.js";
 
 /**
  * 一覧・詳細の1件分(summarizeOrder に、論理削除の印と、明細ごとのまとめ用のキーを加える)。
@@ -44,4 +45,25 @@ export function groupHistoryLinesByDealer(lines) {
     by.get(k).lines.push(l);
   }
   return [...by.values()];
+}
+
+/** 一覧のカードに出す明細の上限(超えた分は「ほか N件」。全件は詳細で確認する) */
+export const HISTORY_CARD_LINES = 5;
+
+/**
+ * 一覧のカード用: 明細を詳細と同じ「手術日 + 担当医」のまとまり(手術日の早い順・同じ日は担当医の初出順)にし、
+ * まとまりの順に合わせて max 行まで残す。hidden は出さなかった明細の件数
+ * @returns {{groups: Array<{surgeryDate:string, doctor:string, hasDoctor:boolean, lines:Array<object>}>, hidden:number}}
+ */
+export function historyCardGroups(lines, max = HISTORY_CARD_LINES) {
+  const all = Array.isArray(lines) ? lines : [];
+  const groups = [];
+  let left = max;
+  for (const g of groupLinesByDateAndDoctor(all.map(l => ({ ...l, doctor: l.doctorName, doctorId: l.doctorKey })))) {
+    if (left <= 0) break;
+    const shown = g.lines.slice(0, left);
+    left -= shown.length;
+    groups.push({ surgeryDate: g.surgeryDate || "", doctor: g.doctor, hasDoctor: Boolean(g.lines[0].doctorKey), lines: shown });
+  }
+  return { groups, hidden: Math.max(0, all.length - max) };
 }
