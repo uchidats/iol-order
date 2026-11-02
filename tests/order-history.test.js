@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orderLinesOf, summarizeOrder, sortOrdersNewestFirst, formatDateTimeJst, toMillis, describeLine } from "../src/domain/order-history.js";
-import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, HISTORY_CARD_LINES, todayJst } from "../src/domain/order-history-view.js";
+import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, HISTORY_CARD_LINES, todayJst, groupSurgeryRowsByDate, historyDoctorLabel } from "../src/domain/order-history-view.js";
 import { formatShortSurgeryDate } from "../src/ui/confirm-lines.js";
 import { orderLinesOf as serverOrderLinesOf } from "../functions/src/orders.js";
 
@@ -159,18 +159,33 @@ test("取消済みの注文(受付の直後に本人が取り消した): 状態�
   assert.equal(deleted.notifications[0].statusLabel, "未送信（注文の削除により送信を中止）", "論理削除の文言は従来どおり");
 });
 
-test("一覧のカード: 明細を「手術日 + 担当医」ごと(詳細と同じ順)にまとめ、合わせて5行まで。超えた分は hidden の件数", () => {
+test("一覧のカード(注文日順): 明細を手術日ごと(担当医が複数でも日付は1回)にまとめ、同じ日は明細の順。合わせて5行まで。超えた分は hidden の件数", () => {
   const line = (lineNo, surgeryDate, doctorKey, doctorName) => ({ lineNo, surgeryDate, doctorKey, doctorName, maker: "J&J", model: "DIB00V", power: "+20.0D", quantity: 1 });
   const lines = [line(1, "2026-11-12", "o2", "佐藤"), line(2, "2026-11-10", "o1", "山田"), line(3, "2026-11-10", "o1", "山田"),
     line(4, "2026-11-10", "o3", "高橋"), line(5, "2026-11-12", "o2", "佐藤"), line(6, "2026-11-12", "o2", "佐藤"), line(7, "2026-11-14", "", "（記録なし）")];
   assert.equal(HISTORY_CARD_LINES, 5);
   const { groups, hidden } = historyCardGroups(lines);
-  assert.deepEqual(groups.map(g => [g.surgeryDate, g.doctor, g.hasDoctor, g.lines.map(l => l.lineNo)]),
-    [["2026-11-10", "山田", true, [2, 3]], ["2026-11-10", "高橋", true, [4]], ["2026-11-12", "佐藤", true, [1, 5]]], "手術日の早い順・同じ日は担当医の初出順。5行で打ち切る");
+  assert.deepEqual(groups.map(g => [g.surgeryDate, g.lines.map(l => l.lineNo)]),
+    [["2026-11-10", [2, 3, 4]], ["2026-11-12", [1, 5]]], "手術日の早い順。同じ日の担当医が違っても1つ(明細の順)。同じモデル・度数でも合算しない。5行で打ち切る");
   assert.equal(hidden, 2);
-  const few = historyCardGroups(lines.slice(6));
-  assert.deepEqual([few.groups.map(g => [g.surgeryDate, g.hasDoctor]), few.hidden], [[["2026-11-14", false]], 0], "担当医の記録なし・超過なし");
+  assert.deepEqual(historyCardGroups(lines.slice(6)), { groups: [{ surgeryDate: "2026-11-14", lines: [lines[6]] }], hidden: 0 });
   assert.deepEqual(historyCardGroups([]), { groups: [], hidden: 0 });
+  assert.deepEqual([historyDoctorLabel(lines[0]), historyDoctorLabel(lines[6])], ["佐藤Dr", "担当医の記録なし"], "右側の担当医名");
+});
+
+test("手術日順の表示: 隣り合う同じ手術日を見出し1つにまとめ(注文・担当医・ページの境目をまたぐ)、その日のレンズを索引の順に1行ずつ。合算しない", () => {
+  const ln = (lineNo, surgeryDate, doctor) => ({ lineNo, surgeryDate, doctorKey: doctor, doctorName: doctor, maker: "HOYA", model: "XY1", power: "+20.0D", quantity: 1 });
+  const a = { id: "a", lines: [ln(1, "2026-11-25", "内田"), ln(2, "2026-11-26", "山田"), ln(3, "2026-11-25", "山田")] };
+  const b = { id: "b", cancelled: true, lines: [ln(1, "2026-11-25", "内田"), ln(2, "2026-11-25", "内田")] };
+  const c = { id: "c", lines: [ln(1, "2026-11-26", "内田")] };
+  // 1ページ目の最後と2ページ目の最初が同じ 11/25(読み込み済みの行をつなげたもの)
+  const page1 = [{ order: a, surgeryDate: "2026-11-25", lineNos: [3, 1] }];
+  const page2 = [{ order: b, surgeryDate: "2026-11-25", lineNos: [1, 2] }, { order: a, surgeryDate: "2026-11-26", lineNos: [2] }, { order: c, surgeryDate: "2026-11-26", lineNos: null }];
+  const days = groupSurgeryRowsByDate([...page1, ...page2]);
+  assert.deepEqual(days.map(d => [d.surgeryDate, d.items.map(x => `${x.order.id}${x.line.lineNo}`)]),
+    [["2026-11-25", ["a1", "a3", "b1", "b2"]], ["2026-11-26", ["a2", "c1"]]], "同じ日付は1つ。索引の順・同じ注文の中はレンズ番号の順。b1 と b2 は同じIOLでも別の行");
+  assert.equal(days[0].items.filter(x => x.order.cancelled).length, 2, "取消済みの注文の行を判別できる");
+  assert.deepEqual(groupSurgeryRowsByDate([{ order: a, surgeryDate: "2026-11-27", lineNos: [9] }]), [], "その日のレンズがない索引は見出しを作らない");
 });
 
 test("一覧の手術日の短い表記: 「11/10(火)」。読めなければそのまま", () => {

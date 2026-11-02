@@ -2055,9 +2055,19 @@ input[type="date"].form-control {
 #orderHistory .history-card-group + .history-card-group { margin-top: 4px; }
 #orderHistory .history-card-lines { margin: 0; padding: 0; list-style: none; }
 #orderHistory .history-card .summary-line { padding: 2px 0; border: 0; }   /* 一覧の行の区切り線(.history-list li + li)をカードの中のレンズには付けない */
-#orderHistory .history-card .summary-maker { font-size: 0.85rem; font-weight: 600; color: #334155; }
-#orderHistory .history-card .summary-power, #orderHistory .history-card .summary-qty { font-weight: 700; }
+#orderHistory .history-lens-row .summary-power, #orderHistory .history-lens-row .summary-qty { font-weight: 700; }   /* 一覧ではメーカー名を出さない(order-history.js) */
 #orderHistory .history-card-more { font-size: 0.85rem; color: #64748b; }
+/* レンズ行(注文日順・手術日順で共通): 左に明細、右に担当医名。右の列は行幅の4割まで(長い名前はその中で折り返す)。
+   右の列の最小幅で、名前が1文字ずつ縦に並ばないようにする */
+#orderHistory .history-lens-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(36%); align-items: center; column-gap: 10px; }
+#orderHistory .history-lens-main { min-width: 0; }
+#orderHistory .history-lens-side { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px 6px; min-width: 4.5em; text-align: right; }
+#orderHistory .history-lens-doctor { font-size: 0.85rem; color: #64748b; overflow-wrap: anywhere; }
+/* 手術日順: 手術日ごとの見出しの下に、押せるレンズ行(1行 = 1レンズ。押すとその注文の詳細) */
+#orderHistory .history-day { padding: 8px 4px 4px; }
+#orderHistory .history-day-lines { margin: 2px 0 0; padding: 0; list-style: none; }
+#orderHistory .history-list .history-day-lines li { border-top: 0; }
+#orderHistory .history-lens-btn { display: block; width: 100%; min-height: 40px; padding: 6px 4px; border-radius: var(--radius-sm); }
 /* 並び順の切替の右に、小さな選択式ボタン(「過去分」は手術日順だけ)。OFFは白地・グレーの枠、ONは青地・白文字(狭い画面では次の行へ折り返す) */
 #orderHistory .history-sort-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 4px 0 10px; }
 #orderHistory .history-sort-bar .history-sort { margin: 0; }

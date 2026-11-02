@@ -1,5 +1,5 @@
 import { sortOrdersNewestFirst } from "../domain/order-history.js";
-import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, todayJst } from "../domain/order-history-view.js";
+import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, groupSurgeryRowsByDate, historyDoctorLabel, todayJst } from "../domain/order-history-view.js";
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
 import { summaryDateHead, summaryLineMain, formatShortSurgeryDate } from "./confirm-lines.js";
 import { confirmDialog } from "./confirm-dialog.js";
@@ -145,30 +145,52 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     return h("div", { class: "history-sort-bar" }, sort, filters);
   }
 
+  /** 注文の状態のバッジ(取消済み・テスト) */
+  const orderBadges = (o) => [o.cancelled ? h("span", { class: "history-cancelled-badge" }, "取消済み") : null, o.testOrder ? h("span", { class: "lens-badge" }, "テスト") : null].filter(Boolean);
+  /** 一覧の手術日の見出し(短い表記) */
+  const dayHead = (date, badges = []) => h("div", { class: "history-card-head" },
+    h("span", { class: "history-card-date" }, date ? formatShortSurgeryDate(date) : "手術日の記録なし"),
+    badges.length ? h("span", { class: "history-card-badges" }, badges) : null);
   /**
-   * 一覧のカード(押すと詳細)。上に明細(「手術日 + 担当医」ごと。手術日は短い表記。各行は詳細と同じ部品でメーカー・モデル・度数・枚数)を最大5行、
-   * 超えた分は「ほか N件」。取消済み・テストのバッジは残す。注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)。
-   * 注文日順だけ、最上部に注文番号を控えめに(番号に日付が含まれるので注文日時は出さない)。
-   * 手術日順はその手術日のレンズだけ(同じ注文のほかの手術日は別のカード。注文番号は出さない)
+   * 一覧のレンズ行(注文日順・手術日順で共通): 左に「モデル 度数 枚数」(詳細と同じ部品。一覧ではメーカー名を省く。詳細・確認画面は従来どおり)、
+   * 右に担当医名(長い名前は右の列の中で折り返す)。
+   * badges は左の明細の末尾(手術日順の取消済み・テスト。右の列は担当医名だけにして、明細の幅を確保する)
+   */
+  const lensRow = (tag, attrs, l, badges = []) => h(tag, { ...attrs, class: ["history-line history-lens-row", attrs.class].filter(Boolean).join(" "), "data-line": String(l.lineNo) },
+    h("div", { class: "history-lens-main" }, (() => { const m = summaryLineMain({ manufacturer: l.maker, modelName: l.model, power: l.power, quantity: l.quantity }); m.querySelector(".summary-maker").remove(); if (badges.length) m.append(...badges); return m; })()),
+    h("span", { class: "history-lens-side" }, h("span", { class: "history-lens-doctor" }, historyDoctorLabel(l))));
+
+  /**
+   * 注文日順のカード(押すと詳細)。最上部に注文番号を控えめに(番号に日付が含まれるので注文日時は出さない)、その下に手術日ごとの見出し
+   * (担当医が複数でも日付は1回)とレンズ行を最大5行、超えた分は「ほか N件」。取消済み・テストのバッジは1つ目の見出しの右端。
+   * 注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)
    */
   function rowView(r) {
     const o = r.order;
-    const surgery = r.surgeryDate !== undefined;
-    const onDate = r.lineNos ? o.lines.filter(l => r.lineNos.includes(l.lineNo)) : o.lines;   // 手術日順: その手術日のレンズ
-    const { groups, hidden } = historyCardGroups(onDate);
-    const badges = [o.cancelled ? h("span", { class: "history-cancelled-badge" }, "取消済み") : null, o.testOrder ? h("span", { class: "lens-badge" }, "テスト") : null].filter(Boolean);
-    const head = (g, i) => h("div", { class: "history-card-head" },
-      h("span", { class: "history-card-date" }, g.surgeryDate ? formatShortSurgeryDate(g.surgeryDate) : "手術日の記録なし"),
-      h("span", { class: "summary-doctor" }, g.hasDoctor ? `${g.doctor}Dr` : "担当医の記録なし"),
-      i === 0 && badges.length ? h("span", { class: "history-card-badges" }, badges) : null);   // 取消済み・テストは1つ目の見出しの右端
-    const btn = h("button", { type: "button", class: ["history-row", "history-card", surgery ? "history-row-surgery" : "", o.cancelled ? "is-cancelled" : ""].filter(Boolean).join(" "),
-      "data-order": o.id, ...(surgery ? { "data-surgery": r.surgeryDate } : {}) },
-      !surgery && o.orderNumber ? h("div", { class: "history-card-no" }, o.orderNumber) : null,
-      groups.map((g, i) => h("div", { class: "history-card-group" }, head(g, i), h("ul", { class: "history-card-lines" }, g.lines.map(lineView)))),
+    const { groups, hidden } = historyCardGroups(o.lines);
+    const badges = orderBadges(o);
+    const btn = h("button", { type: "button", class: ["history-row", "history-card", o.cancelled ? "is-cancelled" : ""].filter(Boolean).join(" "), "data-order": o.id },
+      o.orderNumber ? h("div", { class: "history-card-no" }, o.orderNumber) : null,
+      groups.map((g, i) => h("div", { class: "history-card-group" }, dayHead(g.surgeryDate, i === 0 ? badges : []),
+        h("ul", { class: "history-card-lines" }, g.lines.map(l => lensRow("li", { class: "summary-line" }, l))))),
       groups.length ? null : h("div", { class: "history-card-head" }, h("span", {}, "明細の記録なし"), badges.length ? h("span", { class: "history-card-badges" }, badges) : null),
       hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null);
     btn.addEventListener("click", () => renderDetail(o.id));
     return h("li", {}, btn);
+  }
+
+  /**
+   * 手術日順: 読み込み済みの行(索引)を手術日ごとの見出し1つにまとめ(注文・担当医が違っても同じ日付は1つ。ページの境目もまたぐ)、
+   * その日のレンズを索引の順に1行ずつ。各行を押すと、そのレンズを含む注文の詳細。取消済み・テストのバッジは該当する行に
+   */
+  function surgeryDays(rows) {
+    return groupSurgeryRowsByDate(rows).map(d => h("li", { class: "history-day", "data-day": d.surgeryDate }, dayHead(d.surgeryDate),
+      h("ul", { class: "history-day-lines" }, d.items.map(({ order: o, line: l }) => {
+        const b = h("button", { type: "button", class: "history-row history-lens-btn", "data-order": o.id, "data-surgery": d.surgeryDate, "data-line": String(l.lineNo) },
+          lensRow("div", {}, l, orderBadges(o)));
+        b.addEventListener("click", () => renderDetail(o.id));
+        return h("li", {}, b);
+      }))));
   }
 
   /** 手術日順の「過去分」の境目(この下が今日以降) */
@@ -181,10 +203,10 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     const mainMore = main.hasMore || main.buffered.length > 0;
     let list;
     if (showPast() && rows.length) {
-      list = h("ul", { class: "history-list" }, past.rows.map(rowView), todayDivider(),
-        main.rows.length ? main.rows.map(rowView) : (main.loading || mainMore ? null : h("li", { class: "form-hint history-empty" }, "今日以降に手術予定の注文はありません。")));
+      list = h("ul", { class: "history-list" }, surgeryDays(past.rows), todayDivider(),
+        main.rows.length ? surgeryDays(main.rows) : (main.loading || mainMore ? null : h("li", { class: "form-hint history-empty" }, "今日以降に手術予定の注文はありません。")));
     } else if (rows.length) {
-      list = h("ul", { class: "history-list" }, rows.map(rowView));
+      list = h("ul", { class: "history-list" }, mode === "surgery" ? surgeryDays(rows) : rows.map(rowView));
     } else {
       const hint = includeCancelled ? "" : "（取消済みの注文は「取消済み」を選ぶと表示できます）";
       list = h("p", { class: "form-hint" }, loading ? "読み込み中…"
@@ -212,7 +234,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     const hd = document.querySelector(".app-header");
     return hd && getComputedStyle(hd).position === "sticky" ? Math.max(0, hd.getBoundingClientRect().bottom) : 0;
   }
-  const anchorKey = (e) => e.classList.contains("history-today") ? "today" : `${e.dataset.order}@${e.dataset.surgery ?? ""}`;
+  const anchorKey = (e) => e.classList.contains("history-today") ? "today" : `${e.dataset.order}@${e.dataset.surgery ?? ""}#${e.dataset.line ?? ""}`;   // 手術日順はレンズ行ごと
   const anchors = () => [...body.querySelectorAll(".history-list .history-row, .history-list .history-today")];
   /** 上に行を足す前に、画面に見えている先頭のカード(または境目)の位置を覚え、描き直した後に同じ位置へ戻す関数を返す */
   function keepScrollAnchor() {
