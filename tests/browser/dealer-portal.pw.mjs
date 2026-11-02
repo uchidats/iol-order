@@ -417,6 +417,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator('[data-facility="fA"]').check();
       await page.click("#btnDealerSearch");
       await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 1 && !document.querySelector("#btnDealerMore").hidden);
+      // 注文日順の「もっと見る」も補助ボタンの大きさ(高さ36px・文字0.9rem・上下6px)
+      assert.deepEqual(await page.locator("#btnDealerMore").evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return [Math.round(b.height), Math.round(parseFloat(c.fontSize) * 10) / 10, c.paddingTop, c.paddingBottom, b.left >= 0 && b.right <= innerWidth, e.scrollWidth <= e.clientWidth + 1]; }), [36, 14.4, "6px", "6px", true, true]);
       // 施設を B に替える → 結果と続きを破棄。「さらに表示」は出ない(古い A の続きを読まない)
       await page.locator('[data-facility="fA"]').uncheck();
       await page.locator('[data-facility="fB"]').check();
@@ -836,6 +838,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await page.setViewportSize({ width: w, height: 900 });
         const lay = await page.locator("#dealerSurgery .history-lens-row").evaluateAll(rs => rs.map(r => { const m = r.querySelector(".history-lens-main").getBoundingClientRect(), d = r.querySelector(".history-lens-side").getBoundingClientRect(); return [d.left - m.right, d.right - r.getBoundingClientRect().right]; }));
         assert.ok(lay.every(([gap, out]) => gap >= 0 && out <= 0.5), `${w}: ${JSON.stringify(lay.slice(0, 3))}`);
+        // 「過去の注文をもっと見る」「もっと見る」: 補助ボタンの大きさ(高さ36px・文字0.9rem・上下6px。幅は文字に合わせ、はみ出さない)。スマホ・PCで同じ
+        for (const act of ["more-past", "more"]) assert.deepEqual(await page.locator(`#dealerSurgery [data-act="${act}"]`).evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return [Math.round(b.height), Math.round(parseFloat(c.fontSize) * 10) / 10, c.paddingTop, c.paddingBottom, b.left >= 0 && b.right <= innerWidth, e.scrollWidth <= e.clientWidth + 1]; }), [36, 14.4, "6px", "6px", true, true], `${w}: ${act}`);
+        assert.ok(await page.locator('#dealerSurgery [data-act="more"]').evaluate(e => e.getBoundingClientRect().width < innerWidth * 0.8), `${w}: 幅は文字に合わせる`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}: 横にはみ出さない`);
       }
       await page.setViewportSize({ width: 390, height: 900 });

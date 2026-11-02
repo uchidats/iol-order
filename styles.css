@@ -1790,9 +1790,11 @@ input[type="date"].form-control {
 /* 戻る・移動用のボタン: 注文履歴の「← 一覧へ戻る」(.btn-sm-inline)と同じ高さ 36px・文字 0.9rem・上下の余白 6px。
    対象: 注文履歴・使い方・紹介・申請・事前登録・ディーラー管理・施設の登録/参加の「注文画面に戻る」、「目次へ戻る」、
    ディーラー設定の「受注一覧に戻る」、ディーラー受注詳細の「← 一覧へ戻る」。色・枠線・角丸・左右の余白は .btn のまま。
-   行の高さは button の標準(normal)にそろえる(「目次へ戻る」はリンクのため) */
+   行の高さは button の標準(normal)にそろえる(「目次へ戻る」はリンクのため)。
+   .btn-aux: 戻る・移動・追加読み込み用の補助ボタンの共通の大きさ(今後追加する補助ボタンも、原則このクラスを付けてこの大きさにする)。
+   ディーラー受注一覧の「もっと見る」「過去の注文をもっと見る」で使用 */
 #btnHistoryClose, .manual-back, .manual-toc, #btnApplicationsClose, #btnPreregClose, .dealer-operator > .settings-head > .btn-secondary,
-#btnOnboardingClose, #btnDealerSettingsClose, .dealer-detail > .btn[data-act="back"] {
+#btnOnboardingClose, #btnDealerSettingsClose, .dealer-detail > .btn[data-act="back"], .btn.btn-aux {
   min-height: 36px; padding-top: 6px; padding-bottom: 6px; font-size: 0.9rem; line-height: normal;
 }
 

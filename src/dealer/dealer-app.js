@@ -274,7 +274,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     const search = h("button", { type: "button", class: "btn btn-primary", id: "btnDealerSearch" }, "この条件で表示");
     const clear = h("button", { type: "button", class: "btn btn-secondary", id: "btnDealerClear" }, "条件をクリア");
     const listBox = h("div", { class: "dealer-results", id: "dealerResults" });
-    const more = h("button", { type: "button", class: "btn btn-secondary history-more", id: "btnDealerMore", hidden: true }, "もっと見る");
+    const more = h("button", { type: "button", class: "btn btn-secondary btn-aux history-more", id: "btnDealerMore", hidden: true }, "もっと見る");
     // 件数・状態(一覧の直前に控えめに表示)
     const listMsg = h("p", { class: "form-hint dealer-list-count", role: "status", id: "dealerListMsg" });
     // 「絞り込み」の右のⓘ: 絞り込みの使い方と、検索時点・反映の時間差の説明(検索時点の日時は常時表示しない)
@@ -405,9 +405,9 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
               })))))));
         }
       }
-      const up = weeks.length || loadingUp ? h("button", { type: "button", class: "btn btn-secondary history-more history-more-past", "data-act": "more-past", disabled: loadingUp }, loadingUp ? "読み込み中…" : "過去の注文をもっと見る") : null;
+      const up = weeks.length || loadingUp ? h("button", { type: "button", class: "btn btn-secondary btn-aux history-more history-more-past", "data-act": "more-past", disabled: loadingUp }, loadingUp ? "読み込み中…" : "過去の注文をもっと見る") : null;
       if (up) up.addEventListener("click", () => loadWeeks("up"));
-      const down = weeks.length || !loadingDown ? h("button", { type: "button", class: "btn btn-secondary history-more", "data-act": "more", disabled: loadingDown }, loadingDown ? "読み込み中…" : "もっと見る") : null;
+      const down = weeks.length || !loadingDown ? h("button", { type: "button", class: "btn btn-secondary btn-aux history-more", "data-act": "more", disabled: loadingDown }, loadingDown ? "読み込み中…" : "もっと見る") : null;
       if (down) down.addEventListener("click", () => loadWeeks("down"));
       surgeryBox.replaceChildren(...[up, upNote ? h("p", { class: "form-hint dealer-surgery-note", "data-note": "up" }, upNote) : null,
         rows.length ? h("ul", { class: "history-list dealer-surgery-list" }, rows) : (loadingDown ? h("p", { class: "form-hint" }, "読み込み中…") : null),
