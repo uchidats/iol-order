@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orderLinesOf, summarizeOrder, sortOrdersNewestFirst, formatDateTimeJst, toMillis, describeLine } from "../src/domain/order-history.js";
-import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, HISTORY_CARD_LINES } from "../src/domain/order-history-view.js";
+import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, HISTORY_CARD_LINES, todayJst } from "../src/domain/order-history-view.js";
 import { formatShortSurgeryDate } from "../src/ui/confirm-lines.js";
 import { orderLinesOf as serverOrderLinesOf } from "../functions/src/orders.js";
 
@@ -177,4 +177,10 @@ test("一覧の手術日の短い表記: 「11/10(火)」。読めなければ�
   assert.equal(formatShortSurgeryDate("2026-11-10"), "11/10(火)");
   assert.equal(formatShortSurgeryDate("2027-01-03"), "1/3(日)");
   assert.equal(formatShortSurgeryDate("不明"), "不明");
+});
+
+test("日本時間の今日: 端末のタイムゾーンによらず、UTC 15:00 で日付が変わる", () => {
+  assert.equal(todayJst(new Date("2026-11-02T14:59:59Z")), "2026-11-02");
+  assert.equal(todayJst(new Date("2026-11-02T15:00:00Z")), "2026-11-03");
+  assert.equal(todayJst(new Date("2026-12-31T15:00:00Z")), "2027-01-01");
 });

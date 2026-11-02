@@ -1,5 +1,5 @@
 import { sortOrdersNewestFirst } from "../domain/order-history.js";
-import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups } from "../domain/order-history-view.js";
+import { summarizeHistoryOrder, visibleOrders, groupHistoryLinesByDealer, historyCardGroups, todayJst } from "../domain/order-history-view.js";
 import { groupLinesByDateAndDoctor } from "../domain/order-lines.js";
 import { summaryDateHead, summaryLineMain, formatShortSurgeryDate } from "./confirm-lines.js";
 import { confirmDialog } from "./confirm-dialog.js";
@@ -37,8 +37,9 @@ const SCAN_MAX = 100;                  // 注文日順で1回に読む上限(論
  * @param {object} deps.repository listOrdersPage・listSurgeryIndexPage・getOrder(ない環境では listOrders の1回だけ)
  * @param {(facilityId:string, orderId:string) => Promise<object>} [deps.deleteOrder] 注文の削除(論理削除)
  * @param {() => void} deps.onClose 「注文画面に戻る」
+ * @param {() => string} [deps.today] 日本時間の今日(YYYY-MM-DD)。テストで固定するときだけ渡す
  */
-export function createOrderHistory({ mount, repository, deleteOrder = null, onClose }) {
+export function createOrderHistory({ mount, repository, deleteOrder = null, onClose, today = todayJst }) {
   const root = h("section", { id: "orderHistory", class: "settings-view order-history", hidden: true });
   mount.insertBefore(root, mount.firstChild);
   let open = false;
@@ -49,7 +50,9 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   let mode = "created";   // "created"(注文日順)/ "surgery"(手術日順)
   let rows = [];          // 表示中の行 { order, surgeryDate?, lineNos? }
   let cursor = null, hasMore = false, loading = false;
-  const buffered = [];       // 注文日順で読んだが、まだ出していない注文(20件ずつ出すため)
+  let includePast = false;   // 手術日順の「過去分」(初期はOFF = 日本時間の今日以降の手術日だけ)
+  let surgeryFrom = null;    // 手術日順で読む手術日の下限。読み直しのときに決め、「もっと見る」でも同じ条件で読む(日付が変わってもずれない)
+  const buffered = [];       // 読んだが、まだ出していない行(20件ずつ出すため。論理削除を飛ばして読み足す)
   const cache = new Map();   // 注文ID → 表示用データ(手術日順で同じ注文が複数の行になる)
   const paged = () => typeof repository.listOrdersPage === "function";
   const canSurgery = () => typeof repository.listSurgeryIndexPage === "function" && typeof repository.getOrder === "function";
@@ -111,7 +114,10 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       h("dl", { class: "summary-list" }, notesItem(o)));
   }
 
-  /** 並び順の切替(注文日順・手術日順) */
+  /**
+   * 並び順の切替(注文日順・手術日順)と、右の小さな選択式ボタン(押すたびにON/OFF。ONは青)。
+   * 「過去分」は手術日順のときだけ表示する(状態は並び順を切り替えても保つ)。切り替えると先頭から読み直す
+   */
   function sortBar() {
     if (!canSurgery()) return null;
     const btn = (m, label) => {
@@ -119,12 +125,16 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       b.addEventListener("click", () => { if (mode !== m) { mode = m; reload(); } });
       return b;
     };
-    return h("div", { class: "history-sort", role: "group", "aria-label": "並び順" }, btn("created", "注文日順"), btn("surgery", "手術日順"));
+    const sort = h("div", { class: "history-sort", role: "group", "aria-label": "並び順" }, btn("created", "注文日順"), btn("surgery", "手術日順"));
+    if (mode !== "surgery") return sort;
+    const past = h("button", { type: "button", class: "history-filter-btn", "data-filter": "past", "aria-pressed": String(includePast), title: "過去の手術日も表示する" }, "過去分");
+    past.addEventListener("click", () => { includePast = !includePast; reload(); });
+    return h("div", { class: "history-sort-bar" }, sort, h("div", { class: "history-filters", role: "group", "aria-label": "表示する注文" }, past));
   }
 
   /**
    * 一覧のカード(押すと詳細)。上に明細(「手術日 + 担当医」ごと。手術日は短い表記。各行は詳細と同じ部品でメーカー・モデル・度数・枚数)を最大5行、
-   * 超えた分は「ほか N件」。下に注文日時・発注者・件数を控えめに。発注先名は出さない(詳細だけ)。
+   * 超えた分は「ほか N件」。取消済み・テストのバッジは残す。注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)。
    * 手術日順はその手術日のレンズだけ(同じ注文のほかの手術日は別のカード)
    */
   function rowView(r) {
@@ -140,12 +150,8 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     const btn = h("button", { type: "button", class: ["history-row", "history-card", surgery ? "history-row-surgery" : "", o.cancelled ? "is-cancelled" : ""].filter(Boolean).join(" "),
       "data-order": o.id, ...(surgery ? { "data-surgery": r.surgeryDate } : {}) },
       groups.map((g, i) => h("div", { class: "history-card-group" }, head(g, i), h("ul", { class: "history-card-lines" }, g.lines.map(lineView)))),
-      groups.length ? null : (badges.length ? h("div", { class: "history-card-head" }, h("span", { class: "history-card-badges" }, badges)) : null),
-      hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null,
-      h("div", { class: "history-meta" },
-        h("span", { class: "history-date" }, `注文 ${o.createdAtLabel}`),
-        h("span", { class: "history-by" }, o.isProxyEntry ? `${o.orderedBy}（代行入力）` : o.orderedBy),
-        h("span", { class: "history-count" }, r.lineNos && onDate.length !== o.lines.length ? `この日 ${totalLabel(onDate)}（注文全体 ${o.lineCount}件）` : `${o.lineCount}件・合計${o.totalQuantity}枚`)));
+      groups.length ? null : h("div", { class: "history-card-head" }, h("span", {}, "明細の記録なし"), badges.length ? h("span", { class: "history-card-badges" }, badges) : null),
+      hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null);
     btn.addEventListener("click", () => renderDetail(o.id));
     return h("li", {}, btn);
   }
@@ -154,13 +160,16 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     selectedId = null;
     const list = rows.length
       ? h("ul", { class: "history-list" }, rows.map(rowView))
-      : h("p", { class: "form-hint" }, loading ? "読み込み中…" : "この施設の注文はまだありません。");
+      : h("p", { class: "form-hint" }, loading ? "読み込み中…" : mode === "surgery" && !includePast ? "今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。" : "この施設の注文はまだありません。");
     const more = (hasMore || buffered.length) && rows.length ? h("button", { type: "button", class: "btn btn-secondary history-more", "data-act": "more", disabled: loading }, loading ? "読み込み中…" : "もっと見る") : null;
     if (more) more.addEventListener("click", () => loadMore());
     body.replaceChildren(...[sortBar(), list, more].filter(Boolean));
   }
 
-  /** 次の20件を読む(注文日順は論理削除した注文を飛ばしながら。手術日順は索引から) */
+  /**
+   * 次の20件を読む(論理削除した注文を飛ばしながら、20件そろうまで読み足す。一度に読む上限あり)。
+   * 注文日順は注文の新しい順。手術日順は索引から手術日の早い順で、「過去分」がOFFなら日本時間の今日以降だけ
+   */
   async function loadMore() {
     if (loading || !facility) return;
     const mySeq = seq;
@@ -182,24 +191,30 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
           for (const raw of r.orders) {
             const o = summarizeHistoryOrder(raw);
             cache.set(o.id, o);
-            if (!o.deleted) buffered.push(o);
+            if (!o.deleted) buffered.push({ order: o });
           }
         }
-        rows.push(...buffered.splice(0, HISTORY_PAGE).map(order => ({ order })));
+        rows.push(...buffered.splice(0, HISTORY_PAGE));
       } else {
-        const r = await repository.listSurgeryIndexPage(facility.id, { limit: HISTORY_PAGE, cursor });
-        if (stale()) return;
-        const missing = [...new Set(r.entries.map(e => e.orderId).filter(id => !cache.has(id)))];
-        const got = await Promise.all(missing.map(id => repository.getOrder(facility.id, id)));
-        if (stale()) return;
-        got.forEach(raw => { if (raw) cache.set(raw.id, summarizeHistoryOrder(raw)); });
-        cursor = r.cursor; hasMore = r.hasMore;
-        for (const e of r.entries) {
-          const o = cache.get(e.orderId);
-          if (o && !o.deleted) rows.push({ order: o, surgeryDate: e.surgeryDate || "", lineNos: Array.isArray(e.lineNos) ? e.lineNos : null });   // 削除の直後で索引の印が遅れても出さない
+        let scanned = 0;
+        while (buffered.length < HISTORY_PAGE && hasMore && scanned < SCAN_MAX) {
+          const r = await repository.listSurgeryIndexPage(facility.id, { limit: HISTORY_PAGE, cursor, fromDate: surgeryFrom });
+          if (stale()) return;
+          cursor = r.cursor; hasMore = r.hasMore; scanned += r.entries.length;
+          const live = r.entries.filter(e => e.deleted !== true);   // 論理削除した注文の索引は読まない
+          const missing = [...new Set(live.map(e => e.orderId).filter(id => !cache.has(id)))];
+          const got = await Promise.all(missing.map(id => repository.getOrder(facility.id, id)));
+          if (stale()) return;
+          got.forEach(raw => { if (raw) cache.set(raw.id, summarizeHistoryOrder(raw)); });
+          for (const e of live) {
+            const o = cache.get(e.orderId);
+            if (o && !o.deleted) buffered.push({ order: o, surgeryDate: e.surgeryDate || "", lineNos: Array.isArray(e.lineNos) ? e.lineNos : null });   // 削除の直後で索引の印が遅れても出さない
+          }
         }
+        rows.push(...buffered.splice(0, HISTORY_PAGE));
       }
-      status.textContent = rows.length ? `${rows.length}件を表示しています${hasMore || buffered.length ? "（「もっと見る」で過去の注文をさかのぼれます）" : ""}。` : "";
+      const moreHint = mode === "surgery" ? "（「もっと見る」で続きを表示できます）" : "（「もっと見る」で過去の注文をさかのぼれます）";
+      status.textContent = rows.length ? `${rows.length}件を表示しています${hasMore || buffered.length ? moreHint : ""}。` : "";
     } catch (e) {
       if (stale()) return;
       console.error("注文履歴の読み込みに失敗しました:", e);
@@ -212,7 +227,8 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   /** 並び順の切替・施設を開いたとき: 先頭から読み直す */
   function reload() {
     seq++;
-    rows = []; cursor = null; hasMore = mode === "created" && paged(); loading = false; cache.clear(); buffered.length = 0;
+    rows = []; cursor = null; hasMore = mode === "created" ? paged() : canSurgery(); loading = false; cache.clear(); buffered.length = 0;
+    surgeryFrom = includePast ? null : today();
     status.textContent = "読み込み中…";
     renderList();
     return loadMore();
@@ -289,6 +305,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       facility = fac;
       canDelete = fac.canDelete === true;
       mode = "created";
+      includePast = false;
       root.hidden = false;
       open = true;
       await reload();

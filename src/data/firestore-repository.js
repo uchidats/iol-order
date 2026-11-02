@@ -42,13 +42,15 @@ export function createFirestoreRepository(db, fs) {
       return { orders: snap.docs.map(d => ({ id: d.id, facilityId, ...d.data() })), cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor, hasMore: snap.docs.length === limit };
     },
     /**
-     * 手術日順の1ページ(手術日の新しい順、同じ日は注文日の新しい順)。索引(orderSurgeryIndex)は注文ID×手術日なので、手術日が複数の注文は日ごとに出る。
-     * 論理削除した注文の索引は除く(削除済みで枠が埋まらない)
-     * @returns {Promise<{entries:Array<{orderId:string, surgeryDate:string, lineNos:number[]}>, cursor:object|null, hasMore:boolean}>}
+     * 手術日順の1ページ(手術日の早い順、同じ日は索引のID順)。索引(orderSurgeryIndex)は注文ID×手術日なので、手術日が複数の注文は日ごとに出る。
+     * fromDate(YYYY-MM-DD)を指定するとその日以降だけ。指定しなければ手術日のある全件(手術日の記録なしの索引は除く。注文日順で確認できる)。
+     * 手術日だけの条件と並びにして、自動の単一フィールドのインデックスで読む(複合インデックスを増やさない)。
+     * そのため論理削除した注文の索引も返す(deleted: true)。除くのは呼び出し側(order-history.js が読み足しながら20件にそろえる)
+     * @returns {Promise<{entries:Array<{orderId:string, surgeryDate:string, lineNos:number[], deleted:boolean}>, cursor:object|null, hasMore:boolean}>}
      */
-    async listSurgeryIndexPage(facilityId, { limit = 20, cursor = null } = {}) {
-      const q = fs.query(fs.collection(db, "facilities", facilityId, "orderSurgeryIndex"), fs.where("deleted", "==", false),
-        fs.orderBy("surgeryDate", "desc"), fs.orderBy("createdAt", "desc"), ...(cursor ? [fs.startAfter(cursor)] : []), fs.limit(limit));
+    async listSurgeryIndexPage(facilityId, { limit = 20, cursor = null, fromDate = null } = {}) {
+      const q = fs.query(fs.collection(db, "facilities", facilityId, "orderSurgeryIndex"), fromDate ? fs.where("surgeryDate", ">=", fromDate) : fs.where("surgeryDate", ">", ""),
+        fs.orderBy("surgeryDate", "asc"), ...(cursor ? [fs.startAfter(cursor)] : []), fs.limit(limit));
       const snap = await fs.getDocs(q);
       return { entries: snap.docs.map(d => ({ id: d.id, ...d.data() })), cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor, hasMore: snap.docs.length === limit };
     },

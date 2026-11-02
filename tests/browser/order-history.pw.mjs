@@ -34,14 +34,15 @@ window.__asked = [];
 window.__deleted = [];
 window.__data = { f1: orders };
 const dataOf = async (fid) => (window.__defer && window.__defer[fid] ? await window.__defer[fid] : (window.__data[fid] || orders));
-const surgeryEntries = (list) => list.flatMap(o => {
+// Firestore の手術日順のクエリと同じ: 手術日 >= fromDate(指定なしは手術日のある全件)・手術日の早い順・同じ日は索引のID順。論理削除の索引も返す(画面が除く)
+const surgeryEntries = (list, fromDate) => list.flatMap(o => {
   const ls = Array.isArray(o.lines) ? o.lines : (o.item ? [{ lineNo: 1, surgeryDate: o.surgeryDate }] : []);
   const by = new Map();
   ls.forEach((l, i) => { const d = l.surgeryDate || ""; if (!by.has(d)) by.set(d, []); by.get(d).push(l.lineNo || i + 1); });
   return [...by].map(([surgeryDate, lineNos]) => ({ id: o.id + "_" + (surgeryDate || "nodate"), orderId: o.id, surgeryDate, lineNos, ms: o.createdAt.toMillis(), deleted: o.deleted === true }));
-}).filter(e => !e.deleted).sort((a, b) => b.surgeryDate.localeCompare(a.surgeryDate) || b.ms - a.ms);
+}).filter(e => fromDate ? e.surgeryDate >= fromDate : e.surgeryDate > "").sort((a, b) => a.surgeryDate.localeCompare(b.surgeryDate) || a.id.localeCompare(b.id));
 const pageOf = (list, limit, cursor) => { const start = cursor ?? 0; const page = list.slice(start, start + limit); return { page, cursor: start + page.length, hasMore: page.length === limit }; };
-window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose: () => { window.__closed++; },
+window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose: () => { window.__closed++; }, today: () => window.__today || "2026-11-03",
   deleteOrder: async (fid, oid) => { window.__deleted.push([fid, oid]); if (window.__deleteFail) throw Object.assign(new Error(window.__deleteMsg || "denied"), { code: window.__deleteFail }); return { orderId: oid, deleted: true, cancelledMails: window.__cancelled || 0 }; },
   repository: {
     listOrdersPage: async (fid, { limit, cursor }) => {
@@ -49,9 +50,9 @@ window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose
       const r = pageOf([...await dataOf(fid)].sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()), limit, cursor);
       return { orders: r.page, cursor: r.cursor, hasMore: r.hasMore };
     },
-    listSurgeryIndexPage: async (fid, { limit, cursor }) => {
-      window.__asked.push(["surgery", fid, limit, cursor ?? null]);
-      const r = pageOf(surgeryEntries(await dataOf(fid)), limit, cursor);
+    listSurgeryIndexPage: async (fid, { limit, cursor, fromDate }) => {
+      window.__asked.push(["surgery", fid, limit, cursor ?? null, fromDate ?? null]);
+      const r = pageOf(surgeryEntries(await dataOf(fid), fromDate), limit, cursor);
       return { entries: r.page, cursor: r.cursor, hasMore: r.hasMore };
     },
     getOrder: async (fid, id) => { window.__asked.push(["get", fid, id]); return (await dataOf(fid)).find(o => o.id === id) || null; }
@@ -102,16 +103,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "注文日順");
       const rows = await page.locator(".history-row").evaluateAll(rs => rs.map(r => r.innerText.replace(/\s+/g, " ").trim()));
       assert.equal(rows.length, 3);
-      // カード: 明細(「手術日(短い表記) + 担当医」ごと・メーカー/モデル/度数/枚数)、下に注文日時・発注者・件数。発注先名は出さない
+      // カード: 明細(「手術日(短い表記) + 担当医」ごと・メーカー/モデル/度数/枚数)とバッジ(テスト・取消済み)だけ。
+      // 注文日時・発注者・件数・合計枚数・発注先名は出さない(詳細で確認する)
       assert.deepEqual(rows, [
-        "11/10(火) 山田Dr テスト J&J DIB00V +20.0D 1枚 11/12(木) 佐藤Dr J&J DIW300 +18.5D 2枚 注文 2026/10/25 14:30 ログイン太郎 2件・合計3枚",
-        "10/1(木) 旧注文者Dr J&J DIB00V +20.0D 2枚 注文 2026/09/01 09:00 x@example.jp 1件・合計2枚",
-        "9/1(火) 最古注文者Dr J&J DIB00V +20.0D 1枚 注文 2026/08/01 09:00 （不明） 1件・合計1枚"]);
-      assert.equal(await page.locator(".history-row").evaluateAll(rs => rs.some(r => r.innerText.includes("A商会"))), false, "発注先名は一覧に出さない");
-      // 強調: モデル・度数・枚数は太字、補足(注文日時・発注者・件数)は小さい文字
+        "11/10(火) 山田Dr テスト J&J DIB00V +20.0D 1枚 11/12(木) 佐藤Dr J&J DIW300 +18.5D 2枚",
+        "10/1(木) 旧注文者Dr J&J DIB00V +20.0D 2枚",
+        "9/1(火) 最古注文者Dr J&J DIB00V +20.0D 1枚"]);
+      assert.equal(await page.locator(".history-row").evaluateAll(rs => rs.some(r => /A商会|ログイン太郎|x@example|2026\/|合計|件/.test(r.innerText))), false, "注文日時・発注者・件数・発注先名は一覧に出さない");
+      assert.equal(await page.locator("#orderHistory .history-meta, #orderHistory .history-row .history-date, #orderHistory .history-row .history-by, #orderHistory .history-row .history-count").count(), 0);
+      // 強調: モデル・度数・枚数は太字
       const look = await page.locator('[data-order="new"]').evaluate(b => { const q = (s) => getComputedStyle(b.querySelector(s));
-        return { model: Number(q(".summary-model").fontWeight), power: Number(q(".summary-power").fontWeight), qty: Number(q(".summary-qty").fontWeight), meta: parseFloat(q(".history-meta").fontSize), line: parseFloat(q(".summary-model").fontSize) }; });
-      assert.ok(look.model >= 700 && look.power >= 700 && look.qty >= 700 && look.meta < look.line, JSON.stringify(look));
+        return { model: Number(q(".summary-model").fontWeight), power: Number(q(".summary-power").fontWeight), qty: Number(q(".summary-qty").fontWeight) }; });
+      assert.ok(look.model >= 700 && look.power >= 700 && look.qty >= 700, JSON.stringify(look));
       for (const w of [320, 390, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
@@ -119,12 +122,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal((await page.locator("#orderHistory .settings-head").innerText()).replace(/\s+/g, " ").trim(), "注文履歴 注文画面に戻る", `見出しに施設名を出さない ${w}`);
         assert.ok(await page.evaluate(() => { const h = document.querySelector("#orderHistory .settings-head").getBoundingClientRect(), b = document.querySelector("#btnHistoryClose").getBoundingClientRect(), t = document.querySelector("#orderHistory .settings-head h2").getBoundingClientRect();
           return Math.abs(b.right - h.right) < 1 && Math.abs((b.top + b.bottom) / 2 - (t.top + t.bottom) / 2) < 2; }), `「注文画面に戻る」は見出しと同じ行の右端 ${w}`);
-        const overlap = await page.locator(".history-row").evaluateAll(rs => rs.some(r => {
-          const b = ["history-date", "history-count", "history-by"].map(c => r.querySelector("." + c).getBoundingClientRect());
-          const hit = (x, y) => x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
-          return hit(b[0], b[1]) || hit(b[0], b[2]) || hit(b[1], b[2]);
-        }));
-        assert.equal(overlap, false, `注文日順の行の文字が重ならない ${w}`);
+        // カードの最後は明細(補足の行がなく、下に余分な余白が残らない)
+        const gap = await page.locator(".history-row").evaluateAll(rs => rs.map(r => { const g = r.querySelectorAll(".history-card-group"); return r.getBoundingClientRect().bottom - g[g.length - 1].getBoundingClientRect().bottom; }));
+        assert.ok(gap.every(g => g >= 0 && g <= 12), `カードの下の余白 ${w}: ${gap}`);
       }
       // 詳細(現行形式・発注先が2社): 確認画面と同じく、ディーラーごとのまとまり。手術日・担当医は見出しにまとめ、レンズの行は「IOL名・度数・枚数」だけ
       await page.locator('[data-order="new"]').click();
@@ -341,46 +341,91 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(shown.at(-1), "o44", "最も古い注文までさかのぼれる");
       const asked = await page.evaluate(() => window.__asked.filter(a => a[0] === "orders").map(a => a[3]));
       assert.ok(asked.length <= 5, "一度に全件は読まない: " + JSON.stringify(asked));
-      // 手術日順: 手術日の新しい順。o02 は 11/28 と 11/02 の2行。削除済みは出さない
+      // 注文日順には「過去分」を出さない
+      assert.equal(await page.locator('[data-filter="past"]').count(), 0);
+      // 手術日順: 手術日の早い順。初めは「過去分」OFF = 日本時間の今日(テストでは 2026-11-03)以降だけ。削除済みは出さない
+      await page.evaluate(() => { window.__asked = []; });
       await page.click('[data-sort="surgery"]');
       await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "surgery" && document.querySelectorAll(".history-row").length === 20);
+      assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "false", "初期はOFF");
+      assert.equal(await page.locator('[data-filter="past"]').innerText(), "過去分");
+      assert.equal(await page.locator('input[type="checkbox"]').count(), 0, "チェックボックスではなく選択式のボタン");
       shown = await ids();
-      assert.deepEqual(shown.slice(0, 3), ["o00@2026-11-30", "o28@2026-11-30", "o29@2026-11-29"], "同じ手術日は注文日の新しい順");
-      const dates = shown.map(id => id.split("@")[1]);
-      assert.deepEqual([...dates].sort().reverse(), dates, "手術日の新しい順");
-      // 手術日順のカードは、その手術日のレンズだけ(o02 の 11/2 のレンズは 11/28 のカードに出さない)
-      const o02 = (await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText()).replace(/\s+/g, " ").trim();
-      assert.match(o02, /^11\/28\(土\) \S+Dr .*1枚 注文 .* この日 1件・合計1枚（注文全体 2件）$/, o02);
-      assert.equal(await page.locator('[data-order="o02"][data-surgery="2026-11-28"] .history-line').count(), 1);
-      assert.ok(!o02.includes("11/2("), "ほかの手術日のレンズは出さない");
-      // スマホ(320〜430)・PC: 明細・補足の文字が重ならず、横にはみ出さない
-      const boxes = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => [".history-card-head", ".history-card-lines", ".history-date", ".history-count", ".history-by"].map(c => { const b = r.querySelector(c).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; })));
+      assert.deepEqual(shown.slice(0, 3), ["o27@2026-11-03", "o26@2026-11-04", "o25@2026-11-05"], "今日から手術日の早い順");
+      let dates = shown.map(id => id.split("@")[1]);
+      assert.deepEqual([...dates].sort(), dates, "手術日の早い順");
+      assert.ok(shown.every(id => { const n = Number(id.slice(1, 3)); return !(n % 2 === 1 && n < 20); }), "論理削除の索引は出さない: " + shown.join(","));
+      assert.ok((await page.evaluate(() => window.__asked.filter(a => a[0] === "surgery"))).every(a => a[4] === "2026-11-03"), "今日以降の条件で読む");
+      // スマホ(320〜430)・PC: 見出しと明細の文字が重ならず、横にはみ出さない
+      const boxes = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => [".history-card-head", ".history-card-lines"].map(c => { const b = r.querySelector(c).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; })));
       const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
       for (const w of [320, 390, 430, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         for (const bs of await boxes()) {
           const pairs = bs.flatMap((a, i) => bs.slice(i + 1).map(b => [a, b]));
           assert.ok(pairs.every(([a, b]) => !hit(a, b)), `${w}: 重なりなし ${JSON.stringify(bs)}`);
-          assert.ok(bs[0].b <= bs[1].t + 0.5 && bs[1].b <= Math.min(bs[2].t, bs[3].t, bs[4].t) + 0.5, `${w}: 見出し → 明細 → 補足の順`);
+          assert.ok(bs[0].b <= bs[1].t + 0.5, `${w}: 見出し → 明細の順`);
         }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
       }
       await page.setViewportSize({ width: 390, height: 900 });
-      for (let i = 0; i < 3 && await page.locator('[data-act="more"]').count(); i++) {
-        const n = (await ids()).length;
-        await page.click('[data-act="more"]');
-        await page.waitForFunction((n) => document.querySelectorAll(".history-row").length > n || !document.querySelector('[data-act="more"]'), n);
-      }
-      shown = await ids();
+      const loadAll = async () => {
+        for (let i = 0; i < 4 && await page.locator('[data-act="more"]').count(); i++) {
+          const n = (await ids()).length;
+          await page.click('[data-act="more"]');
+          await page.waitForFunction((n) => document.querySelectorAll(".history-row").length > n || !document.querySelector('[data-act="more"]'), n);
+        }
+        return ids();
+      };
+      // 「もっと見る」でも今日以降の条件を保つ(o02 の 11/2 は出さない)
+      shown = await loadAll();
+      assert.equal(shown.length, 35, "今日以降: 35件の注文(o02 の 11/2 の行は過去)");
+      assert.ok(!shown.includes("o02@2026-11-02") && shown.includes("o02@2026-11-28"));
+      assert.equal(new Set(shown).size, 35, "重複なし");
+      dates = shown.map(id => id.split("@")[1]);
+      assert.deepEqual([...dates].sort(), dates, "追加の読み込みでも手術日の早い順");
+      assert.ok((await page.evaluate(() => window.__asked.filter(a => a[0] === "surgery"))).every(a => a[4] === "2026-11-03"), "続きも同じ条件");
+      // 手術日順のカードは、その手術日のレンズだけ(o02 の 11/2 のレンズは 11/28 のカードに出さない)
+      const o02 = (await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText()).replace(/\s+/g, " ").trim();
+      assert.match(o02, /^11\/28\(土\) \S+Dr \S+ \S+ [+-]\d+\.\dD 1枚$/, o02);   // 明細だけ(注文日時・件数は出さない)
+      assert.equal(await page.locator('[data-order="o02"][data-surgery="2026-11-28"] .history-line').count(), 1);
+      // 「過去分」ON: 先頭から読み直し、過去の手術日も含めて早い順。続きも同じ条件
+      await page.evaluate(() => { window.__asked = []; });
+      await page.click('[data-filter="past"]');
+      await page.waitForFunction(() => document.querySelector('.history-row[data-surgery]') && document.querySelectorAll(".history-row").length === 20);
+      assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "true");
+      // 選択中は青地・白文字で、OFFと明確に区別できる
+      const pastBg = await page.locator('[data-filter="past"]').evaluate(e => getComputedStyle(e).backgroundColor.match(/\d+/g).map(Number));
+      assert.ok(pastBg[2] > 150 && pastBg[2] - pastBg[0] > 80, "ONは青: " + pastBg);
+      shown = await loadAll();
+      assert.equal(shown[0], "o02@2026-11-02", "過去の手術日から早い順");
       assert.equal(shown.length, 36, "35件の注文 + 手術日が2つの注文の2行目");
       assert.ok(shown.includes("o02@2026-11-02") && shown.includes("o02@2026-11-28"), "手術日が複数の注文は、それぞれの手術日に出る");
       assert.equal(new Set(shown).size, 36);
+      dates = shown.map(id => id.split("@")[1]);
+      assert.deepEqual([...dates].sort(), dates);
+      const askedPast = await page.evaluate(() => window.__asked.filter(a => a[0] === "surgery"));
+      assert.ok(askedPast.length >= 2 && askedPast.every(a => a[4] === null), "過去分を含む条件で読む(続きも): " + JSON.stringify(askedPast));
+      assert.equal(askedPast[0][3], null, "切り替えたら先頭から読み直す");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "横スクロール");
       // 手術日順の行から詳細 → 一覧へ戻ると、並び順と読み込んだ行を保つ
       await page.locator('[data-order="o02"][data-surgery="2026-11-02"]').click();
       assert.equal(await page.locator(".summary-date-group").count(), 2, "詳細は注文全体(手術日2つ)");
       await page.click('[data-act="back"]');
       assert.equal((await ids()).length, 36);
       assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "手術日順");
+      assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "true", "詳細から戻っても「過去分」を保つ");
+      // 並び順を切り替えても選択状態を保つ(注文日順では「過去分」を出さない)。戻すと同じ条件で読み直す
+      await page.click('[data-sort="created"]');
+      await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "created" && document.querySelectorAll(".history-row").length === 20);
+      assert.equal(await page.locator('[data-filter="past"]').count(), 0);
+      await page.evaluate(() => { window.__asked = []; });
+      await page.click('[data-sort="surgery"]');
+      await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "surgery" && document.querySelectorAll(".history-row").length === 20);
+      assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "true", "並び順を切り替えても「過去分」を保つ");
+      assert.equal(await page.evaluate(() => window.__asked.find(a => a[0] === "surgery")[4]), null);
+      shown = await loadAll();
+      assert.equal(shown.length, 36);
       // 削除すると、その注文の行(手術日ごと)はすべて消える
       await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').click();
       await page.click('[data-act="deleteOrder"]');
@@ -458,7 +503,22 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-line').count(), 3);
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-20"] .history-line').count(), 4);
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-cancelled-badge').count(), 1);
-      assert.match(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-count').innerText(), /この日 3件・合計3枚（注文全体 7件）/);
+      assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-count').count(), 0, "件数は一覧に出さない(詳細で確認)");
+      // 詳細では従来どおり、注文日時・発注者・注文全体の合計を確認できる
+      await page.locator('[data-order="c1"][data-surgery="2026-11-21"]').click();
+      assert.match(await page.locator(".history-detail-head").innerText(), /注文日時 2026\/10\/30 09:00 ・ 発注者 発注者/);
+      assert.equal(await page.locator(".history-total").innerText(), "7件・合計7枚");
+      // 今日以降に手術予定がない(すべて過去): OFFでは案内だけ。ONにすると過去分を表示する。施設を開き直すとOFF・注文日順に戻る
+      await page.evaluate(async () => { window.__today = "2027-01-01"; await window.__h.open({ id: "f5", name: "カードの施設" }); });
+      await page.click('[data-sort="surgery"]');
+      await page.getByText("今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。").waitFor();
+      assert.equal(await page.locator(".history-row").count(), 0);
+      await page.click('[data-filter="past"]');
+      await page.waitForFunction(() => document.querySelectorAll('.history-row[data-surgery]').length === 3);
+      await page.evaluate(async () => { window.__today = null; await window.__h.open({ id: "f5", name: "カードの施設" }); });
+      assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "注文日順");
+      await page.click('[data-sort="surgery"]');
+      assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "false", "開き直すとOFF");
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });

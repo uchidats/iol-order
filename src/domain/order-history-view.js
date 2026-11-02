@@ -67,3 +67,9 @@ export function historyCardGroups(lines, max = HISTORY_CARD_LINES) {
   }
   return { groups, hidden: Math.max(0, all.length - max) };
 }
+
+/** 日本時間の今日(YYYY-MM-DD)。手術日順の「過去分を表示」がOFFのとき、この日以降の手術日だけを出す(端末のタイムゾーンによらない) */
+export function todayJst(now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
