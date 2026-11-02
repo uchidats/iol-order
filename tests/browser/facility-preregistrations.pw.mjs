@@ -139,6 +139,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.waitForFunction(() => document.querySelectorAll(".prereg-item").length === 1);
       assert.deepEqual((await page.evaluate(() => window.__calls)).at(-1), ["cancel", { facilityId: "fac-aaaaaaaaaaaaaaaaaaaaaaaa" }]);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "スマートフォン幅ではみ出さない");
+      // 注文画面に戻る(注文履歴の「← 一覧へ戻る」と同じ高さ 36px・文字 0.9rem)
+      assert.deepEqual(await page.locator("#btnPreregClose").evaluate(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10]), [36, 14.4]);
       await page.click("#btnPreregClose");
       assert.equal(await page.evaluate(() => window.__closed), true);
       assert.deepEqual(errors, []);

@@ -214,6 +214,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok((await page.locator(".dealer-detail").innerText()).includes("<b>山田</b>"), "担当医名も文字のまま");
         assert.equal(await page.locator(".dealer-detail b, .dealer-detail img").count(), 0);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 詳細が横にはみ出さない`);
+        // 「← 一覧へ戻る」は医療機関側の注文履歴と同じ高さ 36px・文字 0.9rem
+        assert.deepEqual(await page.locator('.dealer-detail > [data-act="back"]').evaluate(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10]), [36, 14.4], `${width}: ← 一覧へ戻る の高さ`);
         await page.click('[data-act="back"]');
         await page.mouse.move(0, 0);   // 戻った後の位置にⓘがあると、マウスのホバーで説明が開くため離す
         // 選択を解除 → 0件(自動で全選択に戻さない)
@@ -833,6 +835,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.locator("#dealerSettings .settings-head h2").innerText(), "ディーラー設定");
         assert.equal(await page.locator("#dealerSettings .settings-head .info-tip-btn").count(), 1);
         assert.equal(await page.locator("#btnDealerSettingsClose").innerText(), "受注一覧に戻る");
+        assert.deepEqual(await page.locator("#btnDealerSettingsClose").evaluate(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10]), [36, 14.4], "受注一覧に戻る の高さ");
         assert.equal(await page.locator(".app-header .header-title").innerText(), "受注一覧");
         assert.equal(await page.locator("#dealerCompany").innerText(), "エックス商事", "ヘッダーは「受注一覧」と会社名");
         const names = () => page.locator(".dealer-manage-staff .dealer-manage-name").allInnerTexts();

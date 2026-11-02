@@ -138,6 +138,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const w of [320, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `詳細の横スクロール ${w}`);
+        // 右上の「注文画面に戻る」は「← 一覧へ戻る」と同じ高さ 36px・文字 0.9rem・上下の余白。色・角丸・左右の余白は従来(.btn-secondary)のまま、文字は1行
+        const look = (q) => page.evaluate((s) => { const e = document.querySelector(s), c = getComputedStyle(e);
+          return { h: e.getBoundingClientRect().height, pt: c.paddingTop, pb: c.paddingBottom, fs: c.fontSize, bg: c.backgroundColor, radius: c.borderRadius, pl: c.paddingLeft, oneLine: e.scrollWidth <= e.clientWidth }; }, q);
+        const [top, back] = [await look("#btnHistoryClose"), await look('[data-act="back"]')];
+        assert.deepEqual([top.h, top.pt, top.pb, top.fs, top.bg, top.radius], [back.h, back.pt, back.pb, back.fs, back.bg, back.radius], `${w}px: 「← 一覧へ戻る」と同じ高さ・文字`);
+        assert.deepEqual([top.h, top.pl, top.oneLine], [36, "20px", true], `${w}px: 高さ36px・左右の余白は従来どおり`);
       }
       await page.setViewportSize({ width: 390, height: 900 });
       assert.equal(await page.locator(".history-status").innerText(), "状態 テスト注文（ディーラー未通知）", "テスト注文はディーラーへの送信状態を注文の状態として出さない");

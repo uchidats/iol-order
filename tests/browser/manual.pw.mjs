@@ -117,6 +117,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(await noOverflow(page), `${width}: 1. が横にはみ出さない`);
         const hrefs = await page.locator(".manual-body a").evaluateAll(as => as.map(a => [a.getAttribute("href"), a.target, a.rel]));
         for (const [href, target, rel] of hrefs) assert.deepEqual([/^https:\/\//.test(href), target, rel], [true, "_blank", "noopener noreferrer"], href);
+        // 「目次へ戻る」・見出しと末尾の戻るボタンは、注文履歴の「← 一覧へ戻る」と同じ高さ 36px・文字 0.9rem
+        assert.deepEqual(await page.locator(".manual-toc, .manual-back").evaluateAll(es => es.map(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10])),
+          Array(3).fill([36, 14.4]), `${width}: 目次へ戻る・戻るボタンの高さ`);
         // 目次へ戻る・ブラウザの戻る
         await page.locator(".manual-toc").click();
         await page.waitForFunction(() => location.hash === "#help" && document.querySelector(".manual-body h1"));

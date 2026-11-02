@@ -173,7 +173,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.waitForFunction(() => document.querySelectorAll(".application-recent").length === 2);
       assert.deepEqual(await page.evaluate(() => window.__deletes), ["fac-cccccccccccccccccccccccc"]);
       assert.match(await page.locator("#facilityApplications [role=status]").innerText(), /「品川クリニック」の申請を削除しました/);
-      // 注文画面に戻る
+      // 注文画面に戻る(注文履歴の「← 一覧へ戻る」と同じ高さ 36px・文字 0.9rem)
+      assert.deepEqual(await page.locator("#btnApplicationsClose").evaluate(e => [e.getBoundingClientRect().height, Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10]), [36, 14.4]);
       await page.click("#btnApplicationsClose");
       assert.equal(await page.evaluate(() => window.__closed), true);
       assert.deepEqual(errors, []);
