@@ -2062,6 +2062,11 @@ input[type="date"].form-control {
 #orderHistory .history-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 #orderHistory .history-filter-btn { min-height: 32px; padding: 4px 12px; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #475569; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 #orderHistory .history-filter-btn[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: #fff; }
+/* 手術日順の「過去分」: 上に「過去の注文をもっと見る」、過去分と今日以降の間に「今日(11/3(火))以降」の区切り */
+#orderHistory .history-more-past { margin: 0 auto 12px; }
+#orderHistory .history-list .history-today { padding: 6px 4px 4px; border-top: 2px solid var(--primary); font-size: 0.8rem; font-weight: 700; color: var(--primary); }
+#orderHistory .history-list .history-today + li { border-top: 0; }
+#orderHistory .history-empty { padding: 10px 4px; margin: 0; }
 /* 取消済み: 見落としにくいが目立ちすぎない、控えめなグレーのバッジ */
 .history-cancelled-badge { display: inline-block; padding: 1px 8px; font-size: 0.75rem; font-weight: 600; line-height: 1.5; color: #475569; background: #f1f5f9; border: 1px solid #94a3b8; border-radius: 999px; white-space: nowrap; }
 

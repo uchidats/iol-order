@@ -21,7 +21,7 @@ function h(tag, attrs = {}, ...children) {
 
 const totalLabel = (lines) => `${lines.length}件・合計${lines.reduce((s, l) => s + l.quantity, 0)}枚`;
 export const HISTORY_PAGE = 20;        // 初期表示と「もっと見る」の件数
-const SCAN_MAX = 100;                  // 注文日順で1回に読む上限(論理削除した注文を飛ばしながら、20件そろうまで。読み過ぎない)
+const SCAN_MAX = 200;                  // 1回の「もっと見る」で読む上限(論理削除・取消済みを飛ばしながら、20件そろうまで。読み過ぎない)
 
 /**
  * 注文履歴(閲覧。編集・再注文はない)。選択中の施設の注文を表示する。論理削除した注文は出さない。
@@ -48,14 +48,23 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
   let canDelete = false;   // 施設の管理者・副管理者(表示だけの判定。実行の可否はサーバーが確認する)
   let seq = 0; // 読み込みの世代。施設の切替・並び順の切替・画面を閉じたあとに届いた古い結果は捨てる
   let mode = "created";   // "created"(注文日順)/ "surgery"(手術日順)
-  let rows = [];          // 表示中の行 { order, surgeryDate?, lineNos? }
-  let cursor = null, hasMore = false, loading = false;
-  let includePast = false;   // 手術日順の「過去分」(初期はOFF = 日本時間の今日以降の手術日だけ)
-  let surgeryFrom = null;    // 手術日順で読む手術日の下限。読み直しのときに決め、「もっと見る」でも同じ条件で読む(日付が変わってもずれない)
-  const buffered = [];       // 読んだが、まだ出していない行(20件ずつ出すため。論理削除を飛ばして読み足す)
+  let includePast = false;        // 手術日順の「過去分」(初期OFF = 日本時間の今日以降の手術日だけ)
+  let includeCancelled = false;   // 「取消済み」(初期OFF = 取消済みの注文を出さない。両方の並び順。「過去分」とは別に切り替える)
+  let surgeryToday = null;        // 手術日順の今日(日本時間)。読み直しのときに決め、ページ送りでも同じ境目を使う(日付が変わってもずれない)
+  let listScrollY = 0;            // 詳細を開く前の一覧のスクロール位置(「← 一覧へ戻る」で戻す)
+  /**
+   * 読み込みの流れ(行・カーソル・続きの有無・読み足して出していない行)。過去と未来は別のクエリ・別のカーソルで、境目(surgeryToday)で重ならない。
+   * main = 注文日順(新しい順) / 手術日順の今日以降(早い順)。past = 手術日順の「過去分」(今日より前を手術日の新しい順に読み、画面では早い順で上に足す)
+   */
+  const stream = () => ({ rows: [], cursor: null, hasMore: false, buffered: [], loading: false });
+  let main = stream(), past = stream();
   const cache = new Map();   // 注文ID → 表示用データ(手術日順で同じ注文が複数の行になる)
   const paged = () => typeof repository.listOrdersPage === "function";
   const canSurgery = () => typeof repository.listSurgeryIndexPage === "function" && typeof repository.getOrder === "function";
+  const showPast = () => mode === "surgery" && includePast && canSurgery();
+  const allRows = () => [...past.rows, ...main.rows];
+  /** 一覧に出す注文か(論理削除は出さない。取消済みは「取消済み」がONのときだけ) */
+  const visible = (o) => Boolean(o) && !o.deleted && (includeCancelled || !o.cancelled);
 
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", id: "btnHistoryClose" }, "注文画面に戻る");
   const status = h("p", { class: "form-hint", role: "status" });
@@ -116,20 +125,24 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
 
   /**
    * 並び順の切替(注文日順・手術日順)と、右の小さな選択式ボタン(押すたびにON/OFF。ONは青)。
-   * 「過去分」は手術日順のときだけ表示する(状態は並び順を切り替えても保つ)。切り替えると先頭から読み直す
+   * 「過去分」は手術日順のときだけ、「取消済み」は両方の並び順で表示する(状態は並び順を切り替えても保つ)。切り替えると先頭から読み直す
    */
   function sortBar() {
-    if (!canSurgery()) return null;
     const btn = (m, label) => {
       const b = h("button", { type: "button", class: "history-sort-btn", "data-sort": m, "aria-pressed": String(mode === m) }, label);
       b.addEventListener("click", () => { if (mode !== m) { mode = m; reload(); } });
       return b;
     };
-    const sort = h("div", { class: "history-sort", role: "group", "aria-label": "並び順" }, btn("created", "注文日順"), btn("surgery", "手術日順"));
-    if (mode !== "surgery") return sort;
-    const past = h("button", { type: "button", class: "history-filter-btn", "data-filter": "past", "aria-pressed": String(includePast), title: "過去の手術日も表示する" }, "過去分");
-    past.addEventListener("click", () => { includePast = !includePast; reload(); });
-    return h("div", { class: "history-sort-bar" }, sort, h("div", { class: "history-filters", role: "group", "aria-label": "表示する注文" }, past));
+    const toggle = (key, label, on, title, set) => {
+      const b = h("button", { type: "button", class: "history-filter-btn", "data-filter": key, "aria-pressed": String(on), title }, label);
+      b.addEventListener("click", () => { set(!on); reload(); });
+      return b;
+    };
+    const sort = canSurgery() ? h("div", { class: "history-sort", role: "group", "aria-label": "並び順" }, btn("created", "注文日順"), btn("surgery", "手術日順")) : null;
+    const filters = h("div", { class: "history-filters", role: "group", "aria-label": "表示する注文" },
+      mode === "surgery" ? toggle("past", "過去分", includePast, "過去の手術日も表示する", v => { includePast = v; }) : null,
+      toggle("cancelled", "取消済み", includeCancelled, "取り消した注文も表示する", v => { includeCancelled = v; }));
+    return h("div", { class: "history-sort-bar" }, sort, filters);
   }
 
   /**
@@ -156,90 +169,183 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
     return h("li", {}, btn);
   }
 
+  /** 手術日順の「過去分」の境目(この下が今日以降) */
+  const todayDivider = () => h("li", { class: "history-today" }, `今日（${formatShortSurgeryDate(surgeryToday)}）以降`);
+
   function renderList() {
     selectedId = null;
-    const list = rows.length
-      ? h("ul", { class: "history-list" }, rows.map(rowView))
-      : h("p", { class: "form-hint" }, loading ? "読み込み中…" : mode === "surgery" && !includePast ? "今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。" : "この施設の注文はまだありません。");
-    const more = (hasMore || buffered.length) && rows.length ? h("button", { type: "button", class: "btn btn-secondary history-more", "data-act": "more", disabled: loading }, loading ? "読み込み中…" : "もっと見る") : null;
+    const rows = allRows();
+    const loading = main.loading || past.loading;
+    const mainMore = main.hasMore || main.buffered.length > 0;
+    let list;
+    if (showPast() && rows.length) {
+      list = h("ul", { class: "history-list" }, past.rows.map(rowView), todayDivider(),
+        main.rows.length ? main.rows.map(rowView) : (main.loading || mainMore ? null : h("li", { class: "form-hint history-empty" }, "今日以降に手術予定の注文はありません。")));
+    } else if (rows.length) {
+      list = h("ul", { class: "history-list" }, rows.map(rowView));
+    } else {
+      const hint = includeCancelled ? "" : "（取消済みの注文は「取消済み」を選ぶと表示できます）";
+      list = h("p", { class: "form-hint" }, loading ? "読み込み中…"
+        : mainMore || past.hasMore ? "表示する注文が見つかりませんでした。「もっと見る」で続きを探せます。"
+          : mode === "surgery" && !includePast ? `今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。${includeCancelled ? "" : "取消済みの注文は「取消済み」を選ぶと表示できます。"}`
+            : mode === "surgery" ? `手術日のある注文はありません${hint}。` : `この施設の注文はまだありません${hint}。`);
+    }
+    // 上: 過去の手術日の続き(手術日順の「過去分」だけ)。下: 注文日順の過去の注文 / 手術日順の今日以降の続き
+    const morePast = showPast() && (past.hasMore || past.buffered.length) && (rows.length || !past.loading)
+      ? h("button", { type: "button", class: "btn btn-secondary history-more history-more-past", "data-act": "more-past", disabled: past.loading }, past.loading ? "読み込み中…" : "過去の注文をもっと見る") : null;
+    if (morePast) morePast.addEventListener("click", () => loadPast());
+    const more = mainMore && (rows.length || !main.loading) ? h("button", { type: "button", class: "btn btn-secondary history-more", "data-act": "more", disabled: main.loading }, main.loading ? "読み込み中…" : "もっと見る") : null;
     if (more) more.addEventListener("click", () => loadMore());
-    body.replaceChildren(...[sortBar(), list, more].filter(Boolean));
+    body.replaceChildren(...[sortBar(), morePast, list, more].filter(Boolean));
+  }
+
+  function updateStatus() {
+    const n = allRows().length;
+    const hint = mode === "surgery" ? "（「もっと見る」で続きを表示できます）" : "（「もっと見る」で過去の注文をさかのぼれます）";
+    status.textContent = n ? `${n}件を表示しています${main.hasMore || main.buffered.length ? hint : ""}。` : "";
+  }
+
+  /** 固定表示のヘッダーの下端(スクロール位置の計算で、ヘッダーに隠れる分を除く) */
+  function headerBottom() {
+    const hd = document.querySelector(".app-header");
+    return hd && getComputedStyle(hd).position === "sticky" ? Math.max(0, hd.getBoundingClientRect().bottom) : 0;
+  }
+  const anchorKey = (e) => e.classList.contains("history-today") ? "today" : `${e.dataset.order}@${e.dataset.surgery ?? ""}`;
+  const anchors = () => [...body.querySelectorAll(".history-list .history-row, .history-list .history-today")];
+  /** 上に行を足す前に、画面に見えている先頭のカード(または境目)の位置を覚え、描き直した後に同じ位置へ戻す関数を返す */
+  function keepScrollAnchor() {
+    const top0 = headerBottom();
+    const a = anchors().find(e => e.getBoundingClientRect().bottom > top0);
+    if (!a) return () => {};
+    const key = anchorKey(a), before = a.getBoundingClientRect().top;
+    return () => {
+      const b = anchors().find(e => anchorKey(e) === key);
+      if (b) window.scrollBy(0, b.getBoundingClientRect().top - before);
+    };
+  }
+  /** 「過去分」ONで開いたとき: 今日付近を最初に見せる。今日以降があれば境目を画面の上に、なければ直近の過去分が画面の下側に見えるように */
+  function scrollToToday() {
+    const d = body.querySelector(".history-today");
+    if (!d) return;
+    const r = d.getBoundingClientRect();
+    window.scrollBy(0, main.rows.length ? r.top - headerBottom() - 8 : r.bottom - window.innerHeight + 16);
   }
 
   /**
-   * 次の20件を読む(論理削除した注文を飛ばしながら、20件そろうまで読み足す。一度に読む上限あり)。
-   * 注文日順は注文の新しい順。手術日順は索引から手術日の早い順で、「過去分」がOFFなら日本時間の今日以降だけ
+   * 続きを読む(除外する注文 = 論理削除・OFFのときの取消済みを飛ばしながら、20件そろうまで読み足す。一度に読む上限 SCAN_MAX)。
+   * そろった分を返す(読み足した残りは st.buffered に残し、次の「もっと見る」で先に出す)。古い世代になったら null
    */
+  async function fill(st, fetchPage, stale) {
+    let scanned = 0;
+    while (st.buffered.length < HISTORY_PAGE && st.hasMore && scanned < SCAN_MAX) {
+      const r = await fetchPage(st.cursor, stale);
+      if (stale()) return null;
+      st.cursor = r.cursor; st.hasMore = r.hasMore; scanned += r.count;
+      st.buffered.push(...r.rows);
+    }
+    return st.buffered.splice(0, HISTORY_PAGE);
+  }
+  const NONE = { rows: [], cursor: null, hasMore: false, count: 0 };
+  /** 注文日順の1ページ(注文の新しい順) */
+  async function fetchCreated(cur, stale) {
+    const r = await repository.listOrdersPage(facility.id, { limit: HISTORY_PAGE, cursor: cur });
+    if (stale()) return NONE;
+    const out = [];
+    for (const raw of r.orders) {
+      const o = summarizeHistoryOrder(raw);
+      cache.set(o.id, o);
+      if (visible(o)) out.push({ order: o });
+    }
+    return { rows: out, cursor: r.cursor, hasMore: r.hasMore, count: r.orders.length };
+  }
+  /** 手術日順の1ページ(索引から。opts: { fromDate } = 今日以降を早い順 / { before } = 今日より前を新しい順)。注文本体は読んでいないものだけ読む */
+  const fetchSurgery = (opts) => async (cur, stale) => {
+    const r = await repository.listSurgeryIndexPage(facility.id, { limit: HISTORY_PAGE, cursor: cur, ...opts });
+    if (stale()) return NONE;
+    const live = r.entries.filter(e => e.deleted !== true);   // 論理削除した注文の索引は読まない
+    const missing = [...new Set(live.map(e => e.orderId).filter(id => !cache.has(id)))];
+    const got = await Promise.all(missing.map(id => repository.getOrder(facility.id, id)));
+    if (stale()) return NONE;
+    got.forEach(raw => { if (raw) cache.set(raw.id, summarizeHistoryOrder(raw)); });
+    const out = [];
+    for (const e of live) {
+      const o = cache.get(e.orderId);
+      if (visible(o)) out.push({ order: o, surgeryDate: e.surgeryDate || "", lineNos: Array.isArray(e.lineNos) ? e.lineNos : null });   // 削除の直後で索引の印が遅れても出さない
+    }
+    return { rows: out, cursor: r.cursor, hasMore: r.hasMore, count: r.entries.length };
+  };
+
+  /** 下の「もっと見る」: 注文日順は過去へ、手術日順は今日以降の続きを20件 */
   async function loadMore() {
-    if (loading || !facility) return;
+    if (main.loading || !facility) return;
     const mySeq = seq;
     const stale = () => mySeq !== seq || !open;
-    loading = true;
+    main.loading = true;
     if (selectedId === null) renderList();
     try {
       if (!paged()) {   // 開発用の静的モードなど: 従来の1回だけ
         const raw = await repository.listOrders(facility.id, 50);
         if (stale()) return;
-        rows = sortOrdersNewestFirst(visibleOrders(raw.map(summarizeHistoryOrder))).map(order => ({ order }));
-        hasMore = false;
-      } else if (mode === "created") {
-        let scanned = 0;
-        while (buffered.length < HISTORY_PAGE && hasMore && scanned < SCAN_MAX) {
-          const r = await repository.listOrdersPage(facility.id, { limit: HISTORY_PAGE, cursor });
-          if (stale()) return;
-          cursor = r.cursor; hasMore = r.hasMore; scanned += r.orders.length;
-          for (const raw of r.orders) {
-            const o = summarizeHistoryOrder(raw);
-            cache.set(o.id, o);
-            if (!o.deleted) buffered.push({ order: o });
-          }
-        }
-        rows.push(...buffered.splice(0, HISTORY_PAGE));
+        main.rows = sortOrdersNewestFirst(visibleOrders(raw.map(summarizeHistoryOrder))).filter(visible).map(order => ({ order }));
+        main.hasMore = false;
       } else {
-        let scanned = 0;
-        while (buffered.length < HISTORY_PAGE && hasMore && scanned < SCAN_MAX) {
-          const r = await repository.listSurgeryIndexPage(facility.id, { limit: HISTORY_PAGE, cursor, fromDate: surgeryFrom });
-          if (stale()) return;
-          cursor = r.cursor; hasMore = r.hasMore; scanned += r.entries.length;
-          const live = r.entries.filter(e => e.deleted !== true);   // 論理削除した注文の索引は読まない
-          const missing = [...new Set(live.map(e => e.orderId).filter(id => !cache.has(id)))];
-          const got = await Promise.all(missing.map(id => repository.getOrder(facility.id, id)));
-          if (stale()) return;
-          got.forEach(raw => { if (raw) cache.set(raw.id, summarizeHistoryOrder(raw)); });
-          for (const e of live) {
-            const o = cache.get(e.orderId);
-            if (o && !o.deleted) buffered.push({ order: o, surgeryDate: e.surgeryDate || "", lineNos: Array.isArray(e.lineNos) ? e.lineNos : null });   // 削除の直後で索引の印が遅れても出さない
-          }
-        }
-        rows.push(...buffered.splice(0, HISTORY_PAGE));
+        const got = await fill(main, mode === "created" ? fetchCreated : fetchSurgery({ fromDate: surgeryToday }), stale);
+        if (!got) return;
+        main.rows.push(...got);
       }
-      const moreHint = mode === "surgery" ? "（「もっと見る」で続きを表示できます）" : "（「もっと見る」で過去の注文をさかのぼれます）";
-      status.textContent = rows.length ? `${rows.length}件を表示しています${hasMore || buffered.length ? moreHint : ""}。` : "";
+      updateStatus();
     } catch (e) {
       if (stale()) return;
       console.error("注文履歴の読み込みに失敗しました:", e);
       status.textContent = "注文履歴を読み込めませんでした。権限を確認してください。";
     } finally {
-      if (!stale()) { loading = false; if (selectedId === null) renderList(); }
+      if (!stale()) { main.loading = false; if (selectedId === null) renderList(); }
     }
   }
 
-  /** 並び順の切替・施設を開いたとき: 先頭から読み直す */
+  /** 上の「過去の注文をもっと見る」: 今日より前の手術日を、今日に近い方から20件。上に足しても、見ているカードの位置は動かさない */
+  async function loadPast({ keepPosition = true } = {}) {
+    if (past.loading || !facility || !showPast()) return;
+    const mySeq = seq;
+    const stale = () => mySeq !== seq || !open;
+    const draw = () => { if (selectedId !== null) return; const restore = keepPosition ? keepScrollAnchor() : () => {}; renderList(); restore(); };
+    past.loading = true;
+    draw();
+    try {
+      const got = await fill(past, fetchSurgery({ before: surgeryToday }), stale);
+      if (!got) return;
+      past.rows = [...got.reverse(), ...past.rows];   // 新しい順に読んだ分を早い順にして上へ
+      updateStatus();
+    } catch (e) {
+      if (stale()) return;
+      console.error("注文履歴(過去分)の読み込みに失敗しました:", e);
+      status.textContent = "注文履歴を読み込めませんでした。権限を確認してください。";
+    } finally {
+      if (!stale()) { past.loading = false; draw(); }
+    }
+  }
+
+  /** 並び順・フィルターの切替・施設を開いたとき: 先頭から読み直す(過去・未来とも最初から。今日の日付も決め直す) */
   function reload() {
     seq++;
-    rows = []; cursor = null; hasMore = mode === "created" ? paged() : canSurgery(); loading = false; cache.clear(); buffered.length = 0;
-    surgeryFrom = includePast ? null : today();
+    const mySeq = seq;
+    main = stream(); past = stream(); cache.clear();
+    main.hasMore = mode === "created" ? paged() : canSurgery();
+    past.hasMore = showPast();
+    surgeryToday = today();
     status.textContent = "読み込み中…";
     renderList();
-    return loadMore();
+    if (!showPast()) return loadMore();
+    return Promise.all([loadMore(), loadPast({ keepPosition: false })]).then(() => { if (mySeq === seq && open && selectedId === null) scrollToToday(); });
   }
 
   function renderDetail(id) {
-    const o = cache.get(id) || (rows.find(r => r.order.id === id) || {}).order;
+    const o = cache.get(id) || (allRows().find(r => r.order.id === id) || {}).order;
     if (!o) return renderList();
+    listScrollY = window.scrollY;   // 戻ったときに、読み込み済みの一覧と同じ位置へ
     selectedId = id;
     const back = h("button", { type: "button", class: "btn btn-secondary btn-sm-inline", "data-act": "back" }, "← 一覧へ戻る");
-    back.addEventListener("click", renderList);
+    back.addEventListener("click", () => { renderList(); window.scrollTo(0, listScrollY); });
     body.replaceChildren(
       back,
       h("div", { class: "history-detail-head" },
@@ -281,7 +387,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       try {
         const r = await deleteOrder(facility.id, o.id);
         if (mySeq !== seq || !open) return;   // 削除中に施設を切り替えた・閉じた
-        rows = rows.filter(x => x.order.id !== o.id);
+        for (const st of [main, past]) { st.rows = st.rows.filter(x => x.order.id !== o.id); st.buffered = st.buffered.filter(x => x.order.id !== o.id); }
         cache.delete(o.id);
         renderList();
         const n = r && r.cancelledMails ? `未送信のメール${r.cancelledMails}件の送信を中止しました。` : "";
@@ -306,6 +412,7 @@ export function createOrderHistory({ mount, repository, deleteOrder = null, onCl
       canDelete = fac.canDelete === true;
       mode = "created";
       includePast = false;
+      includeCancelled = false;
       root.hidden = false;
       open = true;
       await reload();

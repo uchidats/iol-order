@@ -34,13 +34,15 @@ window.__asked = [];
 window.__deleted = [];
 window.__data = { f1: orders };
 const dataOf = async (fid) => (window.__defer && window.__defer[fid] ? await window.__defer[fid] : (window.__data[fid] || orders));
-// Firestore の手術日順のクエリと同じ: 手術日 >= fromDate(指定なしは手術日のある全件)・手術日の早い順・同じ日は索引のID順。論理削除の索引も返す(画面が除く)
-const surgeryEntries = (list, fromDate) => list.flatMap(o => {
+// Firestore の手術日順のクエリと同じ: fromDate = その日以降を早い順(同じ日は索引のID順)、before = その日より前を新しい順(同じ日はIDの逆順)、
+// どちらもなし = 手術日のある全件を早い順。論理削除の索引も返す(画面が除く)
+const surgeryEntries = (list, { fromDate, before } = {}) => list.flatMap(o => {
   const ls = Array.isArray(o.lines) ? o.lines : (o.item ? [{ lineNo: 1, surgeryDate: o.surgeryDate }] : []);
   const by = new Map();
   ls.forEach((l, i) => { const d = l.surgeryDate || ""; if (!by.has(d)) by.set(d, []); by.get(d).push(l.lineNo || i + 1); });
   return [...by].map(([surgeryDate, lineNos]) => ({ id: o.id + "_" + (surgeryDate || "nodate"), orderId: o.id, surgeryDate, lineNos, ms: o.createdAt.toMillis(), deleted: o.deleted === true }));
-}).filter(e => fromDate ? e.surgeryDate >= fromDate : e.surgeryDate > "").sort((a, b) => a.surgeryDate.localeCompare(b.surgeryDate) || a.id.localeCompare(b.id));
+}).filter(e => before ? e.surgeryDate < before && e.surgeryDate > "" : fromDate ? e.surgeryDate >= fromDate : e.surgeryDate > "")
+  .sort((a, b) => (before ? -1 : 1) * (a.surgeryDate.localeCompare(b.surgeryDate) || a.id.localeCompare(b.id)));
 const pageOf = (list, limit, cursor) => { const start = cursor ?? 0; const page = list.slice(start, start + limit); return { page, cursor: start + page.length, hasMore: page.length === limit }; };
 window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose: () => { window.__closed++; }, today: () => window.__today || "2026-11-03",
   deleteOrder: async (fid, oid) => { window.__deleted.push([fid, oid]); if (window.__deleteFail) throw Object.assign(new Error(window.__deleteMsg || "denied"), { code: window.__deleteFail }); return { orderId: oid, deleted: true, cancelledMails: window.__cancelled || 0 }; },
@@ -50,9 +52,9 @@ window.__h = createOrderHistory({ mount: document.querySelector("main"), onClose
       const r = pageOf([...await dataOf(fid)].sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()), limit, cursor);
       return { orders: r.page, cursor: r.cursor, hasMore: r.hasMore };
     },
-    listSurgeryIndexPage: async (fid, { limit, cursor, fromDate }) => {
-      window.__asked.push(["surgery", fid, limit, cursor ?? null, fromDate ?? null]);
-      const r = pageOf(surgeryEntries(await dataOf(fid), fromDate), limit, cursor);
+    listSurgeryIndexPage: async (fid, { limit, cursor, fromDate, before }) => {
+      window.__asked.push(["surgery", fid, limit, cursor ?? null, fromDate ?? null, before ?? null]);
+      const r = pageOf(surgeryEntries(await dataOf(fid), { fromDate, before }), limit, cursor);
       return { entries: r.page, cursor: r.cursor, hasMore: r.hasMore };
     },
     getOrder: async (fid, id) => { window.__asked.push(["get", fid, id]); return (await dataOf(fid)).find(o => o.id === id) || null; }
@@ -389,10 +391,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const o02 = (await page.locator('[data-order="o02"][data-surgery="2026-11-28"]').innerText()).replace(/\s+/g, " ").trim();
       assert.match(o02, /^11\/28\(土\) \S+Dr \S+ \S+ [+-]\d+\.\dD 1枚$/, o02);   // 明細だけ(注文日時・件数は出さない)
       assert.equal(await page.locator('[data-order="o02"][data-surgery="2026-11-28"] .history-line').count(), 1);
-      // 「過去分」ON: 先頭から読み直し、過去の手術日も含めて早い順。続きも同じ条件
+      // 「過去分」ON: 先頭から読み直し、今日以降(早い順)と直近の過去分(新しい順に読み、早い順で上へ)を別々に読む。続きも同じ条件
       await page.evaluate(() => { window.__asked = []; });
       await page.click('[data-filter="past"]');
-      await page.waitForFunction(() => document.querySelector('.history-row[data-surgery]') && document.querySelectorAll(".history-row").length === 20);
+      await page.waitForFunction(() => document.querySelector('.history-row[data-surgery]') && document.querySelectorAll(".history-row").length === 21);
       assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "true");
       // 選択中は青地・白文字で、OFFと明確に区別できる
       const pastBg = await page.locator('[data-filter="past"]').evaluate(e => getComputedStyle(e).backgroundColor.match(/\d+/g).map(Number));
@@ -405,8 +407,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       dates = shown.map(id => id.split("@")[1]);
       assert.deepEqual([...dates].sort(), dates);
       const askedPast = await page.evaluate(() => window.__asked.filter(a => a[0] === "surgery"));
-      assert.ok(askedPast.length >= 2 && askedPast.every(a => a[4] === null), "過去分を含む条件で読む(続きも): " + JSON.stringify(askedPast));
-      assert.equal(askedPast[0][3], null, "切り替えたら先頭から読み直す");
+      assert.ok(askedPast.every(a => (a[4] === "2026-11-03") !== (a[5] === "2026-11-03")), "今日以降(fromDate)と今日より前(before)のどちらかの条件で読む: " + JSON.stringify(askedPast));
+      assert.deepEqual([askedPast.find(a => a[5])[3], askedPast.find(a => a[4])[3]], [null, null], "切り替えたら過去・未来とも先頭から読み直す");
+      assert.equal(await page.locator(".history-list .history-today").innerText(), "今日（11/3(火)）以降");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, "横スクロール");
       // 手術日順の行から詳細 → 一覧へ戻ると、並び順と読み込んだ行を保つ
       await page.locator('[data-order="o02"][data-surgery="2026-11-02"]').click();
@@ -421,9 +424,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('[data-filter="past"]').count(), 0);
       await page.evaluate(() => { window.__asked = []; });
       await page.click('[data-sort="surgery"]');
-      await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "surgery" && document.querySelectorAll(".history-row").length === 20);
+      await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "surgery" && document.querySelectorAll(".history-row").length === 21);
       assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "true", "並び順を切り替えても「過去分」を保つ");
-      assert.equal(await page.evaluate(() => window.__asked.find(a => a[0] === "surgery")[4]), null);
+      assert.ok(await page.evaluate(() => window.__asked.some(a => a[0] === "surgery" && a[5] === "2026-11-03")), "過去分も読み直す");
       shown = await loadAll();
       assert.equal(shown.length, 36);
       // 削除すると、その注文の行(手術日ごと)はすべて消える
@@ -477,6 +480,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         window.__data.f5 = list.map(o => ({ ...o, createdAt: { toMillis: () => o.createdAt.ms } }));
         await window.__h.open({ id: "f5", name: "カードの施設" });
       }, cardOrders());
+      // 「取消済み」は初期OFF: 取消済みの注文(c1)は出さない。ONで通常の注文に追加して出す
+      await page.locator('[data-order="c2"]').waitFor();
+      assert.equal(await page.locator('[data-filter="cancelled"]').getAttribute("aria-pressed"), "false");
+      assert.equal(await page.locator('[data-order="c1"]').count(), 0, "取消済みは初期では出さない");
+      await page.click('[data-filter="cancelled"]');
+      await page.locator('[data-order="c1"]').waitFor();
+      assert.deepEqual(await page.locator(".history-row").evaluateAll(rs => rs.map(r => r.dataset.order)), ["c1", "c2"], "通常の注文に取消済みを加える(注文日順のまま)");
       const card = page.locator('[data-order="c1"]');
       assert.equal(await card.locator(".history-line").count(), 5, "明細は5行まで");
       assert.equal(await card.locator(".history-card-more").innerText(), "ほか2件");
@@ -497,9 +507,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator(".history-line").count(), 7);
       assert.match(await page.locator(".history-status").innerText(), /取消済み/);
       await page.click('[data-act="back"]');
-      // 手術日順: 取消済みの注文も手術日ごとのカード(バッジ付き)。その手術日のレンズだけ
+      // 手術日順: 「取消済み」ONは並び順を切り替えても保つ。取消済みの注文も手術日ごとのカード(バッジ付き)。その手術日のレンズだけ
       await page.click('[data-sort="surgery"]');
       await page.waitForFunction(() => document.querySelectorAll('.history-row[data-surgery]').length === 3);
+      assert.equal(await page.locator('[data-filter="cancelled"]').getAttribute("aria-pressed"), "true");
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-line').count(), 3);
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-20"] .history-line').count(), 4);
       assert.equal(await page.locator('[data-order="c1"][data-surgery="2026-11-21"] .history-cancelled-badge').count(), 1);
@@ -510,6 +521,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator(".history-total").innerText(), "7件・合計7枚");
       // 今日以降に手術予定がない(すべて過去): OFFでは案内だけ。ONにすると過去分を表示する。施設を開き直すとOFF・注文日順に戻る
       await page.evaluate(async () => { window.__today = "2027-01-01"; await window.__h.open({ id: "f5", name: "カードの施設" }); });
+      assert.equal(await page.locator('[data-filter="cancelled"]').getAttribute("aria-pressed"), "false", "開き直すと「取消済み」もOFF");
+      await page.click('[data-filter="cancelled"]');
       await page.click('[data-sort="surgery"]');
       await page.getByText("今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。").waitFor();
       assert.equal(await page.locator(".history-row").count(), 0);
@@ -519,6 +532,142 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('.history-sort-btn[aria-pressed="true"]').innerText(), "注文日順");
       await page.click('[data-sort="surgery"]');
       assert.equal(await page.locator('[data-filter="past"]').getAttribute("aria-pressed"), "false", "開き直すとOFF");
+      assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+/**
+ * 過去・未来のページ送りと取消済みの大量混在(今日は 2026-11-03 に固定):
+ * p00…p49 = 過去(11/2 から1日ずつさかのぼる。p10/p11 は同じ日)、f00…f29 = 今日以降(11/4 から。f05/f06 は同じ日)、
+ * x00…x69 = 取消済み(注文日は最も新しい。手術日は 11/4 と 10/30 に集中)。q00…q04 = 論理削除(過去)
+ */
+function pagingOrders() {
+  const it = (power) => ({ manufacturer: "HOYA", model: "XY1", displayName: "HOYA / XY1", isToric: false, isMultifocal: false, toricModel: "", power, quantity: 1 });
+  const day = (base, n) => new Date(Date.parse(base + "T00:00:00Z") + n * 86400e3).toISOString().slice(0, 10);
+  const list = [];
+  let t = Date.parse("2026-10-31T00:00:00Z");
+  const add = (id, surgeryDate, extra = {}) => list.push({ id, schemaVersion: 3, orderNumber: `IOL-${id}`, createdAt: { ms: t-- }, status: extra.cancelled ? "cancelled" : "accepted", createdBy: { displayName: "発注者" },
+    lines: [{ lineNo: 1, item: it("+20.0D"), surgeryDate, doctor: { id: "o1", name: "山田" }, dealer: { id: "d1", name: "A商会" } }], ...extra });
+  for (let i = 0; i < 70; i++) add(`x${String(i).padStart(2, "0")}`, i % 2 ? "2026-11-04" : "2026-10-30", { cancelled: true });   // 注文日が最も新しい70件はすべて取消済み
+  for (let i = 0; i < 30; i++) add(`f${String(i).padStart(2, "0")}`, day("2026-11-04", i > 5 ? i - 1 : i));
+  for (let i = 0; i < 50; i++) add(`p${String(i).padStart(2, "0")}`, day("2026-11-02", -(i > 10 ? i - 1 : i)));
+  for (let i = 0; i < 5; i++) add(`q${String(i).padStart(2, "0")}`, day("2026-11-01", -i), { deleted: true });
+  return list;
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`注文履歴の過去分・取消済み: 過去と未来を別のカーソルで20件ずつ(境目で重複・欠落なし)、上に足しても位置を保つ、取消済みの大量混在でも20件、未来0件、詳細から戻る: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 700 } });
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await page.goto(base);
+      await page.waitForFunction(() => window.__ready);
+      const data = pagingOrders();
+      await page.evaluate(async (list) => {
+        window.__data.f6 = list.map(o => ({ ...o, createdAt: { toMillis: () => o.createdAt.ms } }));
+        window.__asked = [];
+        await window.__h.open({ id: "f6", name: "ページ送りの施設" });
+      }, data);
+      const ids = () => page.locator(".history-row").evaluateAll(rs => rs.map(r => r.dataset.order + (r.dataset.surgery ? "@" + r.dataset.surgery : "")));
+      const count = () => page.locator(".history-row").count();
+      const clickMore = async (act) => {
+        const n = await count();
+        await page.click(`[data-act="${act}"]`);
+        await page.waitForFunction(([n, a]) => document.querySelectorAll(".history-row").length > n || !document.querySelector(`[data-act="${a}"]`), [n, act]);
+      };
+      const loadAll = async (act) => { for (let i = 0; i < 10 && await page.locator(`[data-act="${act}"]`).count(); i++) await clickMore(act); return ids(); };
+      const live = data.filter(o => !o.deleted && !o.cancelled);
+      const entry = (o) => `${o.id}@${o.lines[0].surgeryDate}`;
+      const bySurgery = (a, b) => a.split("@")[1].localeCompare(b.split("@")[1]) || a.localeCompare(b);
+
+      // 注文日順・取消済みOFF: 最も新しい70件が取消済みでも、読み足して最初から20件(取消済みは出さない)
+      let shown = await ids();
+      assert.equal(shown.length, 20, "取消済みを飛ばして20件");
+      assert.ok(shown.every(id => !id.startsWith("x")), shown.join(","));
+      assert.deepEqual(shown.slice(0, 2), ["f00", "f01"]);
+      shown = await loadAll("more");
+      assert.deepEqual(shown, live.map(o => o.id), "注文日順(新しい順)で、取消済み・論理削除を除いた全件。重複・欠落なし");
+      // 取消済みON(注文日順): 通常の注文に取消済みを加える
+      await page.click('[data-filter="cancelled"]');
+      await page.waitForFunction(() => document.querySelectorAll(".history-row").length === 20 && document.querySelector('[data-order="x00"]'));
+      assert.ok((await ids()).every(id => id.startsWith("x")), "注文日の新しい取消済みから");
+      await page.click('[data-filter="cancelled"]');   // OFFに戻す
+      await page.waitForFunction(() => document.querySelectorAll(".history-row").length === 20 && !document.querySelector('[data-order^="x"]'));
+
+      // 手術日順・過去分OFF: 今日以降を早い順。取消済み(11/4 に集中)を飛ばして20件
+      await page.click('[data-sort="surgery"]');
+      await page.waitForFunction(() => document.querySelector('.history-sort-btn[aria-pressed="true"]').dataset.sort === "surgery" && document.querySelectorAll(".history-row").length === 20);
+      const future = live.filter(o => o.lines[0].surgeryDate >= "2026-11-03").map(entry).sort(bySurgery);
+      const pastAll = live.filter(o => o.lines[0].surgeryDate < "2026-11-03").map(entry).sort(bySurgery);
+      assert.deepEqual(await ids(), future.slice(0, 20));
+      assert.equal(await page.locator('[data-act="more-past"]').count(), 0, "過去分OFFでは上のボタンを出さない");
+
+      // 過去分ON: 今日以降20件と直近の過去20件を別々に読み、早い順に並べ、今日付近(境目)が上に見える位置へ
+      await page.evaluate(() => { window.__asked = []; });
+      await page.click('[data-filter="past"]');
+      await page.waitForFunction(() => document.querySelectorAll(".history-row").length === 40);
+      assert.deepEqual(await ids(), [...pastAll.slice(-20), ...future.slice(0, 20)], "直近の過去20件(早い順) + 今日以降20件");
+      const asked = await page.evaluate(() => window.__asked.filter(a => a[0] === "surgery"));
+      assert.ok(asked.some(a => a[5] === "2026-11-03" && a[3] === null) && asked.some(a => a[4] === "2026-11-03" && a[3] === null), "過去・未来を別々のクエリで先頭から: " + JSON.stringify(asked));
+      await page.waitForFunction(() => Math.abs(document.querySelector(".history-today").getBoundingClientRect().top - 8) <= 4);   // 境目が画面の上
+      assert.equal(await page.locator('[data-act="more-past"]').innerText(), "過去の注文をもっと見る");
+
+      // 上の「過去の注文をもっと見る」: 20件ずつ上に足しても、見ているカードの位置を保つ
+      for (const n of [40, 50]) {
+        await page.evaluate(() => window.scrollTo(0, 0));
+        const first = page.locator(".history-row").first();
+        const key = await first.evaluate(e => [e.dataset.order, e.dataset.surgery]);
+        const before = await first.evaluate(e => e.getBoundingClientRect().top);
+        await clickMore("more-past");
+        const after = await page.locator(`.history-row[data-order="${key[0]}"][data-surgery="${key[1]}"]`).evaluate(e => e.getBoundingClientRect().top);
+        assert.ok(Math.abs(after - before) <= 2, `上に足しても位置を保つ: ${before} → ${after}`);
+        const p = (await ids()).filter(id => id.split("@")[1] < "2026-11-03");
+        assert.deepEqual(p, pastAll.slice(-n), `過去分 ${n}件(早い順・重複なし)`);
+      }
+      assert.equal(await page.locator('[data-act="more-past"]').count(), 0, "過去を最後まで読んだら上のボタンを出さない");
+      // 下の「もっと見る」: 今日以降の続き。境目で重複・欠落なし
+      shown = await loadAll("more");
+      assert.deepEqual(shown, [...pastAll, ...future], "過去・未来を合わせて、手術日の早い順に全件(重複・欠落なし)");
+      assert.equal(await page.locator(".history-list .history-today").count(), 1);
+      for (const w of [320, 430]) {
+        await page.setViewportSize({ width: w, height: 700 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, `横スクロール ${w}`);
+      }
+      await page.setViewportSize({ width: 390, height: 700 });
+
+      // 詳細から戻ると、読み込み済みの一覧とスクロール位置を保つ
+      await page.locator(".history-today").scrollIntoViewIfNeeded();
+      await page.evaluate(() => window.scrollBy(0, 300));
+      const y = await page.evaluate(() => window.scrollY);
+      await page.locator(".history-row").nth(52).click();
+      await page.locator('[data-act="back"]').click();
+      assert.equal(await count(), 80);
+      assert.ok(Math.abs(await page.evaluate(() => window.scrollY) - y) <= 2, "スクロール位置を保つ");
+      assert.deepEqual(await page.locator("[data-filter]").evaluateAll(bs => bs.map(b => [b.dataset.filter, b.getAttribute("aria-pressed")])), [["past", "true"], ["cancelled", "false"]]);
+
+      // 過去分ONのまま取消済みON: 過去・未来とも取消済みを加えて読み直す(「過去分」とは別に切り替わる)
+      await page.click('[data-filter="cancelled"]');
+      await page.waitForFunction(() => document.querySelector('.history-row[data-order^="x"]') && document.querySelector(".history-today"));
+      assert.deepEqual(await page.locator("[data-filter]").evaluateAll(bs => bs.map(b => b.getAttribute("aria-pressed"))), ["true", "true"]);
+      const both = await ids();
+      assert.ok(both.some(id => id.startsWith("x") && id.endsWith("10-30")) && both.some(id => id.startsWith("x") && id.endsWith("11-04")), "過去・未来の両方に取消済み");
+      assert.equal(await page.locator('.history-row[data-order^="x"] .history-cancelled-badge').count(), both.filter(id => id.startsWith("x")).length, "取消済みにはバッジ");
+
+      // 未来が0件: 直近の過去分が画面に見える(境目を画面の下側に)
+      await page.evaluate(async () => { window.__today = "2027-01-01"; await window.__h.open({ id: "f6", name: "ページ送りの施設" }); });
+      await page.click('[data-sort="surgery"]');
+      await page.getByText("今日以降に手術予定の注文はありません（「過去分」を選ぶと過去の手術日も表示できます）。").waitFor();
+      await page.click('[data-filter="past"]');
+      await page.waitForFunction(() => document.querySelectorAll(".history-row").length === 20 && document.querySelector(".history-empty"));
+      assert.equal(await page.locator(".history-empty").innerText(), "今日以降に手術予定の注文はありません。");
+      await page.waitForFunction(() => { const e = [...document.querySelectorAll(".history-row")].at(-1).getBoundingClientRect(); return e.top >= 0 && e.bottom <= innerHeight; });   // 直近の過去分(一番下)が画面に見える
+      const lastFuture = data.filter(o => o.id.startsWith("f")).at(-1);
+      assert.equal((await ids()).at(-1), entry(lastFuture), "最も今日に近い(新しい)手術日が一番下");
+      await page.evaluate(() => { window.__today = null; });
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });
