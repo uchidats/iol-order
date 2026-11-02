@@ -50,7 +50,7 @@ function cacheElements() {
     modalSubmitErrorText: $("modalSubmitErrorText"),
     completeModal: $("completeModal"),
     completeDetails: $("completeDetails"),
-    btnNewOrder: $("btnNewOrder"),
+    btnCompleteClose: $("btnCompleteClose"),
     duplicateModal: $("duplicateModal"), duplicateTitle: $("duplicateTitle"), duplicateList: $("duplicateList"),
     btnDupBack: $("btnDupBack"), btnDupContinue: $("btnDupContinue"), btnConfirm: $("btnConfirm")
   });
@@ -158,7 +158,7 @@ function setupEventListeners() {
 
   el.btnModalBack.addEventListener("click", hideConfirmModal);
   el.btnModalSubmit.addEventListener("click", handleExecuteOrder);
-  el.btnNewOrder.addEventListener("click", handleResetForNewOrder);
+  el.btnCompleteClose.addEventListener("click", handleResetForNewOrder);   // 完了画面を閉じる = 従来の「新しい注文を入力する」
   el.btnDupBack.addEventListener("click", hideDuplicateModal);                       // 修正する。次に「確認画面へ進む」を押したときに、重複を再判定する
   el.btnDupContinue.addEventListener("click", () => { hideDuplicateModal(); showConfirmModal(currentPendingOrderData); });   // 確認後は発注を許可(この後も、通常の確認画面と最終確認は省略しない)
 
@@ -382,7 +382,7 @@ async function handleExecuteOrder() {
     // 送信した入力内容(全明細の状態・備考)。受付の直後に取り消せたときだけ、この内容で注文入力画面に戻す(下書きの復元と同じ形)
     const submittedForm = lensLines ? { lines: lensLines.snapshot(), notes: el.notesInput.value } : null;
     // 取消可能な時間(サーバーが返した期限と現在時刻の差。端末の時計は使わない)。受け取った時点から数える
-    const cancelWindowMs = Number.isFinite(r.cancelUntilMs) && Number.isFinite(r.serverNowMs) ? Math.min(r.cancelUntilMs - r.serverNowMs, 60 * 1000) : 0;
+    const cancelWindowMs = Number.isFinite(r.cancelUntilMs) && Number.isFinite(r.serverNowMs) ? Math.min(r.cancelUntilMs - r.serverNowMs, 10 * 1000) : 0;   // 受付から最大10秒(サーバーの期限も10秒)
     const cancelDeadline = performance.now() + cancelWindowMs;
     if (pendingStore) pendingStore.clear();
 
@@ -455,7 +455,8 @@ function showCompleteModal(saved, { replayed }) {
 }
 
 /**
- * 完了画面の「取り消す」(受付の直後の取消可能な時間だけ表示し、過ぎたら自動で消す。カウントダウン・残り秒数は出さない)。
+ * 完了画面の「注文を取り消す」(受付から10秒間だけ表示し、過ぎたら自動で消す。カウントダウン・残り秒数は出さない)。
+ * 取り消しの処理中は完了画面を閉じられない(結果を必ず表示する。取り消せなかったときに入力を消して二重注文になるのを防ぐ)。
  * 期限・送信の開始との競合はサーバー(cancelOrder)が判定する。期限の後に届いた要求は「取り消せませんでした」と表示する
  */
 let cancelTimer = null;
@@ -475,13 +476,14 @@ function showCancelButton({ facilityId, orderId, deadline, submittedForm = null 
   const remaining = deadline - performance.now();
   if (!orderApi || typeof orderApi.cancelOrder !== "function" || remaining <= 0) return;
   const btn = document.createElement("button");
-  btn.type = "button"; btn.className = "btn btn-secondary"; btn.id = "btnCancelOrder"; btn.textContent = "取り消す";
+  btn.type = "button"; btn.className = "btn btn-secondary"; btn.id = "btnCancelOrder"; btn.textContent = "注文を取り消す";
   const footer = el.completeModal.querySelector(".modal-footer");
   footer.insertBefore(btn, footer.firstChild);
   cancelTimer = setTimeout(removeCancelButton, remaining);
   btn.addEventListener("click", async () => {
     if (btn.disabled) return;
     btn.disabled = true;
+    el.btnCompleteClose.disabled = true;
     clearTimeout(cancelTimer); cancelTimer = null;   // 結果が出るまで消さない(押した後に時間が過ぎても、結果を必ず表示する)
     try {
       await orderApi.cancelOrder({ facilityId, orderId });
@@ -499,6 +501,7 @@ function showCancelButton({ facilityId, orderId, deadline, submittedForm = null 
         : "取り消せたか確認できませんでした。通信状況を確認し、注文履歴で注文の状態を確認してください。", { error: true });
     } finally {
       removeCancelButton();
+      el.btnCompleteClose.disabled = false;
     }
   });
 }

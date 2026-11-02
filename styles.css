@@ -974,7 +974,13 @@ input[type="date"].form-control {
 .complete-title-row .info-tip-pop { white-space: pre-line; left: 50%; transform: translateX(-50%); }
 .complete-title-row .info-tip[hidden] { display: none; }
 .modal-complete .modal-footer { margin-top: 20px; }
+.modal-complete .modal-footer:empty { display: none; }   /* 「注文を取り消す」がないとき(期限後など)は、ボタンの欄と余白ごと詰める */
 .modal-complete .complete-details[hidden], .modal-complete .modal-subtitle[hidden] { display: none; }
+/* 右上の×(閉じると新しい注文を入力できる)。取り消しの処理中は押せない */
+.modal-complete { position: relative; }
+.complete-close { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #64748b; cursor: pointer; }
+.complete-close:hover { background: #f1f5f9; color: #334155; }
+.complete-close:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .complete-details {
   width: 100%;

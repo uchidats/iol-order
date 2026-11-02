@@ -50,6 +50,7 @@ async cancelOrder(req) {
   const s = srv();
   (s.cancels = s.cancels || []).push(req);
   put(s);
+  if (s.cancelDelayMs) await new Promise(r => setTimeout(r, s.cancelDelayMs));
   if (s.cancelMode === "late") throw Object.assign(new Error("取り消せる時間を過ぎたため、取り消せませんでした"), { code: "functions/failed-precondition", details: { reason: "too-late" } });
   if (s.cancelMode === "network") throw Object.assign(new Error("timeout"), { code: "functions/deadline-exceeded" });
   s.orders[req.orderId] = { ...s.orders[req.orderId], status: "cancelled", cancelled: true };
@@ -179,7 +180,7 @@ test("同じ注文の中の重複: 入力の誤りにせず、確認画面で警
     assert.equal(await page.locator("#completeDetails").isVisible(), false, "完了画面に注文の内容(合計など)は出さない");
 
     // 同じ内容でもう一度(追加注文): 過去の注文との重複の警告 → 確認して続行 → 同じ注文の中の重複も確認して送信できる
-    await page.click("#btnNewOrder");
+    await page.click("#btnCompleteClose");
     await fillLine(page, 0, 2);
     await fillLine(page, 1, 2);
     await page.click("#btnConfirm");
@@ -234,7 +235,11 @@ test("完了画面: 本番の注文(testOrder: false)は「開発用」と出さ
       assert.match(help, /ディーラーへの注文メールを送信します/);
       assert.match(help, /注文の受付と、メールの配信の完了は別です。送信の結果\(受付・配信・失敗\)は、注文履歴で確認できます/);
       await page.keyboard.press("Escape");
-      assert.equal(await page.locator("#completeModal #btnNewOrder").isVisible(), true, "「新しい注文を入力する」はそのまま");
+      // 「新しい注文を入力する」はない。右上に「×」(閉じる)。取り消せない注文ではボタンの欄ごと出さない(余白を詰める)
+      assert.equal(await page.locator("#btnNewOrder").count(), 0);
+      const [card, close] = [await page.locator("#completeModal .modal-card").boundingBox(), await page.locator("#btnCompleteClose").boundingBox()];
+      assert.ok(close && card.x + card.width - (close.x + close.width) < 16 && close.y - card.y < 16, `${width}: ×は右上`);
+      assert.equal(await page.locator("#completeModal .modal-footer").isVisible(), false, `${width}: ボタンがなければ欄を出さない`);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
     }
     assert.deepEqual(errors, []);
@@ -380,17 +385,19 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await setSrv(page, { mode: "ok", cancelWindowMs: 1500, real: true });
       await submit(page, "自動で消える", "+20.0D");
       const btn = page.locator("#completeModal #btnCancelOrder");
-      assert.equal(await btn.innerText(), "取り消す");
+      assert.equal(await btn.innerText(), "注文を取り消す");
       assert.ok(!/d+s*秒|残り/.test(await page.locator("#completeModal").innerText()), "残り秒数を出さない");
       assert.equal(await page.locator("#completeModal progress, #completeModal [role=progressbar]").count(), 0, "プログレスバーを出さない");
-      assert.equal(await page.locator("#completeModal #btnNewOrder").isVisible(), true, "既存のボタンはそのまま");
+      assert.deepEqual([await page.locator("#btnNewOrder").count(), await page.locator("#btnCompleteClose").isEnabled()], [0, true], "「新しい注文を入力する」はなく、×で閉じられる");
       await btn.waitFor({ state: "detached", timeout: 5000 });
+      assert.equal(await page.locator("#completeModal .modal-footer").isVisible(), false, "期限後はボタンの欄ごと詰める");
       assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
-      await page.click("#btnNewOrder");
+      await page.click("#btnCompleteClose");
       // 2) 取消可能な間に押す: 取り消せたら「注文を取り消しました」と知らせ、送信した内容のまま注文入力画面へ戻る(完了画面は閉じる)
-      await setSrv(page, { cancelWindowMs: 10000 });
+      await setSrv(page, { cancelWindowMs: 10000, cancelDelayMs: 800 });
       await submit(page, "取り消す", "+20.5D");
       await btn.click();
+      assert.equal(await page.locator("#btnCompleteClose").isDisabled(), true, "取り消しの処理中は閉じられない");
       await page.waitForFunction(() => document.getElementById("completeModal").classList.contains("hidden"));
       await page.getByText("注文を取り消しました。内容を修正して、もう一度送信できます").waitFor();
       assert.deepEqual([await page.locator("#notesInput").inputValue(), await page.locator(".lens-line [data-f=power]").first().inputValue()], ["取り消す", "+20.5D"]);
@@ -405,15 +412,25 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(await page.locator("#completeCancelMsg").innerText(), /^取り消せませんでした。取り消せる時間を過ぎたため、注文は受け付けられ、ディーラーへ送信されます。/);
       assert.equal(await page.locator("#completeTitle").innerText(), "注文を受け付けました");
       assert.equal(await btn.count(), 0);
-      await page.click("#btnNewOrder");
+      await page.click("#btnCompleteClose");
       // 4) 通信の失敗: 取り消せたか分からないことを表示し、注文履歴での確認を案内
       await setSrv(page, { cancelMode: "network" });
       await submit(page, "通信の失敗", "+21.5D");
       await btn.click();
       await page.locator("#completeCancelMsg").waitFor();
       assert.match(await page.locator("#completeCancelMsg").innerText(), /取り消せたか確認できませんでした/);
-      await page.click("#btnNewOrder");
+      await page.click("#btnCompleteClose");
       assert.equal(await page.locator("#completeCancelMsg").count(), 0, "次の注文には前の表示を残さない");
+      await setSrv(page, { cancelDelayMs: 0 });
+      // 取消ボタンは受付から最大10秒(サーバーがそれより長い期限を返しても、10秒で消す)
+      if (name === "chromium") {
+        await setSrv(page, { cancelWindowMs: 60000, cancelMode: null });
+        await submit(page, "10秒で消える", "+22.5D");
+        const t0 = Date.now();
+        await btn.waitFor({ state: "detached", timeout: 13000 });
+        assert.ok(Date.now() - t0 < 11500, "10秒で消える: " + (Date.now() - t0));
+        await page.click("#btnCompleteClose");
+      }
       // 5) 期限を返さない(旧いサーバー・再送の受付済み)ときは出さない
       await setSrv(page, { cancelWindowMs: 0, cancelMode: null });
       await submit(page, "期限なし", "+22.0D");
@@ -485,8 +502,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.locator("#btnCancelOrder").click();
       await page.locator("#completeCancelMsg").waitFor();
       assert.equal(await page.locator("#completeModal").evaluate(e => e.classList.contains("hidden")), false, "完了画面のまま");
-      // 取り消さずに「新しい注文を入力する」: 従来どおり新規入力(1明細・空)
-      await page.click("#btnNewOrder");
+      // 取り消さずに完了画面を閉じる(×): 従来の「新しい注文を入力する」と同じく新規入力(1明細・空)
+      await page.click("#btnCompleteClose");
       const fresh = await read();
       assert.deepEqual([fresh.notes, fresh.lines.length, fresh.lines[0].power], ["", 1, ""]);
       assert.deepEqual(errors, []);
