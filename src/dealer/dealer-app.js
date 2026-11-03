@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekSpanLabel, weekStartLabel, spanLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekStartLabel, spanLabel, dateFieldLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { historyCardGroups } from "../domain/order-history-view.js";
 import { lensDayHead, lensRow } from "../ui/history-lens.js";
 import { createDealerManage } from "./dealer-manage.js";
@@ -249,8 +249,35 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     selected = new Set(restored.ids);
     const remember = () => facilityView.save(ctx.company.id, [...selected]);   // 担当施設の登録(setAssignments)は呼ばない
     // 一覧表示の絞り込み(任意。既定は期間なし = 全期間を新しい順)
-    const from = h("input", { class: "form-control", type: "date", id: "dealerFrom", "aria-label": "注文日(から)" });
-    const to = h("input", { class: "form-control", type: "date", id: "dealerTo", "aria-label": "注文日(まで)" });
+    // 注文日の欄: 値は日付の入力欄(YYYY-MM-DD)のまま。画面には月日だけ(今年以外は年も)を表示し、欄を押すと端末の日付選択(年も選べる)を開く。
+    // 入力欄は表示の上に透明で重ね、押す・キーボードで入力する対象はそのまま。値があるときは「×」で消せる(両方空で全期間)
+    const dateField = (id, label, placeholder) => {
+      const input = h("input", { class: "dealer-date-native", type: "date", id, "aria-label": label });
+      const text = h("span", { class: "dealer-date-text", "aria-hidden": "true" });
+      const clearBtn = h("button", { type: "button", class: "dealer-date-clear", "aria-label": `${label}を消す` }, "×");
+      const wrap = h("div", { class: "dealer-date-field" }, text, input, clearBtn);
+      const sync = () => {
+        const v = input.value;
+        text.textContent = v ? dateFieldLabel(v) : placeholder;
+        wrap.classList.toggle("is-empty", !v);
+        wrap.title = v ? `${label}: ${v.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => `${y}年${Number(m)}月${Number(d)}日`)}` : label;
+        clearBtn.hidden = !v;
+        syncRow();
+      };
+      input.addEventListener("input", sync);
+      input.addEventListener("change", sync);
+      // 押したら日付選択を開く(対応していない端末は、従来どおり入力欄の操作で開く)
+      input.addEventListener("click", () => { try { if (typeof input.showPicker === "function") input.showPicker(); } catch { /* 開けない端末は従来の操作 */ } });
+      clearBtn.addEventListener("click", () => { input.value = ""; sync(); input.focus(); });
+      return { wrap, input, sync };
+    };
+    const dateRow = h("div", { class: "dealer-date-row" });
+    // 年を表示している欄があれば、2つの欄を同じ広さにそろえる
+    const syncRow = () => dateRow.classList.toggle("has-year", [from, to].some(x => x && x.value && dateFieldLabel(x.value).split("/").length === 3));
+    const fromField = dateField("dealerFrom", "注文日(から)", "開始日");
+    const toField = dateField("dealerTo", "注文日(まで)", "終了日");
+    const from = fromField.input, to = toField.input;
+    fromField.sync(); toField.sync();
     const checks = h("div", { class: "dealer-facility-list", role: "group", "aria-label": "医療機関" });
     const selectBar = h("div", { class: "dealer-select-actions", role: "group", "aria-label": "医療機関の選択" });
     const renderChecks = () => {
@@ -379,7 +406,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         if (!hasData(w)) {
           let j = i;
           while (j + 1 < weeks.length && !hasData(weeks[j + 1])) j++;
-          rows.push(h("li", { class: "dealer-week-empty", "data-week": w.weekStart }, `${j === i ? weekSpanLabel(w.weekStart) : `${spanLabel(w.weekStart, weeks[j].weekEnd)}`}: 手術予定の受注はありません`));
+          rows.push(h("li", { class: "dealer-week-empty", "data-week": w.weekStart }, `${j === i ? weekStartLabel(w.weekStart) : `${weekStartLabel(w.weekStart)}〜${weekStartLabel(weeks[j].weekStart)}`}: 受注はありません`));
           i = j;
           continue;
         }
@@ -523,7 +550,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       // 注文日の検索(常に表示。注文日順だけ)。開始日 〜 終了日 [検索]。狭い画面で収まらなければ「検索」だけ次の行
       h("div", { class: "dealer-date-search", id: "dealerDateSearch", role: "search" },
         h("div", { class: "dealer-date-head" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), filterTip),
-        h("div", { class: "dealer-date-row" }, from, h("span", { class: "dealer-date-tilde" }, "〜"), to, search)),
+        (dateRow.append(fromField.wrap, h("span", { class: "dealer-date-tilde" }, "〜"), toField.wrap, search), dateRow)),
       listMsg, listBox, more);
     // 補足の説明はⓘ(共通の info-tip。タップ・クリックで開く)。医療機関名・検索範囲・メッセージは常に表示する
     const tip = (text, label) => createInfoTip(text, { label }).root;

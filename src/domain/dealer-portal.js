@@ -67,6 +67,17 @@ export function spanLabel(start, end, today = jstDate(Date.now())) {
 export const weekSpanLabel = (weekStart, today) => `${spanLabel(weekStart, addDays(weekStart, 6), today)}の週`;
 /** 手術日順の週の区切り「11月9日の週」(週の開始日 = 月曜だけ。今年以外は「2025年12月29日の週」) */
 export const weekStartLabel = (weekStart, today) => `${spanLabel(weekStart, weekStart, today)}の週`;
+/**
+ * 注文日の検索の欄に出す日付(値は YYYY-MM-DD のまま)。今年(日本時間)は月日だけ「11/10」、今年以外は年も「2027/1/5」(年を誤認しないように)。
+ * 値がなければ空文字。読めない値はそのまま
+ */
+export function dateFieldLabel(value, today = jstDate(Date.now())) {
+  if (!value) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return value;
+  const md = `${Number(m[2])}/${Number(m[3])}`;
+  return m[1] === today.slice(0, 4) ? md : `${m[1]}/${md}`;
+}
 /** 「11/12」(ほかの手術日の案内) */
 export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 

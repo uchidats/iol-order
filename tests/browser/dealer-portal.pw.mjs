@@ -417,7 +417,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const fbox = async () => page.evaluate(() => {
         const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, h: b.height }; };
         const e = document.querySelector("#btnDealerSearch"), c = getComputedStyle(e), b = e.getBoundingClientRect();
-        return { row: r(".dealer-date-row"), head: r(".dealer-date-head"), from: r("#dealerFrom"), to: r("#dealerTo"), tilde: r(".dealer-date-tilde"),
+        // 日付の欄は表示の枠(.dealer-date-field)。表示の文字が枠の中に収まっている(見切れない)かも測る
+        const clip = [...document.querySelectorAll(".dealer-date-field")].some(f => { const t = f.querySelector(".dealer-date-text").getBoundingClientRect(), b = f.getBoundingClientRect(); return t.left < b.left || t.right > b.right - 18; });
+        return { row: r(".dealer-date-row"), head: r(".dealer-date-head"), from: r(".dealer-date-field:has(#dealerFrom)"), to: r(".dealer-date-field:has(#dealerTo)"), tilde: r(".dealer-date-tilde"), clip,
+          texts: [...document.querySelectorAll(".dealer-date-text")].map(t => t.textContent),
+          native: [...document.querySelectorAll(".dealer-date-native")].map(i => getComputedStyle(i).opacity),
           btn: { l: b.left, r: b.right, t: b.top, h: Math.round(b.height), fs: Math.round(parseFloat(c.fontSize) * 10) / 10, bg: c.backgroundColor.match(/\d+/g).map(Number), one: e.scrollWidth <= e.clientWidth + 1 },
           over: document.documentElement.scrollWidth > innerWidth };
       });
@@ -437,12 +441,34 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(x.btn.bg[2] > 150 && x.btn.bg[2] - x.btn.bg[0] > 80, `${w}: 「検索」は青`);
         assert.ok(x.btn.r <= x.row.r + 0.5, `${w}: 「検索」は枠の中`);
         const sameLine = x.btn.t < x.to.b && x.btn.t + x.btn.h > x.to.t;
-        if (sameLine) assert.ok(x.to.r <= x.btn.l, `${w}: 同じ行なら終了日の右`);
+        if (sameLine) assert.ok(x.btn.l - x.to.r >= 8 - 0.5 && x.btn.l - x.to.r <= 12 + 0.5, `${w}: 同じ行なら終了日の右に 8〜12px 空けて「検索」(${x.btn.l - x.to.r})`);
         else assert.ok(x.btn.t >= x.to.b - 0.5, `${w}: 収まらなければ「検索」だけ次の行`);
         if (w >= 360) assert.ok(sameLine, `${w}: 開始日 〜 終了日 [検索] が1行に収まる`);   // 320px だけは「検索」の折り返しを許容
         assert.ok(Math.abs((x.from.r - x.from.l) - (x.to.r - x.to.l)) < 0.5, `${w}: 2つの日付の欄は同じ幅`);
+        assert.deepEqual(x.texts, [dateFieldLabel("2026-10-01"), dateFieldLabel("2026-12-31")], `${w}: 画面の表示は月日(今年なら「10/1」)`);
+        assert.equal(x.clip, false, `${w}: 日付の表示は欄の中で見切れない`);
+        assert.deepEqual(x.native, ["0", "0"], `${w}: 端末の日付の入力欄は透明で重ねる(表示が二重にならない)`);
       }
+      // 今年以外の日付は年も表示し(誤認しない)、2つの欄は年が収まる同じ幅に広がる。値は YYYY-MM-DD のまま
+      const nextYear = `${Number(jstDateOfDealer(Date.now()).slice(0, 4)) + 1}-01-05`;
+      await page.fill("#dealerTo", nextYear);
+      for (const w of [320, 390, 1100]) {
+        await page.setViewportSize({ width: w, height: 900 });
+        await page.waitForTimeout(250);
+        const x = await fbox();
+        assert.equal(x.texts[1], `${nextYear.slice(0, 4)}/1/5`, `${w}: 今年以外は年も表示`);
+        assert.equal(x.clip, false, `${w}: 年を表示しても見切れない`);
+        assert.equal(x.over, false, `${w}: 横にはみ出さない`);
+        assert.ok(Math.abs((x.from.r - x.from.l) - (x.to.r - x.to.l)) < 0.5, `${w}: 年があっても2つの欄は同じ幅`);
+        assert.deepEqual([Math.round(x.from.h), Math.round(x.to.h)], [36, 36], `${w}: 高さ36px`);
+      }
+      assert.equal(await page.inputValue("#dealerTo"), nextYear, "値は年月日のまま");
+      // 「×」で消すと、欄は「終了日」(未入力)の表示に戻る
       await page.setViewportSize({ width: 390, height: 900 });
+      await page.click('.dealer-date-clear[aria-label="注文日(まで)を消す"]');
+      assert.equal(await page.inputValue("#dealerTo"), "");
+      assert.equal(await page.locator("#dealerTo").evaluate(i => i.parentElement.querySelector(".dealer-date-text").textContent), "終了日");
+      assert.equal(await page.locator('.dealer-date-clear[aria-label="注文日(まで)を消す"]').isVisible(), false, "未入力なら「×」は出さない");
       // 検索の動作: 日付を入力しただけでは検索しない。開始日だけ・終了日だけ・両方・なし(全期間)をそのまま送る。開始日 > 終了日 はエラーで検索しない
       let k = (await calls(page, "list")).length;
       assert.equal(k, (await calls(page, "list")).length, "入力だけでは検索しない");
@@ -807,7 +833,7 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
   } finally { await browser.close(); }
 });
 
-import { mondayOf, jstDate as jstDateOfDealer, weekSpanLabel, weekStartLabel, addDays as addDaysOf } from "../../src/domain/dealer-portal.js";
+import { mondayOf, jstDate as jstDateOfDealer, weekStartLabel, dateFieldLabel, addDays as addDaysOf } from "../../src/domain/dealer-portal.js";
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`ディーラー画面の手術日順: 今週から手術日の昇順に連続(週の区切り → 手術日 → 医療機関 → レンズ行)。上下に週を追加(予定のない週は最大4週まで探し、さらに続きも探せる)、上に足しても位置を保つ、一部だけの週を明示、行から受注詳細(戻ると位置を保つ)。注文日順のカード。320/390/430/PC: ${name}`, async (t) => {
     const browser = await launch(type, name);
@@ -885,13 +911,14 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual((await weekCalls()).slice(n).sort(), [0, 7, 14].map(k => day(thisWeek, k)));
       assert.deepEqual(await page.locator("#dealerSurgery .dealer-surgery-list > li").evaluateAll(ls => ls.map(l => [l.className, l.dataset.week || l.dataset.day || ""])).then(x => x.filter(([c]) => c !== "history-day")),
         [["dealer-week-empty", day(thisWeek, 0)], ["dealer-week-head", day(thisWeek, 7)], ["dealer-week-empty", day(thisWeek, 14)]], "今週・翌々週は予定なしの1行、翌週は区切りと明細");
-      assert.equal(await page.locator(".dealer-week-empty").first().innerText(), `${weekSpanLabel(thisWeek)}: 手術予定の受注はありません`, "予定のない週の案内は期間を明示したまま");
+      assert.equal(await page.locator(".dealer-week-empty").first().innerText(), `${weekStartLabel(thisWeek)}: 受注はありません`, "予定のない週の案内は開始日(月曜)だけ「11月16日の週: 受注はありません」");
       assert.equal(await page.locator('.dealer-surgery-note[data-note="down"]').count(), 0, "予定のある週があれば案内は出さない");
       // 3週とも予定なし: 1行にまとめて案内し、「もっと見る」で先を探せる
       await page.evaluate(() => { window.__weekData = {}; });
       n = await reopen();
       assert.equal((await weekCalls()).length - n, 3, "初期表示は3週だけ読む(予定がなくても先を自動で探さない)");
       assert.equal(await page.locator(".dealer-week-empty").count(), 1);
+      assert.equal(await page.locator(".dealer-week-empty").innerText(), `${weekStartLabel(thisWeek)}〜${weekStartLabel(day(thisWeek, 14))}: 受注はありません`, "続く予定なしの週は、各週の開始日(月曜)でまとめる");
       assert.match(await page.locator('.dealer-surgery-note[data-note="down"]').innerText(), /に手術予定の受注はありません。「もっと見る」で、さらに先を探せます。$/);
       assert.equal(await page.locator('#dealerSurgery [data-act="more"]').isEnabled(), true);
       // 元の予定に戻して読み直す(以下の確認のため)
