@@ -205,12 +205,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await page.locator(".dealer-scope").count(), 0, "「検索範囲: …」の行は出さない");
         assert.ok(!(await page.locator("#dealerPanel").innerText()).includes("検索範囲"));
         assert.deepEqual(await page.locator(".dealer-card").evaluateAll(rs => rs.map(r => r.dataset.receipt)), ["rcp-b"]);
+        // チェックしている施設が1つ(閲覧できる施設は2つ): 注文番号の横の医療機関名は出さない。注文番号・明細・担当医名はそのまま
+        assert.equal(await page.locator(".dealer-card-facility").count(), 0, "1施設の選択では医療機関名を出さない");
+        assert.deepEqual([await page.locator(".dealer-card-no").innerText(), await page.locator(".dealer-card .history-lens-doctor").innerText()], ["IOL-20261027-02", "とても長い名前の担当医の先生Dr"]);
         // すべて選択 → 検索(複数施設)
         await page.click('[data-select="all"]');
         assert.deepEqual(await page.locator(".dealer-facility input").evaluateAll(cs => cs.map(c => c.checked)), [true, true], "すべて選択(検索範囲の文言はなし)");
         await page.click("#btnDealerSearch");
         await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 2);
         assert.deepEqual((await calls(page, "list")).at(-1).facilityFilter.facilityIds.sort(), ["fA", "fB"]);
+        assert.deepEqual(await page.locator(".dealer-card-facility").allInnerTexts(), ["B眼科", "<img src=x onerror=\"window.__xss=1\">A眼科"], "2施設以上なら注文番号の横に医療機関名");
+        // 1施設に戻して表示し直すと、医療機関名は出ない
+        await page.click('[data-select="assigned"]');
+        await page.click("#btnDealerSearch");
+        await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 1);
+        assert.equal(await page.locator(".dealer-card-facility").count(), 0, "1施設に戻すと省略");
+        await page.click('[data-select="all"]');
+        await page.click("#btnDealerSearch");
+        await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 2);
         // 施設名の HTML は文字として表示(要素にならない)
         assert.equal(await page.locator(".dealer-results img").count(), 0);
         assert.ok((await page.locator(".dealer-results").innerText()).includes("<img src=x"));

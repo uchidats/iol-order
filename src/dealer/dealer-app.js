@@ -483,7 +483,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       listBox.replaceChildren(...(items.length ? [h("ul", { class: "history-list dealer-list" }, items.map(it => {
         const { groups, hidden } = historyCardGroups((it.lines || []).map(lensOf));
         const b = h("button", { type: "button", class: "history-row history-card dealer-card", "data-receipt": it.receiptId },
-          h("div", { class: "history-card-no dealer-card-head" }, h("span", { class: "dealer-card-no" }, it.orderNumber), h("span", { class: "dealer-card-facility" }, it.facilityName)),
+          h("div", { class: "history-card-no dealer-card-head" }, h("span", { class: "dealer-card-no" }, it.orderNumber),
+            selected.size >= 2 ? h("span", { class: "dealer-card-facility" }, it.facilityName) : null),   // 医療機関名は、今チェックしている施設が2つ以上のときだけ(閲覧できる施設の総数ではない)
           ...groups.map(g => h("div", { class: "history-card-group" }, lensDayHead(g.surgeryDate),
             h("ul", { class: "history-card-lines" }, g.lines.map(l => lensRow("li", l, { doctor: doctorOf(l), className: "summary-line" }))))),
           hidden ? h("div", { class: "history-card-more" }, `ほか${hidden}件`) : null);
