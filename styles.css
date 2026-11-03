@@ -243,6 +243,8 @@ body {
 .auth-signin .feature-desc + .form-group { margin-top: 14px; }
 .auth-signin .form-group + .form-group { margin-top: 24px; }   /* Google とメールの区切り(前のまとまりの下の余白と重ねて 24px) */
 .auth-signin #authEmailInput + #btnAuthEmailLink { margin-top: 12px; }
+/* ログイン画面の Google・メールアドレス欄・送信ボタンは高さ 40px(この画面だけ。上下の余白だけを詰め、横幅・文字・左右の余白は共通のまま) */
+.auth-signin #btnAuthGoogle, .auth-signin #authEmailInput, .auth-signin #btnAuthEmailLink { height: 40px; min-height: 40px; padding-top: 0; padding-bottom: 0; }
 
 .btn-future {
   width: 100%;
