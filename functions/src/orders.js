@@ -13,7 +13,8 @@
  *   レンズ名・メーカー・注文者名・メールなどは、サーバーがマスターから引いてスナップショットとして保存する。
  * - 冪等性: 注文ドキュメントIDを (操作ユーザー, requestId) から決め、トランザクション内で存在確認する。
  *   同じ内容の再送は既存の注文番号を返し、同じ requestId で内容が違う場合は拒否する。
- * - 注文番号はサーバーが日付ごとの連番で発行する(クライアントは指定できない)。
+ * - 注文番号はサーバーが日付ごとの連番で発行する(クライアントは指定できない)。GLOBAL_ORDER_NUMBER_FROM(日本時間)以降は全施設で共通の連番
+ *   (orderNumberCounters/{yyyymmdd})、前日までは従来どおり施設ごとの連番(facilities/{fid}/orderCounters/{yyyymmdd})。保存済みの番号は変えない。
  * - 依存(db, FieldValue など)は注入する。テストはエミュレータ上の本物の Firestore で実行する。
  * - ディーラーへの注文メール・注文控えは、注文と同じトランザクションで「送信待ち」として保存するだけ(送信は order-mail-outbox.js)。
  *   宛先・件名・本文は注文時点の施設設定のスナップショット。送信に失敗しても注文は残る。
@@ -49,6 +50,30 @@ export const ORDER_LIMITS = Object.freeze({
   rateMax: 60,
   quantities: Object.freeze([1, 2])
 });
+
+/**
+ * 注文番号を全施設で共通の連番に切り替える日(日本時間 YYYYMMDD。docs/order-intake.md「注文番号」)。
+ * この日以降の注文は orderNumberCounters/{yyyymmdd}(全施設で1つ)で採番し、施設をまたいでも番号が重複しない。
+ * 前日までは従来どおり施設ごとのカウンター。日付の境目で切り替えるので、同じ日に2つの方式が混ざらない(既存の番号・カウンターは変更しない)。
+ * 2026-11-03(配備の当日)から使う(ユーザーの判断。当初予定の 11/10 を前倒し)。配備の前に、当日の注文番号・施設ごとのカウンターがないこと
+ * (= 共通のカウンターの初期値 0 で重複しないこと)を本番で確認し、配備の直後に scripts/admin/seed-order-number-counter.mjs で初期値を確かめる。
+ * (この日以降に旧方式の createOrder が動くと、施設ごとの番号と共通の番号が重複しうる。docs/order-intake.md「注文番号」)
+ */
+export const GLOBAL_ORDER_NUMBER_FROM = "20261103";
+
+/**
+ * その日の注文番号のカウンター。共通の連番の日は、念のため同じ日の施設ごとのカウンター(旧方式が誤って動いた場合の値)も読み、大きい方の続きにする
+ * @param {string} facilityId
+ * @param {string} day YYYYMMDD(日本時間)
+ * @returns {{ global:boolean, counterPath:string, legacyPath:string|null }}
+ */
+export function orderCounterPlan(facilityId, day, globalFrom = GLOBAL_ORDER_NUMBER_FROM) {
+  const legacy = `facilities/${facilityId}/orderCounters/${day}`;
+  return day >= globalFrom ? { global: true, counterPath: `orderNumberCounters/${day}`, legacyPath: legacy } : { global: false, counterPath: legacy, legacyPath: null };
+}
+
+/** 注文番号「IOL-YYYYMMDD-NN」(連番は最低2桁。100件目以降は3桁以上) */
+export const formatOrderNumber = (day, seq) => `IOL-${day}-${String(seq).padStart(2, "0")}`;
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -220,7 +245,7 @@ export function validateLens(model, input) {
  * @param {Array<object>} [deps.catalog]
  * @param {number} [deps.cancelWindowMs] 受付の直後に取り消せる時間(= メールの送信の保留)。既定は ORDER_CANCEL.windowMs(テストで 0 にすると従来どおり即時)
  */
-export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, getPolicy = () => ({ unrestricted: true }), catalog = IOL_MODELS, cancelWindowMs = ORDER_CANCEL.windowMs }) {
+export function createOrderService({ db, FieldValue, now = Date.now, isEnabled = () => true, getPolicy = () => ({ unrestricted: true }), catalog = IOL_MODELS, cancelWindowMs = ORDER_CANCEL.windowMs, globalNumberFrom = GLOBAL_ORDER_NUMBER_FROM }) {
   async function consumeRate(uid) {
     const ref = db.doc(`rateLimits/${uid}_createOrder`);
     await db.runTransaction(async (tx) => {
@@ -253,12 +278,16 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     const orderRef = db.doc(`facilities/${input.facilityId}/orders/${orderId}`);
     const hash = contentHash(input);
     const day = jstDate(now()).replace(/-/g, "");
-    const counterRef = db.doc(`facilities/${input.facilityId}/orderCounters/${day}`);
+    const plan = orderCounterPlan(input.facilityId, day, globalNumberFrom);
+    const counterRef = db.doc(plan.counterPath);
+    const legacyRef = plan.legacyPath ? db.doc(plan.legacyPath) : null;
 
     return db.runTransaction(async (tx) => {
       const mailSettingsRef = db.doc(`facilities/${input.facilityId}/settings/mail`);   // 注文控え・署名(施設設定)
-      const [fac, mem, existing, counter, mailSettingsSnap] = await Promise.all(
-        [fRef, mRef, orderRef, counterRef, mailSettingsRef].map(r => tx.get(r)));
+      // 連番のカウンター(共通の日は、念のため同じ日の施設ごとのカウンターも)は、注文・所属などと一緒に最初に読む(すべての読み取りは書き込みより前)。
+      // 読む順番を後ろへずらすと、同じ注文の同時の再送でロックの待ちが循環しうる(エミュレータで確認)ため、従来どおり最初にまとめて読む
+      const [fac, mem, existing, mailSettingsSnap, counter, legacy] = await Promise.all(
+        [fRef, mRef, orderRef, mailSettingsRef, counterRef, legacyRef].map(r => (r ? tx.get(r) : Promise.resolve(null))));
       // 担当医: この施設のマスター(orderers)にいる人だけ。明細ごとに異なってよい
       const doctorIds = [...new Set(input.lines.map(l => l.doctorId))];
       const doctorSnaps = await Promise.all(doctorIds.map(id => tx.get(db.doc(`facilities/${input.facilityId}/orderers/${id}`))));
@@ -317,12 +346,13 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
           dispatch                            // 実メール送信の可否。allowed=false の明細は、将来も送信してはいけない
         };
       });
+      const countOf = (snap) => (snap && snap.exists ? Number(snap.get("count")) || 0 : 0);
       const t = now();
       const cancelUntilMs = t + cancelWindowMs;   // 取消の期限 = メールの送信を始めてよい時刻(サーバーの時計)
-      const seq = (counter.exists ? counter.get("count") || 0 : 0) + 1;
-      const orderNumber = `IOL-${day}-${String(seq).padStart(2, "0")}`;   // 連番は最低2桁(100件目以降は3桁以上)。保存済みの注文番号(旧4桁)は変えない
+      const seq = Math.max(countOf(counter), countOf(legacy)) + 1;   // 共通の日に旧方式の施設カウンターが残っていても、同じ施設の番号と重ならない
+      const orderNumber = formatOrderNumber(day, seq);   // 連番は最低2桁(100件目以降は3桁以上)。保存済みの注文番号(旧4桁など)は変えない
 
-      tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(counterRef, { count: seq, updatedAt: FieldValue.serverTimestamp(), ...(plan.global ? { day } : {}) });
       const orderDoc = {
         schemaVersion: 3,
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,

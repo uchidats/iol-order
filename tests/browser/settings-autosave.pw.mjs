@@ -430,7 +430,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(fac.weight, body.weight, "太さは標準");
         assert.equal(h2.weight, "700", "「施設設定」は太字");
         const mids = await page.evaluate(() => [".settings-head h2", ".settings-facility"].map(sel => { const r = document.createRange(); r.selectNodeContents(document.querySelector(sel)); const b = r.getBoundingClientRect(); return (b.top + b.bottom) / 2; }));
-        assert.ok(Math.abs(mids[0] - mids[1]) < 0.5, `${width}: 「施設設定」と施設名の文字の縦位置がそろう ${mids}`);
+        if (width > 560) assert.ok(Math.abs(mids[0] - mids[1]) < 0.5, `${width}: PC は「施設設定」と施設名が1行で、文字の縦位置がそろう ${mids}`);
+        else {
+          // スマホ(560px 以下): 1行目に「施設設定」ⓘ と右端の「注文画面に戻る」、2行目に施設名(と鉛筆・ゴミ箱)。styles.css の @media (max-width: 560px)
+          const rows = await page.evaluate(() => { const r = (q) => document.querySelector(q).getBoundingClientRect(); const h = r(".settings-head .settings-heading"), f = r(".settings-head .settings-facility"), b = r("#btnSettingsClose"), head = r(".settings-head");
+            return { nameBelow: f.top >= h.bottom - 0.5, backSameRow: Math.abs((b.top + b.bottom) / 2 - (h.top + h.bottom) / 2) <= 2, backRight: Math.abs(b.right - head.right) <= 1, nameLeft: Math.abs(f.left - head.left) <= 1 }; });
+          assert.deepEqual(rows, { nameBelow: true, backSameRow: true, backRight: true, nameLeft: true }, `${width}: スマホは「施設設定」と「注文画面に戻る」が1行目、施設名は2行目の左`);
+        }
         // 施設設定の「追加」ボタン(担当医・ディーラー・利用者管理)は、幅60px・高さ36pxで3か所とも同じ
         const adds = await page.locator('#facilitySettings .settings-actions > [data-act="add"]').evaluateAll(bs => bs.map(b => { const r = b.getBoundingClientRect(), s = getComputedStyle(b); return [Math.round(r.width), Math.round(r.height), s.fontSize, s.borderRadius, s.paddingTop]; }));
         assert.ok(adds.length >= 2, "追加ボタン");

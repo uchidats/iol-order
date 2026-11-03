@@ -380,6 +380,10 @@ service cloud.firestore {
     match /rateLimits/{id} {
       allow read, write: if false;
     }
+    // 注文番号の全施設共通の連番(日本時間の日付ごと。createOrder だけが Admin SDK で読み書きする)。クライアントからは運営者を含め読み書きできない
+    match /orderNumberCounters/{day} {
+      allow read, write: if false;
+    }
     // ディーラー専用画面(docs/dealer-portal.md)。会社・支店・担当者・担当施設・参加待ち・閲覧許可・受信の索引・操作履歴は、
     // すべてサーバー(Cloud Functions)だけが扱う。ディーラーの担当者・施設の管理者・運営者を含め、クライアントからは読み書きできない
     // (担当者の所属は staff。既存の /{path=**}/members の規則に巻き込まないため members という名前にしない)

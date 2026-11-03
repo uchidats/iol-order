@@ -18,6 +18,7 @@ Security Rules は [firestore.rules](../firestore.rules)、テストは `npm run
 
 ```
 iolCatalog/{catalogIolId}        全施設共通（ログイン済みは読取、運営者のみ書込）
+orderNumberCounters/{yyyymmdd}   注文番号の全施設共通の連番（count・day・updatedAt。2026-11-03 以降。createOrder だけが読み書き。クライアントは全拒否）
 dealers/{dealerId}               ディーラー本体（運営者 + memberUids に含まれる者のみ読取、運営者のみ書込）
 
 facilities/{facilityId}          name, status: pending|active|suspended, updatedAt,
@@ -28,7 +29,7 @@ facilities/{facilityId}          name, status: pending|active|suspended, updated
   ├─ facilityDealers/{id}        facilityId, name(1-100), dealerId?, sortOrder?, updatedAt,
   │                              orderEmails[<=5]?（発注用）, usageReportEmails[<=5]?（使用報告用。発注用とは別管理）
   ├─ orders/{orderId}            サーバー(createOrder)発行のみ・クライアント書込不可。詳細は order-intake.md
-  └─ orderCounters/{yyyymmdd}    注文番号の連番(サーバー専用)
+  └─ orderCounters/{yyyymmdd}    注文番号の連番(サーバー専用)。2026-11-02 までの施設ごとの連番(以降は使わない。過去分はそのまま)
 ```
 
 - `members/{uid}` のドキュメントIDは Firebase Auth の uid。`uid` フィールドと一致必須。

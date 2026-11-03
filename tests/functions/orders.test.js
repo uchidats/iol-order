@@ -747,3 +747,119 @@ test('追加IOL NP-1/PN6A: 未採用では拒否し、採用後は区間ごと�
     await rejects(order(user('ordA'),body({modelId,power:powers[0]})),'invalid-argument');
   }
 });
+
+// ================= 注文番号: 全施設共通の連番への切り替え(GLOBAL_ORDER_NUMBER_FROM = 2026-11-10 日本時間) =================
+import { GLOBAL_ORDER_NUMBER_FROM, orderCounterPlan, formatOrderNumber } from "../../functions/src/orders.js";
+const JST_1109_235959 = Date.parse("2026-11-09T14:59:59Z");   // 日本時間 2026-11-09 23:59:59(旧方式の最後の1秒)
+const JST_1110_000000 = Date.parse("2026-11-09T15:00:00Z");   // 日本時間 2026-11-10 00:00:00(共通の連番の最初)
+const later = (over = {}) => body({ surgeryDate: "2026-12-01", ...over });   // 切り替え日以降も手術日が過去にならないように
+const globalCounter = (day = "20261110") => db.doc(`orderNumberCounters/${day}`);
+const legacyCounter = (fid, day) => db.doc(`facilities/${fid}/orderCounters/${day}`);
+// 境目の確認は、切り替え日を 2026-11-10 と指定したサービスで行う(本番の切り替え日 GLOBAL_ORDER_NUMBER_FROM の値に左右されない)
+const BOUNDARY_FROM = "20261110";
+const gOrder = (auth, data) => createOrderService({ db, FieldValue, now: () => clock.t, isEnabled: () => enabled.v, globalNumberFrom: BOUNDARY_FROM }).createOrder({ auth, data });
+
+test("注文番号の方式: 本番の切り替え日は 2026-11-03(配備の当日。日本時間)。前日までは施設ごと、当日以降は共通のカウンター。形式は IOL-YYYYMMDD-NN(最低2桁)", () => {
+  assert.equal(GLOBAL_ORDER_NUMBER_FROM, "20261103");
+  assert.deepEqual(orderCounterPlan("fA", "20261102"), { global: false, counterPath: "facilities/fA/orderCounters/20261102", legacyPath: null });
+  assert.deepEqual(orderCounterPlan("fA", "20261103"), { global: true, counterPath: "orderNumberCounters/20261103", legacyPath: "facilities/fA/orderCounters/20261103" });
+  assert.deepEqual(orderCounterPlan("fA", "20261109", BOUNDARY_FROM), { global: false, counterPath: "facilities/fA/orderCounters/20261109", legacyPath: null });
+  assert.deepEqual(orderCounterPlan("fA", "20261110", BOUNDARY_FROM), { global: true, counterPath: "orderNumberCounters/20261110", legacyPath: "facilities/fA/orderCounters/20261110" });
+  assert.deepEqual(orderCounterPlan("fB", "20270101"), { global: true, counterPath: "orderNumberCounters/20270101", legacyPath: "facilities/fB/orderCounters/20270101" });
+  assert.deepEqual([formatOrderNumber("20261110", 1), formatOrderNumber("20261110", 99), formatOrderNumber("20261110", 100), formatOrderNumber("20261110", 1000)],
+    ["IOL-20261110-01", "IOL-20261110-99", "IOL-20261110-100", "IOL-20261110-1000"]);
+});
+
+test("切り替え日の前後: 11/9 23:59:59 までは施設ごと(2施設とも -01)、11/10 0:00 からは全施設で共通の連番。翌日は -01 から", async () => {
+  clock.t = JST_1109_235959;
+  const a1 = await gOrder(user("ordA"), later());
+  const b1 = await gOrder(user("ordB"), later({ facilityId: "fB" }));
+  assert.deepEqual([a1.orderNumber, b1.orderNumber], ["IOL-20261109-01", "IOL-20261109-01"], "前日までは従来どおり施設ごと");
+  assert.equal((await globalCounter("20261109").get()).exists, false, "前日に共通のカウンターは作らない");
+  clock.t = JST_1110_000000;
+  const nums = [];
+  for (const [u, f] of [["ordA", F], ["ordB", "fB"], ["ordA", F], ["ordB", "fB"]]) nums.push((await gOrder(user(u), later({ facilityId: f }))).orderNumber);
+  assert.deepEqual(nums, ["IOL-20261110-01", "IOL-20261110-02", "IOL-20261110-03", "IOL-20261110-04"], "施設をまたいで1つの連番");
+  const g = await globalCounter().get();
+  assert.deepEqual([g.get("count"), g.get("day")], [4, "20261110"]);
+  assert.equal((await legacyCounter(F, "20261110").get()).exists, false, "当日以降は施設ごとのカウンターを作らない");
+  assert.equal((await legacyCounter("fB", "20261110").get()).exists, false);
+  assert.equal((await legacyCounter(F, "20261109").get()).get("count"), 1, "前日の施設ごとのカウンターはそのまま");
+  clock.t += 24 * 60 * 60 * 1000;
+  assert.equal((await gOrder(user("ordB"), later({ facilityId: "fB" }))).orderNumber, "IOL-20261111-01", "翌日は共通の連番を -01 から");
+  // 保存された番号はすべて重複しない(既存の 11/9 の2件は施設ごとに -01 のまま。日付が違うので共通の番号とは重ならない)
+  const all = [...(await orders()), ...(await orders("fB"))].map(d => d.get("orderNumber"));
+  assert.equal(all.length, 7);
+  assert.equal(new Set(all.filter(n => !n.startsWith("IOL-20261109-"))).size, 5);
+});
+
+test("共通の連番: 2施設から別々の注文を並列で10件送っても、番号は重複・欠番しない(-01〜-10。従来の施設ごとの並列テストと同じ件数。エミュレータは1つの文書への同時のトランザクションをロックの待ち時間で解決し、20件では時間切れになりうる)", async () => {
+  clock.t = JST_1110_000000 + 9 * 60 * 60 * 1000;
+  await seedMember(F, "ordA2", "orderer");
+  await seedMember("fB", "ordB2", "orderer");
+  const jobs = [];
+  for (let i = 0; i < 3; i++) for (const [u, f] of [["ordA", F], ["ordA2", F], ["ordB", "fB"], ["ordB2", "fB"]]) jobs.push(() => gOrder(user(u), later({ facilityId: f })));
+  const rs = await Promise.all(jobs.slice(0, 10).map(j => j()));
+  assert.deepEqual(rs.map(r => r.orderNumber).sort(), Array.from({ length: 10 }, (_, i) => `IOL-20261110-${String(i + 1).padStart(2, "0")}`));
+  assert.equal((await globalCounter().get()).get("count"), 10);
+  assert.equal((await orders()).length + (await orders("fB")).length, 10);
+});
+
+test("共通の連番の冪等性: 同じ requestId の並列20回は1件・同じ番号、カウンターは1つだけ進む。前日の注文の再送は前日の番号のまま(共通の連番を消費しない)", async () => {
+  clock.t = JST_1109_235959;
+  const before = later();
+  const prev = await gOrder(user("ordA"), before);
+  assert.equal(prev.orderNumber, "IOL-20261109-01");
+  clock.t = JST_1110_000000 + 60 * 1000;
+  const replay = await gOrder(user("ordA"), before);   // 日付をまたいだ再送(通信断の後など)
+  assert.deepEqual([replay.replayed, replay.orderNumber, replay.orderId], [true, "IOL-20261109-01", prev.orderId]);
+  assert.equal((await globalCounter().get()).exists, false, "再送は共通のカウンターに書き込まない(進めない)");
+  const d = later();
+  const rs = await Promise.all(Array.from({ length: 20 }, () => gOrder(user("ordA"), d)));
+  assert.equal(new Set(rs.map(r => r.orderNumber)).size, 1);
+  assert.equal(rs[0].orderNumber, "IOL-20261110-01");
+  assert.equal(rs.filter(r => !r.replayed).length, 1);
+  assert.equal((await globalCounter().get()).get("count"), 1);
+  // 同じ requestId で内容が違えば拒否され、カウンターは進まない
+  await rejects(gOrder(user("ordA"), { ...d, power: "+21.0D" }), "already-exists");
+  assert.equal((await gOrder(user("ordB"), later({ facilityId: "fB" }))).orderNumber, "IOL-20261110-02");
+});
+
+test("共通の連番: 拒否される注文(検証エラー・権限なし)は共通のカウンターを作らない・進めない", async () => {
+  clock.t = JST_1110_000000;
+  await rejects(gOrder(user("ordA"), later({ power: "+99.0D" })), "invalid-argument");
+  await rejects(gOrder(user("ordB"), later()), "permission-denied");   // 他施設の注文者
+  assert.equal((await globalCounter().get()).exists, false);
+  assert.equal((await gOrder(user("ordA"), later())).orderNumber, "IOL-20261110-01");
+});
+
+test("共通の連番: 100件目以降は3桁以上(-99 → -100 → -101)", async () => {
+  clock.t = JST_1110_000000;
+  await globalCounter().set({ count: 98, day: "20261110" });
+  const rs = [];
+  for (const [u, f] of [["ordA", F], ["ordB", "fB"], ["ordA", F]]) rs.push((await gOrder(user(u), later({ facilityId: f }))).orderNumber);
+  assert.deepEqual(rs, ["IOL-20261110-99", "IOL-20261110-100", "IOL-20261110-101"]);
+});
+
+test("デプロイの安全策: 切り替え日に旧方式が施設ごとのカウンターで番号を出していても、同じ施設の番号とは重ならない(大きい方の続き)", async () => {
+  clock.t = JST_1110_000000 + 60 * 60 * 1000;
+  await legacyCounter(F, "20261110").set({ count: 5 });   // 旧方式の createOrder が当日に A 施設で -01〜-05 を出した想定
+  assert.equal((await gOrder(user("ordA"), later())).orderNumber, "IOL-20261110-06");
+  assert.equal((await gOrder(user("ordB"), later({ facilityId: "fB" }))).orderNumber, "IOL-20261110-07", "以降は共通の連番の続き");
+  assert.equal((await globalCounter().get()).get("count"), 7);
+  assert.equal((await legacyCounter(F, "20261110").get()).get("count"), 5, "旧方式のカウンターは変更しない");
+});
+
+test("Rules: 全施設共通のカウンター(orderNumberCounters)は、どのクライアント(運営者を含む)も読み書きできない", async () => {
+  clock.t = JST_1110_000000;
+  await gOrder(user("ordA"), later());
+  const ctx = (uid, claims) => env.authenticatedContext(uid, claims).firestore();
+  for (const c of [env.unauthenticatedContext().firestore(), ctx("ordA"), ctx("adminA"), ctx("ops", { platformAdmin: true })]) {
+    await assertFails(getDoc(doc(c, "orderNumberCounters/20261110")));
+    await assertFails(getDocs(collection(c, "orderNumberCounters")));
+    await assertFails(setDoc(doc(c, "orderNumberCounters/20261110"), { count: 0 }));
+    await assertFails(setDoc(doc(c, "orderNumberCounters/20261111"), { count: 0 }));
+    await assertFails(deleteDoc(doc(c, "orderNumberCounters/20261110")));
+  }
+  assert.equal((await globalCounter().get()).get("count"), 1);
+});
