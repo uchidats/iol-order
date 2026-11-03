@@ -67,11 +67,12 @@ test("サブテーマカラー: 反映(<html> の変数を上書き、未設定�
   assert.equal(cachedSubTheme("fA", { getItem: () => { throw new Error("x"); } }), null, "記憶が使えない環境でも動く");
 });
 
-test("サブテーマカラー: ディーラー画面(dealer.html・src/dealer)は読み込まない(会社別のテーマカラーと独立。ディーラー画面は従来の青のまま)", () => {
+test("サブテーマカラー: ディーラー画面は会社の値(context.subTheme)だけを反映し、医療機関の設定は読まない・端末に覚えない(施設側と独立)", () => {
   const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
   const dealerFiles = fs.readdirSync(new URL("../src/dealer/", import.meta.url)).filter(f => f.endsWith(".js")).map(f => `src/dealer/${f}`);
-  // ディーラーの画面のコードは、サブテーマカラーを反映・読み込みしない(色見本の部品が色の検証だけを共有するのは可)
-  for (const p of dealerFiles) assert.ok(!/applySubTheme|loadSubTheme|ui\/sub-theme/.test(read(p)), `${p} はサブテーマカラーを反映しない`);
+  // ディーラーの画面のコードは、施設の読み込み(loadSubTheme)・端末の記憶(cacheSubTheme)を使わない。反映は会社の値だけ
+  for (const p of dealerFiles) assert.ok(!/loadSubTheme|cacheSubTheme|cachedSubTheme|getSubTheme/.test(read(p)), `${p} は医療機関のサブテーマカラーを読まない`);
+  assert.match(read("src/dealer/dealer-app.js"), /applySubTheme\(ctx\.subTheme\)/, "会社の値を反映する");
   // dealer.html は import map(全モジュールの版の対応表。読み込みはしない)以外でサブテーマカラーに触れない
   const html = read("dealer.html").replace(/<script type="importmap">[\s\S]*?<\/script>/, "");
   assert.ok(!/sub-theme/.test(html), "dealer.html");

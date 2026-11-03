@@ -16,7 +16,7 @@ import { isValidEmail } from "../domain/order-validation.js";
 import { MAIL_SETTINGS_LIMITS, dealerSubjectExample } from "../domain/order-mail-profiles.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { readHeaderTheme } from "../domain/header-theme.js";
-import { createThemeColorSection } from "./theme-color-section.js";
+import { createThemeColorTabs } from "./theme-color-section.js";
 import { createAutoSaver, setSectionMessage } from "./settings-autosave.js";
 import { applyHeaderTheme, cacheHeaderTheme } from "./header-theme.js";
 import { applySubTheme, cacheSubTheme } from "./sub-theme.js";
@@ -714,41 +714,22 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーション + 白い文字に戻す(設定を削除)。
   // 背景色は明るさに関係なく選べる。文字は白(既定)か黒。読みにくい組み合わせは控えめに案内するだけで、反映・保存は止めない。
   function themeSection() {
-    // ヘッダー: 従来の設定のまま(グラデーション・黒い文字を含む)
-    const header = createThemeColorSection({
-      bare: true,
-      get: () => data.headerTheme,
-      use: (theme) => { data.headerTheme = theme; applyHeaderTheme(theme); cacheHeaderTheme(facility.id, theme); },
-      save: async (t) => { if (t) await settingsApi.saveHeaderTheme(facility.id, t); else await settingsApi.resetHeaderTheme(facility.id); }
+    // 「ヘッダー」「サブテーマカラー」の切り替え付きの欄(共通の部品。ディーラー設定と同じ)。ヘッダーは従来の設定のまま
+    const sub = settingsApi.saveSubTheme && settingsApi.resetSubTheme;
+    const { section, savers } = createThemeColorTabs({
+      description: "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。" + (sub ? "「サブテーマカラー」では、ボタン・選択中の表示・リンクなどの色を施設ごとに設定できます(文字が読みやすいように、必要に応じて少し濃くして表示します)。" : ""),
+      header: {
+        get: () => data.headerTheme,
+        use: (theme) => { data.headerTheme = theme; applyHeaderTheme(theme); cacheHeaderTheme(facility.id, theme); },
+        save: async (t) => { if (t) await settingsApi.saveHeaderTheme(facility.id, t); else await settingsApi.resetHeaderTheme(facility.id); }
+      },
+      sub: sub ? {
+        get: () => data.subTheme,
+        use: (theme) => { data.subTheme = theme; applySubTheme(theme); cacheSubTheme(facility.id, theme); },
+        save: async (t) => { if (t) await settingsApi.saveSubTheme(facility.id, t); else await settingsApi.resetSubTheme(facility.id); }
+      } : null
     });
-    // サブテーマカラー: 同じ色見本と「その他の色」だけ。保存するのは選んだ元の色で、文字の読みやすさのための濃さの調整は表示のときだけ(domain/sub-theme.js)
-    const sub = settingsApi.saveSubTheme && settingsApi.resetSubTheme ? createThemeColorSection({
-      bare: true, variant: "sub",
-      get: () => data.subTheme,
-      use: (theme) => { data.subTheme = theme; applySubTheme(theme); cacheSubTheme(facility.id, theme); },
-      save: async (t) => { if (t) await settingsApi.saveSubTheme(facility.id, t); else await settingsApi.resetSubTheme(facility.id); }
-    }) : null;
-    themeSaver = header.saver;
-    subThemeSaver = sub ? sub.saver : null;
-    // 切り替え(見出しの直下。初期表示は「ヘッダー」。設定の内容・保存には影響しない)
-    let target = "header";
-    const tabBtn = (v, label) => {
-      const b = h("button", { type: "button", class: "history-sort-btn", "data-theme-target": v, "aria-pressed": String(v === target) }, label);
-      b.addEventListener("click", () => setTarget(v));
-      return b;
-    };
-    const tabs = sub ? h("div", { class: "history-sort theme-target", role: "group", "aria-label": "テーマカラーを設定する場所" }, tabBtn("header", "ヘッダー"), tabBtn("sub", "サブテーマカラー")) : null;
-    function setTarget(v) {
-      target = v;
-      if (tabs) tabs.querySelectorAll("[data-theme-target]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeTarget === v)));
-      header.section.hidden = v !== "header";
-      if (sub) sub.section.hidden = v !== "sub";
-    }
-    const section = h("section", { class: "settings-section", "data-section": "theme" },
-      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。" + (sub ? "「サブテーマカラー」では、ボタン・選択中の表示・リンクなどの色を施設ごとに設定できます(文字が読みやすいように、必要に応じて少し濃くして表示します)。" : "")),
-      tabs, header.section, sub ? sub.section : null);
-    setTarget("header");
-    section._render = () => { header.section._render(); if (sub) sub.section._render(); setTarget("header"); };
+    [themeSaver, subThemeSaver = null] = savers;
     return section;
   }
 

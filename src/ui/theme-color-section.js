@@ -87,3 +87,33 @@ export function createThemeColorSection({ description, get, use: apply, save, va
   section._render = () => { saved = get(); setSectionMessage(section, ""); show(); };
   return { section, saver };
 }
+
+/**
+ * テーマカラー欄(「テーマカラー」の見出しの直下に「ヘッダー」「サブテーマカラー」の切り替え。初期表示は「ヘッダー」)。施設設定・ディーラー設定で共通。
+ * 中身は createThemeColorSection(ヘッダーは従来どおり、サブテーマは色見本・その他の色・初期設定に戻すだけ)。保存先・反映先は呼び出し側が決める。
+ * sub を省略(null)すると、切り替えのない従来のヘッダーの欄だけになる。
+ * @param {{ description:string, header:{get,use,save}, sub?:({get,use,save}|null) }} deps
+ * @returns {{ section: HTMLElement, savers: object[] }} section._render() で今の設定を表示し直す(切り替えは「ヘッダー」に戻す)
+ */
+export function createThemeColorTabs({ description, header: headerDeps, sub: subDeps = null }) {
+  const header = createThemeColorSection({ ...headerDeps, bare: true });
+  // サブテーマカラー: 保存するのは選んだ元の色で、文字の読みやすさのための濃さの調整は表示のときだけ(domain/sub-theme.js)
+  const sub = subDeps ? createThemeColorSection({ ...subDeps, bare: true, variant: "sub" }) : null;
+  let target = "header";
+  const tabBtn = (v, label) => {
+    const b = h("button", { type: "button", class: "history-sort-btn", "data-theme-target": v, "aria-pressed": String(v === target) }, label);
+    b.addEventListener("click", () => setTarget(v));
+    return b;
+  };
+  const tabs = sub ? h("div", { class: "history-sort theme-target", role: "group", "aria-label": "テーマカラーを設定する場所" }, tabBtn("header", "ヘッダー"), tabBtn("sub", "サブテーマカラー")) : null;
+  function setTarget(v) {
+    target = v;
+    if (tabs) tabs.querySelectorAll("[data-theme-target]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeTarget === v)));
+    header.section.hidden = v !== "header";
+    if (sub) sub.section.hidden = v !== "sub";
+  }
+  const section = h("section", { class: "settings-section", "data-section": "theme" }, createSectionHeading("テーマカラー", description), tabs, header.section, sub ? sub.section : null);
+  setTarget("header");
+  section._render = () => { header.section._render(); if (sub) sub.section._render(); setTarget("header"); };
+  return { section, savers: [header.saver, sub ? sub.saver : null].filter(Boolean) };
+}

@@ -7,8 +7,10 @@ import { createDealerManage } from "./dealer-manage.js";
 import { createDealerExport } from "./dealer-export.js";
 import { createInfoTip } from "../ui/info-tip.js";
 import { readHeaderTheme } from "../domain/header-theme.js";
+import { readSubTheme } from "../domain/sub-theme.js";
 import { applyHeaderTheme } from "../ui/header-theme.js";
-import { createThemeColorSection } from "../ui/theme-color-section.js";
+import { applySubTheme } from "../ui/sub-theme.js";
+import { createThemeColorTabs } from "../ui/theme-color-section.js";
 
 /**
  * ディーラー専用画面(dealer.html)。表示する文字はすべて textContent(HTML として解釈しない)。
@@ -69,12 +71,20 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         ? "自社の担当者・支店を管理します。この画面は会社管理者・支店管理者だけが利用できます。注文を閲覧できる範囲は会社単位で、ここでの設定では変わりません。"
         : "自分の支店の担当者を管理します。この画面は会社管理者・支店管理者だけが利用できます。注文を閲覧できる範囲は会社単位で、ここでの設定では変わりません。";
       // テーマカラー(会社で共通。会社管理者だけに出す。保存はサーバーが会社管理者か確かめる)。施設設定と同じ部品・操作
+      // (「ヘッダー」「サブテーマカラー」の切り替え。端末には覚えない: 所属を確かめる前に会社の色を出さない)
       const c = ctx, companyId = ctx.company.id;
-      const theme = ctx.me.role === "companyAdmin" ? createThemeColorSection({
-        description: "画面上部(ヘッダー)の色を会社で共通に設定できます。すべての担当者の画面に反映されます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。この項目は会社管理者のみ変更できます。",
-        get: () => c.headerTheme || null,
-        use: (t) => { c.headerTheme = t; if (ctx === c) applyHeaderTheme(t); },
-        save: async (t) => { if (t) await api.setTheme({ companyId, ...t }); else await api.resetTheme({ companyId }); }
+      const theme = ctx.me.role === "companyAdmin" ? createThemeColorTabs({
+        description: "画面上部(ヘッダー)の色を会社で共通に設定できます。すべての担当者の画面に反映されます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。この項目は会社管理者のみ変更できます。「サブテーマカラー」では、ボタン・選択中の表示・リンクなどの色を会社で共通に設定できます(文字が読みやすいように、必要に応じて少し濃くして表示します)。",
+        header: {
+          get: () => c.headerTheme || null,
+          use: (t) => { c.headerTheme = t; if (ctx === c) applyHeaderTheme(t); },
+          save: async (t) => { if (t) await api.setTheme({ companyId, ...t }); else await api.resetTheme({ companyId }); }
+        },
+        sub: {
+          get: () => c.subTheme || null,
+          use: (t) => { c.subTheme = t; if (ctx === c) applySubTheme(t); },
+          save: async (t) => { if (t) await api.setSubTheme({ companyId, ...t }); else await api.resetSubTheme({ companyId }); }
+        }
       }) : null;
       settingsView = h("section", { class: "feature-card dealer-panel dealer-settings", id: "dealerSettings", hidden: true },
         h("div", { class: "settings-head" },
@@ -98,7 +108,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   };
   /** 表示中のデータを破棄して案内だけを出す */
   function showMessage(title, text, { error = false, withSignOut = true } = {}) {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null);
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null); applySubTheme(null);
     panel.replaceChildren(...[h("div", { class: "feature-title-row" }, h("span", { class: "feature-title" }, title)),
       h("p", { class: error ? "error-message" : "feature-desc", role: error ? "alert" : "status" }, text),
       withSignOut ? h("div", { class: "onboarding-actions" }, signOutBtn()) : null].filter(Boolean));
@@ -125,7 +135,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
    * 初めて使うログイン方法(参加を含む)・新しい端末(ブラウザ)は、どの方式でも、メールに届く確認コードで本人確認してから使える。
    */
   function showLogin({ notice = "", error = "", onGoogle = null, onMicrosoft = null, onSend }) {
-    setMenu(null); dropSettings(); applyHeaderTheme(null);   // ログイン前・本人確認・会社の選択の間は標準の青(会社のテーマは出さない)
+    setMenu(null); dropSettings(); applyHeaderTheme(null); applySubTheme(null);   // ログイン前・本人確認・会社の選択の間は標準の青(会社のテーマは出さない)
     const google = onGoogle ? h("button", { type: "button", class: "btn btn-primary dealer-login-google", id: "btnDealerGoogle" }, "Googleでログイン") : null;
     const microsoft = onMicrosoft ? h("button", { type: "button", class: "btn btn-primary dealer-login-microsoft", id: "btnDealerMicrosoft" }, "Microsoftでログイン") : null;
     const providers = google || microsoft;
@@ -173,7 +183,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
    * @param {{onLater?: () => void}} [opts] onLater: すでに使える会社があるとき、新しい参加の案内を後回しにする
    */
   function showVerify({ onLater = null } = {}) {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null);
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null); applySubTheme(null);
     const send = h("button", { type: "button", class: "btn btn-secondary", "data-act": "sendCode" }, "確認コードを送る");
     const code = h("input", { class: "form-control dealer-join-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "12", "aria-label": "確認コード(8桁)", placeholder: "8桁の確認コード", "data-f": "code" });
     const verify = h("button", { type: "button", class: "btn btn-primary", "data-act": "verifyCode" }, "確認する");
@@ -242,6 +252,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     // 会社のテーマカラー(サーバーが所属を確かめた context の値。未設定は標準の青)。端末には覚えない(確認前に会社の色を出さない)
     ctx.headerTheme = readHeaderTheme(ctx.headerTheme);
     applyHeaderTheme(ctx.headerTheme);
+    ctx.subTheme = readSubTheme(ctx.subTheme);   // 会社のサブテーマカラー(サーバーが所属を確かめた値。未設定は従来の青)。端末には覚えない
+    applySubTheme(ctx.subTheme);
     // 氏名・所属会社・ディーラー設定(会社管理者・支店管理者)・会社の切り替え・ログアウトはヘッダーの「☰」メニュー(サーバーが確かめた context の値)
     setMenu({ name: ctx.me.name || "", companyName: ctx.company.name, branchName: ctx.me.branch ? ctx.me.branch.name : "",
       canSwitch: choices.length > 1, canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
@@ -594,7 +606,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
 
   /** 有効な所属が2社以上: 会社を選ぶ(本人の有効な所属だけ) */
   function showCompanyChoice() {
-    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null);
+    ctx = null; items = []; cursor = null; lastQuery = null; setSubtitle(""); setMenu(null); dropSettings(); applyHeaderTheme(null); applySubTheme(null);
     const msg = h("p", { class: "error-message", role: "alert" });
     const list = h("ul", { class: "pending-invite-list" }, choices.map(c => {
       const b = h("button", { type: "button", class: "btn btn-primary", "data-company": c.companyId }, "この会社で開く");

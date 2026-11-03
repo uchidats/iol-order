@@ -46,6 +46,8 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     // 会社のテーマカラー(会社で共通。会社管理者のみ。サーバーが役割・値を確かめる)
     setTheme: (a) => portal({ action: "setTheme", ...pick(a, ["companyId", "color", "gradient", "darkText"]) }),
     resetTheme: (a) => portal({ action: "resetTheme", ...pick(a, ["companyId"]) }),
+    setSubTheme: (a) => portal({ action: "setSubTheme", ...pick(a, ["companyId", "color"]) }),   // 会社のサブテーマカラー(選んだ元の色だけ)
+    resetSubTheme: (a) => portal({ action: "resetSubTheme", ...pick(a, ["companyId"]) }),
     listWeek: (a) => portal({ action: "week", ...pick(a, ["companyId", "weekStart", "facilityFilter"]) }),   // 手術日の週表示(月曜〜日曜)
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),

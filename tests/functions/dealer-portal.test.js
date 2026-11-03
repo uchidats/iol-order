@@ -1300,6 +1300,37 @@ test("会社管理者・支店管理者: 他社の担当者・支店は操作で
   enabled.v = true;
 });
 
+test("サブテーマカラー(会社で共通): 会社管理者だけが保存・初期化できる。保存は選んだ元の色だけ。全担当者が context で受け取る。ヘッダーの色・医療機関の設定とは別", async () => {
+  const { S, m, sidOf } = await setupSenju();
+  const subOf = async (uid) => (await m(uid, "context", { companyId: S })).subTheme;
+  assert.equal(await subOf("r1"), null, "未設定は null(従来の青)");
+  assert.deepEqual(await m("sadm", "setSubTheme", { companyId: S, color: "#fdba74" }), { ok: true, subTheme: { color: "#fdba74" } }, "明るい色も元の色のまま保存");
+  for (const u of ["sadm", "tadm", "oadm", "r1", "r2"]) assert.deepEqual(await subOf(u), { color: "#fdba74" }, `${u}: 全担当者に同じ色`);
+  assert.equal((await m("r1", "context", { companyId: S })).headerTheme, null, "ヘッダーの色は変わらない");
+  for (const u of ["tadm", "oadm", "r1"]) {
+    await deniedBy(m(u, "setSubTheme", { companyId: S, color: "#000000" }));
+    await deniedBy(m(u, "resetSubTheme", { companyId: S }));
+  }
+  await rejects(api("x1", "setSubTheme", { companyId: S, color: "#000000" }), "permission-denied");
+  for (const bad of [{ color: "#FDBA74" }, { color: "red" }, { color: "#12345" }, {}, { color: "#fdba74", gradient: true }, { color: "#fdba74", darkText: false }, { color: "#fdba74", primary: "#a85702" }]) {
+    await rejects(m("sadm", "setSubTheme", { companyId: S, ...bad }), "invalid-argument");
+  }
+  await rejects(m("sadm", "resetSubTheme", { companyId: S, color: "#000000" }), "invalid-argument");
+  assert.deepEqual(await subOf("r1"), { color: "#fdba74" }, "拒否された変更は保存しない");
+  for (const fid of ["fA", "fB"]) assert.equal((await db.doc(`facilities/${fid}/displaySettings/subTheme`).get()).exists, false, "医療機関のサブテーマカラーには書かない");
+  // ヘッダーの色を保存・初期化しても、サブテーマカラーはそのまま(別の項目)
+  await m("sadm", "setTheme", { companyId: S, color: "#0f766e", gradient: false, darkText: false });
+  await m("sadm", "resetTheme", { companyId: S });
+  assert.deepEqual(await subOf("r1"), { color: "#fdba74" });
+  assert.deepEqual(await m("sadm", "resetSubTheme", { companyId: S }), { ok: true, subTheme: null });
+  assert.equal(await subOf("tadm"), null);
+  assert.equal((await db.doc(`dealerCompanies/${S}`).get()).get("subTheme"), undefined);
+  const logs = (await db.collection("dealerPortalAuditLogs").where("companyId", "==", S).get()).docs.map(d => d.data()).filter(d => String(d.action).startsWith("company.subTheme"));
+  assert.deepEqual(logs.map(l => [l.action, l.staffId]).sort(), [["company.subTheme", sidOf("sadm")], ["company.subThemeReset", sidOf("sadm")]]);
+  await db.doc(`dealerCompanies/${S}`).update({ subTheme: { color: "javascript:alert(1)" } });
+  assert.equal(await subOf("r1"), null, "壊れた保存値は未設定として返す");
+});
+
 test("テーマカラー(会社で共通): 会社管理者だけが保存・初期化できる。全担当者が context で同じ色を受け取る。支店管理者・閲覧者・他社・無効な担当者は拒否。値は厳密に確かめる。医療機関のテーマには影響しない", async () => {
   const { S, m, sidOf } = await setupSenju();
   const themeOf = async (uid) => (await m(uid, "context", { companyId: S })).headerTheme;

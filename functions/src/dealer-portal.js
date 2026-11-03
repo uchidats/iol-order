@@ -134,6 +134,16 @@ export function parseCompanyTheme(v) {
   return { color: v.color, gradient: v.gradient, darkText: v.darkText };
 }
 
+/**
+ * 会社のサブテーマカラー(ディーラー画面のボタン・選択中の表示・バッジ・リンクなどの色。会社で共通)。医療機関の displaySettings/subTheme と同じ形:
+ * 選んだ元の色 "#rrggbb"(小文字)だけ。読みやすさのための濃さの調整は画面の表示のときだけ(src/domain/sub-theme.js)。形が違えば null
+ */
+export function parseCompanySubTheme(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  if (typeof v.color !== "string" || !/^#[0-9a-f]{6}$/.test(v.color)) return null;
+  return { color: v.color };
+}
+
 export function deletedAndNotSent(order, mail) {
   return !!order && order.deleted === true && !(mail && mail.exists && mail.get("status") === "accepted");
 }
@@ -685,6 +695,7 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       ...(a.principal.testMode ? { testMode: true } : {}),   // 運営者の試験モード(画面は受注一覧を出さない)
       company: { id: a.companyId, name: String(a.company.name || "") },
       headerTheme: parseCompanyTheme(a.company.headerTheme),   // 会社のテーマカラー(全担当者に同じ色。未設定・壊れた値は null = 標準の青)
+      subTheme: parseCompanySubTheme(a.company.subTheme),      // 会社のサブテーマカラー(ボタンなどの色。全担当者に同じ色。未設定・壊れた値は null = 従来の青)
       me: { name: String(a.staff.name || ""), role: a.staff.role, branch },
       ...sel,
       defaultRange: { from: jstDateOf(now() - 29 * DAY_MS), to: today },
@@ -1050,24 +1061,31 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
     });
   }
 
+  /** テーマカラーの種類: ヘッダー(headerTheme)・サブテーマカラー(subTheme)。保存する項目・検証・監査ログの名前だけが違う */
+  const COMPANY_THEMES = {
+    header: { field: "headerTheme", keys: ["color", "gradient", "darkText"], parse: (d) => parseCompanyTheme({ color: d.color, gradient: d.gradient, darkText: d.darkText }), action: "company.theme" },
+    sub: { field: "subTheme", keys: ["color"], parse: (d) => parseCompanySubTheme({ color: d.color }), action: "company.subTheme" }
+  };
+
   /**
-   * 会社のテーマカラーの保存・初期設定に戻す(会社で共通。会社管理者のみ)。支店管理者・閲覧者・他社・無効な担当者・本人確認前は拒否。
+   * 会社のテーマカラー(ヘッダー・サブテーマカラー)の保存・初期設定に戻す(会社で共通。会社管理者のみ)。支店管理者・閲覧者・他社・無効な担当者・本人確認前は拒否。
    * 値は項目を限定して厳密に確かめる。トランザクションの中で本人を読み直し(途中の降格・無効化を拒否)、操作を監査ログに残す
    */
-  async function setCompanyTheme(auth, data, reset) {
-    strict(data, reset ? ["companyId"] : ["companyId", "color", "gradient", "darkText"]);
+  async function setCompanyTheme(auth, data, reset, kind = "header") {
+    const k = COMPANY_THEMES[kind];
+    strict(data, reset ? ["companyId"] : ["companyId", ...k.keys]);
     const actor = await managerActor(auth, data.companyId);
     if (actor.role !== "companyAdmin") throw new RegistrationError("permission-denied", "テーマカラーの変更は、会社管理者のみ行えます");
-    const theme = reset ? null : parseCompanyTheme({ color: data.color, gradient: data.gradient, darkText: data.darkText });
+    const theme = reset ? null : k.parse(data);
     if (!reset && !theme) throw badInput("色は #rrggbb の形式で指定してください");
     await db.runTransaction(async (tx) => {
       await recheck(tx, actor);
       tx.update(companyRef(actor.companyId), theme
-        ? { headerTheme: { ...theme, updatedAt: FieldValue.serverTimestamp(), updatedBy: actor.uid } }
-        : { headerTheme: FieldValue.delete() });
-      audit(tx, { action: reset ? "company.themeReset" : "company.theme", companyId: actor.companyId, staffId: actor.staffId, actorUid: actor.uid, ...(theme ? { theme } : {}) });
+        ? { [k.field]: { ...theme, updatedAt: FieldValue.serverTimestamp(), updatedBy: actor.uid } }
+        : { [k.field]: FieldValue.delete() });
+      audit(tx, { action: reset ? `${k.action}Reset` : k.action, companyId: actor.companyId, staffId: actor.staffId, actorUid: actor.uid, ...(theme ? { theme } : {}) });
     });
-    return { ok: true, headerTheme: theme };
+    return { ok: true, [k.field]: theme };
   }
 
   /** ディーラー画面の呼び出し(担当者・招待先本人) */
@@ -1096,6 +1114,8 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       case "manageBranch": return manageBranch(auth, rest);
       case "setTheme": return setCompanyTheme(auth, rest, false);    // 会社管理者のみ: 会社のテーマカラー
       case "resetTheme": return setCompanyTheme(auth, rest, true);
+      case "setSubTheme": return setCompanyTheme(auth, rest, false, "sub");   // 会社管理者のみ: 会社のサブテーマカラー(ボタンなどの色)
+      case "resetSubTheme": return setCompanyTheme(auth, rest, true, "sub");
       default: throw badInput();
     }
   }
