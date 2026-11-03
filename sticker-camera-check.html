@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>撮影品質の確認(R09 検証用)</title>
+  <!-- R09 使用済みIOLシール写真の実機検証用のページ(docs/iol-sticker-photo-design.md §9-1)。
+       画像はこのページのメモリだけで扱い、サーバーへ送信・保存しない(Firebase も読み込まない)。注文画面・ディーラー画面とは無関係 -->
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .cc-main { display: flex; flex-direction: column; gap: 14px; padding-bottom: 40px; }
+    .cc-card { background: #fff; border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 14px 16px; }
+    .cc-card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .cc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .cc-video { width: 100%; max-height: 60vh; background: #000; border-radius: var(--radius-sm); object-fit: contain; }
+    .cc-video[hidden] { display: none; }
+    .cc-dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 0.9rem; }
+    .cc-dl dt { color: var(--text-muted); }
+    .cc-dl dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .cc-blurry { color: var(--warning); font-weight: 700; }
+    .cc-zoom { margin-top: 8px; overflow: auto; max-height: 70vh; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: #f8fafc; touch-action: pan-x pan-y pinch-zoom; }
+    .cc-zoom img { display: block; width: 100%; height: auto; }
+    .cc-zoom.is-100 img { width: auto; max-width: none; }
+    .cc-zoom.is-200 img { max-width: none; }
+    .cc-results { display: flex; flex-direction: column; gap: 14px; }
+    .cc-lib { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 0.9rem; }
+    .cc-summary { width: 100%; min-height: 160px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; }
+    .cc-msg { margin: 6px 0 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-text">
+          <h1 class="header-title">撮影品質の確認</h1>
+          <p class="header-subtitle">R09 検証用(送信・保存はしません)</p>
+        </div>
+      </div>
+    </header>
+    <main class="main-content cc-main" id="ccMain">
+      <section class="cc-card" id="ccCamera">
+        <h2>1. ブラウザのカメラで撮影(本番の方式)</h2>
+        <div class="cc-row">
+          <button type="button" class="btn btn-primary btn-aux" id="ccStart">カメラを起動</button>
+          <button type="button" class="btn btn-primary btn-aux" id="ccShot" disabled>撮影</button>
+          <button type="button" class="btn btn-secondary btn-aux" id="ccStill" hidden disabled>静止画モードで撮影(比較)</button>
+          <button type="button" class="btn btn-secondary btn-aux" id="ccStop" disabled>カメラを止める</button>
+        </div>
+        <video class="cc-video" id="ccVideo" playsinline muted hidden></video>
+        <dl class="cc-dl" id="ccCamInfo"></dl>
+        <p class="form-hint cc-msg" id="ccCamMsg" role="status"></p>
+      </section>
+
+      <section class="cc-card" id="ccFile">
+        <h2>2. 比較: ファイル選択で撮影(カメラを使えない端末の代わりの方式)</h2>
+        <div class="cc-row">
+          <label class="btn btn-secondary btn-aux" for="ccFileInput">カメラアプリで撮影</label>
+          <input type="file" id="ccFileInput" accept="image/*" capture="environment" hidden>
+        </div>
+        <p class="form-hint cc-msg">この方式は、端末によっては写真ライブラリに残ることがあります(結果の欄で確認してください)。</p>
+      </section>
+
+      <div class="cc-results" id="ccResults"></div>
+
+      <section class="cc-card" id="ccSummaryCard">
+        <h2>結果のまとめ(コピーして共有)</h2>
+        <textarea class="form-control cc-summary" id="ccSummary" readonly></textarea>
+        <div class="cc-row" style="margin-top:8px">
+          <button type="button" class="btn btn-secondary btn-aux" id="ccCopy">結果をコピー</button>
+          <button type="button" class="btn btn-secondary btn-aux" id="ccClear">結果を消す</button>
+        </div>
+        <p class="form-hint cc-msg" id="ccCopyMsg" role="status"></p>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="src/sticker/camera-check.js"></script>
+</body>
+</html>
