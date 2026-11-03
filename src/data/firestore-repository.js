@@ -81,6 +81,11 @@ export function createFirestoreRepository(db, fs) {
       const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme"));
       return snap.exists() ? snap.data() : null;
     },
+    /** サブテーマカラー(主要ボタン・選択中の表示などの色。所属者が読める)。未設定は null */
+    async getSubTheme(facilityId) {
+      const snap = await fs.getDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "subTheme"));
+      return snap.exists() ? snap.data() : null;
+    },
     listDealers: async (facilityId) => (await listSub(facilityId, "facilityDealers")).sort(bySortOrder),
     /** 施設のメール設定(注文控え・署名)。管理者・副管理者だけが読める。未設定は null */
     async getMailSettings(facilityId) {
@@ -189,6 +194,11 @@ export function createFirestoreSettingsApi(db, fs, { getUid = () => null, trackA
       fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme"),
       { color, gradient, darkText: darkText === true, updatedAt: fs.serverTimestamp() }),
     resetHeaderTheme: (facilityId) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "headerTheme")),
+    /** サブテーマカラーの保存(管理者・副管理者のみ。Rules が検証する)。保存するのは選んだ元の色(読みやすさの調整は表示のときだけ)。初期設定に戻すときは削除する */
+    saveSubTheme: (facilityId, { color }) => fs.setDoc(
+      fs.doc(db, "facilities", facilityId, "displaySettings", "subTheme"),
+      { color, updatedAt: fs.serverTimestamp() }),
+    resetSubTheme: (facilityId) => fs.deleteDoc(fs.doc(db, "facilities", facilityId, "displaySettings", "subTheme")),
     /** 施設のメール設定の保存(管理者・副管理者のみ。Rules が検証する)。変更者の記録(updatedBy)も付ける */
     saveMailSettings: async (facilityId, data) => {
       const by = trackActor ? { updatedBy: actorUid() } : {};

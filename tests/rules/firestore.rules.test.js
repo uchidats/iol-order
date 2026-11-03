@@ -550,6 +550,32 @@ test("テーマカラー: 形式の検証(#rrggbb の小文字・グラデーシ
   await assertFails(setDoc(doc(as("ordA"), path), { color: "#fde047", gradient: false, darkText: true }), "注文者は変更できない");
 });
 
+// ---------- サブテーマカラー(displaySettings/subTheme) ----------
+test("サブテーマカラー: ヘッダーのテーマカラーと同じく、管理者・副管理者・運営者だけが保存・初期設定に戻す(削除)ことができる。所属メンバーは読める。他施設・未ログインは不可", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), "facilities/fA/members/subA"), member("subA", "subadmin")); });
+  const path = "facilities/fA/displaySettings/subTheme";
+  const body = { color: "#93c5fd", updatedAt: serverTimestamp() };   // 明るい色もそのまま(元の色を保存。濃さの調整は表示のときだけ)
+  await assertSucceeds(setDoc(doc(as("adminA"), path), body));
+  await assertSucceeds(setDoc(doc(as("subA"), path), { ...body, color: "#be185d" }));
+  await assertSucceeds(getDoc(doc(as("ordA"), path)));
+  await assertFails(setDoc(doc(as("ordA"), path), body));
+  await assertFails(deleteDoc(doc(as("ordA"), path)));
+  await assertFails(setDoc(doc(as("adminB"), path), body));
+  await assertFails(getDoc(doc(as("ordB"), path)));
+  await assertFails(getDoc(doc(anon(), path)));
+  await assertSucceeds(deleteDoc(doc(as("subA"), path)));
+});
+
+test("サブテーマカラー: 形式の検証(#rrggbb の小文字・色は必須・余計なキー〔グラデーション・黒い文字・調整後の色など〕は拒否)", async () => {
+  const db = as("adminA"), path = "facilities/fA/displaySettings/subTheme";
+  for (const bad of [{ color: "#15803D" }, { color: "#abc" }, { color: "red" }, { color: 123 }, {}, { updatedAt: serverTimestamp() },
+    { color: "#15803d", gradient: true }, { color: "#15803d", darkText: true }, { color: "#15803d", primary: "#0469d9" }]) {
+    await assertFails(setDoc(doc(db, path), bad), JSON.stringify(bad));
+  }
+  await assertSucceeds(setDoc(doc(db, path), { color: "#ffffff" }), "白など明るい色も保存できる(表示のときに濃くする)");
+  await assertFails(setDoc(doc(as("ordA"), path), { color: "#15803d" }), "注文者は変更できない");
+});
+
 // ---------- 役割の拡張(副管理者・代行入力者)と参加待ち ----------
 async function seedRoles() {
   await env.withSecurityRulesDisabled(async (ctx) => {

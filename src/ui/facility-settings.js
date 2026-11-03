@@ -19,6 +19,8 @@ import { readHeaderTheme } from "../domain/header-theme.js";
 import { createThemeColorSection } from "./theme-color-section.js";
 import { createAutoSaver, setSectionMessage } from "./settings-autosave.js";
 import { applyHeaderTheme, cacheHeaderTheme } from "./header-theme.js";
+import { applySubTheme, cacheSubTheme } from "./sub-theme.js";
+import { readSubTheme } from "../domain/sub-theme.js";
 import { pencilIcon, trashIcon } from "./action-icons.js";
 
 /** 要素生成の小さなヘルパー（ユーザー入力は textContent / value で扱い、HTMLとして解釈しない） */
@@ -73,8 +75,8 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 自動保存(採用IOL・担当医など)は共通の部品(./settings-autosave.js。ディーラー設定のテーマカラーと共通)
   /** 各リストの先頭の「↑」: 見えなく・押せなくするが、場所は残す(ほかのボタンの位置を揃える) */
   const markFirst = (up, first) => { if (!up) return; up.classList.toggle("is-first", first); up.tabIndex = first ? -1 : 0; up.setAttribute("aria-hidden", String(first)); };
-  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
-  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver, built.relatedLinks?._related.saver].filter(Boolean);
+  let orderSaver = null, iolSaver = null, dealerSaver = null, memberSaver = null, mailSaver = null, themeSaver = null, subThemeSaver = null;   // 担当医・採用IOL・ディーラー・利用者管理・メール設定の自動保存(各セクションの作成時に用意する)
+  const savers = () => [orderSaver, iolSaver, dealerSaver, memberSaver, mailSaver, themeSaver, subThemeSaver, built.relatedLinks?._related.saver].filter(Boolean);
 
   const message = setSectionMessage;
 
@@ -89,7 +91,9 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
     const mailSettings = repository.getMailSettings ? await repository.getMailSettings(facility.id).catch((e) => { console.warn("メール設定を読み込めませんでした:", e); return null; }) : null;
     // ヘッダーのテーマカラー。読めない場合は未設定(標準の青)として表示する
     const headerTheme = repository.getHeaderTheme ? readHeaderTheme(await repository.getHeaderTheme(facility.id).catch((e) => { console.warn("テーマカラーを読み込めませんでした:", e); return null; })) : null;
-    data = { orderers, adopted, dealers, iolOrder, mailSettings, headerTheme, members: [], pending: [] };
+    // サブテーマカラー。読めない場合は未設定(従来の青)として表示する
+    const subTheme = repository.getSubTheme ? readSubTheme(await repository.getSubTheme(facility.id).catch((e) => { console.warn("サブテーマカラーを読み込めませんでした:", e); return null; })) : null;
+    data = { orderers, adopted, dealers, iolOrder, mailSettings, headerTheme, subTheme, members: [], pending: [] };
     if (canManageMembers) await reloadMembers();
   }
 
@@ -710,13 +714,41 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   // 色見本(格子)または自由な色(HEX)を選ぶと、すぐにヘッダーに反映して自動保存する。「初期設定に戻す」で標準の青いグラデーション + 白い文字に戻す(設定を削除)。
   // 背景色は明るさに関係なく選べる。文字は白(既定)か黒。読みにくい組み合わせは控えめに案内するだけで、反映・保存は止めない。
   function themeSection() {
-    const { section, saver } = createThemeColorSection({
-      description: "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。",
+    // ヘッダー: 従来の設定のまま(グラデーション・黒い文字を含む)
+    const header = createThemeColorSection({
+      bare: true,
       get: () => data.headerTheme,
       use: (theme) => { data.headerTheme = theme; applyHeaderTheme(theme); cacheHeaderTheme(facility.id, theme); },
       save: async (t) => { if (t) await settingsApi.saveHeaderTheme(facility.id, t); else await settingsApi.resetHeaderTheme(facility.id); }
     });
-    themeSaver = saver;
+    // サブテーマカラー: 同じ色見本と「その他の色」だけ。保存するのは選んだ元の色で、文字の読みやすさのための濃さの調整は表示のときだけ(domain/sub-theme.js)
+    const sub = settingsApi.saveSubTheme && settingsApi.resetSubTheme ? createThemeColorSection({
+      bare: true, variant: "sub",
+      get: () => data.subTheme,
+      use: (theme) => { data.subTheme = theme; applySubTheme(theme); cacheSubTheme(facility.id, theme); },
+      save: async (t) => { if (t) await settingsApi.saveSubTheme(facility.id, t); else await settingsApi.resetSubTheme(facility.id); }
+    }) : null;
+    themeSaver = header.saver;
+    subThemeSaver = sub ? sub.saver : null;
+    // 切り替え(見出しの直下。初期表示は「ヘッダー」。設定の内容・保存には影響しない)
+    let target = "header";
+    const tabBtn = (v, label) => {
+      const b = h("button", { type: "button", class: "history-sort-btn", "data-theme-target": v, "aria-pressed": String(v === target) }, label);
+      b.addEventListener("click", () => setTarget(v));
+      return b;
+    };
+    const tabs = sub ? h("div", { class: "history-sort theme-target", role: "group", "aria-label": "テーマカラーを設定する場所" }, tabBtn("header", "ヘッダー"), tabBtn("sub", "サブテーマカラー")) : null;
+    function setTarget(v) {
+      target = v;
+      if (tabs) tabs.querySelectorAll("[data-theme-target]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeTarget === v)));
+      header.section.hidden = v !== "header";
+      if (sub) sub.section.hidden = v !== "sub";
+    }
+    const section = h("section", { class: "settings-section", "data-section": "theme" },
+      createSectionHeading("テーマカラー", "画面上部(ヘッダー)の色を施設ごとに設定できます。選ぶとすぐにヘッダーに反映され、自動で保存されます。明るい色には「フォントを黒にする」がおすすめです。" + (sub ? "「サブテーマカラー」では、ボタン・選択中の表示・リンクなどの色を施設ごとに設定できます(文字が読みやすいように、必要に応じて少し濃くして表示します)。" : "")),
+      tabs, header.section, sub ? sub.section : null);
+    setTarget("header");
+    section._render = () => { header.section._render(); if (sub) sub.section._render(); setTarget("header"); };
     return section;
   }
 

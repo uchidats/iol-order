@@ -286,7 +286,13 @@ service cloud.firestore {
               && request.resource.data.keys().hasAll(['color', 'gradient'])
               && request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-f]{6}$')
               && request.resource.data.gradient is bool
-              && (!('darkText' in request.resource.data) || request.resource.data.darkText is bool)));
+              && (!('darkText' in request.resource.data) || request.resource.data.darkText is bool))
+            // サブテーマカラー(主要ボタン・選択中の表示などの色。所属者が読める。書き込みはヘッダーのテーマカラーと同じ)。
+            // 保存するのは選んだ元の色だけ(文字の読みやすさのための濃さの調整は画面の表示のときだけ)。初期設定に戻すときは削除
+            || (docId == 'subTheme'
+              && request.resource.data.keys().hasOnly(['color', 'updatedAt'])
+              && request.resource.data.keys().hasAll(['color'])
+              && request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-f]{6}$')));
         allow delete: if isPlatformAdmin() || isFacilityManager(fid);
       }
 

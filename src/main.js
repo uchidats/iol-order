@@ -14,6 +14,7 @@ import { createOrderApi } from "./data/order-api.js";
 import { createDealerPortalApi } from "./data/dealer-portal-api.js";
 import { canOpenDealerPortalMenu } from "./domain/dealer-portal.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
+import { loadSubTheme } from "./ui/sub-theme.js";
 import { confirmDialog } from "./ui/confirm-dialog.js";
 import { decideFacilityByLocation, GEO_RESULT } from "./domain/geo.js";
 import * as selection from "./domain/facility-selection.js";
@@ -439,6 +440,7 @@ async function bootstrapWithFirebase(config) {
       formUid = state.user.uid;
       relatedLinksView.load(access.facilityId, ctx.repository);
       loadHeaderTheme(access.facilityId, ctx.repository);   // ヘッダーのテーマカラー(施設ごと。待たずに注文画面を表示する)
+      loadSubTheme(access.facilityId, ctx.repository);      // サブテーマカラー(主要ボタン・選択中の表示などの色。施設ごと。待たない)
       await initOrderForm({
         config,
         orderApi: ctx.orderApi,

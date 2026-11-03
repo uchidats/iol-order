@@ -1,6 +1,7 @@
 import { h } from "./markdown-view.js";
 import { createSectionHeading } from "./info-tip.js";
 import { HEADER_THEME_PALETTE, validateHeaderTheme, isReadable } from "../domain/header-theme.js";
+import { validateSubTheme } from "../domain/sub-theme.js";
 import { createAutoSaver, setSectionMessage } from "./settings-autosave.js";
 
 /** 初期設定(標準の青。styles.css の .app-header と同じ色) */
@@ -17,38 +18,44 @@ export const DEFAULT_THEME_COLOR = "#1d4ed8";
  * @param {() => (object|null)} deps.get 今の設定(未設定は null)
  * @param {(theme:(object|null)) => void} deps.use 設定を変えたとき(画面の状態の更新・ヘッダーへの反映)。保存はこの部品が自動で行う
  * @param {(theme:(object|null)) => Promise<void>} deps.save 保存(null は初期設定に戻す = 削除)
+ * @param {"header"|"sub"} [deps.variant] "sub" = サブテーマカラー(色だけ。グラデーション・黒い文字・読みやすさの案内・色見本の行の見出しは出さない)
+ * @param {boolean} [deps.bare] true なら見出しのない部品(div)を返す(施設設定の「ヘッダー」「サブテーマカラー」の切り替えの中身)
  * @returns {{ section: HTMLElement, saver: object }} section._render() で今の設定を表示し直す
  */
-export function createThemeColorSection({ description, get, use: apply, save }) {
+export function createThemeColorSection({ description, get, use: apply, save, variant = "header", bare = false }) {
+  const sub = variant === "sub";
   // 色見本: 行ごとに「白文字向け」「黒文字向け」の小さな見出し。選ぶと文字の色もその行に合わせる(後から「フォントを黒にする」で変更できる)
   const swatches = h("div", { class: "theme-palette", role: "group", "aria-label": "色見本" },
     HEADER_THEME_PALETTE.flatMap(row => [
-      h("span", { class: "theme-row-label" }, row.label),
+      sub ? null : h("span", { class: "theme-row-label" }, row.label),
       h("div", { class: "theme-swatches" }, row.colors.map(c => h("button", { type: "button", class: "theme-swatch", "data-color": c, "data-dark-text": String(row.darkText),
-        title: `${c}(${row.label})`, "aria-label": `${c}(${row.label})`, "aria-pressed": "false", style: `background:${c}` })))]));
-  const picker = h("input", { type: "color", class: "theme-picker", "data-f": "themePicker", "aria-label": "その他の色" });
-  const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": "themeHex", placeholder: DEFAULT_THEME_COLOR, "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
+        title: sub ? c : `${c}(${row.label})`, "aria-label": sub ? c : `${c}(${row.label})`, "aria-pressed": "false", style: `background:${c}` })))].filter(Boolean)));
+  const f = (name) => (sub ? name.replace(/^theme/, "subTheme") : name);   // サブテーマの欄は data-f を分ける(同じ画面に2つ並ぶため)
+  const picker = h("input", { type: "color", class: "theme-picker", "data-f": f("themePicker"), "aria-label": "その他の色" });
+  const hexIn = h("input", { class: "form-control theme-hex", type: "text", maxlength: "7", "data-f": f("themeHex"), placeholder: DEFAULT_THEME_COLOR, "aria-label": "色(HEX)", autocomplete: "off", spellcheck: "false" });
   const chk = h("input", { type: "checkbox", "data-f": "themeGradient" });
   const dark = h("input", { type: "checkbox", "data-f": "themeDarkText" });
   const advice = h("p", { class: "theme-advice", "data-f": "themeAdvice", hidden: true }, "文字が読みやすい配色を推奨します");
-  const reset = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "theme-reset" }, "初期設定に戻す");
-  const section = h("section", { class: "settings-section", "data-section": "theme" },
-    createSectionHeading("テーマカラー", description),
+  const reset = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": sub ? "sub-theme-reset" : "theme-reset" }, "初期設定に戻す");
+  const body = [
     swatches,
     h("div", { class: "theme-custom" }, h("span", { class: "form-label" }, "その他の色"), picker, hexIn),
-    h("label", { class: "settings-check" }, chk, h("span", {}, "グラデーションを使用する")),
-    h("label", { class: "settings-check" }, dark, h("span", {}, "フォントを黒にする")),
-    advice,
+    sub ? null : h("label", { class: "settings-check" }, chk, h("span", {}, "グラデーションを使用する")),
+    sub ? null : h("label", { class: "settings-check" }, dark, h("span", {}, "フォントを黒にする")),
+    sub ? null : advice,
     h("div", {}, reset),
-    h("p", { class: "form-hint", "data-msg": "" }));
+    h("p", { class: "form-hint", "data-msg": "" })].filter(Boolean);
+  const section = bare
+    ? h("div", { class: "theme-pane", "data-theme-pane": variant }, ...body)
+    : h("section", { class: "settings-section", "data-section": "theme" }, createSectionHeading("テーマカラー", description), ...body);
   const show = () => {
     const t = get();
     for (const b of swatches.querySelectorAll(".theme-swatch")) b.setAttribute("aria-pressed", String(Boolean(t) && b.dataset.color === t.color));
     picker.value = t ? t.color : DEFAULT_THEME_COLOR;
     hexIn.value = t ? t.color : "";
-    chk.checked = t ? t.gradient : true;
+    chk.checked = t ? t.gradient !== false : true;
     dark.checked = Boolean(t && t.darkText);
-    advice.hidden = isReadable(t);
+    advice.hidden = sub || isReadable(t);
     reset.disabled = !t;
   };
   let saver = null;
@@ -58,7 +65,7 @@ export function createThemeColorSection({ description, get, use: apply, save }) 
     saver.request();
   };
   const choose = (color, darkText = dark.checked) => {
-    const v = validateHeaderTheme({ color, gradient: chk.checked, darkText });
+    const v = sub ? validateSubTheme({ color }) : validateHeaderTheme({ color, gradient: chk.checked, darkText });   // サブテーマは選んだ元の色だけ
     if (!v.ok) { setSectionMessage(section, v.error, true); return; }   // 形式違い(#RRGGBB でない)だけは反映も保存もしない
     setSectionMessage(section, "");
     use(v.theme);
