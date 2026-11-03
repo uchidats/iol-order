@@ -2506,10 +2506,10 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 #dealerPanel.feature-card { border-left: 1px solid var(--border-light); }
 /* 受注一覧の「もっと見る」「過去の注文をもっと見る」(注文日順・手術日順): 背景・枠線のないテキストボタン(青・中央)。
    押せる範囲(補助ボタンの高さ36px・幅は文字と左右の余白)・無効・読み込み中の表示はそのまま。ホバーは薄い背景と下線、キーボードの選択は外枠 */
-#dealerPanel .btn.history-more { background: transparent; border-color: transparent; color: var(--primary); box-shadow: none; }
-#dealerPanel .btn.history-more:hover:not(:disabled) { background: var(--primary-light); text-decoration: underline; }
-#dealerPanel .btn.history-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-#dealerPanel .btn.history-more:disabled { color: #94a3b8; cursor: default; }
+#dealerPanel .btn.history-more { background: transparent; border-color: transparent; color: #64748b; box-shadow: none; }   /* 落ち着いた濃いグレーの文字 */
+#dealerPanel .btn.history-more:hover:not(:disabled) { background: #f1f5f9; color: #475569; text-decoration: underline; }
+#dealerPanel .btn.history-more:focus-visible { outline: 2px solid #64748b; outline-offset: 2px; }
+#dealerPanel .btn.history-more:disabled { color: #cbd5e1; cursor: default; }
 /* ディーラー設定のテーマカラー: カードの中に置くため施設設定より幅が狭い。色見本(10色×2行)は 28px を上限に、狭い画面では縮めて横にはみ出さない(施設設定は変えない) */
 .dealer-settings .settings-section[data-section="theme"] { padding: 12px; }
 .dealer-settings .theme-swatches { grid-template-columns: repeat(10, minmax(0, 28px)); gap: 4px; }
@@ -2618,7 +2618,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 /* 受注一覧(注文日順・手術日順。医療機関側の注文履歴と同じ .history-card・.history-lens-row を使う。ここはディーラーだけの部分) */
 .dealer-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
 .dealer-card-head .dealer-card-facility { font-size: 0.85rem; font-weight: 600; color: #334155; }   /* 医療機関名は注文番号より目立たせる */
-.dealer-surgery-list .dealer-week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 10px 4px 4px; border-top: 2px solid var(--primary); font-size: 0.8rem; font-weight: 700; color: var(--primary); }
+.dealer-surgery-list .dealer-week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 10px 4px 4px; border-top: 2px solid #64748b; font-size: 0.8rem; font-weight: 700; color: var(--primary); }   /* 週の区切り線は濃いグレー、週の見出しの文字は青 */
 .dealer-surgery-list .dealer-week-head + li { border-top: 0; }
 .dealer-week-truncated { font-weight: 600; color: #b45309; }   /* 1週の上限に達した: 一部だけの表示であることを明示する */
 .dealer-surgery-list .dealer-week-empty { padding: 8px 4px; font-size: 0.85rem; color: #64748b; }
