@@ -2553,9 +2553,13 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-date-row > input[type="date"] { box-sizing: border-box; height: 36px; min-height: 36px; padding-top: 0; padding-bottom: 0; }
 .dealer-date-tilde { flex: none; }
 .dealer-date-row > #btnDealerSearch { flex: none; }
-@media (max-width: 360px) {
+/* スマホ: 「開始日 〜 終了日 [検索]」を1行に。日付の欄は同じ幅で、年月日の全文が見える最小限(文字を少し小さく・左右の余白を詰める)。
+   「〜」の左右を詰め、「検索」は文字が折り返さない幅(左右の余白を少し詰める)。高さは3つとも36px。収まらない幅(320px など)は「検索」だけ次の行 */
+@media (max-width: 560px) {
   .dealer-date-row { column-gap: 3px; }
-  .dealer-date-row > input[type="date"] { flex-basis: 100px; font-size: 0.875rem; padding-left: 4px; padding-right: 2px; }
+  .dealer-date-row > input[type="date"] { flex: 0 0 auto; width: 7.6em; max-width: none; font-size: 0.875rem; padding-left: 5px; padding-right: 2px; }
+  .dealer-date-tilde { margin: 0 -1px; }
+  .dealer-date-row > #btnDealerSearch { padding-left: 12px; padding-right: 12px; white-space: nowrap; }
 }
 .dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm, #dealerBackToOrder { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }   /* 「IOL注文フォームに戻る」は受注一覧の「今週」などと同じ大きさ */
 /* 運営者の会社の鉛筆・ゴミ箱は、施設設定の「担当医」のアイコンボタン(.orderer-icon)と同じ寸法に戻す */

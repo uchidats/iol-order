@@ -439,7 +439,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const sameLine = x.btn.t < x.to.b && x.btn.t + x.btn.h > x.to.t;
         if (sameLine) assert.ok(x.to.r <= x.btn.l, `${w}: 同じ行なら終了日の右`);
         else assert.ok(x.btn.t >= x.to.b - 0.5, `${w}: 収まらなければ「検索」だけ次の行`);
-        if (w >= 430) assert.ok(sameLine, `${w}: 1行に収まる`);
+        if (w >= 360) assert.ok(sameLine, `${w}: 開始日 〜 終了日 [検索] が1行に収まる`);   // 320px だけは「検索」の折り返しを許容
+        assert.ok(Math.abs((x.from.r - x.from.l) - (x.to.r - x.to.l)) < 0.5, `${w}: 2つの日付の欄は同じ幅`);
       }
       await page.setViewportSize({ width: 390, height: 900 });
       // 検索の動作: 日付を入力しただけでは検索しない。開始日だけ・終了日だけ・両方・なし(全期間)をそのまま送る。開始日 > 終了日 はエラーで検索しない
