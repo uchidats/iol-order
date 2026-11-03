@@ -431,7 +431,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(x.over, false, `${w}: 横にはみ出さない`);
         assert.ok(x.head.b <= x.from.t + 0.5, `${w}: 「注文日」は入力欄の上`);
         assert.ok(Math.abs(x.from.t - x.to.t) < 1 && x.from.r <= x.tilde.l + 0.5 && x.tilde.r <= x.to.l + 0.5 && x.to.r <= x.row.r + 0.5, `${w}: 開始日 〜 終了日 が横並びで枠の中`);
-        assert.ok(Math.abs(x.from.h - pc.from.h) < 1 && Math.abs(x.to.h - pc.to.h) < 1, `${w}: 入力欄の高さは PC と同じ`);
+        assert.deepEqual([Math.round(x.from.h), Math.round(x.to.h)], [x.btn.h, x.btn.h], `${w}: 開始日・終了日の欄は「検索」と同じ高さ`);
+        assert.ok(Math.abs((x.from.t + x.from.h / 2) - (x.btn.t + x.btn.h / 2)) < 1 || x.btn.t >= x.to.b - 0.5, `${w}: 同じ行なら縦の中心もそろう`);
         assert.deepEqual([x.btn.h, x.btn.fs, x.btn.one], [36, 14.4, true], `${w}: 「検索」は高さ36px・0.9rem・1行`);
         assert.ok(x.btn.bg[2] > 150 && x.btn.bg[2] - x.btn.bg[0] > 80, `${w}: 「検索」は青`);
         assert.ok(x.btn.r <= x.row.r + 0.5, `${w}: 「検索」は枠の中`);
