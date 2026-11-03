@@ -15,6 +15,8 @@
   --primary-hover: #1e40af;
   --primary-light: #eff6ff;
   --primary-focus: rgba(29, 78, 216, 0.2);
+  /* 通知(トースト)の背景: 共通の中立色(施設・ディーラーのテーマカラーには連動させない。文字は白) */
+  --toast-bg: #374151;
   /* 青系の薄い背景・枠線・チェック・情報バッジ(以下は従来の値)。施設のサブテーマカラーを設定すると、--primary 系とあわせて
      <html> の style で上書きする(src/ui/sub-theme.js、注文画面だけ)。エラー・警告・成功・削除の色とヘッダーは対象外 */
   --primary-tint: #eef3fd;
@@ -1027,7 +1029,7 @@ input[type="date"].form-control {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: #0f172a;
+  background-color: var(--toast-bg);
   color: #ffffff;
   padding: 12px 20px;
   border-radius: 999px;
@@ -2233,7 +2235,7 @@ button.lens-line-title:focus-visible { outline: 2px solid var(--primary); outlin
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1100;
   display: flex; align-items: center; gap: 14px; box-sizing: border-box;
   width: max-content; max-width: calc(100vw - 24px); padding: 10px 12px 10px 16px;
-  background: #1f2937; color: #ffffff; border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.3);
+  background: var(--toast-bg); color: #ffffff; border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.3);
   font-size: 0.95rem; color-scheme: dark;
 }
 .undo-toast-text { min-width: 0; overflow-wrap: anywhere; }

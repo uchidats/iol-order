@@ -177,6 +177,17 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.match(await toast.innerText(), /レンズ2を削除しました\s*元に戻す/);
       const tr = await toast.evaluate(e => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, b: r.bottom, vw: innerWidth, vh: innerHeight }; });
       assert.ok(tr.l >= 0 && tr.r <= tr.vw && tr.b <= tr.vh, "通知が画面内: " + JSON.stringify(tr));
+      // 通知の色は共通の中立色(濃いグレー #374151・白い文字)。共通のトースト(showToast。「入力途中の内容を復元しました」など)も同じ。
+      // テーマカラー(サブテーマの --primary など)を変えても変わらない
+      const toastColors = await page.evaluate(() => {
+        const t = document.createElement("div"); t.className = "toast"; t.textContent = "入力途中の内容を復元しました"; document.body.append(t);
+        document.documentElement.style.setProperty("--primary", "#be185d");
+        const u = getComputedStyle(document.querySelector(".undo-toast")), c = getComputedStyle(t);
+        const r = [u.backgroundColor, u.color, c.backgroundColor, c.color];
+        document.documentElement.style.removeProperty("--primary"); t.remove();
+        return r;
+      });
+      assert.deepEqual(toastColors, ["rgb(55, 65, 81)", "rgb(255, 255, 255)", "rgb(55, 65, 81)", "rgb(255, 255, 255)"], "通知の背景 #374151・文字は白");
       assert.equal((await stored("u4")).lines.length, 2, "削除は下書きに即時反映");
       // 元に戻す: 元の位置に、同じ内容で戻る。下書きにも即時反映
       await toast.getByRole("button", { name: "元に戻す" }).click();
