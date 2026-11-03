@@ -1589,7 +1589,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.evaluate(() => {
         const L = (no, sd, model, power, q, doc, toric = "") => ({ no, surgeryDate: sd, model, toricModel: toric, power, quantity: q, doctorName: doc });
         const item = (i) => ({ receiptId: `x${i}`, facilityId: "fB", facilityName: "B眼科", orderNumber: `IOL-X-${String(i).padStart(2, "0")}`, orderedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(), lineCount: 2, totalQuantity: 3,
-          lines: [L(1, "2026-11-10", "DIB00V", "+21.0D", 2, "内田"), L(2, "2026-11-12", "ZCT", "+19.0D", 1, "佐藤", "ZCT225")] });
+          lines: [L(1, "2026-11-10", "DIB00V", "+21.0D", 2, "内田"), L(2, "2026-11-12", "ZCT", "+6.5D", 1, "佐藤", "ZCT225")] });
         window.__exportItems = Array.from({ length: 5 }, (_, i) => item(i + 1));
         window.__listOverride = (d) => {
           if (!d.cursor) return { items: window.__exportItems.slice(0, d.limit >= 100 ? 3 : 2), nextCursor: "c1", complete: false, asOf: "2026-11-03T06:30:00.000Z" };
@@ -1622,7 +1622,27 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const o1 = page.locator('.dealer-report-order[data-receipt="x1"] tr');
       assert.equal(await o1.count(), 2);
       assert.deepEqual(await o1.first().locator("td").allInnerTexts(), ["IOL-X-01", "B眼科", "2026/10/01 09:01", "11/10(火)", "DIB00V", "+21.0D", "2", "内田"]);
-      assert.deepEqual(await o1.nth(1).locator("td").allInnerTexts(), ["11/12(木)", "ZCT225", "+19.0D", "1", "佐藤"]);
+      assert.deepEqual(await o1.nth(1).locator("td").allInnerTexts(), ["11/12(木)", "ZCT225", "+6.5D", "1", "佐藤"]);
+      // 度数: 列は中央寄せで、桁数が違っても小数点の位置が縦にそろう。枚数: 見出し・数値とも中央。度数・枚数の列幅は内容の分だけ(画面のプレビューと印刷の両方)
+      const numCols = () => page.evaluate(() => {
+        const t = document.querySelector(".dealer-report-table");
+        const al = (q) => getComputedStyle(t.querySelector(q)).textAlign;
+        const dots = [...t.querySelectorAll(".dealer-report-pw-frac")].map(e => Math.round(e.getBoundingClientRect().left * 10) / 10);
+        const w = (q) => Math.round(t.querySelector(q).getBoundingClientRect().width);
+        const cell = t.querySelector('tbody td.dealer-report-power').getBoundingClientRect(), pw = t.querySelector('tbody .dealer-report-pw').getBoundingClientRect();
+        return { powerTh: al("th.dealer-report-power"), powerTd: al("td.dealer-report-power"), qtyTh: al("th.dealer-report-qty"), qtyTd: al("td.dealer-report-qty"),
+          dotsSame: new Set(dots).size === 1 && dots.length === 10, powerW: w("th.dealer-report-power"), qtyW: w("th.dealer-report-qty"), modelW: w("th.dealer-report-model, .dealer-report-model"),
+          centered: Math.abs((pw.left - cell.left) - (cell.right - pw.right)) <= 2 };
+      });
+      for (const media of ["screen", "print"]) {
+        await page.emulateMedia({ media });
+        const n = await numCols();
+        assert.deepEqual([n.powerTh, n.powerTd, n.qtyTh, n.qtyTd], ["center", "center", "center", "center"], `${media}: 度数・枚数は中央`);
+        assert.ok(n.dotsSame, `${media}: 小数点の位置がそろう(+21.0D と +6.5D)`);
+        assert.ok(n.centered, `${media}: 度数は列の中央`);
+        assert.ok(n.powerW <= 90 && n.qtyW <= 60 && n.modelW >= 60, `${media}: 度数・枚数の列幅は最小限(${n.powerW}/${n.qtyW}/${n.modelW})`);
+      }
+      await page.emulateMedia({ media: "screen" });
       assert.equal(await page.locator(".dealer-report-partial").count(), 0);
       const conds2 = await page.locator(".dealer-report-cond").allInnerTexts();
       assert.deepEqual([conds2[0], conds2[1], conds2[3]], ["医療機関: B眼科", "注文日: 2026/10/01 以降(自社宛ての明細)", "注文 5件 / 明細 10行 / 合計 15枚"]);

@@ -2,7 +2,7 @@ import { h } from "../ui/markdown-view.js";
 import { createInfoTip } from "../ui/info-tip.js";
 import { describeCallableError } from "../data/registration-api.js";
 import { formatJstDateTime } from "../domain/dealer-portal.js";
-import { linesFromOrdered, linesFromWeeks, exportCounts, overLimit, LIMIT_MESSAGE, EXPORT_LIMITS, exportMeta, workbookSheets, exportFileName, exportBaseName, orderedGroups, surgerySections, shortDay } from "../domain/dealer-export.js";
+import { linesFromOrdered, linesFromWeeks, exportCounts, overLimit, LIMIT_MESSAGE, EXPORT_LIMITS, exportMeta, workbookSheets, exportFileName, exportBaseName, orderedGroups, surgerySections, shortDay, powerParts } from "../domain/dealer-export.js";
 import { buildXlsx } from "../domain/xlsx-writer.js";
 
 /** 注文日順の全件取得で1回に読む件数(サーバーの上限 pageMax) */
@@ -166,24 +166,31 @@ export function createDealerExport({ api, getState, showReport, closeReport }) {
       h("p", { class: "dealer-report-cond" }, `注文 ${c.orders}件 / 明細 ${c.lines}行 / 合計 ${c.quantity}枚`),
       meta.partial ? h("p", { class: "dealer-report-partial", role: "alert" }, `※ ${meta.partial}。この出力は不完全です。`) : null);
     const td = (text, cls) => h("td", { class: cls || null }, text);
+    // 度数: 中央寄せの列の中で、整数部を固定幅・右寄せにして小数点の位置をそろえる(+6.0D / +13.5D / +16.5D)。数値で始まらない表記はそのまま
+    const powerTd = (power) => {
+      const p = powerParts(power);
+      return h("td", { class: "dealer-report-power" }, p ? h("span", { class: "dealer-report-pw" }, h("span", { class: "dealer-report-pw-int" }, p.int), h("span", { class: "dealer-report-pw-frac" }, `${p.frac}${p.unit}`)) : power);
+    };
+    const qtyTd = (q) => h("td", { class: "dealer-report-qty" }, String(q));
+    const th = (t) => h("th", { class: t === "度数" ? "dealer-report-power" : t === "枚数" ? "dealer-report-qty" : null }, t);
     const modelOf = (l) => l.toricModel || l.model;
     let table;
     if (meta.kind === "ordered") {
       const groups = orderedGroups(lines);
       table = h("table", { class: "dealer-report-table", "data-kind": "ordered" },
-        h("thead", {}, h("tr", {}, ["注文番号", "医療機関", "注文日時", "手術日", "モデル", "度数", "枚数", "担当医"].map(t => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ["注文番号", "医療機関", "注文日時", "手術日", "モデル", "度数", "枚数", "担当医"].map(th))),
         ...groups.map(g => h("tbody", { class: "dealer-report-order", "data-receipt": g.receiptId }, g.lines.map((l, i) => h("tr", {},
           ...(i === 0 ? [h("td", { rowspan: String(g.lines.length), class: "dealer-report-no" }, g.orderNumber), h("td", { rowspan: String(g.lines.length) }, g.facilityName), h("td", { rowspan: String(g.lines.length), class: "dealer-report-at" }, formatJstDateTime(g.orderedAt))] : []),
-          td(shortDay(l.surgeryDate), "dealer-report-day"), td(modelOf(l), "dealer-report-model"), td(l.power, "num"), td(String(l.quantity), "num"), td(l.doctorName || "—"))))));
+          td(shortDay(l.surgeryDate), "dealer-report-day"), td(modelOf(l), "dealer-report-model"), powerTd(l.power), qtyTd(l.quantity), td(l.doctorName || "—"))))));
     } else {
       const sections = surgerySections(weeks);
       table = h("table", { class: "dealer-report-table", "data-kind": "surgery" },
-        h("thead", {}, h("tr", {}, ["手術日", "医療機関", "注文番号", "モデル", "度数", "枚数", "担当医"].map(t => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ["手術日", "医療機関", "注文番号", "モデル", "度数", "枚数", "担当医"].map(th))),
         ...sections.map(sec => sec.type === "empty"
           ? h("tbody", { class: "dealer-report-empty" }, h("tr", {}, h("td", { colspan: "7" }, sec.label)))
           : h("tbody", { class: "dealer-report-date", "data-day": sec.date }, sec.lines.map((l, i) => h("tr", {},
             ...(i === 0 ? [h("td", { rowspan: String(sec.lines.length), class: "dealer-report-day" }, `${shortDay(sec.date)}${sec.truncated ? "(一部のみ)" : ""}`)] : []),
-            td(l.facilityName), td(l.orderNumber, "dealer-report-no"), td(modelOf(l), "dealer-report-model"), td(l.power, "num"), td(String(l.quantity), "num"), td(l.doctorName || "—"))))));
+            td(l.facilityName), td(l.orderNumber, "dealer-report-no"), td(modelOf(l), "dealer-report-model"), powerTd(l.power), qtyTd(l.quantity), td(l.doctorName || "—"))))));
     }
     return h("section", { class: "dealer-report", "aria-label": meta.title, "data-title": exportBaseName(Date.now()) },
       h("div", { class: "dealer-report-actions" }, back, print), head, h("div", { class: "dealer-report-wrap" }, table));

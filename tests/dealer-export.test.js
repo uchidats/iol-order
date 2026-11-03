@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildXlsx, readZipStored, excelDateSerial, colName, crc32, xmlEscape } from "../src/domain/xlsx-writer.js";
 import { EXPORT_LIMITS, EXCEL_HEADERS, linesFromOrdered, linesFromWeeks, exportCounts, overLimit, LIMIT_MESSAGE, orderedRangeLabel, weekRangeLabel, facilityLabel,
-  partialNotice, exportFileName, exportBaseName, exportMeta, excelRows, conditionRows, workbookSheets, orderedGroups, surgerySections, shortDay, weekdayOf, jstParts } from "../src/domain/dealer-export.js";
+  partialNotice, exportFileName, exportBaseName, exportMeta, excelRows, conditionRows, workbookSheets, orderedGroups, surgerySections, shortDay, weekdayOf, jstParts, powerParts } from "../src/domain/dealer-export.js";
 
 const dec = new TextDecoder();
 const xmlOf = (zip, name) => dec.decode(zip.get(name));
@@ -92,6 +92,12 @@ test("dealer-export: 条件・件数・一部のみの注記・ファイル名(�
   assert.equal(exportBaseName(Date.UTC(2026, 10, 3, 15, 5)), "受注一覧_20261104-0005", "日本時間で日付が変わる");
   assert.equal(shortDay("2026-11-10"), "11/10(火)");
   assert.equal(shortDay(""), "手術日の記録なし");
+  assert.deepEqual(powerParts("+13.5D"), { int: "+13", frac: ".5", unit: "D" });
+  assert.deepEqual(powerParts("+6.0D"), { int: "+6", frac: ".0", unit: "D" });
+  assert.deepEqual(powerParts("-2D"), { int: "-2", frac: "", unit: "D" });
+  assert.deepEqual(powerParts(" 21.00 "), { int: "21", frac: ".00", unit: "" });
+  assert.equal(powerParts("未定"), null);
+  assert.equal(powerParts(""), null);
   assert.equal(weekdayOf("2026-11-08"), "日");
   assert.deepEqual(jstParts("2026-11-03T00:12:00.000Z"), { date: "2026-11-03", time: "09:12" });
   assert.deepEqual(jstParts("x"), { date: "", time: "" });

@@ -36,6 +36,15 @@ export function shortDay(ymd) {
   return m ? `${Number(m[2])}/${Number(m[3])}(${weekdayOf(ymd)})` : "手術日の記録なし";
 }
 
+/**
+ * 度数「+13.5D」→ { int: "+13", frac: ".5", unit: "D" }(帳票で整数部を右寄せの固定幅にして小数点の位置をそろえる)。
+ * 数値で始まらない表記はそのまま出す(null)
+ */
+export function powerParts(power) {
+  const m = /^([+-]?\d+)(\.\d+)?(.*)$/.exec(String(power || "").trim());
+  return m ? { int: m[1], frac: m[2] || "", unit: m[3] || "" } : null;
+}
+
 /** YYYY-MM-DD → 「2026/11/10」 */
 export const slashDate = (ymd) => (/^\d{4}-\d{2}-\d{2}$/.test(String(ymd || "")) ? String(ymd).replace(/-/g, "/") : "");
 

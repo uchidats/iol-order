@@ -2674,7 +2674,12 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-report-table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.85rem; }   /* PC のカードの幅(約560px)に収める。スマホは横にスクロール */
 .dealer-report-table th, .dealer-report-table td { padding: 4px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .dealer-report-table th { background: #f8fafc; white-space: nowrap; font-weight: 700; }
-.dealer-report-table td.num { text-align: right; white-space: nowrap; }
+/* 度数・枚数: 列幅は内容の分だけ(モデル名・担当医名を圧迫しない)。枚数は見出し・数値とも中央。度数は中央寄せの中で整数部を固定幅・右寄せにして小数点をそろえる(画面・印刷とも) */
+.dealer-report-table .dealer-report-power, .dealer-report-table .dealer-report-qty { width: 1%; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dealer-report-table th.dealer-report-power { padding-left: 10px; padding-right: 10px; }
+.dealer-report-pw { display: inline-block; white-space: nowrap; }
+.dealer-report-pw-int { display: inline-block; min-width: 3ch; text-align: right; }   /* 「+21」「+6」「-10」を右寄せ(符号を含めて3文字分) */
+.dealer-report-pw-frac { display: inline-block; text-align: left; }
 .dealer-report-table .dealer-report-no, .dealer-report-table .dealer-report-at, .dealer-report-table .dealer-report-day, .dealer-report-table .dealer-report-model { white-space: nowrap; }   /* 医療機関名・担当医名だけ折り返す */
 .dealer-report-order > tr:first-child > td, .dealer-report-date > tr:first-child > td { border-top: 1px solid #94a3b8; }   /* 注文・手術日のまとまりの区切り */
 .dealer-report-date > tr:first-child > td.dealer-report-day { font-weight: 700; }
