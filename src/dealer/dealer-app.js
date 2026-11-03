@@ -4,6 +4,7 @@ import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStat
 import { historyCardGroups } from "../domain/order-history-view.js";
 import { lensDayHead, lensRow } from "../ui/history-lens.js";
 import { createDealerManage } from "./dealer-manage.js";
+import { createDealerExport } from "./dealer-export.js";
 import { createInfoTip } from "../ui/info-tip.js";
 import { readHeaderTheme } from "../domain/header-theme.js";
 import { applyHeaderTheme } from "../ui/header-theme.js";
@@ -236,6 +237,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     ctx = context;
     selected = new Set();
     dropSettings();
+    document.body.classList.remove("dealer-report-open");
     setSubtitle(ctx.company.name);
     // 会社のテーマカラー(サーバーが所属を確かめた context の値。未設定は標準の青)。端末には覚えない(確認前に会社の色を出さない)
     ctx.headerTheme = readHeaderTheme(ctx.headerTheme);
@@ -552,6 +554,23 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         h("div", { class: "dealer-date-head" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), filterTip),
         (dateRow.append(fromField.wrap, h("span", { class: "dealer-date-tilde" }, "〜"), toField.wrap, search), dateRow)),
       listMsg, listBox, more);
+    // ---- 出力(印刷・PDF / Excel。dealer-export.js)。足すのは「出力」1つ。帳票は一覧の代わりに表示し、戻ると読み込み済みの一覧と位置はそのまま ----
+    const report = h("div", { class: "dealer-report-view", id: "dealerReport", hidden: true });
+    let reportY = 0, titleBefore = "";
+    const exporter = createDealerExport({
+      api,
+      getState: () => ({ view, companyName: ctx.company.name, facilities: ctx.facilities, selectedIds: [...selected], lastQuery, weeks }),
+      showReport: (el) => {
+        reportY = window.scrollY; titleBefore = document.title;
+        document.title = el.dataset.title || document.title;   // 「PDF に保存」の既定のファイル名(受注一覧_YYYYMMDD-HHMM)
+        searchArea.hidden = true; report.hidden = false; report.replaceChildren(el);
+        document.body.classList.add("dealer-report-open"); window.scrollTo(0, 0);
+      },
+      closeReport: () => {
+        report.hidden = true; report.replaceChildren(); searchArea.hidden = false;
+        document.body.classList.remove("dealer-report-open"); document.title = titleBefore; window.scrollTo(0, reportY);
+      }
+    });
     // 補足の説明はⓘ(共通の info-tip。タップ・クリックで開く)。医療機関名・検索範囲・メッセージは常に表示する
     const tip = (text, label) => createInfoTip(text, { label }).root;
     const facilityHelp = "チェックした医療機関の受注を表示します。チェックはこの端末に自動で記憶し、次回も同じ選択で開きます(閲覧できる範囲・担当施設は変わりません)。「担当」は会社の管理者が登録した担当施設です。"
@@ -560,7 +579,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       h("div", { class: "dealer-filters dealer-facility-box" },
         h("div", { class: "form-label dealer-login-head" }, h("span", {}, "医療機関"), tip(facilityHelp, "医療機関の選択の説明")),
         selectBar, checks),   // 「検索範囲: …」の行は出さない(選択はチェックボックスと「担当」の印で分かる)
-      viewBar,
+      h("div", { class: "dealer-view-row" }, viewBar, exporter.root), exporter.msg,
       surgeryArea, orderedArea);
     // 担当者・支店の管理は、☰メニューの「ディーラー設定」(会社管理者・支店管理者)から開く(openSettings)
     panel.replaceChildren(...[
@@ -568,7 +587,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         h("span", { class: "dealer-title-main" }, h("span", { class: "feature-title" }, "受注一覧"),
           tip("医療機関が閲覧を許可した後の新規注文のうち、自社宛ての明細だけを表示します。", "受注一覧の説明"))),
       deviceNotSaved ? h("p", { class: "form-hint", "data-notice": "device-not-saved" }, "このブラウザには確認の記録を保存できませんでした。この画面を閉じると、次のログインでも確認コードが必要です。") : null,
-      searchArea, detail].filter(Boolean));
+      searchArea, detail, report].filter(Boolean));
     renderChecks();
     resetSurgery();   // 初期表示は手術日順(今週の月曜から。注文日順は切り替えて表示)
   }

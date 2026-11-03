@@ -1447,3 +1447,207 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+// ---- 出力(印刷・PDF / Excel。dealer-export.js): 足すのは「出力」1つ、メニューは2項目+ⓘ。注文日順は条件の全件を100件ずつ続けて読む(画面の一覧には触れない)、
+//      手術日順は読み込んだ週をそのまま。一部のみの週は出力の前に確認し帳票にも明記。上限・restart は必要なときだけのエラー ----
+import { readZipStored, excelDateSerial } from "../../src/domain/xlsx-writer.js";
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`ディーラー画面の出力(印刷・PDF / Excel): 「出力」1つ・2項目+ⓘ。手術日順は読み込んだ週、注文日順は条件の全件(一覧はそのまま)。一部のみの確認・上限・restart: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません(npx playwright-core install ${name})`);
+    try {
+      const context = await newFakeContext(browser, base, 390, STAFF);
+      const page = await context.newPage();
+      await installFakeServer(page, "staff");
+      const errors = [];
+      page.on("pageerror", e => errors.push(String(e)));
+      await page.goto(`${base}dealer.html`);
+      await page.locator("#dealerSurgery .history-lens-btn").first().waitFor();
+      const thisWeek = mondayOf(jstDateOfDealer(Date.now()));
+      const day = (ws, n) => addDaysOf(ws, n);
+      const dec = new TextDecoder();
+      const cellsOf = (xml) => new Map([...xml.matchAll(/<c r="([A-Z]+\d+)"[^>]*>(?:<is><t[^>]*>([^<]*)<\/t><\/is>|<v>([^<]*)<\/v>)<\/c>/g)].map(m => [m[1], m[2] !== undefined ? m[2] : Number(m[3])]));
+      const readXlsx = async (dl) => {
+        const zip = readZipStored(new Uint8Array(fs.readFileSync(await dl.path())));
+        const s1 = dec.decode(zip.get("xl/worksheets/sheet1.xml")), s2 = dec.decode(zip.get("xl/worksheets/sheet2.xml"));
+        return { s1, s2, c1: cellsOf(s1), c2: cellsOf(s2), rows1: (s1.match(/<row /g) || []).length };
+      };
+      const btn = page.locator("#btnDealerExport");
+      const menu = page.locator("#dealerExportMenu");
+      const exportMsg = page.locator("#dealerExportMsg");
+
+      // 1) ミニマル: 足した操作は「出力」1つ(補助ボタン36px。並び順の切り替えの右端。はみ出さない)。説明・件数の常時表示はない
+      assert.equal(await btn.innerText(), "出力");
+      const box = () => page.evaluate(() => {
+        const r = (q) => document.querySelector(q).getBoundingClientRect();
+        const b = r("#btnDealerExport"), v = r(".dealer-view"), row = r(".dealer-view-row");
+        return { h: Math.round(b.height), rightOfView: b.left >= v.right - 0.5, inRow: b.right <= row.right + 0.5, over: document.documentElement.scrollWidth > innerWidth };
+      });
+      for (const w of [320, 390, 1100]) {
+        await page.setViewportSize({ width: w, height: 800 });
+        await page.waitForTimeout(250);
+        assert.deepEqual(await box(), { h: 36, rightOfView: true, inRow: true, over: false }, `${w}: 「出力」は36pxで並び順の右端・はみ出さない`);
+      }
+      await page.setViewportSize({ width: 390, height: 800 });
+      const added = await page.locator(".dealer-search-area .btn").evaluateAll(bs => bs.filter(b => !b.closest(".dealer-select-actions") && !b.closest(".dealer-date-search") && !b.classList.contains("history-more")).map(b => b.id));
+      assert.deepEqual(added, ["btnDealerExport"], "一覧に足したボタンは「出力」だけ");
+      assert.equal(await exportMsg.isVisible(), false, "処理中・エラー以外は何も出さない");
+      assert.equal(await menu.isVisible(), false);
+      // 2) メニュー: 2項目+ⓘ だけ(説明文は ⓘ に収納)。Escape で閉じる
+      await btn.click();
+      await menu.waitFor();
+      assert.deepEqual(await menu.locator('[role="menuitem"]').allInnerTexts(), ["印刷・PDF", "Excelで保存"]);
+      assert.equal(await menu.locator(".info-tip-btn").count(), 1);
+      assert.equal(await menu.locator("p").count(), 0, "メニューに説明文はない");
+      await menu.locator(".info-tip-btn").click();
+      await page.getByText(/注文日順は条件に該当する全件、手術日順は画面に読み込んでいる週の範囲です/).waitFor();
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => document.getElementById("dealerExportMenu").hidden);
+      assert.equal(await btn.getAttribute("aria-expanded"), "false");
+
+      // 3) 手術日順の Excel: 読み込んだ3週(担当施設 B)をそのまま使う(通信なし)。ファイル名は 受注一覧_YYYYMMDD-HHMM.xlsx。1レンズ1行・日付セル・数式なし
+      const weekCalls0 = (await calls(page, "week")).length;
+      await btn.click();
+      const [dl1] = await Promise.all([page.waitForEvent("download"), page.click('[data-export="xlsx"]')]);
+      assert.match(dl1.suggestedFilename(), /^受注一覧_\d{8}-\d{4}\.xlsx$/);
+      assert.equal((await calls(page, "week")).length, weekCalls0, "手術日順の出力は週を読み直さない");
+      assert.equal((await calls(page, "list")).length, 0, "list も呼ばない");
+      const x1 = await readXlsx(dl1);
+      assert.ok(!x1.s1.includes("<f>") && !x1.s1.includes("<f "), "数式セルなし");
+      assert.equal(x1.rows1, 1 + 3 * 2, "見出し + 担当施設Bの明細(1週に2行 × 3週)");
+      assert.deepEqual([x1.c1.get("A1"), x1.c1.get("E1"), x1.c1.get("L1")], ["注文番号", "手術日", "担当医"]);
+      assert.deepEqual([x1.c1.get("A2"), x1.c1.get("B2"), x1.c1.get("E2"), x1.c1.get("G2"), x1.c1.get("H2"), x1.c1.has("I2"), x1.c1.get("J2"), x1.c1.get("K2"), x1.c1.get("L2")],
+        ["IOL-20261027-03", "B眼科", excelDateSerial(day(thisWeek, 1)), 1, "DIB00V", false, "+21.0D", 2, "内田"], "手術日は日付セル、枚数・明細No は数値、トーリック型番なしは空");
+      assert.deepEqual([x1.c1.get("A3"), x1.c1.get("E3"), x1.c1.get("K3"), x1.c1.get("L3")], ["IOL-20261027-02", excelDateSerial(day(thisWeek, 3)), 1, "山田"]);
+      assert.deepEqual([x1.c2.get("B2"), x1.c2.get("B4"), x1.c2.get("A5"), x1.c2.get("B5")], ["受注一覧(手術日順)", "B眼科", "手術日", `${weekStartLabel(thisWeek)} 〜 ${weekStartLabel(day(thisWeek, 14))}`], "出力条件");
+      assert.ok(!x1.s2.includes("注意") && !x1.s2.includes("一部のみ"), "完全な出力に注意の行はない");
+
+      // 4) 一部のみの週(1週の上限): 出力の前に確認。「やめる」なら出力しない。「出力する」なら Excel の1行目と出力条件に注記
+      const reopen = async () => {
+        await page.click('[data-view="ordered"]');
+        await page.locator(".dealer-card").first().waitFor();
+        const k = (await calls(page, "week")).length;
+        await page.click('[data-view="surgery"]');
+        await page.waitForFunction((k) => (window.__calls || []).filter(([, d]) => d.action === "week").length >= k + 3 && document.querySelector('#dealerSurgery [data-act="more"]:not([disabled])'), k);
+      };
+      await page.evaluate((w) => { window.__weekTruncated = { [w]: true }; }, day(thisWeek, 7));
+      await reopen();
+      await btn.click();
+      await page.click('[data-export="xlsx"]');
+      await page.locator(".dealer-export-warn").waitFor();
+      assert.equal(await page.locator(".dealer-export-warn").innerText(), `${weekStartLabel(day(thisWeek, 7))}は一部のみ(件数が多いため)。一部だけの出力になります。`);
+      let downloaded = false;
+      page.once("download", () => { downloaded = true; });
+      await page.click('[data-act="export-stop"]');
+      await page.waitForTimeout(300);
+      assert.equal(downloaded, false, "「やめる」なら出力しない");
+      assert.equal(await menu.isVisible(), false);
+      await btn.click();
+      await page.click('[data-export="xlsx"]');
+      const [dl2] = await Promise.all([page.waitForEvent("download"), page.click('[data-act="export-go"]')]);
+      const x2 = await readXlsx(dl2);
+      assert.equal(x2.c1.get("A1"), `※ ${weekStartLabel(day(thisWeek, 7))}は一部のみ(件数が多いため)。この出力は不完全です。`, "不完全な出力は「明細」の1行目に注記");
+      assert.equal(x2.c1.get("A2"), "注文番号");
+      assert.ok(!x2.s1.includes("<autoFilter"), "注記があるときはフィルタなし");
+      assert.ok(x2.s2.includes("注意") && x2.s2.includes("この出力は不完全です"));
+
+      // 5) 印刷(手術日順): 帳票を一覧の代わりに表示(見出し・条件・件数・一部のみの明記・手術日ごとのまとまり)。印刷時は帳票だけ。戻ると一覧はそのまま
+      const titleBefore = await page.title();
+      await btn.click();
+      await page.click('[data-export="print"]');
+      await page.click('[data-act="export-go"]');
+      await page.locator("#dealerReport .dealer-report").waitFor();
+      assert.equal(await page.locator(".dealer-search-area").isVisible(), false);
+      assert.deepEqual([await page.locator(".dealer-report-title").innerText(), await page.locator(".dealer-report-company").innerText()], ["受注一覧(手術日順)", "エックス商事"]);
+      const conds = await page.locator(".dealer-report-cond").allInnerTexts();
+      assert.equal(conds[0], "医療機関: B眼科");
+      assert.equal(conds[1], `手術日: ${weekStartLabel(thisWeek)} 〜 ${weekStartLabel(day(thisWeek, 14))}(自社宛ての明細)`);
+      assert.match(conds[2], /^出力 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/, "手術日順に検索時点はない");
+      assert.equal(conds[3], "注文 2件 / 明細 6行 / 合計 9枚");
+      assert.equal(await page.locator(".dealer-report-partial").innerText(), `※ ${weekStartLabel(day(thisWeek, 7))}は一部のみ(件数が多いため)。この出力は不完全です。`);
+      assert.deepEqual(await page.locator('.dealer-report-table[data-kind="surgery"] thead th').allInnerTexts(), ["手術日", "医療機関", "注文番号", "モデル", "度数", "枚数", "担当医"]);
+      assert.equal(await page.locator(".dealer-report-date").count(), 6, "手術日ごとのまとまり(3週 × 2日)");
+      assert.equal(await page.locator(".dealer-report-empty").count(), 0);
+      assert.equal(await page.locator(`.dealer-report-date[data-day="${day(thisWeek, 8)}"] .dealer-report-day`).innerText(), `${Number(day(thisWeek, 8).slice(5, 7))}/${Number(day(thisWeek, 8).slice(8, 10))}(火)(一部のみ)`);
+      assert.match(await page.title(), /^受注一覧_\d{8}-\d{4}$/, "PDF に保存の既定のファイル名");
+      await page.emulateMedia({ media: "print" });
+      assert.deepEqual(await page.evaluate(() => ({
+        header: getComputedStyle(document.querySelector(".app-header")).display, actions: getComputedStyle(document.querySelector(".dealer-report-actions")).display,
+        title: getComputedStyle(document.querySelector(".dealer-title-row")).display, table: getComputedStyle(document.querySelector(".dealer-report-table")).display
+      })), { header: "none", actions: "none", title: "none", table: "table" }, "印刷時は帳票だけ");
+      await page.emulateMedia({ media: "screen" });
+      await page.click('[data-act="report-back"]');
+      assert.equal(await page.locator(".dealer-search-area").isVisible(), true);
+      assert.equal(await page.locator("#dealerReport").isVisible(), false);
+      assert.equal(await page.title(), titleBefore);
+      assert.equal(await page.evaluate(() => document.body.classList.contains("dealer-report-open")), false);
+      assert.equal(await page.locator(".dealer-week-head").count(), 3, "一覧はそのまま");
+      await page.evaluate(() => { window.__weekTruncated = null; });
+
+      // 6) 注文日順: いまの検索条件で 100 件ずつ、続きがなくなるまで読む。画面の一覧(20件ずつ・続き・件数)には触れない。検索時点・条件を出力条件に
+      await openOrdered(page);
+      await page.evaluate(() => {
+        const L = (no, sd, model, power, q, doc, toric = "") => ({ no, surgeryDate: sd, model, toricModel: toric, power, quantity: q, doctorName: doc });
+        const item = (i) => ({ receiptId: `x${i}`, facilityId: "fB", facilityName: "B眼科", orderNumber: `IOL-X-${String(i).padStart(2, "0")}`, orderedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(), lineCount: 2, totalQuantity: 3,
+          lines: [L(1, "2026-11-10", "DIB00V", "+21.0D", 2, "内田"), L(2, "2026-11-12", "ZCT", "+19.0D", 1, "佐藤", "ZCT225")] });
+        window.__exportItems = Array.from({ length: 5 }, (_, i) => item(i + 1));
+        window.__listOverride = (d) => {
+          if (!d.cursor) return { items: window.__exportItems.slice(0, d.limit >= 100 ? 3 : 2), nextCursor: "c1", complete: false, asOf: "2026-11-03T06:30:00.000Z" };
+          if (d.cursor === "c1") return { items: window.__exportItems.slice(3), nextCursor: null, complete: true, asOf: "2026-11-03T06:30:00.000Z" };
+          throw new Error("bad cursor");
+        };
+      });
+      await page.fill("#dealerFrom", "2026-10-01");
+      await page.click("#btnDealerSearch");
+      await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 2);
+      const listCalls0 = (await calls(page, "list")).length;
+      const listMsg0 = await page.locator("#dealerListMsg").innerText();
+      await btn.click();
+      const [dl3] = await Promise.all([page.waitForEvent("download"), page.click('[data-export="xlsx"]')]);
+      assert.deepEqual((await calls(page, "list")).slice(listCalls0).map(d => [d.limit, d.cursor || null, d.from, d.to || null]), [[100, null, "2026-10-01", null], [100, "c1", "2026-10-01", null]], "いまの条件で100件ずつ、続きがなくなるまで");
+      assert.equal(await page.locator(".dealer-card").count(), 2, "画面の一覧はそのまま");
+      assert.equal(await page.locator("#dealerListMsg").innerText(), listMsg0, "件数の表示もそのまま");
+      assert.equal(await page.locator("#btnDealerMore").isVisible(), true, "画面の続きもそのまま");
+      assert.equal(await exportMsg.isVisible(), false, "終わったら進捗は消す");
+      const x3 = await readXlsx(dl3);
+      assert.equal(x3.rows1, 1 + 5 * 2);
+      assert.deepEqual([x3.c1.get("A2"), x3.c1.get("C2"), x3.c1.get("D2"), x3.c1.get("E2"), x3.c1.get("F2"), x3.c1.get("I3"), x3.c1.get("H3")], ["IOL-X-01", excelDateSerial("2026-10-01"), "09:01", excelDateSerial("2026-11-10"), "火", "ZCT225", "ZCT"], "注文日・時刻は日本時間。トーリック型番は別の列");
+      assert.deepEqual([x3.c2.get("B4"), x3.c2.get("A5"), x3.c2.get("B5"), x3.c2.get("B6"), x3.c2.get("B8"), x3.c2.get("B9"), x3.c2.get("B10")], ["B眼科", "注文日", "2026/10/01 以降", "2026/11/03 15:30", 5, 10, 15], "出力条件: 医療機関・注文日・検索時点・件数");
+      // 印刷(注文日順): 注文ごとのまとまり。2行目以降は注文の列を繰り返さない。トーリックは型番
+      await btn.click();
+      await page.click('[data-export="print"]');
+      await page.locator("#dealerReport .dealer-report").waitFor();
+      assert.deepEqual(await page.locator('.dealer-report-table[data-kind="ordered"] thead th').allInnerTexts(), ["注文番号", "医療機関", "注文日時", "手術日", "モデル", "度数", "枚数", "担当医"]);
+      assert.equal(await page.locator(".dealer-report-order").count(), 5);
+      const o1 = page.locator('.dealer-report-order[data-receipt="x1"] tr');
+      assert.equal(await o1.count(), 2);
+      assert.deepEqual(await o1.first().locator("td").allInnerTexts(), ["IOL-X-01", "B眼科", "2026/10/01 09:01", "11/10(火)", "DIB00V", "+21.0D", "2", "内田"]);
+      assert.deepEqual(await o1.nth(1).locator("td").allInnerTexts(), ["11/12(木)", "ZCT225", "+19.0D", "1", "佐藤"]);
+      assert.equal(await page.locator(".dealer-report-partial").count(), 0);
+      const conds2 = await page.locator(".dealer-report-cond").allInnerTexts();
+      assert.deepEqual([conds2[0], conds2[1], conds2[3]], ["医療機関: B眼科", "注文日: 2026/10/01 以降(自社宛ての明細)", "注文 5件 / 明細 10行 / 合計 15枚"]);
+      assert.match(conds2[2], /^検索時点 2026\/11\/03 15:30 {2}出力 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/);
+      await page.click('[data-act="report-back"]');
+      assert.equal(await page.locator(".dealer-card").count(), 2);
+      // 7) 取得の途中で新しい注文が反映(restart): 出力せず案内。上限(注文1,001件): 出力しない。条件を変えた後(検索前)は「検索」を促す
+      await page.evaluate(() => { const o = window.__listOverride; window.__listOverride = (d) => (d.cursor ? { restart: true } : o(d)); });
+      await btn.click();
+      await page.click('[data-export="xlsx"]');
+      await page.locator("#dealerExportMsg.error-message").waitFor();
+      assert.equal(await exportMsg.innerText(), "検索の途中で新しい注文が反映されました。「検索」を押してから、もう一度出力してください。");
+      assert.equal(await page.locator("#dealerReport").isVisible(), false);
+      await page.evaluate(() => { window.__listOverride = () => ({ items: Array.from({ length: 1001 }, (_, i) => ({ ...window.__exportItems[0], receiptId: `big${i}`, orderNumber: `B${i}` })), nextCursor: null, complete: true }); });
+      await btn.click();
+      await page.click('[data-export="print"]');
+      await page.waitForFunction(() => /上限/.test(document.getElementById("dealerExportMsg").textContent));
+      assert.equal(await exportMsg.innerText(), "出力の上限(注文1,000件または明細3,000行)を超えています。期間や医療機関を絞ってください。");
+      assert.equal(await page.locator("#dealerReport").isVisible(), false);
+      await page.click('[data-facility="fA"]');   // 条件を変えた(検索前)
+      await btn.click();
+      await page.click('[data-export="xlsx"]');
+      await page.waitForFunction(() => /「検索」を押してから出力してください/.test(document.getElementById("dealerExportMsg").textContent));
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+}
