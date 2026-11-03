@@ -164,6 +164,9 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* 「認証状態を確認しています…」の間(auth-ui.js が is-auth-loading を付ける): 外枠・背景・影をなくし、文字だけ。余白は上下だけ少し残す */
+#authPanel.feature-card.is-auth-loading { background: transparent; border: 0; box-shadow: none; border-radius: 0; padding: 4px 0; margin-bottom: 12px; }
+
 /* 計測結果の読み取り: 初期は折りたたみ */
 .ocr-collapse > summary {
   cursor: pointer;

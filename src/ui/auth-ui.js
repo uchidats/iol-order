@@ -196,6 +196,7 @@ export function createAuthUi(handlers) {
     lastArgs = args;
     const { access, user, notice, error, facilities = [], busy = false, registration = null, pendingInvites = [], pendingBusy = false } = args;
     const state = access.state;
+    panel.classList.toggle("is-auth-loading", state === ACCESS.LOADING);   // 「認証状態を確認しています」の間は外枠なし(表示の切り替えだけ。CSS)
 
     if (state === ACCESS.LEGACY) {
       panel.hidden = true;
