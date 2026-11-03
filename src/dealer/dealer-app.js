@@ -376,6 +376,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     function renderSurgery() {
       if (!ctx.facilities.length) { surgeryBox.replaceChildren(); return; }
       const rows = [];
+      const showFacility = selected.size >= 2;   // 医療機関の小見出しは、今チェックしている施設が2つ以上のときだけ(閲覧できる施設の総数ではない)
       for (let i = 0; i < weeks.length; i++) {
         const w = weeks[i];
         if (!hasData(w)) {
@@ -396,7 +397,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
           }
           rows.push(h("li", { class: "history-day", "data-day": d.date }, lensDayHead(d.date),
             ...byFacility.map(g => h("div", { class: "dealer-day-facility", "data-facility-group": g.facilityId },
-              h("div", { class: "dealer-day-facility-name" }, g.facilityName),
+              showFacility ? h("div", { class: "dealer-day-facility-name" }, g.facilityName) : null,   // 1施設だけを選んでいるときは省略
               h("ul", { class: "history-day-lines" }, g.orders.flatMap(o => o.lines.map(l => {
                 const b = h("button", { type: "button", class: "history-row history-lens-btn", "data-receipt": o.receiptId, "data-date": d.date, "data-line": String(l.no) },
                   lensRow("div", lensOf(l), { doctor: doctorOf(l) }));

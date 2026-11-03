@@ -758,6 +758,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual(await page.locator(".dealer-week-head").evaluateAll(hs => hs.map(h => h.dataset.week)), [0, 7, 14].map(k => day(thisWeek, k)), "週の区切りは3つ(早い順)");
       assert.equal((await page.locator(".dealer-week-head").first().innerText()).trim(), weekSpanLabel(thisWeek), "週の区切り「11月9日〜15日の週」");
       assert.deepEqual(await rowKeys(), [0, 7, 14].flatMap(k => [`rcp-c@${day(thisWeek, k + 1)}#1`, `rcp-b@${day(thisWeek, k + 3)}#1`]), "担当施設(B)の注文だけ・手術日の昇順");
+      // チェックしている施設が1つ(閲覧できる施設は2つ): 手術日の下の医療機関名は省略。手術日・明細・担当医・週の区切りはそのまま
+      assert.equal(await page.locator("#dealerSurgery .dealer-day-facility-name").count(), 0, "1施設の選択では医療機関名を出さない");
+      assert.ok(await page.locator("#dealerSurgery .history-day .history-card-head").count() > 0 && await page.locator("#dealerSurgery .history-lens-doctor").count() === 6);
       // すべての施設: 各週の火曜(A の2行・B の1行)・木曜(B)。手術日 → 医療機関 → レンズ行(左にモデル・度数・枚数、右に担当医名。メーカー名は出さない)
       await page.click('[data-select="all"]');
       await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .history-lens-btn").length === 12);
@@ -766,6 +769,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual(await tue.locator(".dealer-day-facility-name").allInnerTexts(), ['<img src=x onerror="window.__xss=1">A眼科', "B眼科"], "同じ手術日の中は医療機関ごと(施設名の HTML は文字のまま)");
       assert.deepEqual((await tue.locator(".history-lens-btn").allInnerTexts()).map(x => x.replace(/\s+/g, " ").trim()),
         ["DIB00V +21.0D 2枚 山田Dr", "DIW300 +18.5D 1枚 <b>佐藤</b>Dr", "DIB00V +21.0D 2枚 内田Dr"], "トーリックはトーリック型番。別の注文の同じレンズは合算しない");
+      // 選択を1施設に戻すと、医療機関名の小見出しも自動で消える。再び2施設にすると出る
+      await page.click('[data-select="assigned"]');
+      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .history-lens-btn").length === 6);
+      assert.equal(await page.locator("#dealerSurgery .dealer-day-facility-name").count(), 0, "1施設に戻すと省略");
+      await page.click('[data-select="all"]');
+      await page.waitForFunction(() => document.querySelectorAll("#dealerSurgery .history-lens-btn").length === 12 && document.querySelector("#dealerSurgery .dealer-day-facility-name"));
       assert.equal(await page.locator("#dealerSurgery .summary-maker, #dealerSurgery img, #dealerSurgery b").count(), 0, "メーカー名を出さない・HTML を解釈しない");
       // 下の「もっと見る」: 4週目(3週の次)を読んで下に足す
       await page.click('#dealerSurgery [data-act="more"]');
