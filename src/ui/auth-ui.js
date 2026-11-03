@@ -278,14 +278,15 @@ export function createAuthUi(handlers) {
 
     panel.innerHTML = `
       <div class="feature-info">
-        <div class="feature-title-row"><span class="feature-title">施設を選択してください</span></div>
-        <p class="feature-desc">複数の施設に所属しています。注文する施設を選んでください。</p>
+        <div class="feature-title-row facility-select-title"><span class="feature-title">施設を選択してください</span></div>
         <div class="facility-select-list">${buttons}</div>
         ${canLocate ? `
           <button type="button" class="btn btn-outline-sm" id="btnLocateFacility" ${busy ? "disabled" : ""}>現在地から施設を選ぶ</button>
           <p class="form-hint">現在地は端末内で施設の登録位置と比較するだけです。保存・送信はせず、継続的な追跡もしません。</p>` : ""}
         ${msg}
       </div>`;
+    // 説明は見出しの右のⓘ(常時表示しない。ほかの見出しと同じ部品)
+    panel.querySelector(".facility-select-title").append(createInfoTip("複数の施設に所属しています。注文する施設を選んでください。", { label: "施設の選択の説明" }).root);
     panel.querySelectorAll("[data-facility-id]").forEach(b => {
       b.addEventListener("click", () => handlers.onSelectFacility(b.getAttribute("data-facility-id")));
     });

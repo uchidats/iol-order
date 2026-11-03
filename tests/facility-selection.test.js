@@ -87,3 +87,16 @@ test("権限状態の取得（非対応は unsupported）", async () => {
   assert.equal(await getGeoPermissionState({ permissions: { query: async () => ({ state: "granted" }) } }), "granted");
   assert.equal(await getGeoPermissionState({ permissions: { query: async () => { throw new Error("x"); } } }), "unsupported");
 });
+
+test("「施設を切り替える」の行き先: ちょうど2施設でその一方を開いているときだけ、もう一方へ直接(それ以外は選択画面 = null)", async () => {
+  const { directSwitchTarget } = await import("../src/domain/facility-selection.js");
+  const m = (...ids) => ids.map(facilityId => ({ facilityId }));
+  assert.equal(directSwitchTarget(m("fA", "fB"), "fA"), "fB");
+  assert.equal(directSwitchTarget(m("fA", "fB"), "fB"), "fA");
+  assert.equal(directSwitchTarget(m("fA", "fB", "fA"), "fA"), "fB", "重複は1施設として数える");
+  assert.equal(directSwitchTarget(m("fA"), "fA"), null, "1施設");
+  assert.equal(directSwitchTarget(m("fA", "fB", "fC"), "fA"), null, "3施設以上は選択画面");
+  assert.equal(directSwitchTarget(m("fA", "fB"), null), null, "施設をまだ選んでいない");
+  assert.equal(directSwitchTarget(m("fA", "fB"), "fX"), null, "開いている施設が所属にない");
+  assert.equal(directSwitchTarget(null, "fA"), null);
+});

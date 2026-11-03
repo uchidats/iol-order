@@ -126,11 +126,19 @@ async function bootstrapWithFirebase(config) {
       leaveOverlay();
       setOrderViewHidden(false);
       const dirty = isOrderFormDirty() || biometryState.userConfirmedValues.isConfirmed;
+      // 所属がちょうど2施設: 選択画面を出さず、もう一方の施設へ直接切り替える(3施設以上・施設を選ぶ前は従来どおり選択画面)
+      const access = decideAccess(state);
+      const target = access.state === ACCESS.GRANTED ? selection.directSwitchTarget(validMemberships(state.memberships), access.facilityId) : null;
       // 入力中なら確認(既存のモーダルと同じ見た目。キャンセルなら入力内容・現在の施設はそのまま)
-      if (dirty && !(await confirmDialog({ message: "入力中の内容は破棄されます。施設を切り替えますか？", okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
-      selection.clearRemembered(window.localStorage);
-      selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
-      location.reload(); // 入力内容・計測値をメモリごと破棄
+      const message = target ? `入力中の内容は破棄されます。「${facilityName(target)}」に切り替えますか？` : "入力中の内容は破棄されます。施設を切り替えますか？";
+      if (dirty && !(await confirmDialog({ message, okLabel: "切り替える", cancelLabel: "キャンセル" }))) return;
+      if (target) {
+        selection.remember(window.localStorage, state.user.uid, target);   // 再読み込みの後、この施設を開く(所属の検証は従来どおり decideAccess)
+      } else {
+        selection.clearRemembered(window.localStorage);
+        selection.setForceSelect(window.sessionStorage); // 切替直後は自動復元・自動判定をしない
+      }
+      location.reload(); // 入力内容・計測値をメモリごと破棄(下書きは施設ごとに保存しているため、別の施設には引き継がない)
     },
     onOpenHistory: leaveSettings(() => { leaveOverlay(); openHistory(); }),
     onOpenSettings: leaveSettings(() => { leaveOverlay(); openSettings(); }),

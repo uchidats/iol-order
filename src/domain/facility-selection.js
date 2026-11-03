@@ -45,3 +45,15 @@ export function consumeForceSelect(session) {
   safe(() => session.removeItem(FORCE_SELECT_KEY));
   return v;
 }
+
+/**
+ * 「施設を切り替える」の行き先。所属(検証済み・重複なし)がちょうど2施設で、いまその一方を開いているときだけ、もう一方の施設 ID。
+ * それ以外(1施設・3施設以上・施設をまだ選んでいない・開いている施設が所属に含まれない)は null = 従来どおり施設の選択画面
+ * @param {Array<{facilityId:string}>} memberships 検証済みの所属(domain/access.js の validMemberships)
+ * @param {string|null} currentFacilityId いま開いている施設
+ */
+export function directSwitchTarget(memberships, currentFacilityId) {
+  const ids = [...new Set((memberships || []).map(m => m && m.facilityId).filter(Boolean))];
+  if (ids.length !== 2 || !currentFacilityId || !ids.includes(currentFacilityId)) return null;
+  return ids.find(id => id !== currentFacilityId);
+}
