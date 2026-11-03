@@ -251,7 +251,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     // 一覧表示の絞り込み(任意。既定は期間なし = 全期間を新しい順)
     const from = h("input", { class: "form-control", type: "date", id: "dealerFrom", "aria-label": "注文日(から)" });
     const to = h("input", { class: "form-control", type: "date", id: "dealerTo", "aria-label": "注文日(まで)" });
-    const number = h("input", { class: "form-control", type: "text", id: "dealerOrderNumber", maxlength: "40", placeholder: "例: IOL-20261027-01", "aria-label": "注文番号(完全一致)", autocomplete: "off" });
     const checks = h("div", { class: "dealer-facility-list", role: "group", "aria-label": "医療機関" });
     const selectBar = h("div", { class: "dealer-select-actions", role: "group", "aria-label": "医療機関の選択" });
     const renderChecks = () => {
@@ -271,19 +270,17 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); remember(); facilitiesChanged(); });
       return b;
     };
-    const search = h("button", { type: "button", class: "btn btn-primary btn-aux", id: "btnDealerSearch" }, "この条件で表示");   // 絞り込みのボタンは補助ボタンの大きさ(色は従来どおり)
-    const clear = h("button", { type: "button", class: "btn btn-secondary btn-aux", id: "btnDealerClear" }, "条件をクリア");
+    const search = h("button", { type: "button", class: "btn btn-primary btn-aux", id: "btnDealerSearch" }, "検索");   // 補助ボタンの大きさ(青)
     const listBox = h("div", { class: "dealer-results", id: "dealerResults" });
     const more = h("button", { type: "button", class: "btn btn-secondary btn-aux history-more", id: "btnDealerMore", hidden: true }, "もっと見る");
     // 件数・状態(一覧の直前に控えめに表示)
     const listMsg = h("p", { class: "form-hint dealer-list-count", role: "status", id: "dealerListMsg" });
-    // 「絞り込み」の右のⓘ: 絞り込みの使い方と、検索時点・反映の時間差の説明(検索時点の日時は常時表示しない)
+    // 「注文日」の右のⓘ: 期間の指定の仕方と、検索時点・反映の時間差の説明(検索時点の日時は常時表示しない)
     const filterTip = createInfoTip([
-      "期間(開始日と終了日)と注文番号で絞り込めます。指定しない場合は、全期間を注文日時の新しい順に表示します。",
-      "一覧は「この条件で表示」を押した時点(検索時点)の内容です。「もっと見る」の続きも同じ時点の内容で表示します。",
+      "注文日で絞り込めます。開始日だけならその日以降、終了日だけならその日まで、両方ならその期間(両端を含む)の注文を表示します。両方を空にして「検索」を押すと、全期間を注文日時の新しい順に表示します。",
+      "一覧は「検索」を押した時点(検索時点)の内容です。「もっと見る」の続きも同じ時点の内容で表示します。",
       "注文メールとは別に反映されるため、新しい注文が一覧に出るまで少し時間がかかることがあります。"
     ].join("\n"), { label: "絞り込みと検索時点の説明" }).root;
-    filterTip.addEventListener("click", (e) => e.preventDefault(), true);   // ⓘの操作で絞り込みを開閉しない(summary の中のため)
     const detail = h("div", { class: "dealer-detail", id: "dealerDetail", hidden: true });
     const searchArea = h("div", { class: "dealer-search-area" });
 
@@ -428,7 +425,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     }
 
     /** 検索条件(施設・期間・注文番号)を変えたら、表示中の結果と続きを破棄する。「さらに表示」で古い条件の続きを読まない */
-    const CHANGED = "条件を変更しました。「この条件で表示」を押すと、新しい条件で表示します。";
+    const CHANGED = "条件を変更しました。「検索」を押すと、新しい条件で表示します。";
     function invalidate() {
       gen++;
       if (!lastQuery && !items.length && !cursor) return;
@@ -436,7 +433,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       renderList();
       listMsg.textContent = CHANGED;
     }
-    for (const el of [from, to, number]) { el.addEventListener("input", invalidate); el.addEventListener("change", invalidate); }
 
     const run = async (append) => {
       if (busy) return;
@@ -445,10 +441,9 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       busy = true; listMsg.textContent = "読み込み中…"; search.disabled = more.disabled = true;
       try {
         if (!append) {
-          // 期間は両方を指定したときだけ送る(なければ全期間)。片方だけは送らずに案内する
-          if (Boolean(from.value) !== Boolean(to.value)) { listMsg.textContent = "期間は開始日と終了日の両方を指定してください(期間を指定しない場合は両方を空にします)。"; return; }
-          lastQuery = { companyId: ctx.company.id, ...(from.value && to.value ? { from: from.value, to: to.value } : {}), facilityFilter: facilityFilterOf([...selected]),
-            ...(number.value.trim() ? { orderNumber: number.value.trim() } : {}), limit: LIST_PAGE };
+          // 注文日: 開始日だけ・終了日だけ・両方・なし(全期間)。開始日が終了日より後なら検索しない
+          if (from.value && to.value && from.value > to.value) { listMsg.textContent = "開始日は終了日より前(同じ日まで)の日付にしてください。"; return; }
+          lastQuery = { companyId: ctx.company.id, ...(from.value ? { from: from.value } : {}), ...(to.value ? { to: to.value } : {}), facilityFilter: facilityFilterOf([...selected]), limit: LIST_PAGE };
           cursor = null; items = [];
         }
         const r = await api.listOrders({ ...lastQuery, ...(append && cursor ? { cursor } : {}) });
@@ -456,7 +451,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         if (r.restart) {
           // 検索の途中で、読み終えた範囲に新しい注文の索引が反映された。続きからでは欠けるため、先頭からの再検索を求める
           cursor = null; renderList();
-          listMsg.textContent = "検索の途中で新しい注文が反映されました。「この条件で表示」を押して、先頭から表示し直してください。";
+          listMsg.textContent = "検索の途中で新しい注文が反映されました。「検索」を押して、先頭から表示し直してください。";
           return;
         }
         items = append ? [...items, ...r.items] : r.items;
@@ -465,7 +460,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
         listMsg.textContent = items.length ? `${items.length}件${cursor ? "(続きがあります)" : ""}`
           : cursor ? "ここまでに該当する注文は見つかりませんでした。「もっと見る」で続きを検索できます。" : "該当する注文はありません。";
         // 続きのページも、最初のページを読んだ時点(検索時点)の内容で表示する(サーバーがカーソルで固定)。その後に反映された注文は再検索で表示
-        if (r.newSinceSearch) listMsg.textContent += " 表示の後に反映された注文があります。「この条件で表示」を押すと最新の内容を表示します。";
+        if (r.newSinceSearch) listMsg.textContent += " 表示の後に反映された注文があります。「検索」を押すと最新の内容を表示します。";
       } catch (e) {
         if (my !== gen) { listMsg.textContent = CHANGED; return; }
         items = []; cursor = null; renderList();
@@ -474,7 +469,6 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       } finally { busy = false; search.disabled = more.disabled = false; }
     };
     search.addEventListener("click", () => run(false));
-    clear.addEventListener("click", () => { from.value = ""; to.value = ""; number.value = ""; run(false); });
     more.addEventListener("click", () => run(true));
 
     /** 注文日順: 1注文1カード(押すと受注詳細)。先頭に注文番号・医療機関名、その下に手術日ごとのレンズ行を最大5行と「ほかN件」(医療機関側の注文履歴と同じ) */
@@ -526,12 +520,10 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     }
 
     orderedArea.append(
-      // 絞り込み(折りたたみ。既定は閉じて、期間なし)
-      h("details", { class: "dealer-list-filter", id: "dealerListFilter" }, h("summary", {}, "絞り込み", filterTip),
-        h("div", { class: "dealer-filters" },
-          h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), from, h("span", {}, "〜"), to),
-          h("div", { class: "dealer-filter-row" }, h("label", { class: "form-label", for: "dealerOrderNumber" }, "注文番号"), number),
-          h("div", { class: "onboarding-actions" }, search, clear))),
+      // 注文日の検索(常に表示。注文日順だけ)。開始日 〜 終了日 [検索]。狭い画面で収まらなければ「検索」だけ次の行
+      h("div", { class: "dealer-date-search", id: "dealerDateSearch", role: "search" },
+        h("div", { class: "dealer-date-head" }, h("label", { class: "form-label", for: "dealerFrom" }, "注文日"), filterTip),
+        h("div", { class: "dealer-date-row" }, from, h("span", { class: "dealer-date-tilde" }, "〜"), to, search)),
       listMsg, listBox, more);
     // 補足の説明はⓘ(共通の info-tip。タップ・クリックで開く)。医療機関名・検索範囲・メッセージは常に表示する
     const tip = (text, label) => createInfoTip(text, { label }).root;

@@ -332,7 +332,7 @@ test("担当施設: 担当者ごとに複数。初期選択は担当施設、未
   assert.deepEqual(initialFacilitySelection([], ["fA"]).selection, "none");
 });
 
-test("検索: 注文番号の完全一致・日本時間の期間・最大366日・複数施設をまたぐページング(全件を重複なく)・カーソルの改ざん・期限切れ", async () => {
+test("検索: 注文番号の完全一致・日本時間の期間(長さの上限なし)・複数施設をまたぐページング(全件を重複なく)・カーソルの改ざん・期限切れ", async () => {
   await grant("adminA", "fA", "dA1");
   await grant("adminB", "fB", "dB1");
   const made = [];
@@ -345,10 +345,10 @@ test("検索: 注文番号の完全一致・日本時間の期間・最大366日
   const same = await list("x1", { orderNumber: ` ${num} ` });
   assert.ok(same.items.length >= 1 && same.items.every(i => i.orderNumber === num));
   assert.deepEqual((await list("x1", { orderNumber: num.slice(0, -1) })).items, [], "部分一致はしない");
-  // 期間: 未来だけの期間は0件、366日超・逆順・不正な日付は拒否
+  // 期間: 未来だけの期間は0件、366日を超える期間も受け付ける(上限なし)。逆順・不正な日付は拒否
   const future = jstDateOf(Date.now() + 5 * 24 * 3600 * 1000);
   assert.deepEqual((await list("x1", { from: future, to: future })).items, []);
-  await rejects(list("x1", { from: "2025-01-01", to: today() }), "invalid-argument");
+  assert.equal((await list("x1", { from: "2025-01-01", to: today() })).items.length, 6, "366日を超える期間も検索できる");
   await rejects(list("x1", { from: today(), to: jstDateOf(Date.now() - 2 * 24 * 3600 * 1000) }), "invalid-argument");
   await rejects(list("x1", { from: "2026-02-30", to: today() }), "invalid-argument");
   // ページング: 2件ずつで6件を重複なく、新しい順
@@ -1652,6 +1652,46 @@ test("施設の論理削除: この発注先へ送った注文は削除後も出
   assert.ok((await list("x1")).items.some(i => i.orderNumber === e.orderNumber));
 });
 
+test("注文日の期間: 開始日だけ = その日以降、終了日だけ = その日の終わりまで、両方 = 両端を含む。366日を超える期間も可。逆順は拒否。片側の期間でもページ送りは重複・欠けなし。他社・未選択の施設は出ない", async () => {
+  await grant("adminA", "fA", "dA1");
+  const day = (n) => jstDateOf(Date.now() + n * 24 * 3600e3);
+  const noonJst = (d) => Date.parse(`${d}T03:00:00Z`);   // その日の 12:00(日本時間)
+  const lastJst = (d) => Date.parse(`${d}T14:59:59Z`);   // その日の 23:59:59(日本時間)
+  // 受注日時(索引の orderedAt)を、今日・10日後の正午・10日後の終わり・200日後・399日後にずらす(許可より後の日時)
+  const at = { A: null, B: noonJst(day(10)), E: lastJst(day(10)), C: noonJst(day(200)), D: noonJst(day(399)) };
+  const ids = {};
+  for (const k of Object.keys(at)) {
+    const o = await placeOrder("fA", "ordA", [line({ dealerId: "dA1", power: "+20.0D" })]);
+    const ref = (await db.collection(`dealerCompanies/${C.X}/receipts`).where("sourceOrderId", "==", o.orderId).get()).docs[0].ref;
+    if (at[k] !== null) await ref.update({ orderedAt: Timestamp.fromMillis(at[k]) });
+    ids[ref.id] = k;
+  }
+  const keys = async (q) => (await api("x1", "list", { facilityFilter: { mode: "all" }, limit: 100, ...q })).items.map(i => ids[i.receiptId]);
+  assert.deepEqual(await keys({}), ["D", "C", "E", "B", "A"], "両方空 = 全期間(新しい順)");
+  assert.deepEqual(await keys({ from: day(10) }), ["D", "C", "E", "B"], "開始日だけ = その日の0時以降");
+  assert.deepEqual(await keys({ to: day(10) }), ["E", "B", "A"], "終了日だけ = その日の終わり(23:59:59)まで");
+  assert.deepEqual(await keys({ from: day(10), to: day(200) }), ["C", "E", "B"], "両方 = 両端を含む");
+  assert.deepEqual(await keys({ from: day(10), to: day(10) }), ["E", "B"], "同じ日 = その1日");
+  assert.deepEqual(await keys({ from: today(), to: day(399) }), ["D", "C", "E", "B", "A"], "400日の期間も検索できる(上限なし)");
+  await rejects(api("x1", "list", { facilityFilter: { mode: "all" }, from: day(11), to: day(10) }), "invalid-argument");
+  await rejects(api("x1", "list", { facilityFilter: { mode: "all" }, from: "2026-13-01" }), "invalid-argument");
+  await rejects(api("x1", "list", { facilityFilter: { mode: "all" }, to: "bad" }), "invalid-argument");
+  // 片側の期間のページ送り: 1件ずつ、新しい順に重複・欠けなし(カーソルは同じ条件だけ)
+  const seen = [];
+  let cursor = null;
+  for (let p = 0; p < 6; p++) {
+    const r = await api("x1", "list", { facilityFilter: { mode: "all" }, from: day(10), limit: 1, ...(cursor ? { cursor } : {}) });
+    seen.push(...r.items.map(i => ids[i.receiptId]));
+    cursor = r.nextCursor;
+    if (!cursor) break;
+    await rejects(api("x1", "list", { facilityFilter: { mode: "all" }, to: day(10), limit: 1, cursor }), "invalid-argument");   // 別の条件の続きは使えない
+  }
+  assert.deepEqual(seen, ["D", "C", "E", "B"]);
+  // 権限: 他社(Y)には出ない。未許可の施設は選べない
+  assert.deepEqual((await api("y1", "list", { facilityFilter: { mode: "all" }, from: day(10), limit: 100 })).items.filter(i => ids[i.receiptId]), []);
+  await rejects(api("x1", "list", { facilityFilter: { mode: "selected", facilityIds: ["fB"] }, from: day(10) }), "invalid-argument");
+});
+
 test("一覧表示: 期間なし(全期間)で注文日時の新しい順に20件ずつ、続きはカーソル。担当医(複数・重複なし)を返し、記録のない旧い索引は空。取消・未送信の削除は従来どおり出さない。期間は両方か、なし", async () => {
   await grant("adminA", "fA", "dA1");
   await db.doc("facilities/fA/orderers/o2").set({ facilityId: "fA", name: "佐藤" });
@@ -1698,10 +1738,10 @@ test("一覧表示: 期間なし(全期間)で注文日時の新しい順に20�
   const after = [...(await page()).items, ...(await page({ limit: 100 })).items];
   assert.ok(!after.some(i => i.receiptId === p1.items[0].receiptId || i.receiptId === p1.items[1].receiptId));
   assert.equal((await page({ limit: 100 })).items.length, 22);
-  // 期間: 両方なら従来どおり(最長366日)。片方だけは入力の誤り
+  // 期間: 両方は従来どおり。片方だけも受け付ける(開始日だけ = その日以降 / 終了日だけ = その日の終わりまで)
   assert.equal((await page({ ...range(), limit: 100 })).items.length, 22, "期間の指定は従来どおり");
-  await rejects(page({ from: today() }), "invalid-argument");
-  await rejects(page({ to: today() }), "invalid-argument");
+  assert.equal((await page({ from: today(), limit: 100 })).items.length, 22, "開始日だけ");
+  assert.equal((await page({ to: today(), limit: 100 })).items.length, 22, "終了日だけ");
   // 期間なしと期間ありのカーソルは別の検索(混ぜない)
   await rejects(page({ ...range(), cursor: p1.nextCursor }), "invalid-argument");
   // 他社(ワイ医療)からは見えない(閲覧の許可のない会社)

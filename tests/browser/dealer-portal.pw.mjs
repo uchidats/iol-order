@@ -158,12 +158,11 @@ function installFakeServer(page, scenario) {
 }
 /** 端末の値の保存(キーは UID・ログイン方法・主体ごと。iolDealerDevice.{uid}.…) */
 const deviceStored = (page, uid = "x1") => page.evaluate((u) => Object.keys(localStorage).filter(k => k.startsWith(`iolDealerDevice.${u}.`)).map(k => [k.split(".").length, localStorage.getItem(k)]), uid);
-/** 初期表示(手術日順)を待ってから「注文日順」に切り替え、一覧を待つ。続く操作のため「絞り込み」(折りたたみ)を開いておく */
+/** 初期表示(手術日順)を待ってから「注文日順」に切り替え、一覧を待つ(注文日の検索は常に表示) */
 async function openOrdered(page) {
   await page.waitForFunction(() => (window.__calls || []).some(([n, d]) => n === "dealerPortalApi" && d.action === "week") && document.querySelector('[data-view="ordered"]'));
   await page.click('[data-view="ordered"]');
   await page.locator(".dealer-card").first().waitFor();
-  await page.locator("#dealerListFilter > summary").click();
 }
 const calls = (page, action) => page.evaluate((a) => (window.__calls || []).filter(([n, d]) => n === "dealerPortalApi" && d.action === a).map(([, d]) => d), action);
 
@@ -302,7 +301,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         });
         assert.ok(order, "医療機関 → 切り替え → 受注");
         assert.equal(await page.locator(".dealer-facility-box .dealer-view").count(), 0, "切り替えは医療機関の枠の外");
-        assert.equal(await page.locator("#dealerOrderedArea #dealerListFilter").count(), 1, "絞り込みは一覧表示の中だけ");
+        assert.equal(await page.locator("#dealerOrderedArea #dealerDateSearch").count(), 1, "注文日の検索は注文日順の中だけ");
+        assert.equal(await page.locator("#dealerDateSearch").isVisible(), false, "手術日順では注文日の検索を出さない");
+        assert.equal(await page.locator("#dealerListFilter, #dealerOrderNumber, #btnDealerClear").count(), 0, "折りたたみ・注文番号の欄・条件をクリアはない");
         assert.deepEqual(await page.locator(".dealer-view [data-view]").allInnerTexts(), ["注文日順", "手術日順"]);
         assert.equal(await page.locator(".dealer-view.history-sort .history-sort-btn").count(), 2, "既存の切り替えボタンのデザイン");
         // 切り替えの外枠はボタン2つ分の幅だけ(右の余白まで広げない)。選択中は青、未選択は白
@@ -331,13 +332,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await page.locator(".dealer-facility-box [data-select]").allInnerTexts(), ["担当施設のみ", "すべて選択", "すべて解除"]);
         assert.equal(await page.locator('[data-act="saveAssigned"], .dealer-assign-row').count(), 0);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 横にはみ出さない`);
-        // 一覧表示: 絞り込みは閉じている。行に担当医(複数。文字として表示)、旧い索引(担当医なし)は省略
+        // 注文日順: 注文日の検索(開始日 〜 終了日 [検索])を常に表示。既定は期間なし(全期間)
         await page.click('[data-view="ordered"]');
         await page.locator(".dealer-card").first().waitFor();
-        assert.equal(await page.locator("#dealerListFilter").evaluate(d => d.open), false, "絞り込みは閉じている");
+        assert.equal(await page.locator("#dealerDateSearch").isVisible(), true, "注文日の検索は常に表示");
+        assert.equal(await page.locator("#btnDealerSearch").innerText(), "検索");
         assert.equal(await page.locator("#dealerFrom").inputValue(), "", "期間は指定しない");
         await page.click('[data-select="all"]');
-        await page.locator("#dealerListFilter > summary").click();
         await page.click("#btnDealerSearch");
         await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 2);
         assert.deepEqual(await page.locator(".dealer-card").evaluateAll(rs => rs.map(r => r.dataset.receipt)), ["rcp-b", "rcp-a"], "新しい順");
@@ -345,20 +346,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(!/2026[/]10[/]27/.test(await page.locator("#dealerResults").innerText()), "注文日時は一覧に出さない");
         assert.deepEqual(await page.locator("#dealerResults .history-lens-doctor").allInnerTexts(), ["とても長い名前の担当医の先生Dr", "山田Dr", "<b>佐藤</b>Dr"], "担当医は各レンズ行の右");
         assert.equal(await page.locator(".dealer-results b").count(), 0);
-        // 検索時点の日時は常時表示しない。件数は一覧の直前に控えめに。検索時点の説明は「絞り込み」のⓘ(ⓘだけが単独で残らない)
+        // 検索時点の日時は常時表示しない。件数は一覧の直前に控えめに。期間の指定と検索時点の説明は「注文日」のⓘ
         const orderedText = await page.locator("#dealerOrderedArea").innerText();
         assert.ok(!orderedText.includes("検索時点") && !orderedText.includes("注文メールとは別に"), "検索時点・補足は常時表示しない");
         assert.equal(await page.locator(".dealer-fetched").count(), 0);
         assert.equal(await page.locator("#dealerListMsg").innerText(), "2件");
         assert.ok(await page.evaluate(() => document.querySelector("#dealerListMsg").nextElementSibling === document.querySelector("#dealerResults")), "件数は一覧の直前");
-        assert.equal(await page.locator("#dealerOrderedArea .info-tip-btn").count(), 1, "一覧表示のⓘは絞り込みの1つだけ");
-        const wasOpen = await page.locator("#dealerListFilter").evaluate(d => d.open);
-        await page.locator("#dealerListFilter > summary .info-tip-btn").click();
-        const filterHelp = await page.locator("#dealerListFilter > summary .info-tip-pop").innerText();
-        assert.ok(/検索時点/.test(filterHelp) && /もっと見る/.test(filterHelp) && /注文メールとは別に/.test(filterHelp), filterHelp);
-        assert.equal(await page.locator("#dealerListFilter").evaluate(d => d.open), wasOpen, "ⓘの操作で絞り込みを開閉しない");
+        assert.equal(await page.locator("#dealerOrderedArea .info-tip-btn").count(), 1, "注文日順のⓘは「注文日」の1つだけ");
+        await page.locator(".dealer-date-head .info-tip-btn").click();
+        const filterHelp = await page.locator(".dealer-date-head .info-tip-pop").innerText();
+        assert.ok(/開始日だけならその日以降/.test(filterHelp) && /終了日だけならその日まで/.test(filterHelp) && /両方を空/.test(filterHelp) && /検索時点/.test(filterHelp) && /注文メールとは別に/.test(filterHelp), filterHelp);
         await page.keyboard.press("Escape");
-        assert.equal(await page.locator("#dealerListFilter > summary .info-tip-pop").isHidden(), true);
+        assert.equal(await page.locator(".dealer-date-head .info-tip-pop").isHidden(), true);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 一覧が横にはみ出さない`);
         // 受注詳細: 通常の注文メール(送信済み)は出さない。説明と詳しい状況は見出しのⓘ。下部の説明文はない
         await page.locator('[data-receipt="rcp-a"]').click();
@@ -412,40 +411,59 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(`${base}dealer.html`);
       await openOrdered(page);
-      // 絞り込みの並び(スマホ): 1行目「注文日」/ 開始日 〜 終了日(横並び)/「注文番号」と入力欄 / 「この条件で表示」「条件をクリア」(補助ボタンの大きさで横並び)。
-      // 入力欄の高さは変えない。PC は注文日・注文番号の見出しが入力欄の左のまま。ボタンの色は青・グレー
+      // 注文日の検索の並び: 「注文日」ⓘ / 開始日 〜 終了日 [検索](1行に収まらなければ「検索」だけ次の行)。日付の欄は横並びで枠の中。
+      // 入力欄の高さは PC と同じ。「検索」は補助ボタンの大きさ(高さ36px・文字0.9rem)で青
       await page.fill("#dealerFrom", "2026-10-01"); await page.fill("#dealerTo", "2026-12-31");
       const fbox = async () => page.evaluate(() => {
-        const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, h: b.height, w: b.width }; };
-        const labels = [...document.querySelectorAll("#dealerListFilter .dealer-filter-row > .form-label")].map(e => { const b = e.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; });
-        const tilde = [...document.querySelectorAll("#dealerListFilter .dealer-filter-row > span")].find(e => e.textContent === "〜").getBoundingClientRect();
-        const btn = (q) => { const e = document.querySelector(q), c = getComputedStyle(e), b = e.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, h: Math.round(b.height), fs: Math.round(parseFloat(c.fontSize) * 10) / 10, bg: c.backgroundColor, one: e.scrollWidth <= e.clientWidth + 1 }; };
-        return { box: r("#dealerListFilter .dealer-filters"), from: r("#dealerFrom"), to: r("#dealerTo"), num: r("#dealerOrderNumber"), date: labels[0], numLabel: labels[1], tilde: { l: tilde.left, r: tilde.right },
-          search: btn("#btnDealerSearch"), clear: btn("#btnDealerClear"), over: document.documentElement.scrollWidth > innerWidth };
+        const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, h: b.height }; };
+        const e = document.querySelector("#btnDealerSearch"), c = getComputedStyle(e), b = e.getBoundingClientRect();
+        return { row: r(".dealer-date-row"), head: r(".dealer-date-head"), from: r("#dealerFrom"), to: r("#dealerTo"), tilde: r(".dealer-date-tilde"),
+          btn: { l: b.left, r: b.right, t: b.top, h: Math.round(b.height), fs: Math.round(parseFloat(c.fontSize) * 10) / 10, bg: c.backgroundColor.match(/\d+/g).map(Number), one: e.scrollWidth <= e.clientWidth + 1 },
+          over: document.documentElement.scrollWidth > innerWidth };
       });
       await page.setViewportSize({ width: 1100, height: 900 });
       await page.waitForTimeout(250);   // ボタンの transition(0.15s)が終わってから測る
-      const pc = await fbox();   // PC(変更していない)の入力欄の高さ
+      const pc = await fbox();
       for (const w of [320, 360, 390, 430, 1100]) {
         await page.setViewportSize({ width: w, height: 900 });
-        await page.waitForTimeout(250);   // ボタンの transition(0.15s)が終わってから測る
+        await page.waitForTimeout(250);
         const x = await fbox();
         assert.equal(x.over, false, `${w}: 横にはみ出さない`);
-        assert.ok(Math.abs(x.from.t - x.to.t) < 1 && x.from.r <= x.tilde.l + 0.5 && x.tilde.r <= x.to.l + 0.5, `${w}: 開始日 〜 終了日 が横並び`);
-        assert.ok(x.to.r <= x.box.r + 0.5 && x.num.r <= x.box.r + 0.5, `${w}: 入力欄は枠の中`);
-        assert.ok(Math.abs(x.from.h - pc.from.h) < 1 && Math.abs(x.to.h - pc.to.h) < 1 && Math.abs(x.num.h - pc.num.h) < 1, `${w}: 入力欄の高さは変えない(${x.from.h}/${x.num.h} ↔ PC ${pc.from.h}/${pc.num.h})`);
-        if (w <= 430) {
-          assert.ok(x.date.b <= x.from.t + 0.5 && x.numLabel.b <= x.num.t + 0.5, `${w}: 「注文日」「注文番号」は入力欄の上の行`);
-        } else {
-          assert.ok(x.date.r <= x.from.l + 0.5 && Math.abs(x.numLabel.t - x.num.t) < 20, `${w}: PC は見出しが入力欄の左(従来どおり)`);
-        }
-        // ボタン: 高さ36px・文字0.9rem・1行。横並び(同じ行)で、幅は文字に合わせる(枠の中)。色は青とグレーのまま
-        assert.deepEqual([x.search.h, x.search.fs, x.clear.h, x.clear.fs, x.search.one, x.clear.one], [36, 14.4, 36, 14.4, true, true], `${w}: ボタンの大きさ`);
-        assert.ok(Math.abs(x.search.t - x.clear.t) < 1 && x.search.r <= x.clear.l && x.clear.r <= x.box.r + 0.5, `${w}: 2つのボタンは横並びで枠の中`);
-        const [sb, cb] = [x.search.bg, x.clear.bg].map(c => c.match(/\d+/g).map(Number));
-        assert.ok(sb[2] > 150 && sb[2] - sb[0] > 80 && Math.max(...cb.slice(0, 3)) - Math.min(...cb.slice(0, 3)) <= 30, `${w}: 青とグレー ${x.search.bg} / ${x.clear.bg}`);
+        assert.ok(x.head.b <= x.from.t + 0.5, `${w}: 「注文日」は入力欄の上`);
+        assert.ok(Math.abs(x.from.t - x.to.t) < 1 && x.from.r <= x.tilde.l + 0.5 && x.tilde.r <= x.to.l + 0.5 && x.to.r <= x.row.r + 0.5, `${w}: 開始日 〜 終了日 が横並びで枠の中`);
+        assert.ok(Math.abs(x.from.h - pc.from.h) < 1 && Math.abs(x.to.h - pc.to.h) < 1, `${w}: 入力欄の高さは PC と同じ`);
+        assert.deepEqual([x.btn.h, x.btn.fs, x.btn.one], [36, 14.4, true], `${w}: 「検索」は高さ36px・0.9rem・1行`);
+        assert.ok(x.btn.bg[2] > 150 && x.btn.bg[2] - x.btn.bg[0] > 80, `${w}: 「検索」は青`);
+        assert.ok(x.btn.r <= x.row.r + 0.5, `${w}: 「検索」は枠の中`);
+        const sameLine = x.btn.t < x.to.b && x.btn.t + x.btn.h > x.to.t;
+        if (sameLine) assert.ok(x.to.r <= x.btn.l, `${w}: 同じ行なら終了日の右`);
+        else assert.ok(x.btn.t >= x.to.b - 0.5, `${w}: 収まらなければ「検索」だけ次の行`);
+        if (w >= 430) assert.ok(sameLine, `${w}: 1行に収まる`);
       }
       await page.setViewportSize({ width: 390, height: 900 });
+      // 検索の動作: 日付を入力しただけでは検索しない。開始日だけ・終了日だけ・両方・なし(全期間)をそのまま送る。開始日 > 終了日 はエラーで検索しない
+      let k = (await calls(page, "list")).length;
+      assert.equal(k, (await calls(page, "list")).length, "入力だけでは検索しない");
+      const searchWith = async (fromV, toV) => {
+        await page.fill("#dealerFrom", fromV); await page.fill("#dealerTo", toV);
+        const before = (await calls(page, "list")).length;
+        await page.waitForTimeout(100);
+        assert.equal((await calls(page, "list")).length, before, "入力だけでは検索しない");
+        await page.click("#btnDealerSearch");
+        await page.waitForFunction((n) => (window.__calls || []).filter(([, d]) => d.action === "list").length > n, before);
+        const d = (await calls(page, "list")).at(-1);
+        return [d.from ?? null, d.to ?? null, "orderNumber" in d];
+      };
+      assert.deepEqual(await searchWith("2026-10-01", ""), ["2026-10-01", null, false], "開始日だけ");
+      assert.deepEqual(await searchWith("", "2026-10-31"), [null, "2026-10-31", false], "終了日だけ");
+      assert.deepEqual(await searchWith("2026-10-01", "2026-10-31"), ["2026-10-01", "2026-10-31", false], "両方");
+      assert.deepEqual(await searchWith("2026-10-31", "2026-10-31"), ["2026-10-31", "2026-10-31", false], "同じ日");
+      assert.deepEqual(await searchWith("", ""), [null, null, false], "両方空 = 全期間");
+      await page.fill("#dealerFrom", "2026-11-02"); await page.fill("#dealerTo", "2026-11-01");
+      k = (await calls(page, "list")).length;
+      await page.click("#btnDealerSearch");
+      assert.match(await page.locator("#dealerListMsg").innerText(), /開始日は終了日より前/);
+      assert.equal((await calls(page, "list")).length, k, "開始日 > 終了日 は検索しない");
       await page.fill("#dealerFrom", ""); await page.fill("#dealerTo", "");
       // 1ページ目: 選んだ施設の先頭の1件と続き。続き(cursor)では2件目
       await page.evaluate(() => {
@@ -483,10 +501,13 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.click("#btnDealerMore");
       await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 2);
       assert.equal((await listCalls()).at(-1).cursor, "cur-fB");
-      // 期間・注文番号・選択ボタンの変更でも破棄
+      // 日付を入力しただけでは一覧も続きもそのまま(「検索」で反映)
+      await page.fill("#dealerFrom", "2026-10-01");
+      assert.equal(await page.locator("#btnDealerMore").isHidden(), true, "続きは読み終えている(表示はそのまま)");
+      assert.deepEqual(await rows(), ["fB-1", "fB-2"], "日付の入力だけでは一覧を消さない");
+      await page.fill("#dealerFrom", "");
+      // 選択ボタンの変更では破棄
       for (const change of [
-        () => page.fill("#dealerOrderNumber", "X-1"),
-        async () => { await page.fill("#dealerFrom", "2026-10-01"); await page.fill("#dealerTo", "2026-10-31"); },   // 期間は両方(片方だけは案内を出して検索しない)
         () => page.click('[data-select="all"]')
       ]) {
         await page.click("#btnDealerSearch");

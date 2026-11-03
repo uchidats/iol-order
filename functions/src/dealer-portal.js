@@ -715,16 +715,13 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
 
   /** 検索条件の正規化: 期間(日本時間の日付・最大366日)・施設(selected/all)・注文番号(完全一致) */
   function parseQuery(data, scope) {
-    // 期間は任意(一覧表示の既定は期間なし = 全期間を新しい順)。指定するときは両方(従来どおり最長366日)
-    const noRange = (data.from === undefined || data.from === null || data.from === "") && (data.to === undefined || data.to === null || data.to === "");
+    // 注文日の期間は任意(日本時間の日付)。両方空 = 全期間 / 開始日だけ = その日以降 / 終了日だけ = その日の終わりまで / 両方 = 両端を含む。
+    // 期間の長さの上限はない(全期間も選べるため。1回に読む件数は走査の上限 scanMax で抑える)。開始日が終了日より後なら入力の誤り
+    const empty = (v) => v === undefined || v === null || v === "";
     let fromMs = null, toMs = null;
-    if (!noRange) {
-      fromMs = jstDayStartMs(data.from);
-      const toStart = jstDayStartMs(data.to);
-      if (fromMs === null || toStart === null) throw badInput("期間を確認してください");
-      toMs = toStart + DAY_MS;
-      if (toMs <= fromMs || (toMs - fromMs) / DAY_MS > PORTAL_LIMITS.rangeDaysMax) throw badInput(`期間は${PORTAL_LIMITS.rangeDaysMax}日以内で指定してください`);
-    }
+    if (!empty(data.from)) { fromMs = jstDayStartMs(data.from); if (fromMs === null) throw badInput("期間を確認してください"); }
+    if (!empty(data.to)) { const toStart = jstDayStartMs(data.to); if (toStart === null) throw badInput("期間を確認してください"); toMs = toStart + DAY_MS; }
+    if (fromMs !== null && toMs !== null && toMs <= fromMs) throw badInput("開始日は終了日より前(同じ日まで)の日付にしてください");
     const { facilities, mode } = parseFacilityFilter(data.facilityFilter, scope);
     let orderNumber = null;
     if (data.orderNumber !== undefined && data.orderNumber !== null && data.orderNumber !== "") {
@@ -788,13 +785,15 @@ export function createDealerPortalService({ db, FieldValue, Timestamp, FieldPath
       return Boolean(s && selected.has(r.facilityId) && r.grantId === s.grantId && r.localDealerId === s.localDealerId
         && r.cancelled !== true   // 取り消した注文の索引(通常は作らない。order-cancel.js が印を付ける)
         && r.deletedUnsent !== true   // 施設が削除し、この発注先へ送っていない注文(order-deletion.js が印を付ける。送った注文は印を付けない)
-        && t !== null && (q.fromMs === null || (t >= q.fromMs && t < q.toMs)) && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
+        && t !== null && (q.fromMs === null || t >= q.fromMs) && (q.toMs === null || t < q.toMs) && t >= s.effectiveFromMs && (!q.orderNumber || r.orderNumber === q.orderNumber));
     };
     // 検索時点(最初のページを読んだ時点)を固定し、続きのページも同じ時点の内容を読む(読み取り専用トランザクションの readTime)。
     // 検索中に索引が追加されても、ページの間で欠けたり重なったりしない。検索時点より後に反映された注文は、newSinceSearch で知らせる(再検索で表示)
     const pinned = cursor ? new Timestamp(cursor.as[0], cursor.as[1]) : null;
-    const ranged = q.fromMs === null ? receipts
-      : receipts.where("orderedAt", ">=", Timestamp.fromMillis(q.fromMs)).where("orderedAt", "<", Timestamp.fromMillis(q.toMs));
+    // 片側だけの期間も、同じ受注日時の条件(>= / <)を付けるだけ(並びとインデックスは同じ)
+    let ranged = receipts;
+    if (q.fromMs !== null) ranged = ranged.where("orderedAt", ">=", Timestamp.fromMillis(q.fromMs));
+    if (q.toMs !== null) ranged = ranged.where("orderedAt", "<", Timestamp.fromMillis(q.toMs));
     const base = ranged.orderBy("orderedAt", "desc").orderBy(FieldPath.documentId(), "desc");
     const { asOf, last, exhausted } = await db.runTransaction(async (tx) => {
       let after = cursor ? [new Timestamp(cursor.s, cursor.n), cursor.id] : null;
