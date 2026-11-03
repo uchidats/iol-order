@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekSpanLabel, spanLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekSpanLabel, weekStartLabel, spanLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { historyCardGroups } from "../domain/order-history-view.js";
 import { lensDayHead, lensRow } from "../ui/history-lens.js";
 import { createDealerManage } from "./dealer-manage.js";
@@ -386,7 +386,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
           i = j;
           continue;
         }
-        rows.push(h("li", { class: "dealer-week-head", "data-week": w.weekStart }, h("span", {}, weekSpanLabel(w.weekStart)),
+        rows.push(h("li", { class: "dealer-week-head", "data-week": w.weekStart }, h("span", {}, weekStartLabel(w.weekStart)),   // 週の区切りは開始日(月曜)だけ
           w.truncated ? h("span", { class: "dealer-week-truncated", role: "alert" }, "この週は件数が多いため、一部だけを表示しています。医療機関を絞り込んでください。") : null));
         for (const d of w.days.filter(x => x.orders.length)) {
           // 同じ手術日の中は医療機関ごと(サーバーが医療機関名・注文日時の順に並べている)

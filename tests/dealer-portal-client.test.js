@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createDealerPortalApi, isPortalUnavailable } from "../src/data/dealer-portal-api.js";
-import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE, mondayOf, addDays, formatDayHead, weekLabel, shortDate, spanLabel, weekSpanLabel } from "../src/domain/dealer-portal.js";
+import { facilityFilterOf, selectionFor, scopeLabel, formatJstDateTime, formatDate, dealerEntryUrl, DEALER_ACCESS_NOTICE, mondayOf, addDays, formatDayHead, weekLabel, shortDate, spanLabel, weekSpanLabel, weekStartLabel } from "../src/domain/dealer-portal.js";
 import { weekDatesOf } from "../functions/src/dealer-portal.js";
 import { buildDealerOrderView, ownLinesOf, initialFacilitySelection, jstDayStartMs } from "../functions/src/dealer-portal.js";
 
@@ -207,4 +207,10 @@ test("手術日順の週の区切り「11月9日〜15日の週」と期間の表
   assert.equal(weekSpanLabel("2025-11-03", today), "2025年11月3日〜9日の週");
   assert.equal(spanLabel("2026-11-09", "2026-12-06", today), "11月9日〜12月6日", "予定のない週が続く期間");
   assert.equal(spanLabel("2026-11-09", "2026-11-09", today), "11月9日");
+  // 週の区切り(開始日の月曜だけ)
+  assert.equal(weekStartLabel("2026-11-02", today), "11月2日の週");
+  assert.equal(weekStartLabel("2026-11-09", today), "11月9日の週");
+  assert.equal(weekStartLabel("2026-12-28", today), "12月28日の週", "年をまたぐ週は開始日の月曜(今年なので年は省略)");
+  assert.equal(weekStartLabel("2026-12-28", "2027-01-02"), "2026年12月28日の週", "年が明けてから見ると、前年の月曜に年を付ける");
+  assert.equal(weekStartLabel("2027-01-04", today), "2027年1月4日の週");
 });

@@ -63,8 +63,10 @@ export function spanLabel(start, end, today = jstDate(Date.now())) {
   if (start === end) return head;
   return `${head}〜${crossYear ? `${y(end)}年${m(end)}月` : m(end) === m(start) ? "" : `${m(end)}月`}${dd(end)}日`;
 }
-/** 手術日順の週の区切り「11月9日〜15日の週」 */
+/** 週の期間「11月9日〜15日の週」(予定のない週の案内など、期間を明示する所) */
 export const weekSpanLabel = (weekStart, today) => `${spanLabel(weekStart, addDays(weekStart, 6), today)}の週`;
+/** 手術日順の週の区切り「11月9日の週」(週の開始日 = 月曜だけ。今年以外は「2025年12月29日の週」) */
+export const weekStartLabel = (weekStart, today) => `${spanLabel(weekStart, weekStart, today)}の週`;
 /** 「11/12」(ほかの手術日の案内) */
 export const shortDate = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 

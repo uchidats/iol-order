@@ -731,7 +731,7 @@ test("ディーラー画面: 未ログインはメールリンクのログイン
   } finally { await browser.close(); }
 });
 
-import { mondayOf, jstDate as jstDateOfDealer, weekSpanLabel, addDays as addDaysOf } from "../../src/domain/dealer-portal.js";
+import { mondayOf, jstDate as jstDateOfDealer, weekSpanLabel, weekStartLabel, addDays as addDaysOf } from "../../src/domain/dealer-portal.js";
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`ディーラー画面の手術日順: 今週から手術日の昇順に連続(週の区切り → 手術日 → 医療機関 → レンズ行)。上下に週を追加(予定のない週は最大4週まで探し、さらに続きも探せる)、上に足しても位置を保つ、一部だけの週を明示、行から受注詳細(戻ると位置を保つ)。注文日順のカード。320/390/430/PC: ${name}`, async (t) => {
     const browser = await launch(type, name);
@@ -756,7 +756,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal((await calls(page, "week")).length, 3, "初期表示で読むのは3週だけ");
       assert.ok(first3.every(d => JSON.stringify(d.facilityFilter) === JSON.stringify({ mode: "selected", facilityIds: ["fB"] })), "担当施設");
       assert.deepEqual(await page.locator(".dealer-week-head").evaluateAll(hs => hs.map(h => h.dataset.week)), [0, 7, 14].map(k => day(thisWeek, k)), "週の区切りは3つ(早い順)");
-      assert.equal((await page.locator(".dealer-week-head").first().innerText()).trim(), weekSpanLabel(thisWeek), "週の区切り「11月9日〜15日の週」");
+      assert.equal((await page.locator(".dealer-week-head").first().innerText()).trim(), weekStartLabel(thisWeek), "週の区切りは開始日(月曜)だけ「11月9日の週」");
+      assert.match((await page.locator(".dealer-week-head > span").first().innerText()).trim(), /^(\d{4}年)?\d{1,2}月\d{1,2}日の週$/, "期間(〜)は出さない");
       assert.deepEqual(await rowKeys(), [0, 7, 14].flatMap(k => [`rcp-c@${day(thisWeek, k + 1)}#1`, `rcp-b@${day(thisWeek, k + 3)}#1`]), "担当施設(B)の注文だけ・手術日の昇順");
       // チェックしている施設が1つ(閲覧できる施設は2つ): 手術日の下の医療機関名は省略。手術日・明細・担当医・週の区切りはそのまま
       assert.equal(await page.locator("#dealerSurgery .dealer-day-facility-name").count(), 0, "1施設の選択では医療機関名を出さない");
@@ -808,6 +809,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.deepEqual((await weekCalls()).slice(n).sort(), [0, 7, 14].map(k => day(thisWeek, k)));
       assert.deepEqual(await page.locator("#dealerSurgery .dealer-surgery-list > li").evaluateAll(ls => ls.map(l => [l.className, l.dataset.week || l.dataset.day || ""])).then(x => x.filter(([c]) => c !== "history-day")),
         [["dealer-week-empty", day(thisWeek, 0)], ["dealer-week-head", day(thisWeek, 7)], ["dealer-week-empty", day(thisWeek, 14)]], "今週・翌々週は予定なしの1行、翌週は区切りと明細");
+      assert.equal(await page.locator(".dealer-week-empty").first().innerText(), `${weekSpanLabel(thisWeek)}: 手術予定の受注はありません`, "予定のない週の案内は期間を明示したまま");
       assert.equal(await page.locator('.dealer-surgery-note[data-note="down"]').count(), 0, "予定のある週があれば案内は出さない");
       // 3週とも予定なし: 1行にまとめて案内し、「もっと見る」で先を探せる
       await page.evaluate(() => { window.__weekData = {}; });
