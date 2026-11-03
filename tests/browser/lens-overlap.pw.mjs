@@ -101,7 +101,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const ctx = `${name} ${w}px ${JSON.stringify(r)}`;
         assert.deepEqual(r.hit, [], "要素領域が重なっている: " + ctx);
         assert.deepEqual(r.btnWidths, [80, 80], "枚数ボタンの幅は80px: " + ctx);
-        assert.deepEqual(r.btnHeights, [48, 48], "枚数ボタンの高さは48px: " + ctx);
+        assert.deepEqual(r.btnHeights, [40, 40], "枚数ボタンの高さは40px(注文フォームのほかの入力欄と同じ): " + ctx);
         assert.equal(r.btnGap, 10, "ボタン間隔は10px: " + ctx);
         assert.ok(r.btnsInsideGroup, "ボタンが枚数の欄からはみ出している: " + ctx);
         assert.equal(r.overflowX, false, "横スクロールが出ている: " + ctx);
