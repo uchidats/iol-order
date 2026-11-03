@@ -509,6 +509,7 @@ body {
   .lens-line [data-group="doctor"] > .select-wrapper { width: clamp(120px, var(--doctor-select-w, 190px), 100%); max-width: 100%; }
 }
 .lens-lines-actions { margin: 4px 0 14px; }
+#btnAddLine { min-height: 40px; height: 40px; padding-top: 0; padding-bottom: 0; }   /* 「＋ レンズを追加」: 高さだけ入力欄と同じ40px(幅・見た目は従来の .btn-secondary。文字は .btn の縦の中央) */
 .lens-line [hidden] { display: none !important; }
 /* 備考・各社Calculator関連リンク・計測結果の読み取りは、「レンズN」の外枠(.lens-line)と同じ幅・同じ左右端にそろえる(フォームの全幅) */
 #groupNotes .textarea-field,
