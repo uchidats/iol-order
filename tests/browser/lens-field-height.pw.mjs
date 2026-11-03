@@ -22,7 +22,7 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <link rel="stylesheet" href="/styles.css"></head><body>
 <main class="main-content"><form id="iolOrderForm" class="order-form" novalidate><div class="order-fields">
 <div id="lensLines" class="lens-lines"></div>
-<div class="lens-lines-actions"><button type="button" class="btn btn-secondary" id="btnAddLine">＋ レンズを追加</button></div>
+<div class="lens-lines-actions"><button type="button" class="btn btn-secondary" id="btnAddLine">レンズを追加</button></div>
 <div class="form-group" id="groupNotes"><label for="notesInput" class="form-label">備考</label><textarea id="notesInput" class="form-control textarea-field" rows="3"></textarea></div>
 </div></form></main>
 <script type="module">
@@ -86,11 +86,11 @@ const measureScript = () => {
     if (b.top >= a.bottom - 0.5) out.gaps.push(`${groups[i].dataset.group}>${groups[i + 1].dataset.group}:${Math.round(b.top - a.bottom)}`);
   }
   out.notesH = Math.round(document.getElementById("notesInput").getBoundingClientRect().height);
-  // 「＋ レンズを追加」: 高さ・幅・見た目(背景・枠線・角丸・文字サイズ)と、文字の縦の中央
+  // 「レンズを追加」: 高さ・幅・見た目(背景・枠線・角丸・文字サイズ)と、文字の縦の中央
   const add = document.getElementById("btnAddLine"), ar = add.getBoundingClientRect(), ac = getComputedStyle(add);
   const rg = document.createRange(); rg.selectNodeContents(add); const tr = rg.getBoundingClientRect();
   out.add = { h: Math.round(ar.height * 10) / 10, w: Math.round(ar.width * 10) / 10, fs: ac.fontSize, bg: ac.backgroundColor, bd: ac.borderTopWidth + " " + ac.borderTopColor, rad: ac.borderTopLeftRadius,
-    center: Math.round(((tr.top + tr.bottom) / 2 - (ar.top + ar.bottom) / 2) * 10) / 10, oneLine: tr.height < 30 };
+    text: add.textContent.trim(), center: Math.round(((tr.top + tr.bottom) / 2 - (ar.top + ar.bottom) / 2) * 10) / 10, oneLine: tr.height < 30 };
   out.overflowX = document.documentElement.scrollWidth > document.documentElement.clientWidth;
   return out;
 };
@@ -115,9 +115,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           assert.ok(r[g].length > 0 && r[g].every(x => Math.abs(x.h - FIELD_H) < 0.6), `${g} の高さは ${FIELD_H}px: ` + ctx);
         }
         assert.ok(r.notesH > FIELD_H + 20, "備考(複数行)は対象外のまま: " + ctx);
-        assert.equal(r.add.h, FIELD_H, "「＋ レンズを追加」は高さ40px: " + ctx);
-        assert.ok(r.add.w >= 157 && r.add.w <= 158, "「＋ レンズを追加」の幅は従来のまま(約157px): " + ctx);
-        assert.ok(Math.abs(r.add.center) <= 1 && r.add.oneLine, "「＋ レンズを追加」の文字は1行で縦の中央: " + ctx);
+        assert.equal(r.add.h, FIELD_H, "「レンズを追加」は高さ40px: " + ctx);
+        assert.ok(r.add.w < 145 && r.add.text === "レンズを追加", "「レンズを追加」(先頭の「＋」なし)で、幅は文字に合わせて縮む(従来の「＋ レンズを追加」は約157px): " + ctx);
+        assert.ok(Math.abs(r.add.center) <= 1 && r.add.oneLine, "「レンズを追加」の文字は1行で縦の中央: " + ctx);
         assert.deepEqual([r.add.fs, r.add.rad, r.add.bg], ["16px", "10px", "rgb(241, 245, 249)"], "背景・角丸・文字サイズは従来のまま: " + ctx);
         assert.equal(r.overflowX, false, "横スクロールが出ない: " + ctx);
       }
