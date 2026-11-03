@@ -485,6 +485,12 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await page.click("#btnDealerSearch");
       await page.waitForFunction(() => document.querySelectorAll(".dealer-card").length === 1 && !document.querySelector("#btnDealerMore").hidden);
       // 注文日順の「もっと見る」も補助ボタンの大きさ(高さ36px・文字0.9rem・上下6px)
+      // ホバーで薄い背景(視認性)。注文日順の「もっと見る」もテキストボタン
+      { const st = await page.locator("#btnDealerMore").evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(), p = e.parentElement.getBoundingClientRect(); return { bg: c.backgroundColor, border: c.borderTopColor, color: c.color.match(/\d+/g).map(Number), center: Math.abs((b.left + b.right) / 2 - (p.left + p.right) / 2) < 2 }; }); assert.ok(st.bg === "rgba(0, 0, 0, 0)" && st.border === "rgba(0, 0, 0, 0)" && st.color[2] > 150 && st.center, "注文日順の「もっと見る」はテキストボタン " + JSON.stringify(st)); }
+      await page.locator("#btnDealerMore").hover();
+      await page.waitForTimeout(250);
+      assert.notEqual(await page.locator("#btnDealerMore").evaluate(e => getComputedStyle(e).backgroundColor), "rgba(0, 0, 0, 0)", "ホバーで背景が付く");
+      await page.mouse.move(0, 0);
       assert.deepEqual(await page.locator("#btnDealerMore").evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return [Math.round(b.height), Math.round(parseFloat(c.fontSize) * 10) / 10, c.paddingTop, c.paddingBottom, b.left >= 0 && b.right <= innerWidth, e.scrollWidth <= e.clientWidth + 1]; }), [36, 14.4, "6px", "6px", true, true]);
       // 施設を B に替える → 結果と続きを破棄。「さらに表示」は出ない(古い A の続きを読まない)
       await page.locator('[data-facility="fA"]').uncheck();
@@ -922,6 +928,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 「過去の注文をもっと見る」「もっと見る」: 補助ボタンの大きさ(高さ36px・文字0.9rem・上下6px。幅は文字に合わせ、はみ出さない)。スマホ・PCで同じ
         for (const act of ["more-past", "more"]) assert.deepEqual(await page.locator(`#dealerSurgery [data-act="${act}"]`).evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(); return [Math.round(b.height), Math.round(parseFloat(c.fontSize) * 10) / 10, c.paddingTop, c.paddingBottom, b.left >= 0 && b.right <= innerWidth, e.scrollWidth <= e.clientWidth + 1]; }), [36, 14.4, "6px", "6px", true, true], `${w}: ${act}`);
         assert.ok(await page.locator('#dealerSurgery [data-act="more"]').evaluate(e => e.getBoundingClientRect().width < innerWidth * 0.8), `${w}: 幅は文字に合わせる`);
+        // テキストボタン: 背景・枠線なし(透明)、文字は青、中央揃え
+        for (const act of ["more-past", "more"]) { const st = await page.locator(`#dealerSurgery [data-act="${act}"]`).evaluate((e) => { const c = getComputedStyle(e), b = e.getBoundingClientRect(), p = e.parentElement.getBoundingClientRect(); return { bg: c.backgroundColor, border: c.borderTopColor, color: c.color.match(/\d+/g).map(Number), center: Math.abs((b.left + b.right) / 2 - (p.left + p.right) / 2) < 2 }; }); assert.ok(st.bg === "rgba(0, 0, 0, 0)" && st.border === "rgba(0, 0, 0, 0)" && st.color[2] > 150 && st.color[2] - st.color[0] > 80 && st.center, `${w}: ${act} はテキストボタン ${JSON.stringify(st)}`); }
+        // 受注一覧のカードの左端に太い線(アクセント)はない。枠線(1px)・角丸はそのまま
+        assert.deepEqual(await page.locator("#dealerPanel").evaluate(e => { const c = getComputedStyle(e); return [c.borderLeftWidth, c.borderTopWidth, c.borderLeftColor === c.borderTopColor, parseFloat(c.borderTopLeftRadius) > 0]; }), ["1px", "1px", true, true], `${w}: 左端の太い線なし`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}: 横にはみ出さない`);
       }
       await page.setViewportSize({ width: 390, height: 900 });
