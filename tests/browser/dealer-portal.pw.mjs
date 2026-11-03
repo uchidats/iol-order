@@ -412,6 +412,41 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       page.on("pageerror", e => errors.push(String(e)));
       await page.goto(`${base}dealer.html`);
       await openOrdered(page);
+      // 絞り込みの並び(スマホ): 1行目「注文日」/ 開始日 〜 終了日(横並び)/「注文番号」と入力欄 / 「この条件で表示」「条件をクリア」(補助ボタンの大きさで横並び)。
+      // 入力欄の高さは変えない。PC は注文日・注文番号の見出しが入力欄の左のまま。ボタンの色は青・グレー
+      await page.fill("#dealerFrom", "2026-10-01"); await page.fill("#dealerTo", "2026-12-31");
+      const fbox = async () => page.evaluate(() => {
+        const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, h: b.height, w: b.width }; };
+        const labels = [...document.querySelectorAll("#dealerListFilter .dealer-filter-row > .form-label")].map(e => { const b = e.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; });
+        const tilde = [...document.querySelectorAll("#dealerListFilter .dealer-filter-row > span")].find(e => e.textContent === "〜").getBoundingClientRect();
+        const btn = (q) => { const e = document.querySelector(q), c = getComputedStyle(e), b = e.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, h: Math.round(b.height), fs: Math.round(parseFloat(c.fontSize) * 10) / 10, bg: c.backgroundColor, one: e.scrollWidth <= e.clientWidth + 1 }; };
+        return { box: r("#dealerListFilter .dealer-filters"), from: r("#dealerFrom"), to: r("#dealerTo"), num: r("#dealerOrderNumber"), date: labels[0], numLabel: labels[1], tilde: { l: tilde.left, r: tilde.right },
+          search: btn("#btnDealerSearch"), clear: btn("#btnDealerClear"), over: document.documentElement.scrollWidth > innerWidth };
+      });
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.waitForTimeout(250);   // ボタンの transition(0.15s)が終わってから測る
+      const pc = await fbox();   // PC(変更していない)の入力欄の高さ
+      for (const w of [320, 360, 390, 430, 1100]) {
+        await page.setViewportSize({ width: w, height: 900 });
+        await page.waitForTimeout(250);   // ボタンの transition(0.15s)が終わってから測る
+        const x = await fbox();
+        assert.equal(x.over, false, `${w}: 横にはみ出さない`);
+        assert.ok(Math.abs(x.from.t - x.to.t) < 1 && x.from.r <= x.tilde.l + 0.5 && x.tilde.r <= x.to.l + 0.5, `${w}: 開始日 〜 終了日 が横並び`);
+        assert.ok(x.to.r <= x.box.r + 0.5 && x.num.r <= x.box.r + 0.5, `${w}: 入力欄は枠の中`);
+        assert.ok(Math.abs(x.from.h - pc.from.h) < 1 && Math.abs(x.to.h - pc.to.h) < 1 && Math.abs(x.num.h - pc.num.h) < 1, `${w}: 入力欄の高さは変えない(${x.from.h}/${x.num.h} ↔ PC ${pc.from.h}/${pc.num.h})`);
+        if (w <= 430) {
+          assert.ok(x.date.b <= x.from.t + 0.5 && x.numLabel.b <= x.num.t + 0.5, `${w}: 「注文日」「注文番号」は入力欄の上の行`);
+        } else {
+          assert.ok(x.date.r <= x.from.l + 0.5 && Math.abs(x.numLabel.t - x.num.t) < 20, `${w}: PC は見出しが入力欄の左(従来どおり)`);
+        }
+        // ボタン: 高さ36px・文字0.9rem・1行。横並び(同じ行)で、幅は文字に合わせる(枠の中)。色は青とグレーのまま
+        assert.deepEqual([x.search.h, x.search.fs, x.clear.h, x.clear.fs, x.search.one, x.clear.one], [36, 14.4, 36, 14.4, true, true], `${w}: ボタンの大きさ`);
+        assert.ok(Math.abs(x.search.t - x.clear.t) < 1 && x.search.r <= x.clear.l && x.clear.r <= x.box.r + 0.5, `${w}: 2つのボタンは横並びで枠の中`);
+        const [sb, cb] = [x.search.bg, x.clear.bg].map(c => c.match(/\d+/g).map(Number));
+        assert.ok(sb[2] > 150 && sb[2] - sb[0] > 80 && Math.max(...cb.slice(0, 3)) - Math.min(...cb.slice(0, 3)) <= 30, `${w}: 青とグレー ${x.search.bg} / ${x.clear.bg}`);
+      }
+      await page.setViewportSize({ width: 390, height: 900 });
+      await page.fill("#dealerFrom", ""); await page.fill("#dealerTo", "");
       // 1ページ目: 選んだ施設の先頭の1件と続き。続き(cursor)では2件目
       await page.evaluate(() => {
         window.__listOverride = async (d) => {

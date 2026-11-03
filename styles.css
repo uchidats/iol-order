@@ -2549,6 +2549,25 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-list-filter > summary .info-tip { vertical-align: middle; margin-left: 2px; }
 .dealer-list-filter > summary .info-tip-pop { white-space: pre-line; cursor: auto; }   /* 段落ごとに改行。説明は絞り込みの行の下に出す */
 .dealer-list-filter[open] > summary { margin-bottom: 6px; }
+/* スマホ: 受注一覧(注文日順)の絞り込みだけ。1行目「注文日」/ 2行目 開始日 〜 終了日(横並び。年月日をすべて表示)/「注文番号」と入力欄 /
+   「この条件で表示」「条件をクリア」(補助ボタンの大きさ .btn-aux で横並び)。入力欄の高さはそのまま、幅と並びと左右の余白だけ。PC は従来どおり */
+@media (max-width: 560px) {
+  .dealer-list-filter .dealer-filters { padding: 10px; }
+  .dealer-list-filter .dealer-filter-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 4px 6px; }
+  .dealer-list-filter .dealer-filter-row > .form-label { grid-column: 1 / -1; min-width: 0; }
+  .dealer-list-filter .dealer-filter-row > .form-control { width: 100%; min-width: 0; padding-left: 8px; padding-right: 6px; }
+  .dealer-list-filter .dealer-filter-row > #dealerOrderNumber { grid-column: 1 / -1; }
+  .dealer-list-filter .dealer-filters .onboarding-actions { flex-wrap: nowrap; justify-content: flex-start; gap: 8px; }   /* 補助ボタンの大きさ(.btn-aux)で横並び。幅は文字に合わせる */
+  .dealer-list-filter .dealer-filters .onboarding-actions > .btn-aux { flex: none; padding-left: 14px; padding-right: 14px; white-space: nowrap; }
+}
+/* 320〜360px: 年月日がすべて見えるよう、日付の文字を少し小さく・左右の余白と「〜」の前後・枠の余白を詰める(入力欄の高さは min-height のまま変わらない)。
+   2つのボタンは左右の余白を詰めて横並びに収める(高さ36px・文字0.9remはそのまま) */
+@media (max-width: 360px) {
+  .dealer-list-filter .dealer-filters { padding: 6px; }
+  .dealer-list-filter .dealer-filter-row { column-gap: 2px; }
+  .dealer-list-filter .dealer-filter-row > input[type="date"] { font-size: 0.875rem; padding-left: 4px; padding-right: 2px; }
+  .dealer-list-filter .dealer-filters .onboarding-actions > .btn-aux { padding-left: 10px; padding-right: 10px; }
+}
 .dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm, #dealerBackToOrder { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }   /* 「IOL注文フォームに戻る」は受注一覧の「今週」などと同じ大きさ */
 /* 運営者の会社の鉛筆・ゴミ箱は、施設設定の「担当医」のアイコンボタン(.orderer-icon)と同じ寸法に戻す */
 .dealer-operator .btn-outline-sm.orderer-icon { min-height: 32px; height: 32px; min-width: 32px; padding-left: 8px; padding-right: 8px; }

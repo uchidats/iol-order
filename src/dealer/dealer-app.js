@@ -271,8 +271,8 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
       b.addEventListener("click", () => { selected = new Set(selectionFor(kind, ctx.facilities)); renderChecks(); remember(); facilitiesChanged(); });
       return b;
     };
-    const search = h("button", { type: "button", class: "btn btn-primary", id: "btnDealerSearch" }, "この条件で表示");
-    const clear = h("button", { type: "button", class: "btn btn-secondary", id: "btnDealerClear" }, "条件をクリア");
+    const search = h("button", { type: "button", class: "btn btn-primary btn-aux", id: "btnDealerSearch" }, "この条件で表示");   // 絞り込みのボタンは補助ボタンの大きさ(色は従来どおり)
+    const clear = h("button", { type: "button", class: "btn btn-secondary btn-aux", id: "btnDealerClear" }, "条件をクリア");
     const listBox = h("div", { class: "dealer-results", id: "dealerResults" });
     const more = h("button", { type: "button", class: "btn btn-secondary btn-aux history-more", id: "btnDealerMore", hidden: true }, "もっと見る");
     // 件数・状態(一覧の直前に控えめに表示)
