@@ -24,7 +24,9 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <div id="lensLines" class="lens-lines"></div>
 <div class="lens-lines-actions"><button type="button" class="btn btn-secondary" id="btnAddLine">レンズを追加</button></div>
 <div class="form-group" id="groupNotes"><label for="notesInput" class="form-label">備考</label><textarea id="notesInput" class="form-control textarea-field" rows="3"></textarea></div>
-</div></form></main>
+</div>
+<div class="form-actions"><button type="submit" class="btn btn-primary btn-submit" id="btnConfirm">注文内容を確認<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg></button></div>
+</form></main>
 <script type="module">
 import { createLensLines } from "/src/ui/lens-lines.js";
 import { buildLensOptions } from "/src/domain/lens-options.js";
@@ -91,6 +93,10 @@ const measureScript = () => {
   const rg = document.createRange(); rg.selectNodeContents(add); const tr = rg.getBoundingClientRect();
   out.add = { h: Math.round(ar.height * 10) / 10, w: Math.round(ar.width * 10) / 10, fs: ac.fontSize, bg: ac.backgroundColor, bd: ac.borderTopWidth + " " + ac.borderTopColor, rad: ac.borderTopLeftRadius,
     text: add.textContent.trim(), center: Math.round(((tr.top + tr.bottom) / 2 - (ar.top + ar.bottom) / 2) * 10) / 10, oneLine: tr.height < 30 };
+  // 「注文内容を確認」: 高さ・幅・色・文字の大きさ・矢印の大きさ・右揃え(index.html と同じ構成)
+  const cf = document.getElementById("btnConfirm"), cr = cf.getBoundingClientRect(), cc = getComputedStyle(cf), svg = cf.querySelector("svg").getBoundingClientRect(), fa = cf.parentElement.getBoundingClientRect();
+  out.confirm = { h: Math.round(cr.height * 10) / 10, w: Math.round(cr.width), fs: cc.fontSize, bg: cc.backgroundColor, color: cc.color, icon: [Math.round(svg.width), Math.round(svg.height)], right: Math.abs(cr.right - fa.right) <= 1,
+    center: Math.round(((svg.top + svg.bottom) / 2 - (cr.top + cr.bottom) / 2) * 10) / 10 };
   out.overflowX = document.documentElement.scrollWidth > document.documentElement.clientWidth;
   return out;
 };
@@ -115,6 +121,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           assert.ok(r[g].length > 0 && r[g].every(x => Math.abs(x.h - FIELD_H) < 0.6), `${g} の高さは ${FIELD_H}px: ` + ctx);
         }
         assert.ok(r.notesH > FIELD_H + 20, "備考(複数行)は対象外のまま: " + ctx);
+        // 「注文内容を確認」: スマホ(560px 以下)は「レンズを追加」と同じ高さ(40px)、PC は従来の 46px。幅・色・文字の大きさ・矢印・右揃えは同じ
+        assert.equal(r.confirm.h, w <= 560 ? r.add.h : 46, `「注文内容を確認」の高さ(スマホは「レンズを追加」と同じ ${r.add.h}px、PC は 46px): ` + ctx);
+        assert.deepEqual([r.confirm.w, r.confirm.fs, r.confirm.icon, r.confirm.right], [200, "16px", [20, 20], true], "幅200px・文字16px・矢印20px・右揃えは従来のまま: " + ctx);
+        assert.ok(Math.abs(r.confirm.center) <= 1, "矢印は縦の中央: " + ctx);
         assert.equal(r.add.h, FIELD_H, "「レンズを追加」は高さ40px: " + ctx);
         assert.ok(r.add.w < 145 && r.add.text === "レンズを追加", "「レンズを追加」(先頭の「＋」なし)で、幅は文字に合わせて縮む(従来の「＋ レンズを追加」は約157px): " + ctx);
         assert.ok(Math.abs(r.add.center) <= 1 && r.add.oneLine, "「レンズを追加」の文字は1行で縦の中央: " + ctx);

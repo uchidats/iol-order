@@ -756,6 +756,11 @@ input[type="date"].form-control {
   box-shadow: var(--shadow-md);
 }
 
+/* スマホ: 「注文内容を確認」の高さは「レンズを追加」(40px)と同じ。幅・色・文字の大きさ・矢印・右揃えは従来のまま(PC は 46px のまま) */
+@media (max-width: 560px) {
+  #btnConfirm.btn-submit { min-height: 40px; height: 40px; padding-top: 0; padding-bottom: 0; }
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;   /* 「注文内容を確認」は右揃え(「レンズN」の外枠・備考欄と右端をそろえる) */
