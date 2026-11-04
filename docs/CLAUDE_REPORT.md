@@ -2,26 +2,28 @@
 
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
-- **日時**: 2026-11-04
-- **作業**: R09 の §9-2 の1段目(純粋な処理)を実装。ブランチ `feature/r09-sticker-photo`(`main` 未統合)。
-- `src/domain/sticker-photo.js`: コードの形式・上限の定数・最終手術日・QR の URL・撮影セッションのまとまり・解像度の注意・上限の文言。
-- `functions/src/sticker-photo.js`: チケットの署名と検証、`photoId`、オブジェクト名、コードのハッシュ(`crypto.scrypt`)、重複の判定、上限の判定、登録の決定(`planPhotoRegistration`)、回数制限、JPEG の検証とメタデータの除去(`sanitizeJpeg`)。Node.js 標準の機能だけで、Firestore・バケット・Secret には触らない。
-- 新しいファイルはどこからも呼ばれていない。`stamp-assets` により `index.html`・`dealer.html` の import map には載るが、読み込まれない。既存の注文・メール機能の変更なし。
-- 設計の更新(§8-2): 同じIDで内容の違う同時送信が上書きし合わないよう、オブジェクト名に画像の SHA-256 を含めた。メタデータの除去は残すものを指定する方式にし、MPF と EOI より後のデータも除く。
+- **日時**: 2026-11-05
+- **作業**: R09 の §9-2 の1段目(純粋な処理)の見直しと修正。ブランチ `feature/r09-sticker-photo`(`main` 未統合)。
+- 既存のコミット `42e17a7`(別のセッションの1段目の実装)を改訂8と照合し、その上に修正を追加。`src/domain/sticker-photo.js` は変更なし。
+- `functions/src/sticker-photo.js`:
+  - 確認の後に削除された写真の再送は復元せず、保存したオブジェクトを消す(`discardObject`)。
+  - JPEG の除去は残すものの指定を徹底。残すのは復号の表・サムネイルのない JFIF・ICC・Adobe の色変換だけ。JFIF のサムネイル・JFXX・署名の違う APP0/APP14・未知のセグメントも除く。
+- `docs/iol-sticker-photo-design.md` の §8-2 を実装に合わせて更新。新しいファイルはどこからも呼ばれていない。既存の注文・メール機能の変更なし。
 
 ## commit ID
-- 本体: 本ファイルを含む commit(`git log -1`)。
+- 本体: 本ファイルを含む commit(`git log -1`)。1段目の実装は `42e17a7`。
 
 ## テスト結果
-- unit: `tests/sticker-photo.test.js`・`tests/sticker-photo-server.test.js`(新規)、`tests/asset-stamp.test.js`、`tests/image-sharpness.test.js` 成功。
-- 確認用スクリプト(リポジトリに入れない): Chromium が作った JPEG(800×600・3060×4080)に Exif と末尾のデータを足し、除去の結果が元の JPEG と同じバイト列・同じデコード結果になることを確認。
-- 未実行(範囲外): `npm test` 全体・ブラウザ・Functions・Rules。実機の JPEG(Galaxy・iPhone)の確認は未実施。同時送信はトランザクションを模した順次の判定で確認し、実際の Firestore のトランザクションは次の段階で確認する。
+- unit: `tests/sticker-photo.test.js`・`tests/sticker-photo-server.test.js`・`tests/asset-stamp.test.js` 49件すべて成功。
+- 確認用スクリプト(リポジトリに入れない): ブラウザの canvas が作った 3060×4080 の JPEG は除去の前後で同じバイト列。Exif と末尾のデータを足した画像は元に戻り、表示もできた。
+- 未実行(範囲外): `npm test` 全体・ブラウザ・Functions・Rules。実機の JPEG(Galaxy・iPhone)の確認は未実施。同時送信はトランザクションを模した順次の判定で確認し、実際の Firestore のトランザクションは未確認。
 
 ## push・Firebaseデプロイ
 - `feature/r09-sticker-photo` へ通常の push。`main` への統合なし。Firebase のデプロイなし。Functions の公開・Rules の変更・依存パッケージの追加・バケットと Secret の作成なし。
 
 ## 残課題
 - R09: §9-2 の2段目(サーバー)以降。台紙の試し刷りと行数の確定、シールを貼った台紙の容量と判読、送信時間、iPhone の検証。
+- 2段目で確認すること: 入口トークンが無効なときも応答時間で区別されないこと。上限で保存したオブジェクトを消すときに、同じ写真の登録と競合しないこと。
 - 実際のバケットでの保存・閲覧・削除の確認(配備の後)。
 - 実際の次の注文メールでの、差出人名の表示の確認。
 

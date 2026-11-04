@@ -211,6 +211,12 @@ test("登録: 同じIDで内容が違えば何も書かず、自分のオブジ�
   assert.equal(plan.usage, undefined);
 });
 
+test("登録: 確認の後に削除された写真の再送は復元せず、保存したオブジェクトを消す", () => {
+  const plan = planPhotoRegistration({ existing: stored({ status: "deleted" }), session: { count: 3 }, usage: null, facilityId: "f1", sha256: SHA_A, bytes: 100 });
+  assert.deepEqual([plan.action, plan.created, plan.deleted, plan.discardObject], ["existing", false, true, true]);
+  assert.equal(plan.session, undefined, "枚数・容量を増やさない");
+});
+
 test("登録: 上限を超えたら何も書かず、保存したオブジェクトを消す", () => {
   const plan = planPhotoRegistration({ session: { count: 3 }, facilityId: "f1", sha256: SHA_A, bytes: 10 }, small);
   assert.deepEqual(plan, { action: "limit", reason: "session_photos", discardObject: true });
@@ -322,6 +328,29 @@ test("JPEG: Exif・XMP・IPTC・コメント・MPF・EOI より後のデータ�
   assert.equal(result.ok, true);
   assert.ok(!result.bytes.toString("latin1").includes("SECRET"));
   assert.ok(result.bytes.equals(clean()), "表示に必要な部分と画像データは1バイトも変わらない");
+});
+
+test("JPEG: 埋め込みのサムネイル・署名の違うセグメント・未知のセグメントは残さない", () => {
+  const thumbnail = Buffer.from("THUMB-SECRET", "latin1");
+  const hidden = [
+    segment(0xe0, Buffer.concat([Buffer.from("JFIF\0\x01\x01\0\0\x01\0\x01\x02\x02", "latin1"), thumbnail])),   // JFIF のサムネイル
+    segment(0xe0, Buffer.concat([Buffer.from("JFXX\0\x10", "latin1"), thumbnail])),                                   // JFIF の拡張のサムネイル
+    segment(0xe0, Buffer.from("VENDOR-SECRET-THUMB", "latin1")),
+    segment(0xee, Buffer.from("Vendor\0THUMB-SECRET", "latin1")),
+    segment(0xee, Buffer.from("Adobe\0\x64\0\0\0\0\0THUMB-SECRET", "latin1")),                                     // 署名は同じで長さが違う
+    segment(0xf0, thumbnail),                                                                                         // 予約のセグメント
+    segment(0xc8, thumbnail)
+  ];
+  const result = sanitizeJpeg(Buffer.concat([SOI, ...hidden, DQT, frame(4080, 3060), SOS, SCAN, EOI]));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.bytes, Buffer.concat([SOI, DQT, frame(4080, 3060), SOS, SCAN, EOI]));
+  assert.ok(!result.bytes.includes("SECRET"));
+});
+
+test("JPEG: 復号に必要な表は残す", () => {
+  const tables = [segment(0xc4, Buffer.alloc(20, 2)), segment(0xcc, [1, 2]), segment(0xdd, [0, 8])];
+  const input = Buffer.concat([SOI, DQT, ...tables, frame(100, 50), SOS, SCAN, EOI]);
+  assert.deepEqual(sanitizeJpeg(input).bytes, input);
 });
 
 test("JPEG: 除去は冪等で、同じ入力は同じ結果", () => {

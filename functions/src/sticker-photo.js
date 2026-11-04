@@ -237,13 +237,13 @@ export function checkUploadLimits({ session, usage, bytes }, limits = STICKER_LI
  * トランザクションの再試行で最新の値で判定し直されるので、同時に送っても上限を超えず seq も重複しない。
  * 同じ写真の再送は枚数・容量に数えない。
  * - create: photo・session・usage を書く
- * - existing: 何も書かない(保存したオブジェクトは同じ名前なので残す)
+ * - existing: 何も書かない(保存したオブジェクトは同じ名前なので残す。ただし削除済みの写真は復元せず、discardObject でオブジェクトを消す)
  * - conflict / limit: 何も書かない。discardObject が true なので、保存したオブジェクトを消す
  * @param {{existing?:object|null, session?:object|null, usage?:object|null, facilityId:string, sha256:string, bytes:number, lastSurgeryDate?:string|null}} input
  */
 export function planPhotoRegistration({ existing, session, usage, facilityId, sha256, bytes, lastSurgeryDate = null }, limits = STICKER_LIMITS) {
   const known = decideExistingPhoto(existing, { facilityId, sha256 });
-  if (known) return { ...known, discardObject: known.action === "conflict" };
+  if (known) return { ...known, discardObject: known.action === "conflict" || known.deleted === true };
   const limit = checkUploadLimits({ session, usage, bytes }, limits);
   if (!limit.ok) return { action: "limit", reason: limit.reason, discardObject: true };
   const count = (session?.count ?? 0) + 1;
@@ -281,19 +281,28 @@ export function recordRateLimitFailure(state, max, nowMs, limits = STICKER_RATE_
 
 /* ---------- JPEG の検証とメタデータの除去 ---------- */
 
-const MARKER = Object.freeze({ SOI: 0xd8, EOI: 0xd9, SOS: 0xda, APP0: 0xe0, APP2: 0xe2, APP14: 0xee, COM: 0xfe });
+const MARKER = Object.freeze({ SOI: 0xd8, EOI: 0xd9, SOS: 0xda, APP0: 0xe0, APP2: 0xe2, APP14: 0xee });
 const ICC_SIGNATURE = Buffer.from("ICC_PROFILE\0", "latin1");
+const JFIF_SIGNATURE = Buffer.from("JFIF\0", "latin1");
+const ADOBE_SIGNATURE = Buffer.from("Adobe", "latin1");
+const JFIF_LENGTH = 14;    // サムネイルのない JFIF の本体の長さ
+const ADOBE_LENGTH = 12;   // Adobe の色変換の本体の長さ
+const DECODE_TABLES = new Set([0xc4, 0xcc, 0xdb, 0xdc, 0xdd]);   // DHT・DAC・DQT・DNL・DRI
 
-const isApp = (marker) => marker >= 0xe0 && marker <= 0xef;
+const startsWith = (data, signature) => data.subarray(0, signature.length).equals(signature);
 /** 幅と高さを持つセグメント(SOF0〜15。DHT・JPG・DAC を除く) */
 const isFrameHeader = (marker) => marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
 
-/** 残すセグメントか。表示に必要なものだけを残す(JFIF・色の ICC・Adobe の色変換)。Exif・XMP・IPTC・コメント・MPF などは除く */
+/**
+ * 残すセグメントか。表示に必要なものだけを指定して残す(復号の表・サムネイルのない JFIF・色の ICC・Adobe の色変換)。
+ * Exif・XMP・IPTC・コメント・MPF・JFIF のサムネイル・未知のセグメントなどは除く
+ */
 function keepsSegment(marker, data) {
-  if (marker === MARKER.COM) return false;
-  if (!isApp(marker)) return true;
-  if (marker === MARKER.APP0 || marker === MARKER.APP14) return true;
-  return marker === MARKER.APP2 && data.subarray(0, ICC_SIGNATURE.length).equals(ICC_SIGNATURE);
+  if (isFrameHeader(marker) || DECODE_TABLES.has(marker)) return true;
+  if (marker === MARKER.APP0) return data.length === JFIF_LENGTH && startsWith(data, JFIF_SIGNATURE) && data[12] === 0 && data[13] === 0;
+  if (marker === MARKER.APP2) return startsWith(data, ICC_SIGNATURE);
+  if (marker === MARKER.APP14) return data.length === ADOBE_LENGTH && startsWith(data, ADOBE_SIGNATURE);
+  return false;
 }
 
 /** 画像データの次のマーカーの位置(バイトの埋め込み FF00・再同期 RST は読み飛ばす)。なければ -1 */
