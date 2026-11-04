@@ -358,6 +358,20 @@ service cloud.firestore {
       match /dealerPortalLinks/{localDealerId} {
         allow read, write: if false;
       }
+      // IOL シール写真(docs/iol-sticker-photo-design.md §8-4)。設定・写真の記録・撮影セッション・使用量は、すべてサーバー(Cloud Functions)だけが扱う。
+      // 所属者・管理者・運営者を含め、クライアントからは読み書きできない(写真の一覧・閲覧は stickerPhotoApi・stickerPhotoImage が権限を確かめて返す)
+      match /stickerSettings/{docId} {
+        allow read, write: if false;
+      }
+      match /stickerPhotos/{photoId} {
+        allow read, write: if false;
+      }
+      match /stickerSessions/{sessionId} {
+        allow read, write: if false;
+      }
+      match /stickerUsage/{day} {
+        allow read, write: if false;
+      }
     }
 
     // 施設のセルフ登録・招待参加はサーバー側(Cloud Functions / Admin SDK)専用。クライアントからは一切読み書きできない
@@ -416,6 +430,20 @@ service cloud.firestore {
     }
     // 確認コードの送信の依頼(コードは含まない。サーバーだけが扱う)
     match /dealerAuthCodeJobs/{id} {
+      allow read, write: if false;
+    }
+    // IOL シール写真の入口トークン・ディーラーへの共有の許可(受注の閲覧の許可 dealerPortalGrants とは別)・操作履歴・コードの確認の回数制限。
+    // すべてサーバー(Cloud Functions)だけが扱う
+    match /stickerEntries/{token} {
+      allow read, write: if false;
+    }
+    match /stickerPhotoGrants/{id} {
+      allow read, write: if false;
+    }
+    match /stickerAuditLogs/{id} {
+      allow read, write: if false;
+    }
+    match /stickerRateLimits/{id} {
       allow read, write: if false;
     }
 

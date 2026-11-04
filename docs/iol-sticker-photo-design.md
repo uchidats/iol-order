@@ -496,7 +496,7 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 | --- | --- | --- | --- |
 | 1 | 純粋な処理(共通) | `src/domain/sticker-photo.js`(コードの形式・上限の定数・セッションのまとまり・QR の URL)、`functions/src/sticker-photo.js`(同じ定数・チケットの署名/検証・`photoId` の決定・上限の判定・コードのハッシュ・メタデータの除去)。ピンぼけ判定は既存の `src/domain/image-sharpness.js` を使う。**実装済み(2026-11-04。ブランチ `feature/r09-sticker-photo`。どこからも呼ばれていない)** | unit(上限の一致を含む) |
 | 2 | サーバー | `stickerEntryApi`(`verify`)、`stickerPhotoUpload`、`stickerPhotoApi`(`list`・`dealerList`・`delete`・`getSettings`・`setAccessCode`・`getEntryQr`・`rotateEntryQr`・`setDealerShare`〔`stickerPhotoGrants`〕)、`stickerPhotoImage`、`stickerPhotoCleanup`。サムネイル作成、バケットの部品、機能スイッチ・施設の一覧。**実装済み(2026-11-05。ブランチ `feature/r09-sticker-photo`。未配備。`functions/src/sticker-photo-service.js`・`functions/src/sticker-bucket.js`)** | Functions(Firestore エミュレータと偽のバケット) |
-| 3 | Rules | Firestore Rules とインデックス(§8-4 の一覧を全拒否) | Rules |
+| 3 | Rules | Firestore Rules とインデックス(§8-4 の一覧を全拒否)。**実装済み(2026-11-05。ブランチ `feature/r09-sticker-photo`。未配備)** | Rules |
 | 4 | 看護師用画面 | `sticker.html`・`src/sticker/main.js`・`sticker-app.js`(4画面・最終送信日時と最終手術日の表示・今回の最終手術日の欄・カメラ〔既存の `src/ui/sticker-camera.js` を使う〕・セッション・再送・チケットの期限切れの再認証)、CSS、`stamp-assets` の対象に追加 | ブラウザ(仮想カメラ) |
 | 5 | 施設設定 | セクション「IOLシール写真」(コードの設定・「設定済み」・QR のモーダル〔「サイトを共有」と同じ部品の見た目〕・台紙を印刷〔A4・2列×5行。上部の表示の編集と発注先の選択。§4-2〕・QRコードのみ印刷〔8枚・切り取り線〕・ディーラーへの共有のチェック) | ブラウザ(印刷は `emulateMedia print` と PDF で確認) |
 | 6 | 医療機関用の一覧・拡大 | メニュー「IOLシール写真」、セッションの枠、拡大表示の部品(前後・回転)、削除 | ブラウザ |
