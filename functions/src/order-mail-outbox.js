@@ -43,10 +43,10 @@ export function copyRecipient(mailSettings) {
   return cleanEmail(mailSettings.copyEmail);
 }
 
-/** 送信元の表示名「施設名（IOL Order）」。施設名がなければ「IOL Order」 */
+/** 送信元の表示名「施設名 (IOL注文)」。施設名がなければ「IOL注文」 */
 export function senderName(facilityName) {
   const name = oneLine(facilityName).replace(/[\u0000-\u001f"\\<>]/g, "").slice(0, 60).trim();
-  return name ? `${name}（IOL Order）` : "IOL Order";
+  return name ? `${name} (IOL注文)` : "IOL注文";
 }
 
 /** ディーラー宛ての返信先: 入力者本人。注文控えが ON なら施設共通アドレス(控えの宛先)も。同じアドレスは1件にする */
