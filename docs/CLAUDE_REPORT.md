@@ -3,37 +3,31 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-04
-- **作業**: チェックボックスのチェック済みの色を全画面でサブテーマカラーに統一(CSS のみ)。
-- `styles.css`: 共通の指定 `input[type="checkbox"] { accent-color: var(--primary); }` を追加し、個別の指定2か所(`.dup-ack-check input`・`.orderer-member-opt input`)を削除。
-- 施設・ディーラーとも既存のサブテーマカラーを使用。色の固定値の追加なし。テーマ未設定・施設を選ぶ前は標準の青(`#1d4ed8`)。
-- チェックマークの白、未チェックの外観、大きさ、配置、ラジオボタンは変更なし。
-- マニュアル `docs/manual/03-managers.md` のサブテーマカラーの説明に「チェックボックス」を追加。
-- Functions・Rules の変更なし。既存の作業フォルダ・stash は変更していない(作業は一時的な clone で実施)。
+- **作業**: 注文受付の全面開放(`ORDER_INTAKE_UNRESTRICTED=true`)と、メールを送れない発注先の注文を受付前に止める修正。
+- `functions/src/orders.js`: 本番の注文は、全明細の発注先にメールを送れないと `failed-precondition` で拒否し、何も保存しない。テスト注文は従来どおり。
+- `functions/.env.medconf-iol-dev`: `ORDER_INTAKE_UNRESTRICTED=true`。許可リストの値は残している(戻すときに使う)。
+- マニュアル 02・03、`docs/order-intake.md`、`docs/order-mail.md`、`CLAUDE.md`、`docs/ROADMAP.md` を更新。画面のコードの変更なし(マニュアルの表示データとバージョンのみ)。
+- 配備前の確認: 本番の `createOrder` の設定と配備用の値の差分は `ORDER_INTAKE_UNRESTRICTED` だけ。全3施設(有効)の発注用メールの形式・署名・採用IOL・担当医に問題なし。アドレスが現在の正しい宛先かは未確認(形式のみ)。
 
 ## commit ID
-- 本体: 本ファイルを含む commit(`git log -1`)。
+- 本体: `f0e2458`
 
 ## テスト結果
-- ブラウザ: 新規 `tests/browser/checkbox-theme.pw.mjs`(3ブラウザ)、`tests/browser/header-theme.pw.mjs`・`tests/browser/dealer-portal.pw.mjs` のサブテーマのテスト(実画面でのチェックボックスの確認を追加)、マニュアルの関連ケース: 成功。
-- `header-theme` のサブテーマのテストは、`dealer-portal` と続けて実行した1回目に1ブラウザがタイムアウトした。単独の再実行では2回とも3ブラウザで成功し、再現しなかった。原因は特定していない。
-- unit: `tests/asset-stamp.test.js`・`tests/manual.test.js` 成功。
-- 未実行(軽微な CSS のため関連分に限定): `npm test` 全体・ほかのブラウザテスト・Functions・Rules。
+- Functions: `orders`・`order-mail` は全件成功。`order-cancel` は3回連続で全7件成功。3ファイルをまとめた1回では `order-cancel` の1件が失敗(88/89)。直前に止めた全体テストの残りが同じエミュレータに触れたためと考えられ、単独の再実行では再現しなかった(断定はしていない)。
+- unit: `tests/manual.test.js`・`tests/asset-stamp.test.js` 成功。
+- 未実行(ユーザーの指示で関連分に限定): 全ブラウザ・全単体・Rules 全体・E2E・ほかの Functions のテスト。E2E は初期データに発注先を追加したが、実行していない。
 
-## push・公開
-- main へ push し GitHub Pages で公開。Functions・Rules のデプロイはなし。
-
-## 判断待ち事項
-- NP-T の下限の取り込み(メーカーへの T5・T6 の確認、main への統合、Functions のデプロイ)。修正は `fix/np-t-power-limits` に保留中。
-- 実機検証の結果の共有(Galaxy S24 Ultra → iPhone)と、それによる R09 の圧縮条件・15MB の上限・鮮鋭度のしきい値の確定。
-- R09 第1段階の着手(バケットと IAM の付与の承認・実施方法、有効にする施設とコードの運用)。
-- E2E の2件の環境の問題(エミュレータ用の秘密情報のダミー値)を直すか(前回から継続)。
-- 使わなくなった降順用の複合インデックス(`orderSurgeryIndex`)を削除するか(前回から継続)。
-- 実行サービスアカウントの `roles/firebaseauth.viewer` を外すか(前回から継続)。
+## push・Firebaseデプロイ
+- Functions は `createOrder` だけをデプロイ(成功)。ほかの関数・Rules は変更なし。
+- 配備後: 状態 ACTIVE、`ORDER_INTAKE_UNRESTRICTED=true` の反映、ログインなしの呼び出しは 401、ERROR ログなし。
+- `main` へ通常の push(GitHub Pages に反映)。実際の注文・メール送信はしていない。
 
 ## 残課題
-- チェックボックスの色の実機(iPhone の Safari など)とログイン後の実画面での目視確認(運営者の端末で)。
-- Zenbook 側の未 push のログイン画面の修正は、main と内容が重なるため、取り込まずに破棄するか比較して整理する。
-- 本体フォルダ(`feature/dealer-portal`)は `docs/introduction/` の除外を含まないため、main に切り替えるまでは未追跡のまま表示される。
-- サブテーマカラー(施設・ディーラー)の実機での目視確認(運営者の端末で)。
-- 共通連番での最初の実注文の後に `node scripts/admin/check-order-numbers.mjs` を実行して確認する(前回から継続)。
-- ディーラーのログインを伴う実画面での確認(運営者の端末で。出力を含む)。
+- 実際の利用者の最初の注文での、受付・メール送信の確認。
+- 確認画面の「自動送信不可」の表示は残っている(送信時にサーバーがエラーで止める)。画面で先に止める変更は未実施。
+- Google フォームとの併用中は、互いの注文を重複確認できない。
+
+## 判断待ち事項
+- 立川病院の発注用メール5件が、すべて現在の正しい宛先かの確認。
+- Google フォームの受付をいつ終えるか。
+- NP-T の下限の取り込み、R09 第1段階の着手、E2E の環境の問題、使わなくなった複合インデックスの削除(前回から継続)。
