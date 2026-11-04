@@ -1718,6 +1718,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const p = readablePrimaryOf("#fdba74");
       let v = await vars(page);
       assert.deepEqual([v.primary, v.header], [p, ""], "表示は濃くした色・ヘッダーは標準のまま");
+      assert.equal(hex(await page.evaluate(() => getComputedStyle(document.querySelector('#dealerSettings [data-f="themeGradient"]')).accentColor)), p, "チェックボックス");
       assert.equal((await calls(page, "setTheme")).length, 0, "ヘッダーの設定は保存しない");
       // 受注一覧に戻る: 選択中の並び順のボタンに反映
       await page.click("#btnDealerSettingsClose");

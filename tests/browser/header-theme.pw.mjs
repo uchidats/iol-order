@@ -273,6 +273,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.ok(contrastRatio(rgbToHex(a.qtyText), rgbToHex(a.qtyBg)) >= 4.5, "選択中の文字のコントラスト");
       assert.equal(rgbToHex(a.sortBg), p, "選択中の切り替えボタン");
       assert.deepEqual([rgbToHex(a.badgeText), rgbToHex(a.badgeBg)], [p, v["--primary-tint"]], "レンズのバッジ");
+      assert.equal(rgbToHex(await page.evaluate(() => getComputedStyle(document.querySelector('[data-f="themeGradient"]')).accentColor)), p, "チェックボックス");
       assert.deepEqual([a.err, a.warn, a.header], [before.err, before.warn, ""], "エラー・警告の色とヘッダーは変えない");
       assert.equal(await subPane.locator('.theme-swatch[data-color="#93c5fd"]').getAttribute("aria-pressed"), "true");
       assert.equal(await subPane.locator('[data-act="sub-theme-reset"]').isDisabled(), false);

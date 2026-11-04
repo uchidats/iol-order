@@ -347,6 +347,9 @@ body {
 }
 
 /* 入力コントロール共通 */
+/* チェックボックスのチェック済みの色: 全画面でサブテーマカラー(施設・会社ごと。未設定は標準の青)。チェックマークの白はブラウザが決める(--primary は白と 4.5 以上の対比を保つ)。ラジオボタンは対象外 */
+input[type="checkbox"] { accent-color: var(--primary); }
+
 .form-control {
   width: 100%;
   min-height: var(--min-tap);
@@ -958,7 +961,7 @@ input[type="date"].form-control {
 .dup-ack[hidden] { display: none; }
 .dup-ack-text { margin: 0 0 8px; overflow-wrap: anywhere; }
 .dup-ack-check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #1f2937; cursor: pointer; }
-.dup-ack-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); }
+.dup-ack-check input { width: 18px; height: 18px; margin: 0; }
 
 .modal-error-alert {
   margin-top: 16px;
@@ -1815,7 +1818,7 @@ input[type="date"].form-control {
 /* 担当医の編集: 「利用者管理にも追加する（注文者）」 */
 .orderer-member-opt { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #1f2937; cursor: pointer; }
 .orderer-member-opt[hidden] { display: none; }
-.orderer-member-opt input { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); flex: none; }
+.orderer-member-opt input { width: 18px; height: 18px; margin: 0; flex: none; }
 .btn-sm-inline { min-height: 36px; padding: 6px 14px; font-size: 0.9rem; }
 /* 戻る・移動用のボタン: 注文履歴の「← 一覧へ戻る」(.btn-sm-inline)と同じ高さ 36px・文字 0.9rem・上下の余白 6px。
    対象: 注文履歴・使い方・紹介・申請・事前登録・ディーラー管理・施設の登録/参加の「注文画面に戻る」、「目次へ戻る」、
