@@ -51,6 +51,7 @@ export function createHeaderMenu(handlers) {
           <div class="header-menu-label">施設</div><div>${escapeHtml(info.facilityName)}</div>
         </div>
         <button type="button" role="menuitem" class="header-menu-item" id="menuOrderHistory">注文履歴</button>
+        ${info.canStickerPhotos ? '<button type="button" role="menuitem" class="header-menu-item" id="menuStickerPhotos">IOLシール写真</button>' : ""}
         ${info.canSettings ? '<button type="button" role="menuitem" class="header-menu-item" id="menuFacilitySettings">施設設定</button>' : ""}
         ${info.canSwitch ? '<button type="button" role="menuitem" class="header-menu-item" id="menuSwitchFacility">施設を切り替える</button>' : ""}
         ${info.canApprove ? '<button type="button" role="menuitem" class="header-menu-item" id="menuApplications">施設登録の申請</button>' : ""}
@@ -63,6 +64,8 @@ export function createHeaderMenu(handlers) {
         <button type="button" role="menuitem" class="header-menu-item" id="menuSignOut">ログアウト</button>`;
       bindShare();
       panel.querySelector("#menuOrderHistory").addEventListener("click", () => { setOpen(false); handlers.onOpenHistory(); });
+      const sp = panel.querySelector("#menuStickerPhotos");   // 表示だけ。閲覧の可否はサーバーが確認する
+      if (sp) sp.addEventListener("click", () => { setOpen(false); handlers.onOpenStickerPhotos(); });
       const st = panel.querySelector("#menuFacilitySettings");
       if (st) st.addEventListener("click", () => { setOpen(false); handlers.onOpenSettings(); });
       const sw = panel.querySelector("#menuSwitchFacility");

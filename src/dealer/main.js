@@ -1,6 +1,7 @@
 import { FIREBASE_CONFIG, isFirebaseConfigured } from "../firebase/firebase-config.js";
 import { setupAppCheck } from "../firebase/app-check.js";
 import { createDealerPortalApi } from "../data/dealer-portal-api.js";
+import { createStickerPhotoApi, stickerImageUrl } from "../data/sticker-photo-api.js";
 import { dealerEntryUrl, facilityViewKey } from "../domain/dealer-portal.js";
 import { createDealerApp } from "./dealer-app.js";
 import { createDealerHeaderMenu } from "./dealer-header-menu.js";
@@ -99,6 +100,8 @@ async function bootstrap() {
     return `${user.uid}.${provider}.${digest}`;
   }
   const api = createDealerPortalApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable, device });
+  const stickerApi = createStickerPhotoApi({ functions: sdk.functions.getFunctions(app, "asia-northeast1"), httpsCallable: sdk.functions.httpsCallable,
+    imageUrl: stickerImageUrl(FIREBASE_CONFIG.projectId), getIdToken: () => auth.currentUser.getIdToken(), device });
   const signOut = async () => { try { await service.signOut(); } finally { location.reload(); } };   // 表示中のデータもメモリごと破棄する
   // ---------- 使い方・ヘルプ(ディーラー用マニュアル。医療機関の画面と同じ表示の部品。URL のハッシュ #help/… で開く) ----------
   // 表示中は main の他の画面を CSS で隠すだけ(受注一覧・ディーラー設定の状態はそのまま)。担当者は全員、全ページを読める
@@ -134,9 +137,11 @@ async function bootstrap() {
     onSignOut: signOut,
     onSwitchCompany: () => { closeHelp(); if (ui) ui.switchCompany(); },
     onOpenSettings: () => { closeHelp(); if (ui) ui.openSettings(); },
+    onOpenStickerPhotos: () => { closeHelp(); if (ui) ui.openStickerPhotos(); },
     onOpenHelp: openHelp
   });
   ui = createDealerApp({
+    stickerApi,
     mount, api, setSubtitle, setMenu: (info) => menu.update(info),
     onSignOut: signOut,
     setRememberDevice: (v) => { remember = v !== false; },   // 本人確認の画面の「この端末を記憶する」

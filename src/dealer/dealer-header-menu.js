@@ -8,7 +8,7 @@ import { h } from "../ui/markdown-view.js";
  * 表示は textContent。
  * @param {{ onSignOut: () => void, onSwitchCompany: () => void, onOpenSettings: () => void, onOpenHelp: () => void }} handlers
  */
-export function createDealerHeaderMenu({ onSignOut, onSwitchCompany, onOpenSettings, onOpenHelp }) {
+export function createDealerHeaderMenu({ onSignOut, onSwitchCompany, onOpenSettings, onOpenStickerPhotos = () => {}, onOpenHelp }) {
   const inner = document.querySelector(".header-inner");
   const btn = h("button", { type: "button", class: "header-menu-btn", id: "btnHeaderMenu", "aria-haspopup": "true", "aria-expanded": "false", "aria-label": "メニュー" });
   btn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
@@ -42,6 +42,7 @@ export function createDealerHeaderMenu({ onSignOut, onSwitchCompany, onOpenSetti
           h("div", { class: "header-menu-label" }, "所属会社"), h("div", { "data-f": "menuCompany" }, `${info.companyName}${info.branchName ? ` ${info.branchName}` : ""}`))
         : null;
       panel.replaceChildren(...[who,
+        inPortal && info.canStickerPhotos ? item("menuStickerPhotos", "シール写真", onOpenStickerPhotos) : null,
         inPortal && info.canSettings ? item("menuDealerSettings", "ディーラー設定", onOpenSettings) : null,
         inPortal && info.canSwitch ? item("menuSwitchCompany", "会社を切り替える", onSwitchCompany) : null,
         item("menuHelp", "使い方・ヘルプ", onOpenHelp),
