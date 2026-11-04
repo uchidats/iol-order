@@ -198,7 +198,7 @@ test("callable: 利用者管理の事前登録→本人のログインで参加�
 
 // ---------- 注文受付(createOrder) ----------
 const putDoc = async (p, fields) => {
-  const toValue = (v) => typeof v === "boolean" ? { booleanValue: v } : { stringValue: v };
+  const toValue = (v) => typeof v === "boolean" ? { booleanValue: v } : Array.isArray(v) ? { arrayValue: { values: v.map(toValue) } } : { stringValue: v };
   const r = await fetch(`http://${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${p}`, {
     method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
     body: JSON.stringify({ fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, toValue(v)])) })
@@ -212,6 +212,7 @@ test("callable: createOrder は検証して保存し(accepted)、再送は同じ
   const fid = reg.body.result.facilityId;
   await putDoc(`facilities/${fid}/adoptedIols/jj-dib00v`, { facilityId: fid, catalogIolId: "jj-dib00v", enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田" });
+  await putDoc(`facilities/${fid}/facilityDealers/d1`, { facilityId: fid, name: "E2E商会", orderEmails: ["order@dealer.example.jp"] });
 
   const data = { facilityId: fid, requestId: "order-e2e-request-0001", modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(30), doctorId: "o1" };
   const ok = await call("createOrder", data, verified.idToken);
@@ -247,6 +248,7 @@ test("callable: createOrder は複数明細(まとめ発注)を受け付け、�
   const fid = reg.body.result.facilityId;
   for (const id of ["jj-dib00v", "nidek-nsp-2"]) await putDoc(`facilities/${fid}/adoptedIols/${id}`, { facilityId: fid, catalogIolId: id, enabled: true });
   await putDoc(`facilities/${fid}/orderers/o1`, { facilityId: fid, name: "山田", active: false });
+  await putDoc(`facilities/${fid}/facilityDealers/d1`, { facilityId: fid, name: "E2E商会", orderEmails: ["order@dealer.example.jp"] });
   const base = { facilityId: fid, requestId: "order-e2e-request-0101" };
   const lines = [
     { modelId: "jj-dib00v", power: "+20.0D", quantity: 1, surgeryDate: future(14), doctorId: "o1" },

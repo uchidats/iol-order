@@ -188,7 +188,9 @@ test("取り消せない: 他人の注文・所属なし・他施設・未ログ
 
 test("注文控えだけの注文(発注先の宛先なし)も、控えを期限まで送らず、取り消せば送らない", async () => {
   await db.doc(`facilities/${F}/facilityDealers/d1`).update({ orderEmails: [] });
-  const a = await place();
+  // 本番の注文は発注先へ送れないと受け付けないため、控えだけになるのはテスト注文(開発用受付)だけ
+  const testOrders = createOrderService({ db, FieldValue, now: () => clock.t, isEnabled: () => true, getPolicy: () => ({ facilityIds: [F], uids: ["ordA"] }) });
+  const a = await testOrders.createOrder({ auth: user("ordA"), data: { facilityId: F, requestId: crypto.randomUUID(), notes: "", lines: [line()] } });
   assert.deepEqual(await statuses(a.orderId), { copy: "pending" });
   assert.equal((await mailRef(a.orderId, "copy").get()).get("sendAfterMs"), T0 + 10000);
   assert.equal(await dispatch.processMail(mailRef(a.orderId, "copy")), "skipped");

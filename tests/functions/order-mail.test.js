@@ -228,16 +228,16 @@ test("配信結果(Webhook): 受付の後の配信済み・不達を記録する
   assert.equal(await dispatch.handleDeliveryEvent({ type: "email.delivered", data: { email_id: "../../x" } }), "ignored");
 });
 
-test("注文控えOFF・発注用メールなし: 控えは作らない。送れない発注先は送信対象外として記録し、注文は受け付ける", async () => {
+test("注文控えOFF・発注用メールなし: 本番の注文は受け付けない。テスト注文は控えを作らず、送れない発注先を送信対象外として記録する", async () => {
   await db.doc(`facilities/${F}/settings/mail`).set({ copyEnabled: false, copyEmail: "info@clinic.example.jp" });
   await db.doc(`facilities/${F}/facilityDealers/dB`).set({ facilityId: F, name: "B医療", orderEmails: [] });
-  const r = await place();
+  await assert.rejects(place(), (e) => e.code === "failed-precondition" && /明細2: 発注先「B医療」の発注用メールが登録されていない/.test(e.message));
+  const testOrders = createOrderService({ db, FieldValue, now: () => clock.t, getPolicy: () => ({ facilityIds: [F], uids: ["ord"] }), cancelWindowMs: 0 });
+  const r = await testOrders.createOrder({ auth: user("ord"), data: { facilityId: F, requestId: crypto.randomUUID(), lines: [line(), line({ dealerId: "dB", power: "+21.0D" })] } });
   const mails = await mailsOf(r.orderId);
   assert.deepEqual(Object.keys(mails), ["d_dA"]);
   const o = await orderOf(r.orderId);
   assert.deepEqual(o.notifications.map(n => [n.id, n.status, n.reason || null]), [["d_dA", "pending", null], ["d_dB", "not_sent", "no-order-email"]]);
-  await dispatch.processMail(ref(r.orderId, "d_dA"));
-  assert.equal((await orderOf(r.orderId)).status, "notified");
 });
 
 test("Rules: 送信待ち・送信結果(宛先・本文)は管理者・副管理者だけが読める。メール設定は管理者・副管理者だけが読み書きできる", async () => {

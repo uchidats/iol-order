@@ -18,7 +18,7 @@ ChatGPT など他のツールと GitHub 経由で状況を共有するため、*
 - Claude Codeの回答、進捗報告、作業完了報告は原則として日本語で行ってください。コード、API名、コマンド、識別子は英語のままで構いません。
 
 ## 守ること(常に)
-- **本番運用中**(2026-10-26 開始): 公開サイト(https://iol.medconf.jp/、`SITE_ORDER_MODE=server`)から、許可した施設・利用者(`ORDER_TEST_FACILITY_IDS`・`ORDER_TEST_UIDS`、`ORDER_INTAKE_UNRESTRICTED=false`)だけが注文でき、注文メールは実際のディーラーへ送られる(`ORDER_INTAKE_ENABLED=true`・`ORDER_TEST_MODE=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=false`)。ほかの医師は従来の Google フォームを使う。
+- **本番運用中**(2026-10-26 開始): 公開サイト(https://iol.medconf.jp/、`SITE_ORDER_MODE=server`)から、有効な施設の所属者全員が注文でき(`ORDER_INTAKE_UNRESTRICTED=true`。2026-11-04 に全面開放)、注文メールは実際のディーラーへ送られる(`ORDER_INTAKE_ENABLED=true`・`ORDER_TEST_MODE=false`・`MAIL_SENDING_ENABLED=true`・`MAIL_TEST_ONLY=false`)。メールを送れる発注先がない注文は受け付けない。
 - 注文受付・メール送信の安全設定(上記の値・許可リスト)は、指示があるときだけ変更する。実際の注文・メール送信・施設登録の申請と承認は、利用者の確認なしに行わない(テストは偽の配信サービス・エミュレータで行う)。
 - 本番の Google Forms・GAS には触れない。
 - 新しい施設の登録は運営者の承認制(`docs/facility-applications.md`)。承認権限は platformAdmin の運営者のみ。権限(カスタムクレーム)を勝手に付与しない。

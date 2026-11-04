@@ -59,6 +59,9 @@ Cloud Functions（第2世代 callable `createOrder`）が注文を検証し、Fi
 `facilities/{fid}/orders/**` は、自施設の有効な所属者と運営者だけが**読める**。**作成・変更・削除は全員不可**（Admin SDK＝Cloud Functions のみ）。注文番号のカウンター（`orderCounters`）とレート制限（`rateLimits`）はクライアントから見えない。
 
 ## 開発用受付の制限(サーバー側で強制)
+**2026-11-04 に全面開放した(`ORDER_INTAKE_UNRESTRICTED=true`)。** 本番では以下の許可リストは使われず、有効な施設の所属者全員が注文できる。下の制限は `ORDER_INTAKE_UNRESTRICTED=false` に戻したときの動作。
+本番の注文(テスト注文以外)は、全明細の発注先にメールを送れないと `failed-precondition` で拒否し、何も保存しない(発注先0社・発注用メールなし・形式不正)。テスト注文は発注先へ送らないため対象外。
+
 `ORDER_INTAKE_ENABLED=true` にしても、次を**すべて**満たす注文だけを受け付ける(`functions/.env.<project>`)。ブラウザ側の設定では回避できない。
 - `ORDER_TEST_FACILITY_IDS`(カンマ区切り)に、注文先の施設IDが含まれる(medconf-iol-dev: せんじゅ眼科 `fac-bafcbe1e6d6c6f6c3528cb11`・立川病院 `tachikawa-hospital`。立川病院は 2026-10-29 に追加)。
 - `ORDER_TEST_UIDS`(カンマ区切り)に、操作者のUIDが含まれる(開発環境: 運営者アカウント)。ログイン済み・メール確認済みも必須。

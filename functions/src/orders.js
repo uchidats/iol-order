@@ -200,6 +200,12 @@ export function dealerDispatch(dealer) {
     ? { allowed: true, reason: null } : { allowed: false, reason: "no-order-email" };
 }
 
+/** メールを送れない発注先の明細を拒否するときの案内(注文者が施設の管理者・副管理者へ依頼できる内容にする) */
+export function undeliverableMessage(lineNo, dealer) {
+  const why = dealer ? `発注先「${dealer.name}」の発注用メールが登録されていない` : "発注先が登録されていない";
+  return `明細${lineNo}: ${why}ため、注文を送信できません。施設の管理者・副管理者に設定を依頼してください`;
+}
+
 /**
  * 保存済みの注文を明細の配列として読む。新旧の形式をそろえて返す:
  *  - 現行(schemaVersion 3): 各明細に doctor(担当医のスナップショット)がある
@@ -267,6 +273,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
     // 開発用受付の制限(許可した施設・ユーザーのみ)。許可外は理由を明かさず拒否し、何も書き込まない
     const policy = getPolicy() || {};
     const restricted = policy.unrestricted !== true;
+    const testOrder = restricted && policy.testMode !== false;   // 開発用受付で保存する注文(本番の注文と区別・後から削除を判断するための印)
     if (restricted && !((policy.facilityIds || []).includes(input.facilityId) && (policy.uids || []).includes(user.uid))) {
       throw new RegistrationError("permission-denied", "この施設・ユーザーからの注文は、現在の開発用受付の対象外です");
     }
@@ -331,6 +338,8 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         const dealer = picked.dealer ? { id: picked.dealer.id, name: picked.dealer.name } : null; // その時点のディーラー名を保存(後で削除・改名されても過去の注文は変わらない)
         // 将来の実メール送信の可否(現在は送信機能なし)。発注先なし・発注用メール未登録は送信不可。使用報告用メールは使わない。メールアドレス自体は保存しない
         const dispatch = dealerDispatch(picked.dealer);
+        // 本番の注文は、メールを送れない発注先では受け付けない(注文だけ成立して、ディーラーに届かないことを防ぐ)。テスト注文は発注先へ送らないため対象外
+        if (!testOrder && !dispatch.allowed) throw new RegistrationError("failed-precondition", undeliverableMessage(n, picked.dealer));
         return {
           lineNo: n,
           status: ORDER_STATUS.ACCEPTED,
@@ -358,7 +367,7 @@ export function createOrderService({ db, FieldValue, now = Date.now, isEnabled =
         orderId, orderNumber, requestId: input.requestId, contentHash: hash,
         facilityId: input.facilityId, facilityName: fac.get("name") || "",
         status: ORDER_STATUS.ACCEPTED,
-        testOrder: restricted && policy.testMode !== false, // 開発用受付で保存された注文(本番の注文と区別・後から削除を判断するための印)
+        testOrder,
         ...(input.duplicateAcknowledged ? { duplicateAcknowledged: true } : {}), // 同じ注文の中の重複を、確認画面で了承して注文した
         // マスターのスナップショット(後でマスターが変わっても、この注文の内容を再現できる)
         lines,
