@@ -9,6 +9,9 @@ import {
 } from "../domain/member-admin.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { createDealerPortalSection } from "./dealer-portal-grants.js";
+import { createStickerSettingsSection } from "./sticker-settings-section.js";
+import { createStickerSettingsApi } from "../data/sticker-settings-api.js";
+import { STICKER_SETTINGS_ENABLED } from "../domain/sticker-settings.js";
 import { baseModelName } from "../domain/lens-labels.js";
 import { orderedMakers, orderedModelsOf, buildIolOrderSetting } from "../domain/iol-order.js";
 import { lensBadgeElements } from "./lens-badges.js";
@@ -60,9 +63,10 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
  * @param {object|null} [deps.dealerPortalApi] ディーラー画面の閲覧の許可・取消(data/dealer-portal-api.js。null なら項目を出さない)
+ * @param {boolean} [deps.stickerSettingsEnabled] 「IOLシール写真」の項目を出すか(既定は公開の設定 STICKER_SETTINGS_ENABLED。テストだけが指定する)
  * @param {{removeMember?:Function, addMember?:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 利用者管理・施設の操作（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onRelatedLinksSaved = () => {}, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {} }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onRelatedLinksSaved = () => {}, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {}, stickerSettingsEnabled = STICKER_SETTINGS_ENABLED }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -1036,8 +1040,10 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   if (settingsApi.saveRelatedLinks && repository.listRelatedLinks) built.relatedLinks = createRelatedLinksSection({ h, createAutoSaver, repository, settingsApi, onSaved: onRelatedLinksSaved, pencilIcon, trashIcon });
   if (canManageMembers) built.members = memberSection();
   if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
-  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → 注文メール → 関連リンク → テーマカラー
-  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.relatedLinks ? { relatedLinks: built.relatedLinks } : {}), ...(built.theme ? { theme: built.theme } : {}) };
+  // IOLシール写真(アクセスコード・QR・写真の共有)。受注閲覧の許可とは別の設定(機能が使えないときは表示しない)
+  if (stickerSettingsEnabled && dealerPortalApi?.stickerPhotoCall && isManagerRole(actorRole)) built.stickerPhotos = createStickerSettingsSection({ api: createStickerSettingsApi(dealerPortalApi.stickerPhotoCall) });
+  // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → ディーラー画面での閲覧 → IOLシール写真 → 注文メール → 関連リンク → テーマカラー
+  const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.stickerPhotos ? { stickerPhotos: built.stickerPhotos } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.relatedLinks ? { relatedLinks: built.relatedLinks } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------
   // 開閉の状態は、施設ごとにこの端末(localStorage)に保存し、再読み込みしても戻す。ⓘと「追加」の操作では開閉しない。設定の内容・保存には影響しない
   const collapseKey = () => `iol_settings_collapsed:${facility ? facility.id : ""}`;
@@ -1144,6 +1150,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
 
   function close() {
     built.relatedLinks?._related.discard();
+    built.stickerPhotos?._clear();
     open = false; dirty = false;
     savers().forEach(s => { s.failed = false; });
     root.hidden = true;
@@ -1173,6 +1180,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
         if (sections.theme) sections.theme._render();
         if (sections.members) renderMembers(sections.members);
         if (sections.dealerPortal) sections.dealerPortal._render(fac.id);   // 待たない(失敗しても他の設定は使える)
+        if (sections.stickerPhotos) sections.stickerPhotos._render(fac.id, fac.name);   // 待たない
         status.textContent = "";
         dirty = false;
       } catch (e) {

@@ -1,0 +1,276 @@
+// 回帰テスト(ブラウザ): 施設設定「IOLシール写真」。実際の facility-settings.js を偽の API で動かす(ログイン・Firebase は使わない)
+import test from "node:test";
+import assert from "node:assert/strict";
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium, firefox, webkit } from "playwright-core";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+
+const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="/styles.css"></head><body>
+<header class="app-header"><div class="header-inner"><span class="header-title">IOL</span></div></header>
+<main class="main-content"></main>
+<script type="module">
+import { createFacilitySettings } from "/src/ui/facility-settings.js";
+import { IOL_MODELS } from "/src/data/iol-models.js";
+const q = new URLSearchParams(location.search);
+const role = q.get("role") || "admin", mode = q.get("mode") || "on";
+const repository = {
+  listOrderers: async () => [], listAdoptedIols: async () => [], getIolOrder: async () => null,
+  listDealers: async () => [{ id: "dA", name: "X商事 立川", sortOrder: 10, orderEmails: [] }], getMailSettings: async () => null, getHeaderTheme: async () => null,
+  listMembers: async () => [{ uid: "me", role, displayName: "自分" }], listPendingMembers: async () => [], getMemberOrder: async () => null
+};
+const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveIolOrder: async () => {}, deleteOrderer: async () => {}, deleteDealer: async () => {},
+  saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {} };
+const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
+const state = { set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
+  dealers: [
+    { localDealerId: "dA", dealerName: "X商事 立川", linked: true, companyName: "X商事", shared: false, stale: false, sharedFrom: null },
+    { localDealerId: "dB", dealerName: "Y医療", linked: true, companyName: "Y医療", shared: true, stale: q.get("stale") === "1", sharedFrom: "2026-11-01T00:00:00.000Z" },
+    { localDealerId: "dC", dealerName: "未関連付け", linked: false, shared: false, stale: false }] };
+if (q.get("dealers") === "none") state.dealers = [state.dealers[2]];
+window.__calls = []; window.__portalCalls = [];
+const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
+const stickerPhotoCall = async (p) => {
+  window.__calls.push(p);
+  if (mode === "off") fail("functions/failed-precondition", "IOLシール写真は現在ご利用いただけません");
+  if (mode === "outside") fail("functions/permission-denied", "この施設の写真を操作する権限がありません");
+  if (mode === "error") fail("functions/internal", "boom");
+  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: true, dealers: state.dealers };
+  if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
+  if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>' }; }
+  if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
+  throw new Error("unknown " + p.action);
+};
+const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: [] } : { ok: true }; };
+const dealerPortalApi = { stickerPhotoCall, facilityStatus: portal("facilityStatus"), grant: portal("grant"), revoke: portal("revoke") };
+window.__settings = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, inviteApi, masters: IOL_MODELS, dealerPortalApi,
+  stickerSettingsEnabled: q.get("flag") !== "off", currentUser: { uid: "me", displayName: "自分" }, actorRole: role, onSaved: async () => {}, onClose() {} });
+await window.__settings.open({ id: "fA", name: "A眼科" });
+window.__ready = true;
+</script></body></html>`;
+
+let server, base;
+test.before(async () => {
+  server = http.createServer((req, res) => {
+    const url = decodeURIComponent(req.url.split("?")[0]);
+    if (url === "/") { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(PAGE); return; }
+    const p = path.join(ROOT, url);
+    if (!p.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+    fs.readFile(p, (e, b) => {
+      if (e) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { "content-type": (TYPES[path.extname(p)] || "application/octet-stream") + "; charset=utf-8" });
+      res.end(b);
+    });
+  }).listen(0);
+  await new Promise(r => server.once("listening", r));
+  base = `http://127.0.0.1:${server.address().port}/`;
+});
+test.after(() => server.close());
+
+async function launch(type, name) {
+  for (const opts of name === "chromium" ? [{}, { channel: "msedge" }, { channel: "chrome" }] : [{}]) {
+    try { return await type.launch(opts); } catch { /* 次の候補へ */ }
+  }
+  return null;
+}
+const section = (page) => page.locator('[data-section="stickerPhotos"]');
+async function openPage(browser, query = "", width = 390) {
+  const page = await browser.newPage({ viewport: { width, height: 1000 } });
+  page.errors = [];
+  page.on("pageerror", e => page.errors.push(String(e)));
+  await page.goto(`${base}${query}`);
+  await page.waitForFunction(() => window.__ready);
+  return page;
+}
+const ready = (page) => section(page).locator('[data-f="codeStatus"]:not(:empty)').waitFor();
+const confirmDialog = async (page, act) => { await page.waitForSelector(".confirm-dialog"); await page.click(`.confirm-dialog [data-act="${act}"]`); };
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`IOLシール写真の設定: 管理者・副管理者が表示でき、コードの状態と共有できる発注先だけを出す: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const [role, width] of [["admin", 390], ["subadmin", 1100]]) {
+        const page = await openPage(browser, `?role=${role}`, width);
+        await ready(page);
+        assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03 変更)");
+        assert.equal(await section(page).locator('[data-act="editCode"]').innerText(), "変更");
+        assert.deepEqual(await section(page).locator("[data-share] label span:first-of-type").allInnerTexts(), ["X商事 立川", "Y医療"], "関連付けのない発注先は出さない");
+        assert.deepEqual(await section(page).locator("[data-dealer]").evaluateAll(l => l.map(i => i.checked)), [false, true]);
+        assert.ok(!(await section(page).innerText()).includes("許可中"));
+        assert.deepEqual(page.errors, []);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "横にはみ出さない");
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`IOLシール写真の設定: QR はモーダルに画像として出し、URL の文字列を出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const page = await openPage(browser);
+      await ready(page);
+      await section(page).locator('[data-act="showQr"]').click();
+      await page.waitForSelector(".sticker-qr-dialog");
+      const box = await page.locator(".sticker-qr-dialog .modal-card").innerText();
+      assert.ok(box.includes("IOLシール写真のQRコード") && box.includes("A眼科"));
+      assert.ok(!/https?:|sticker\.html/.test(box), "URL は文字で出さない");
+      assert.ok((await page.locator(".sticker-qr-dialog img").getAttribute("src")).startsWith("data:image/svg+xml"));
+      assert.equal(await page.evaluate(() => window.__evil === undefined), true, "SVG の中のスクリプトは動かない");
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator(".sticker-qr-dialog").count(), 0);
+      await page.close();
+    } finally { await browser.close(); }
+  });
+}
+
+test("アクセスコード: 変更は確認の後に保存し、新しいコードを1回だけ出す。閉じると消える", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser);
+    await ready(page);
+    const s = section(page);
+    assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
+    await s.locator('[data-act="editCode"]').click();
+    await s.locator('[data-f="code"]').fill("12345");
+    await s.locator('[data-act="saveCode"]').click();
+    assert.match(await s.locator('[data-err="code"]').innerText(), /半角数字6〜12桁/);
+    assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "setAccessCode"), false, "形式違いは送らない");
+    await s.locator('[data-f="code"]').fill("654321");
+    await s.locator('[data-act="saveCode"]').click();
+    await confirmDialog(page, "cancel");
+    assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "setAccessCode"), false, "確認で取り消せる");
+    await s.locator('[data-act="saveCode"]').click();
+    await confirmDialog(page, "ok");
+    await s.locator('[data-f="newCodeBox"]').waitFor();
+    assert.equal(await s.locator('[data-f="newCode"]').innerText(), "654321");
+    assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
+    assert.equal(await s.locator('[data-f="code"]').inputValue(), "", "入力欄に残さない");
+    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/05 変更)");
+    assert.deepEqual(await page.evaluate(() => [localStorage.length ? JSON.stringify({ ...localStorage }).includes("654321") : false, sessionStorage.length]), [false, 0], "端末に保存しない");
+    await s.locator('[data-act="hideNewCode"]').click();
+    assert.equal(await s.locator('[data-f="newCode"]').innerText({ timeout: 1000 }).catch(() => ""), "");
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("アクセスコード: 未設定なら確認なしで設定でき、自動で作れる。失敗は理由を出す。画面を閉じると新しいコードは消える", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser, "?code=unset");
+    await ready(page);
+    const s = section(page);
+    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "未設定");
+    assert.equal(await s.locator('[data-act="editCode"]').innerText(), "設定");
+    await s.locator('[data-act="editCode"]').click();
+    await s.locator('[data-act="generateCode"]').click();
+    const code = await s.locator('[data-f="code"]').inputValue();
+    assert.match(code, /^\d{8}$/);
+    await page.evaluate(() => { window.__failCode = true; });
+    await s.locator('[data-act="saveCode"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-err="code"]').textContent.includes("管理者"));
+    assert.equal(await s.locator('[data-f="code"]').inputValue(), code, "失敗したら入力を残す");
+    await page.evaluate(() => { window.__failCode = false; });
+    await s.locator('[data-act="saveCode"]').click();
+    await s.locator('[data-f="newCodeBox"]').waitFor();
+    assert.equal(await page.locator(".confirm-dialog").count(), 0);
+    assert.deepEqual((await page.evaluate(() => window.__calls)).filter(c => c.action === "setAccessCode").at(-1), { action: "setAccessCode", facilityId: "fA", code });
+    await page.evaluate(() => window.__settings.close());
+    assert.equal(await page.evaluate(() => document.querySelector('[data-f="newCode"]').textContent), "");
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("QR: 作り直しは確認の後に行い、新しい QR を出す。取り消せる", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser);
+    await ready(page);
+    const s = section(page);
+    await s.locator('[data-act="rotateQr"]').click();
+    await confirmDialog(page, "cancel");
+    assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "rotateEntryQr"), false);
+    await s.locator('[data-act="rotateQr"]').click();
+    assert.match(await page.locator(".confirm-dialog-message").innerText(), /使えなくなります/);
+    await confirmDialog(page, "ok");
+    await page.waitForSelector(".sticker-qr-dialog");
+    assert.ok(decodeURIComponent(await page.locator(".sticker-qr-dialog img").getAttribute("src")).includes('data-gen="1"'));
+    await page.click('.sticker-qr-dialog [data-act="close"]');
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser);
+    await ready(page);
+    const s = section(page);
+    await s.locator('[data-dealer="dA"]').check();
+    await page.waitForFunction(() => window.__calls.some(c => c.action === "setDealerShare"));
+    await page.waitForFunction(() => document.querySelector('[data-dealer="dA"]').checked && !document.querySelector('[data-dealer="dA"]').disabled);
+    assert.deepEqual((await page.evaluate(() => window.__calls)).find(c => c.action === "setDealerShare"), { action: "setDealerShare", facilityId: "fA", localDealerId: "dA", shared: true });
+    await s.locator('[data-dealer="dB"]').uncheck();
+    await page.waitForFunction(() => window.__calls.filter(c => c.action === "setDealerShare").length === 2);
+    assert.deepEqual((await page.evaluate(() => window.__portalCalls)).map(c => c[0]).filter(n => n !== "facilityStatus"), [], "受注閲覧の許可・取消を呼ばない");
+    await page.evaluate(() => { window.__failShare = true; });
+    await page.waitForFunction(() => !document.querySelector('[data-dealer="dB"]').disabled);
+    await s.locator('[data-dealer="dB"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent.includes("共有できません"));
+    assert.equal(await s.locator('[data-dealer="dB"]').isChecked(), false, "保存できなければ元に戻す");
+    assert.equal(await s.locator('[data-dealer="dB"]').isDisabled(), false);
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("写真の共有: 発注先の変更で止まった許可には「停止中」を出す。関連付けがなければ案内だけ", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    let page = await openPage(browser, "?stale=1");
+    await ready(page);
+    assert.equal(await section(page).locator('[data-share="dB"] [data-state="stale"]').innerText(), "停止中");
+    await page.close();
+    page = await openPage(browser, "?dealers=none");
+    await ready(page);
+    assert.match(await section(page).locator('[data-f="dealers"]').innerText(), /共有できるディーラーはありません/);
+    assert.equal(await section(page).locator("[data-dealer]").count(), 0);
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("表示の条件: 公開の前・注文者・機能の停止・対象外の施設では項目を出さない。ほかのエラーは理由を出し、施設設定は使える", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    for (const q of ["?flag=off", "?role=orderer"]) {
+      const page = await openPage(browser, q);
+      assert.equal(await section(page).count(), 0, q);
+      assert.deepEqual(await page.evaluate(() => window.__calls), [], "呼び出しもしない");
+      await page.close();
+    }
+    for (const q of ["?mode=off", "?mode=outside"]) {
+      const page = await openPage(browser, q);
+      await page.waitForFunction(() => window.__calls.length > 0);
+      await page.waitForTimeout(50);
+      assert.equal(await section(page).isVisible(), false, q);
+      assert.deepEqual(page.errors, []);
+      await page.close();
+    }
+    const page = await openPage(browser, "?mode=error");
+    await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]')?.textContent !== "");
+    assert.equal(await section(page).isVisible(), true);
+    assert.equal(await page.locator('[data-section="dealers"]').isVisible(), true);
+    await page.close();
+  } finally { await browser.close(); }
+});
