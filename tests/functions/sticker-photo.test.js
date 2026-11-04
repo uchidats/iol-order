@@ -1,0 +1,782 @@
+// IOL シール写真(R09)のサーバーの処理。Firestore エミュレータと偽のバケットで確かめる(実際のバケットには接続しない)
+import test, { before, after, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { initializeApp, getApps } from "firebase-admin/app";
+import { getFirestore, FieldValue, Timestamp, FieldPath } from "firebase-admin/firestore";
+import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import { createStickerPhotoService, clientIpOf } from "../../functions/src/sticker-photo-service.js";
+import { createStickerBucket } from "../../functions/src/sticker-bucket.js";
+import { RegistrationError } from "../../functions/src/registration.js";
+import { createDealerPortalService } from "../../functions/src/dealer-portal.js";
+import {
+  STICKER_LIMITS, STICKER_RATE_LIMITS, hashAccessCode, verifyAccessCode, issueTicket, sha256Hex, photoIdOf, newEntryToken, rateLimitDocId, usageDayKey
+} from "../../functions/src/sticker-photo.js";
+
+const sharp = createRequire(new URL("../../functions/package.json", import.meta.url))("sharp");
+const PROJECT = "demo-iol-functions";
+const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8185").split(":");
+const SECRET = "s".repeat(40);
+const ORIGIN = "https://iol.medconf.jp";
+const CODE = "123456";
+const T0 = Date.parse("2026-11-05T01:00:00Z");
+const MIN = 60 * 1000;
+const F = "fA", G = "fB";
+const TOKEN = newEntryToken();
+const TOKEN_B = newEntryToken();
+
+let db, env, clock, enabled, bucket, svc, accessRecord, baseJpeg, codeChecks;
+
+/** 偽のバケット。保存の途中で止める(gate)・失敗させる(failSave)ことができる */
+function fakeBucket() {
+  const objects = new Map();
+  return {
+    objects, gate: null, failSave: false, failDelete: false,
+    async save(name, bytes) {
+      if (this.failSave) throw new Error("save failed");
+      if (this.gate) await this.gate(name);
+      objects.set(name, { bytes: Buffer.from(bytes), updatedMs: clock.t });
+    },
+    async read(name) { return objects.get(name)?.bytes ?? null; },
+    async delete(name) { if (this.failDelete) throw new Error("delete failed"); objects.delete(name); },
+    async list() { return { items: [...objects].map(([name, o]) => ({ name, updatedMs: o.updatedMs })), nextPageToken: null }; }
+  };
+}
+
+const mk = (over = {}) => createStickerPhotoService({
+  db, FieldValue, Timestamp, bucket, now: () => clock.t, isEnabled: () => enabled.on, facilityIds: () => enabled.facilities, ticketSecret: () => SECRET,
+  checkCode: async (code, stored) => { codeChecks.n += 1; return verifyAccessCode(code, stored); },
+  verifyIdToken: async (token) => { if (!token.startsWith("id-")) throw new Error("bad token"); return { uid: token.slice(3), email: `${token.slice(3)}@x.jp`, email_verified: true }; },
+  authorizeDealer: async (auth, companyId) => {
+    if (auth.uid !== "staffX" || (companyId && companyId !== "cX")) throw new RegistrationError("permission-denied", "no");
+    return { companyId: "cX" };
+  },
+  makeQrSvg: async (url) => `<svg data-url="${url}"></svg>`,
+  ...over
+});
+
+before(async () => {
+  if (!getApps().length) initializeApp({ projectId: PROJECT });
+  db = getFirestore();
+  env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: "rules_version = '2'; service cloud.firestore { match /databases/{d}/documents { match /{x=**} { allow read, write: if false; } } }", host, port: Number(port) } });
+  accessRecord = await hashAccessCode(CODE);
+  baseJpeg = await sharp({ create: { width: 640, height: 480, channels: 3, background: "#dde" } }).jpeg({ quality: 90 }).toBuffer();
+});
+after(async () => { await env.clearFirestore(); await env.cleanup(); });
+
+beforeEach(async () => {
+  await env.clearFirestore();
+  clock = { t: T0 };
+  enabled = { on: true, facilities: [F, G] };
+  codeChecks = { n: 0 };
+  bucket = fakeBucket();
+  svc = mk();
+  for (const [fid, token] of [[F, TOKEN], [G, TOKEN_B]]) {
+    await db.doc(`facilities/${fid}`).set({ name: `${fid}眼科`, status: "active" });
+    await db.doc(`facilities/${fid}/stickerSettings/access`).set({ ...accessRecord, codeGeneration: 1 });
+    await db.doc(`facilities/${fid}/stickerSettings/entry`).set({ token });
+    await db.doc(`stickerEntries/${token}`).set({ facilityId: fid, status: "active" });
+  }
+  for (const [fid, uid, role] of [[F, "adminA", "admin"], [F, "subA", "subadmin"], [F, "ordA", "orderer"], [F, "proxyA", "proxy"], [G, "adminB", "admin"]]) {
+    await db.doc(`facilities/${fid}/members/${uid}`).set({ uid, role });
+  }
+  await db.doc("dealerCompanies/cX").set({ name: "X商事", status: "active" });
+  await db.doc(`facilities/${F}/facilityDealers/dA`).set({ facilityId: F, name: "X商事 立川", orderEmails: ["x@example.jp"] });
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).set({ companyId: "cX", status: "proposed", currentGrantId: null });
+});
+
+const user = (uid, over = {}) => ({ uid, token: { email: `${uid}@x.jp`, email_verified: true, ...over } });
+const api = (uid, action, data = {}, s = svc) => s.api({ auth: uid ? user(uid) : null, data: { action, ...data } });
+const rejects = (p, code) => assert.rejects(p, (e) => e.code === code, `expected ${code}`);
+const verify = (token, code, ip = "198.51.100.7", s = svc) => s.verify({ data: { token, code }, ip });
+const uuid = (n) => `3f2b8c1e-4a5d-4e6f-8a9b-${String(n).padStart(12, "0")}`;
+const ticketFor = (fid = F, generation = 1, t = clock.t) => issueTicket({ facilityId: fid, codeGeneration: generation, secret: SECRET, now: t }).ticket;
+
+/** Exif・コメントを足した JPEG(本文の別の内容を作るときは salt を変える) */
+const withExif = (salt = "") => {
+  const exif = Buffer.from(`Exif\0\0GPS-SECRET${salt}`, "latin1");
+  return Buffer.concat([baseJpeg.subarray(0, 2), Buffer.from([0xff, 0xe1, 0, exif.length + 2]), exif, baseJpeg.subarray(2)]);
+};
+
+function reqOf({ method = "PUT", headers = {}, rawBody, query }) {
+  const lower = Object.fromEntries(Object.entries(headers).filter(([, v]) => v !== undefined).map(([k, v]) => [k.toLowerCase(), String(v)]));
+  return { method, rawBody, query, headers: lower, get: (name) => lower[name.toLowerCase()] };
+}
+function resOf() {
+  const r = { statusCode: 0, headers: {}, body: undefined };
+  r.set = (k, v) => { r.headers[k.toLowerCase()] = v; return r; };
+  r.status = (c) => { r.statusCode = c; return r; };
+  r.json = (b) => { r.body = b; return r; };
+  r.send = (b) => { r.body = b; return r; };
+  return r;
+}
+async function put({ ticket = ticketFor(), body = baseJpeg, uploadId = uuid(1), headers = {}, s = svc, sha } = {}) {
+  const res = resOf();
+  await s.handleUpload(reqOf({
+    rawBody: body,
+    headers: { Origin: ORIGIN, "Content-Length": body.length, "X-Sticker-Ticket": ticket, "X-Upload-Id": uploadId, "X-Content-Sha256": sha ?? sha256Hex(body), ...headers }
+  }), res);
+  return res;
+}
+async function image(uid, { facility = F, photo, size, headers = {}, s = svc } = {}) {
+  const res = resOf();
+  await s.handleImage(reqOf({ method: "GET", query: { facility, photo, ...(size ? { size } : {}) }, headers: { Origin: ORIGIN, ...(uid ? { Authorization: `Bearer id-${uid}` } : {}), ...headers } }), res);
+  return res;
+}
+const photoDoc = (id, fid = F) => db.doc(`facilities/${fid}/stickerPhotos/${id}`).get();
+const originals = () => [...bucket.objects.keys()].filter(n => !n.endsWith("_thumb.jpg"));
+const usage = async (fid = F) => (await db.doc(`facilities/${fid}/stickerUsage/${usageDayKey(clock.t)}`).get()).data();
+/** 保存の途中で止めるための鍵 */
+function latch() { let open; const opened = new Promise(r => { open = r; }); return { opened, open }; }
+/** 条件を満たすまで待つ(偽のバケットに届くまで) */
+async function until(cond) { for (let i = 0; i < 400 && !cond(); i += 1) await new Promise(r => setTimeout(r, 10)); assert.ok(cond(), "timeout"); }
+
+// ================= 入口の確認 =================
+test("確認: 正しいコードでチケットと施設名・前回の送信を返す。回数は積み上がらない", async () => {
+  const r = await verify(TOKEN, CODE);
+  assert.equal(r.facilityName, "fA眼科");
+  assert.deepEqual([r.lastSentAt, r.lastSurgeryDate], [null, null]);
+  assert.equal(r.expiresAt, clock.t + 30 * MIN);
+  assert.equal((await put({ ticket: r.ticket })).statusCode, 200);
+  const limit = await db.doc(`stickerRateLimits/${rateLimitDocId("token", TOKEN)}`).get();
+  assert.equal(limit.get("count"), 0);
+});
+
+test("確認: コードの誤り・無効なトークン・無効化・未設定・機能の停止は、すべて同じ応答で、同じ計算をする", async () => {
+  const revoked = newEntryToken();
+  await db.doc(`stickerEntries/${revoked}`).set({ facilityId: F, status: "revoked" });
+  const noCode = newEntryToken();
+  await db.doc("facilities/fC").set({ name: "C", status: "active" });
+  await db.doc(`stickerEntries/${noCode}`).set({ facilityId: "fC", status: "active" });
+  const outsider = newEntryToken();
+  await db.doc("facilities/fD").set({ name: "D", status: "active" });
+  await db.doc("facilities/fD/stickerSettings/access").set({ ...accessRecord, codeGeneration: 1 });
+  await db.doc(`stickerEntries/${outsider}`).set({ facilityId: "fD", status: "active" });
+  const seen = [];
+  for (const [token, code, i] of [[TOKEN, "999999", 1], [newEntryToken(), CODE, 2], [revoked, CODE, 3], [noCode, CODE, 4], [outsider, CODE, 5], ["short", CODE, 6], [TOKEN, "12", 7]]) {
+    const before = codeChecks.n;
+    await assert.rejects(verify(token, code, `198.51.100.${i}`), (e) => { seen.push(`${e.code}|${e.message}`); return true; });
+    assert.equal(codeChecks.n, before + 1, "どの場合もコードの計算を1回行う");
+  }
+  enabled.on = false;
+  await assert.rejects(verify(TOKEN, CODE, "198.51.100.8"), (e) => { seen.push(`${e.code}|${e.message}`); return true; });
+  assert.equal(new Set(seen).size, 1, "応答で区別できない");
+  assert.ok(!seen[0].includes("fA"));
+});
+
+test("確認: 回数制限はトークンの有無によらず同じ。超えると正しいコードも止まり、時間が過ぎると戻る", async () => {
+  const unknown = newEntryToken();
+  for (const token of [TOKEN, unknown]) {
+    for (let i = 0; i < STICKER_RATE_LIMITS.tokenMax; i += 1) await rejects(verify(token, "999999", `203.0.113.${i}`), "permission-denied");
+    await rejects(verify(token, CODE, "203.0.113.200"), "resource-exhausted");
+    await rejects(verify(token, CODE, "203.0.113.201"), "resource-exhausted");
+  }
+  clock.t += STICKER_RATE_LIMITS.blockMs + 1;
+  assert.ok((await verify(TOKEN, CODE)).ticket);
+});
+
+test("確認: 送信元ごとの回数制限は、別のトークンを試しても効く", async () => {
+  for (let i = 0; i < STICKER_RATE_LIMITS.ipMax; i += 1) await rejects(verify(newEntryToken(), CODE, "192.0.2.9"), "permission-denied");
+  await rejects(verify(TOKEN, CODE, "192.0.2.9"), "resource-exhausted");
+  assert.ok((await verify(TOKEN, CODE, "192.0.2.10")).ticket, "別の送信元は通る");
+});
+
+test("同時の確認: 30件を同時に送っても、上限を超えてコードを試せない", async () => {
+  const results = await Promise.allSettled(Array.from({ length: 30 }, (_, i) => verify(TOKEN, String(100000 + i), `203.0.113.${i}`)));
+  assert.equal(codeChecks.n, STICKER_RATE_LIMITS.tokenMax, "確認できるのは上限の回数だけ");
+  assert.equal(results.filter(r => r.reason?.code === "resource-exhausted").length, 30 - STICKER_RATE_LIMITS.tokenMax);
+  await rejects(verify(TOKEN, CODE, "203.0.113.100"), "resource-exhausted");
+});
+
+test("送信元の IP: クライアントが書ける先頭ではなく、末尾の値を使う", () => {
+  assert.equal(clientIpOf({ headers: { "x-forwarded-for": "1.1.1.1, 2.2.2.2, 198.51.100.7" } }), "198.51.100.7");
+  assert.equal(clientIpOf({ headers: {}, ip: "198.51.100.8" }), "198.51.100.8");
+});
+
+test("確認: 前回の送信は保存済みの最新。削除した写真は除き、最新のセッションが未入力なら古い日付を持ち出さない", async () => {
+  const ticket = ticketFor();
+  const a = await put({ ticket, uploadId: uuid(1), headers: { "X-Last-Surgery-Date": "2026-11-04" } });
+  clock.t += MIN;
+  const b = await put({ ticket, uploadId: uuid(2) });
+  let r = await verify(TOKEN, CODE);
+  assert.deepEqual([r.lastSentAt, r.lastSurgeryDate], [b.body.takenAt, "2026-11-04"], "同じセッションの値");
+  clock.t += MIN;
+  const c = await put({ uploadId: uuid(3), ticket: ticketFor() });
+  r = await verify(TOKEN, CODE);
+  assert.deepEqual([r.lastSentAt, r.lastSurgeryDate], [c.body.takenAt, null]);
+  await api("adminA", "delete", { facilityId: F, photoId: c.body.photoId });
+  r = await verify(TOKEN, CODE);
+  assert.equal(r.lastSentAt, b.body.takenAt);
+  assert.ok(a.body.photoId);
+});
+
+// ================= チケット・コード・QR =================
+test("チケット: 期限切れ・改ざん・別の鍵は 401。コードを変更すると発行済みのチケットも拒否する", async () => {
+  const t = ticketFor();
+  clock.t += 30 * MIN;
+  assert.equal((await put({ ticket: t })).statusCode, 401);
+  assert.equal((await put({ ticket: `${ticketFor()}x` })).statusCode, 401);
+  assert.equal((await put({ ticket: issueTicket({ facilityId: F, codeGeneration: 1, secret: "o".repeat(40), now: clock.t }).ticket })).statusCode, 401);
+  const live = ticketFor();
+  await api("subA", "setAccessCode", { facilityId: F, code: "654321" });
+  assert.equal((await put({ ticket: live })).statusCode, 401);
+  await rejects(verify(TOKEN, CODE), "permission-denied");
+  assert.ok((await verify(TOKEN, "654321")).ticket);
+  assert.equal(bucket.objects.size, 0);
+});
+
+test("設定: コードは平文で保存せず再表示もしない。形式違い・権限のない人は変更できない", async () => {
+  await rejects(api("ordA", "setAccessCode", { facilityId: F, code: "654321" }), "permission-denied");
+  await rejects(api("adminB", "setAccessCode", { facilityId: F, code: "654321" }), "permission-denied");
+  await rejects(api("adminA", "setAccessCode", { facilityId: F, code: "12345" }), "invalid-argument");
+  await api("adminA", "setAccessCode", { facilityId: F, code: "654321" });
+  const stored = (await db.doc(`facilities/${F}/stickerSettings/access`).get()).data();
+  assert.equal(stored.codeGeneration, 2);
+  assert.ok(!JSON.stringify(stored).includes("654321"));
+  const logs = await db.collection("stickerAuditLogs").get();
+  assert.ok(!JSON.stringify(logs.docs.map(d => d.data())).includes("654321"));
+  const settings = await api("adminA", "getSettings", { facilityId: F });
+  assert.equal(settings.accessCodeSet, true);
+  assert.ok(!JSON.stringify(settings).includes(stored.hash));
+});
+
+test("QR: 管理者・副管理者だけが取得でき、SVG の中身は URL だけ。作り直すと旧トークンは確実に無効になる", async () => {
+  await rejects(api("ordA", "getEntryQr", { facilityId: F }), "permission-denied");
+  await rejects(api("adminB", "rotateEntryQr", { facilityId: F }), "permission-denied");
+  const first = await api("adminA", "getEntryQr", { facilityId: F });
+  assert.ok(first.svg.includes(`sticker.html#f=${TOKEN}`));
+  assert.ok(!first.svg.includes(F) && !first.svg.includes(CODE));
+  const again = await api("subA", "getEntryQr", { facilityId: F });
+  assert.equal(again.svg, first.svg, "作り直すまで同じ");
+  const rotated = await api("adminA", "rotateEntryQr", { facilityId: F });
+  assert.notEqual(rotated.svg, first.svg);
+  await rejects(verify(TOKEN, CODE), "permission-denied");
+  const fresh = /#f=([A-Za-z0-9_-]{22})/.exec(rotated.svg)[1];
+  assert.ok((await verify(fresh, CODE)).ticket);
+  assert.equal((await db.doc(`stickerEntries/${TOKEN}`).get()).get("status"), "revoked");
+});
+
+test("QR: 同時に初回の取得をしても、トークンは1つだけ発行する", async () => {
+  await db.doc(`facilities/${F}/stickerSettings/entry`).delete();
+  await db.doc(`stickerEntries/${TOKEN}`).delete();
+  const list = await Promise.all(Array.from({ length: 6 }, () => api("adminA", "getEntryQr", { facilityId: F })));
+  assert.equal(new Set(list.map(x => x.svg)).size, 1);
+  const entries = await db.collection("stickerEntries").where("facilityId", "==", F).get();
+  assert.equal(entries.size, 1);
+});
+
+test("QR の既定の生成: 実際の qrcode の SVG を返す", async () => {
+  const r = await api("adminA", "getEntryQr", { facilityId: F }, mk({ makeQrSvg: undefined }));
+  assert.ok(r.svg.startsWith("<svg") && r.svg.includes("path"));
+});
+
+// ================= 保存: 形式・容量・解像度・メタデータ =================
+test("保存: Exif を除いて保存し、施設はチケットから決める。記録に幅・高さが入り、サムネイルが作られる", async () => {
+  const body = withExif();
+  const r = await put({ body, headers: { "X-Blur-Warned": "1", "X-Last-Surgery-Date": "2026-11-05" } });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual([r.body.created, r.body.seq, r.body.lastSurgeryDate], [true, 1, "2026-11-05"]);
+  assert.equal(r.body.photoId, photoIdOf(F, uuid(1)));
+  assert.equal(r.headers["access-control-allow-origin"], ORIGIN);
+  const d = (await photoDoc(r.body.photoId)).data();
+  assert.deepEqual([d.facilityId, d.status, d.width, d.height, d.blurWarned, d.sha256], [F, "stored", 640, 480, true, sha256Hex(body)]);
+  assert.ok(d.storagePath.startsWith(`${F}/`));
+  const saved = bucket.objects.get(d.storagePath).bytes;
+  assert.ok(!saved.includes("GPS-SECRET"));
+  assert.deepEqual(saved, baseJpeg, "画素は変えない");
+  assert.equal(d.bytes, saved.length);
+  const thumb = await sharp(bucket.objects.get(d.thumbPath).bytes).metadata();
+  assert.deepEqual([Math.max(thumb.width, thumb.height), thumb.exif], [400, undefined]);
+  assert.deepEqual(await usage(), { photos: 1, bytes: saved.length });
+});
+
+test("保存: 形式・大きさ・内容の不一致は保存しない", async () => {
+  const cases = [
+    [await put({ headers: { "Content-Length": undefined } }), 413],
+    [await put({ headers: { "Content-Length": STICKER_LIMITS.imageBytes + 1 } }), 413],
+    [await put({ headers: { "Content-Length": baseJpeg.length + 1 } }), 400],
+    [await put({ sha: "0".repeat(64) }), 400],
+    [await put({ sha: "xyz" }), 400],
+    [await put({ uploadId: "not-a-uuid" }), 400],
+    [await put({ uploadId: uuid(1).toUpperCase() }), 400],
+    [await put({ body: Buffer.from("not an image at all") }), 415],
+    [await put({ body: Buffer.concat([baseJpeg.subarray(0, 200)]) }), 415],
+    [await put({ headers: { "X-Last-Surgery-Date": "2026-11-06" } }), 400],
+    [await put({ headers: { "X-Last-Surgery-Date": "2026-13-01" } }), 400]
+  ];
+  for (const [res, status] of cases) assert.equal(res.statusCode, status);
+  assert.equal(bucket.objects.size, 0);
+  assert.equal((await db.collection(`facilities/${F}/stickerPhotos`).get()).size, 0);
+});
+
+test("保存: 1億画素を超える画像は拒否する", async () => {
+  const huge = Buffer.from(baseJpeg);
+  const sof = huge.indexOf(Buffer.from([0xff, 0xc0]));
+  huge.writeUInt16BE(20000, sof + 5);
+  huge.writeUInt16BE(20000, sof + 7);
+  assert.equal((await put({ body: huge })).statusCode, 415);
+});
+
+test("CORS: 許可したオリジン以外は処理せず、OPTIONS は必要なものだけ返す。許可しないメソッドは 405", async () => {
+  const other = resOf();
+  await svc.handleUpload(reqOf({ headers: { Origin: "https://evil.example" }, rawBody: baseJpeg }), other);
+  assert.equal(other.statusCode, 403);
+  const pre = resOf();
+  await svc.handleUpload(reqOf({ method: "OPTIONS", headers: { Origin: ORIGIN } }), pre);
+  assert.deepEqual([pre.statusCode, pre.headers["access-control-allow-methods"], pre.headers["access-control-allow-credentials"], pre.headers.vary], [204, "PUT, OPTIONS", undefined, "Origin"]);
+  assert.ok(pre.headers["access-control-allow-headers"].includes("X-Upload-Id"));
+  const post = resOf();
+  await svc.handleUpload(reqOf({ method: "POST", headers: { Origin: ORIGIN } }), post);
+  assert.equal(post.statusCode, 405);
+  const img = resOf();
+  await svc.handleImage(reqOf({ method: "OPTIONS", headers: { Origin: ORIGIN } }), img);
+  assert.equal(img.headers["access-control-allow-methods"], "GET, OPTIONS");
+});
+
+test("機能の停止・対象外の施設・無効な施設では保存しない", async () => {
+  enabled.on = false;
+  assert.equal((await put()).statusCode, 503);
+  enabled.on = true;
+  enabled.facilities = [G];
+  assert.equal((await put()).statusCode, 403);
+  enabled.facilities = [F, G];
+  await db.doc(`facilities/${F}`).update({ status: "suspended" });
+  assert.equal((await put()).statusCode, 403);
+  assert.equal(bucket.objects.size, 0);
+});
+
+test("保存の失敗: バケットに書けなければ記録も使用量も残さず、再送できる", async () => {
+  bucket.failSave = true;
+  assert.equal((await put()).statusCode, 503);
+  assert.equal((await db.collection(`facilities/${F}/stickerPhotos`).get()).size, 0);
+  assert.equal(await usage(), undefined);
+  bucket.failSave = false;
+  assert.equal((await put()).body.created, true);
+});
+
+test("サムネイルの失敗: 写真の保存は成功のままで、画像の取得は原本を返す", async () => {
+  const s = mk({ makeThumbnail: async () => { throw new Error("thumb failed"); } });
+  const r = await put({ s });
+  assert.equal(r.body.created, true);
+  assert.equal((await photoDoc(r.body.photoId)).get("thumbPath"), null);
+  const got = await image("ordA", { photo: r.body.photoId, size: "thumb" });
+  assert.deepEqual([got.statusCode, got.body], [200, baseJpeg]);
+});
+
+// ================= 再送・セッション・上限 =================
+test("再送: 同じIDは再認証の後でも同じ写真で、記録・使用量・オブジェクトを増やさない。SHA-256 が同じでもIDが違えば別の写真", async () => {
+  const a = await put();
+  const b = await put({ ticket: ticketFor() });
+  assert.deepEqual([b.statusCode, b.body.created, b.body.photoId, b.body.takenAt], [200, false, a.body.photoId, a.body.takenAt]);
+  assert.equal(originals().length, 1);
+  assert.equal((await usage()).photos, 1);
+  const c = await put({ uploadId: uuid(2) });
+  assert.equal(c.body.created, true);
+  assert.notEqual(c.body.photoId, a.body.photoId);
+});
+
+test("再送: 同じIDで内容が違えば 409 で、既存の写真を変えない", async () => {
+  const a = await put();
+  const path = (await photoDoc(a.body.photoId)).get("storagePath");
+  const other = withExif("other");
+  const r = await put({ body: other });
+  assert.equal(r.statusCode, 409);
+  assert.equal((await photoDoc(a.body.photoId)).get("sha256"), sha256Hex(baseJpeg));
+  assert.deepEqual(bucket.objects.get(path).bytes, baseJpeg);
+});
+
+test("セッション: 最初の写真の最終手術日で固定する。2枚目以降に違う値を送っても変わらず、seq が続く", async () => {
+  const ticket = ticketFor();
+  const a = await put({ ticket, uploadId: uuid(1) });
+  const b = await put({ ticket, uploadId: uuid(2), headers: { "X-Last-Surgery-Date": "2026-11-04" } });
+  assert.deepEqual([a.body.lastSurgeryDate, b.body.lastSurgeryDate, b.body.seq], [null, null, 2]);
+  const t2 = ticketFor();
+  const c = await put({ ticket: t2, uploadId: uuid(3), headers: { "X-Last-Surgery-Date": "2026-11-04" } });
+  const d = await put({ ticket: t2, uploadId: uuid(4), headers: { "X-Last-Surgery-Date": "2026-11-03" } });
+  assert.deepEqual([c.body.lastSurgeryDate, d.body.lastSurgeryDate, d.body.seq], ["2026-11-04", "2026-11-04", 2]);
+});
+
+test("上限: セッション・1日の枚数・容量のどれを超えても 429 で、同じ文言(どの上限かは出さない)", async () => {
+  const size = baseJpeg.length;
+  const s = mk({ limits: { ...STICKER_LIMITS, sessionPhotos: 1 } });
+  const ticket = ticketFor();
+  assert.equal((await put({ s, ticket, uploadId: uuid(1) })).statusCode, 200);
+  const r1 = await put({ s, ticket, uploadId: uuid(2) });
+  const s2 = mk({ limits: { ...STICKER_LIMITS, dailyPhotos: 1 } });
+  const r2 = await put({ s: s2, uploadId: uuid(3) });
+  const s3 = mk({ limits: { ...STICKER_LIMITS, dailyBytes: size + 1 } });
+  const r3 = await put({ s: s3, uploadId: uuid(4) });
+  assert.deepEqual([r1.statusCode, r2.statusCode, r3.statusCode], [429, 429, 429]);
+  assert.equal(new Set([r1, r2, r3].map(r => JSON.stringify(r.body))).size, 1);
+  clock.t += 24 * 60 * MIN;
+  assert.equal((await put({ s: s2, uploadId: uuid(5) })).statusCode, 200, "翌日は数え直す");
+});
+
+// ================= 同時送信 =================
+test("同時送信: 同じ写真を20件同時に送っても、記録・使用量は1件で、残るオブジェクトは記録が指すものだけ", async () => {
+  const ticket = ticketFor();
+  const results = await Promise.all(Array.from({ length: 20 }, () => put({ ticket })));
+  assert.ok(results.every(r => r.statusCode === 200), JSON.stringify(results.map(r => r.statusCode)));
+  assert.equal(results.filter(r => r.body.created).length, 1);
+  assert.equal(new Set(results.map(r => r.body.photoId)).size, 1);
+  assert.equal((await db.collection(`facilities/${F}/stickerPhotos`).get()).size, 1);
+  assert.equal((await usage()).photos, 1);
+  const d = (await photoDoc(results[0].body.photoId)).data();
+  assert.deepEqual(originals(), [d.storagePath]);
+  assert.equal((await image("ordA", { photo: results[0].body.photoId })).statusCode, 200);
+});
+
+test("同時送信: 別々の写真を15件同時に送っても、上限(10枚)を超えず seq が重複しない", async () => {
+  const s = mk({ limits: { ...STICKER_LIMITS, sessionPhotos: 10 } });
+  const ticket = ticketFor();
+  const results = await Promise.all(Array.from({ length: 15 }, (_, i) => put({ s, ticket, uploadId: uuid(i + 1) })));
+  const ok = results.filter(r => r.statusCode === 200);
+  assert.equal(ok.length, 10);
+  assert.equal(results.filter(r => r.statusCode === 429).length, 5);
+  assert.deepEqual(ok.map(r => r.body.seq).sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(originals().length, 10, "上限で負けた分のオブジェクトは残らない");
+  assert.equal((await usage()).photos, 10);
+});
+
+test("同時送信: 1日の容量の上限を別々のセッションからの同時送信でも超えない", async () => {
+  const s = mk({ limits: { ...STICKER_LIMITS, dailyBytes: baseJpeg.length * 3 } });
+  const results = await Promise.all(Array.from({ length: 8 }, (_, i) => put({ s, ticket: ticketFor(), uploadId: uuid(i + 1) })));
+  assert.equal(results.filter(r => r.statusCode === 200).length, 3);
+  assert.equal((await usage()).bytes, baseJpeg.length * 3);
+});
+
+test("同時送信: 同じIDで内容の違う送信は1件だけ登録し、負けた送信は勝った写真を消さない", async () => {
+  const bodies = Array.from({ length: 6 }, (_, i) => withExif(String(i)));
+  const results = await Promise.all(bodies.map(body => put({ body })));
+  assert.equal(results.filter(r => r.statusCode === 200 && r.body.created).length, 1);
+  assert.equal(results.filter(r => r.statusCode === 409).length, 5);
+  const id = photoIdOf(F, uuid(1));
+  const d = (await photoDoc(id)).data();
+  assert.deepEqual(originals(), [d.storagePath]);
+  assert.equal((await image("ordA", { photo: id })).statusCode, 200);
+});
+
+test("上限で負けた送信は、同じ写真を別のセッションから保存した送信のオブジェクトを消さない", async () => {
+  const s = mk({ limits: { ...STICKER_LIMITS, sessionPhotos: 1 } });
+  const ticket = ticketFor();
+  const gates = [latch(), latch()];
+  let arrived = 0;
+  bucket.gate = async () => { const g = gates[arrived]; arrived += 1; if (g) await g.opened; };
+  const loser = put({ s, ticket, uploadId: uuid(1) });           // セッション A
+  await until(() => arrived === 1);
+  const winner = put({ s, ticket: ticketFor(), uploadId: uuid(1) });   // 同じ写真を、再認証の後のセッション B から
+  await until(() => arrived === 2);
+  bucket.gate = null;
+  assert.equal((await put({ s, ticket, uploadId: uuid(2) })).statusCode, 200);   // セッション A が上限に達する
+  gates[0].open();
+  assert.equal((await loser).statusCode, 429);
+  gates[1].open();
+  const r = await winner;
+  assert.equal(r.body.created, true);
+  const d = (await photoDoc(r.body.photoId)).data();
+  assert.ok(bucket.objects.has(d.storagePath), "保存済みの写真は消えない");
+  assert.equal((await image("ordA", { photo: r.body.photoId })).statusCode, 200);
+});
+
+// ================= 削除との競合 =================
+test("削除: 管理者・副管理者だけが削除でき、画像が消える。削除した写真は再送しても復活しない", async () => {
+  const r = await put();
+  const id = r.body.photoId;
+  await rejects(api("ordA", "delete", { facilityId: F, photoId: id }), "permission-denied");
+  await rejects(api("adminB", "delete", { facilityId: F, photoId: id }), "permission-denied");
+  await rejects(api("adminB", "delete", { facilityId: G, photoId: id }), "not-found");
+  await api("subA", "delete", { facilityId: F, photoId: id });
+  assert.equal(bucket.objects.size, 0);
+  const d = (await photoDoc(id)).data();
+  assert.deepEqual([d.status, d.deleted.by], ["deleted", "subA"]);
+  const again = await put({ ticket: ticketFor() });
+  assert.deepEqual([again.statusCode, again.body.created], [200, false]);
+  assert.equal((await photoDoc(id)).get("status"), "deleted");
+  assert.equal(bucket.objects.size, 0, "再送の画像は保存されない");
+  assert.equal((await image("ordA", { photo: id })).statusCode, 404);
+  assert.deepEqual((await api("ordA", "list", { facilityId: F })).photos, []);
+  assert.deepEqual(await api("adminA", "delete", { facilityId: F, photoId: id }), { ok: true }, "もう一度の削除は成功のまま");
+});
+
+test("削除との競合: 保存の途中で写真が削除されても、復活せず、途中の画像も残らない", async () => {
+  const first = await put();
+  const id = first.body.photoId;
+  // 1枚目の記録がまだ見えない前提で、もう1つの送信を保存の直前まで進める
+  await db.doc(`facilities/${F}/stickerPhotos/${id}`).delete();
+  const saved = [...bucket.objects.keys()];
+  const g = latch();
+  let reached = false;
+  bucket.gate = async () => { reached = true; await g.opened; };
+  const racing = put({ ticket: ticketFor() });
+  await until(() => reached);
+  bucket.gate = null;
+  await db.doc(`facilities/${F}/stickerPhotos/${id}`).set({ facilityId: F, sha256: sha256Hex(baseJpeg), status: "stored", storagePath: saved.find(n => !n.endsWith("_thumb.jpg")), thumbPath: saved.find(n => n.endsWith("_thumb.jpg")), takenAt: Timestamp.fromMillis(clock.t) });
+  await api("adminA", "delete", { facilityId: F, photoId: id });
+  g.open();
+  const r = await racing;
+  assert.deepEqual([r.statusCode, r.body.created], [200, false]);
+  assert.equal((await photoDoc(id)).get("status"), "deleted");
+  assert.equal(bucket.objects.size, 0, "途中で保存した画像も消える");
+});
+
+test("削除との競合: サムネイルの作成中に削除されても、サムネイルを残さない", async () => {
+  const g = latch();
+  let reached = false;
+  const s = mk({ makeThumbnail: async () => { reached = true; await g.opened; return Buffer.from("thumb"); } });
+  const racing = put({ s });
+  await until(() => reached);
+  await api("adminA", "delete", { facilityId: F, photoId: photoIdOf(F, uuid(1)) });
+  g.open();
+  assert.equal((await racing).body.created, true);
+  assert.equal(bucket.objects.size, 0);
+});
+
+test("削除: 画像の削除に失敗しても記録は deleted のままで見えず、片付けが消す", async () => {
+  const r = await put();
+  bucket.failDelete = true;
+  await api("adminA", "delete", { facilityId: F, photoId: r.body.photoId });
+  bucket.failDelete = false;
+  assert.equal((await image("ordA", { photo: r.body.photoId })).statusCode, 404);
+  assert.equal(bucket.objects.size, 2);
+  clock.t += 25 * 60 * MIN;
+  assert.equal((await svc.cleanup()).removedObjects, 2);
+  assert.equal(bucket.objects.size, 0);
+});
+
+// ================= 一覧・施設の分離 =================
+test("一覧: 自施設の所属者だけ。返す項目は列挙したものだけで、保存先・アップロードID・SHA-256 は返さない", async () => {
+  const r = await put({ headers: { "X-Blur-Warned": "1" } });
+  await put({ ticket: ticketFor(G), uploadId: uuid(9) });
+  const { photos, nextCursor } = await api("proxyA", "list", { facilityId: F });
+  assert.equal(nextCursor, null);
+  assert.equal(photos.length, 1);
+  assert.deepEqual(Object.keys(photos[0]).sort(), ["blurWarned", "height", "lastSurgeryDate", "photoId", "seq", "sessionId", "takenAt", "width"]);
+  assert.deepEqual([photos[0].photoId, photos[0].blurWarned], [r.body.photoId, true]);
+  await rejects(api("adminB", "list", { facilityId: F }), "permission-denied");
+  await rejects(api("nobody", "list", { facilityId: F }), "permission-denied");
+  await rejects(api(null, "list", { facilityId: F }), "unauthenticated");
+  await rejects(svc.api({ auth: user("ordA", { email_verified: false }), data: { action: "list", facilityId: F } }), "permission-denied");
+  await db.doc(`facilities/${F}`).update({ status: "suspended" });
+  await rejects(api("ordA", "list", { facilityId: F }), "permission-denied");
+});
+
+test("一覧: 運営者でも所属がなければ読めない。未知の項目・処理は拒否する", async () => {
+  await rejects(svc.api({ auth: user("op", { platformAdmin: true }), data: { action: "list", facilityId: F } }), "permission-denied");
+  await rejects(api("ordA", "list", { facilityId: F, extra: 1 }), "invalid-argument");
+  await rejects(api("ordA", "unknown"), "invalid-argument");
+  await rejects(api("ordA", "list", { facilityId: F, from: "2026/11/01" }), "invalid-argument");
+});
+
+test("一覧: 期間と続きの読み込み。別の施設の写真をカーソルに使えない", async () => {
+  const s = mk({ limits: { ...STICKER_LIMITS, listPageSize: 2 } });
+  const ids = [];
+  for (let i = 0; i < 5; i += 1) { ids.push((await put({ uploadId: uuid(i + 1) })).body.photoId); clock.t += MIN; }
+  const other = await put({ ticket: ticketFor(G), uploadId: uuid(9) });
+  const seen = [];
+  let cursor;
+  for (let i = 0; i < 3; i += 1) {
+    const page = await api("ordA", "list", { facilityId: F, ...(cursor ? { cursor } : {}) }, s);
+    seen.push(...page.photos.map(p => p.photoId));
+    cursor = page.nextCursor;
+  }
+  assert.deepEqual(seen, [...ids].reverse());
+  assert.equal(cursor, null);
+  await rejects(api("ordA", "list", { facilityId: F, cursor: other.body.photoId }), "invalid-argument");
+  assert.equal((await api("ordA", "list", { facilityId: F, from: "2026-11-06" })).photos.length, 0);
+  assert.equal((await api("ordA", "list", { facilityId: F, to: "2026-11-04" })).photos.length, 0);
+  assert.equal((await api("ordA", "list", { facilityId: F, from: "2026-11-05", to: "2026-11-05" })).photos.length, 5);
+});
+
+test("施設の分離: 同じアップロードIDでも別の写真。別の施設の所属者はチケットも画像も使えない", async () => {
+  const a = await put({ ticket: ticketFor(F) });
+  const b = await put({ ticket: ticketFor(G) });
+  assert.notEqual(a.body.photoId, b.body.photoId);
+  assert.equal(b.body.created, true);
+  assert.equal((await image("adminB", { facility: F, photo: a.body.photoId })).statusCode, 404);
+  assert.equal((await image("adminB", { facility: G, photo: a.body.photoId })).statusCode, 404, "施設を変えても別の施設の写真は読めない");
+  assert.equal((await image("adminA", { facility: F, photo: b.body.photoId })).statusCode, 404);
+});
+
+// ================= 画像の取得 =================
+test("画像: ログイン必須で、キャッシュさせない。サムネイルと原本を返す", async () => {
+  const r = await put();
+  const noAuth = await image(null, { photo: r.body.photoId });
+  assert.equal(noAuth.statusCode, 401);
+  assert.equal(noAuth.headers["cache-control"], "private, no-store");
+  const badToken = resOf();
+  await svc.handleImage(reqOf({ method: "GET", query: { facility: F, photo: r.body.photoId }, headers: { Authorization: "Bearer forged" } }), badToken);
+  assert.equal(badToken.statusCode, 401);
+  const full = await image("ordA", { photo: r.body.photoId });
+  assert.deepEqual([full.statusCode, full.body, full.headers["content-type"], full.headers["cache-control"], full.headers["x-content-type-options"]], [200, baseJpeg, "image/jpeg", "private, no-store", "nosniff"]);
+  const thumb = await image("ordA", { photo: r.body.photoId, size: "thumb" });
+  assert.equal(thumb.statusCode, 200);
+  assert.notDeepEqual(thumb.body, baseJpeg);
+});
+
+test("画像: 見えない理由で応答を変えない(未所属・形式違い・存在しない写真・施設の対象外はすべて 404)", async () => {
+  const r = await put();
+  const id = r.body.photoId;
+  const results = [
+    await image("nobody", { photo: id }), await image("ordA", { photo: "0".repeat(64) }), await image("ordA", { photo: "x" }),
+    await image("ordA", { photo: id, size: "huge" }), await image("ordA", { facility: "../fA", photo: id })
+  ];
+  enabled.facilities = [G];
+  results.push(await image("ordA", { photo: id }));
+  assert.ok(results.every(x => x.statusCode === 404), JSON.stringify(results.map(x => x.statusCode)));
+  assert.equal(new Set(results.map(x => JSON.stringify(x.body))).size, 1);
+});
+
+test("画像: 所属を外されると次の要求から読めない(毎回確かめる)", async () => {
+  const r = await put();
+  assert.equal((await image("ordA", { photo: r.body.photoId })).statusCode, 200);
+  await db.doc(`facilities/${F}/members/ordA`).delete();
+  assert.equal((await image("ordA", { photo: r.body.photoId })).statusCode, 404);
+});
+
+// ================= ディーラーの閲覧(受注閲覧の権限と独立) =================
+const dealerHeaders = { "X-Dealer-Company": "cX", "X-Dealer-Device": "device" };
+const dealerList = (data = {}) => api("staffX", "dealerList", { companyId: "cX", ...data });
+const share = (shared, uid = "subA") => api(uid, "setDealerShare", { facilityId: F, localDealerId: "dA", shared });
+
+test("共有: 管理者・副管理者だけが許可でき、関連付けのない発注先は許可できない。許可前の写真は見えない", async () => {
+  await rejects(share(true, "ordA"), "permission-denied");
+  await rejects(share(true, "adminB"), "permission-denied");
+  await db.doc(`facilities/${F}/facilityDealers/dNone`).set({ facilityId: F, name: "未関連付け" });
+  await rejects(api("adminA", "setDealerShare", { facilityId: F, localDealerId: "dNone", shared: true }), "failed-precondition");
+  const before = await put({ uploadId: uuid(1) });
+  clock.t += MIN;
+  await share(true);
+  clock.t += MIN;
+  const after = await put({ uploadId: uuid(2) });
+  const r = await dealerList({ facilityId: F });
+  assert.deepEqual(r.photos.map(p => p.photoId), [after.body.photoId]);
+  assert.deepEqual(r.facilities, [{ facilityId: F, name: "fA眼科" }]);
+  assert.equal((await image("staffX", { photo: after.body.photoId, headers: dealerHeaders })).statusCode, 200);
+  assert.equal((await image("staffX", { photo: before.body.photoId, headers: dealerHeaders })).statusCode, 404);
+});
+
+test("独立: 受注閲覧の許可があっても写真は見えず、写真の許可は受注の許可を作らない", async () => {
+  const r = await put();
+  // 受注閲覧を許可中(既存の形)。写真の許可はない
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).update({ status: "active", currentGrantId: "gOrder" });
+  await db.doc("dealerPortalGrants/gOrder").set({ companyId: "cX", facilityId: F, localDealerId: "dA", status: "active", effectiveFrom: Timestamp.fromMillis(T0 - MIN) });
+  assert.deepEqual((await dealerList()).facilities, []);
+  await rejects(dealerList({ facilityId: F }), "permission-denied");
+  assert.equal((await image("staffX", { photo: r.body.photoId, headers: dealerHeaders })).statusCode, 404);
+  // 受注の許可を消して、写真だけを許可する
+  await db.doc("dealerPortalGrants/gOrder").delete();
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).update({ status: "proposed", currentGrantId: null });
+  await share(true);
+  assert.equal((await db.collection("dealerPortalGrants").get()).size, 0, "写真の許可は dealerPortalGrants に入らない");
+  const link = (await db.doc(`facilities/${F}/dealerPortalLinks/dA`).get()).data();
+  assert.deepEqual([link.status, link.currentGrantId], ["proposed", null], "関連付けを変えない");
+  const portal = createDealerPortalService({ db, FieldValue, Timestamp, FieldPath });
+  assert.equal((await portal.allowedScope("cX")).size, 0, "受注の閲覧範囲に入らない");
+});
+
+test("独立: 受注閲覧を取り消しても写真の共有は続き、写真の共有を取り消しても受注の許可に触らない", async () => {
+  await share(true);
+  clock.t += MIN;
+  const r = await put();
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).update({ status: "revoked", currentGrantId: null });   // 受注閲覧の取消
+  assert.deepEqual((await dealerList({ facilityId: F })).photos.map(p => p.photoId), [r.body.photoId]);
+  await db.doc("dealerPortalGrants/gOrder").set({ companyId: "cX", facilityId: F, localDealerId: "dA", status: "active" });
+  await share(false);
+  assert.equal((await db.doc("dealerPortalGrants/gOrder").get()).get("status"), "active");
+  assert.equal((await image("staffX", { photo: r.body.photoId, headers: dealerHeaders })).statusCode, 404, "取消はすぐ反映される");
+  assert.deepEqual((await dealerList()).facilities, []);
+});
+
+test("共有: 再び許可すると、それ以前と取消の間の写真は見えない", async () => {
+  await share(true);
+  clock.t += MIN;
+  const during = await put({ uploadId: uuid(1) });
+  await share(false);
+  clock.t += MIN;
+  const revokedTime = await put({ uploadId: uuid(2) });
+  clock.t += MIN;
+  await share(true);
+  clock.t += MIN;
+  const after = await put({ uploadId: uuid(3) });
+  assert.deepEqual((await dealerList({ facilityId: F })).photos.map(p => p.photoId), [after.body.photoId]);
+  for (const r of [during, revokedTime]) assert.equal((await image("staffX", { photo: r.body.photoId, headers: dealerHeaders })).statusCode, 404);
+});
+
+test("共有: 発注先の変更・関連付けの会社の変更の後は公開を止める。別の会社・未確認の担当者は読めない", async () => {
+  await share(true);
+  clock.t += MIN;
+  const r = await put();
+  await rejects(api("stranger", "dealerList", { companyId: "cX" }), "permission-denied");
+  assert.equal((await image("stranger", { photo: r.body.photoId, headers: dealerHeaders })).statusCode, 404);
+  assert.equal((await image("staffX", { photo: r.body.photoId, headers: { ...dealerHeaders, "X-Dealer-Company": "cY" } })).statusCode, 404);
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).update({ companyId: "cY" });
+  assert.deepEqual((await dealerList()).facilities, []);
+  await db.doc(`facilities/${F}/dealerPortalLinks/dA`).update({ companyId: "cX" });
+  assert.equal((await dealerList()).facilities.length, 1);
+  await db.doc(`facilities/${F}/facilityDealers/dA`).update({ orderEmails: ["changed@example.jp"] });
+  assert.deepEqual((await dealerList()).facilities, [], "発注先の識別項目が変わると止まる");
+  assert.equal((await api("adminA", "getSettings", { facilityId: F })).dealers[0].stale, true);
+});
+
+test("ディーラーは削除・設定の操作ができず、一覧の項目も医療機関と同じ列挙だけ", async () => {
+  await share(true);
+  clock.t += MIN;
+  const r = await put();
+  await rejects(api("staffX", "delete", { facilityId: F, photoId: r.body.photoId }), "permission-denied");
+  await rejects(api("staffX", "getSettings", { facilityId: F }), "permission-denied");
+  const { photos } = await dealerList({ facilityId: F });
+  assert.deepEqual(Object.keys(photos[0]).sort(), ["blurWarned", "height", "lastSurgeryDate", "photoId", "seq", "sessionId", "takenAt", "width"]);
+});
+
+test("設定の表示: 関連付け・共有の状態を返し、コードのハッシュは返さない", async () => {
+  await share(true);
+  const s = await api("adminA", "getSettings", { facilityId: F });
+  assert.deepEqual([s.accessCodeSet, s.entryIssued], [true, true]);
+  assert.deepEqual([s.dealers[0].localDealerId, s.dealers[0].linked, s.dealers[0].shared, s.dealers[0].stale, s.dealers[0].companyName], ["dA", true, true, false, "X商事"]);
+  await rejects(api("ordA", "getSettings", { facilityId: F }), "permission-denied");
+});
+
+// ================= 片付け =================
+test("片付け: 記録のない古いオブジェクトだけを消し、新しいもの・記録のあるもの・形の違うものは残す", async () => {
+  const r = await put();
+  const d = (await photoDoc(r.body.photoId)).data();
+  const orphan = `${F}/${"a".repeat(64)}_${"b".repeat(16)}.jpg`;
+  bucket.objects.set(orphan, { bytes: Buffer.from("x"), updatedMs: clock.t });
+  bucket.objects.set("other/file.txt", { bytes: Buffer.from("x"), updatedMs: clock.t });
+  const replaced = `${F}/${r.body.photoId}_${"c".repeat(16)}.jpg`;   // 同じ写真の、記録を作れなかった試行
+  bucket.objects.set(replaced, { bytes: Buffer.from("x"), updatedMs: clock.t });
+  assert.equal((await svc.cleanup()).removedObjects, 0, "送信中かもしれない新しいものは消さない");
+  clock.t += 25 * 60 * MIN;
+  assert.equal((await svc.cleanup()).removedObjects, 2);
+  assert.deepEqual([...bucket.objects.keys()].sort(), [d.storagePath, d.thumbPath, "other/file.txt"].sort());
+});
+
+test("片付け: 期限切れの回数制限の記録だけを消す", async () => {
+  await rejects(verify(TOKEN, "999999"), "permission-denied");
+  assert.equal((await db.collection("stickerRateLimits").get()).size, 2);
+  assert.equal((await svc.cleanup()).removedLimits, 0);
+  clock.t += STICKER_RATE_LIMITS.windowMs + 1;
+  assert.equal((await svc.cleanup()).removedLimits, 2);
+  assert.equal((await db.collection("stickerRateLimits").get()).size, 0);
+});
+
+// ================= バケットの部品 =================
+test("バケットの部品: 保存はキャッシュ禁止、ないものの読み出しは null、削除は存在しなくても成功、一覧はページごと", async () => {
+  const calls = [];
+  const file = (name) => ({
+    save: async (bytes, opts) => calls.push(["save", name, opts]),
+    download: async () => { if (name === "none") throw Object.assign(new Error("x"), { code: 404 }); if (name === "boom") throw new Error("boom"); return [Buffer.from("ok")]; },
+    delete: async (opts) => calls.push(["delete", name, opts])
+  });
+  const b = createStickerBucket(() => ({ file, getFiles: async (q) => [[{ name: "a", metadata: { updated: "2026-11-05T00:00:00Z" } }], q.pageToken ? null : { pageToken: "n" }] }));
+  await b.save("x.jpg", Buffer.from("x"));
+  assert.deepEqual(calls[0][2], { resumable: false, contentType: "image/jpeg", metadata: { cacheControl: "private, no-store" } });
+  assert.deepEqual(await b.read("y"), Buffer.from("ok"));
+  assert.equal(await b.read("none"), null);
+  await assert.rejects(b.read("boom"));
+  await b.delete("x.jpg");
+  assert.deepEqual(calls[1][2], { ignoreNotFound: true });
+  const page = await b.list();
+  assert.deepEqual([page.items[0].name, page.nextPageToken], ["a", "n"]);
+  assert.equal((await b.list({ pageToken: "n" })).nextPageToken, null);
+});

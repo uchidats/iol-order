@@ -5,8 +5,8 @@ import {
   STICKER_LIMITS, STICKER_RATE_LIMITS, MAX_IMAGE_PIXELS,
   isFacilityId, isSha256Hex, newEntryToken, isEntryToken, parseBlurWarned, usageDayKey, sha256Hex,
   hashAccessCode, verifyAccessCode, issueTicket, verifyTicket,
-  photoIdOf, photoObjectPaths, isPhotoOfFacility, decideExistingPhoto, checkUploadLimits, planPhotoRegistration,
-  rateLimitDocId, isRateLimited, recordRateLimitFailure, sanitizeJpeg
+  photoIdOf, photoObjectPaths, parseObjectName, newAttemptId, isPhotoOfFacility, decideExistingPhoto, checkUploadLimits, planPhotoRegistration,
+  rateLimitDocId, isRateLimited, recordRateLimitFailure, refundRateLimitAttempt, sanitizeJpeg
 } from "../functions/src/sticker-photo.js";
 
 const SECRET = "x".repeat(32);
@@ -118,8 +118,8 @@ test("施設の分離: 同じアップロードIDでも施設が違えば別の 
   const b = photoIdOf("f2", UPLOAD_ID);
   assert.notEqual(a, b);
   assert.equal(isSha256Hex(a), true);
-  assert.ok(photoObjectPaths("f1", a, SHA_A).storagePath.startsWith("f1/"));
-  assert.ok(photoObjectPaths("f2", b, SHA_A).storagePath.startsWith("f2/"));
+  assert.ok(photoObjectPaths("f1", a, newAttemptId()).storagePath.startsWith("f1/"));
+  assert.ok(photoObjectPaths("f2", b, newAttemptId()).storagePath.startsWith("f2/"));
 });
 
 test("施設の分離: 施設 ID に区切りの文字があっても別の入力と重ならない", () => {
@@ -131,19 +131,21 @@ test("形式違いの施設・IDからは photoId とパスを作らない", () 
   assert.throws(() => photoIdOf("f1", "not-a-uuid"));
   assert.throws(() => photoIdOf("f1", UPLOAD_ID.toUpperCase()));
   assert.throws(() => photoIdOf("a/b", UPLOAD_ID));
-  assert.throws(() => photoObjectPaths("../f2", SHA_A, SHA_A));
-  assert.throws(() => photoObjectPaths("f1", "x", SHA_A));
+  assert.throws(() => photoObjectPaths("../f2", SHA_A, newAttemptId()));
+  assert.throws(() => photoObjectPaths("f1", "x", newAttemptId()));
   assert.throws(() => photoObjectPaths("f1", SHA_A, "x"));
 });
 
-test("オブジェクト名: 同じ内容は同じ名前、内容が違えば別の名前で、互いを上書きしない", () => {
+test("オブジェクト名: 試行ごとに別の名前で、互いを上書きしない。名前から施設と写真を読める", () => {
   const id = photoIdOf("f1", UPLOAD_ID);
-  const a = photoObjectPaths("f1", id, SHA_A);
-  assert.deepEqual(a, photoObjectPaths("f1", id, SHA_A));
-  const b = photoObjectPaths("f1", id, SHA_B);
-  assert.notEqual(a.storagePath, b.storagePath);
-  assert.notEqual(a.thumbPath, b.thumbPath);
-  assert.notEqual(a.storagePath, a.thumbPath);
+  const first = photoObjectPaths("f1", id, newAttemptId());
+  const second = photoObjectPaths("f1", id, newAttemptId());
+  assert.notEqual(first.storagePath, second.storagePath);
+  assert.ok(first.storagePath.startsWith(`f1/${id}_`) && first.storagePath.endsWith(".jpg"));
+  assert.deepEqual(parseObjectName(first.storagePath), { facilityId: "f1", photoId: id, thumb: false });
+  assert.deepEqual(parseObjectName(first.thumbPath), { facilityId: "f1", photoId: id, thumb: true });
+  for (const name of ["", "f1/x.jpg", `${id}_0000000000000000.jpg`, null]) assert.equal(parseObjectName(name), null);
+  assert.throws(() => photoObjectPaths("f1", id, "not-an-attempt"));
 });
 
 test("記録がその施設のものかを確かめる", () => {
@@ -199,7 +201,7 @@ test("登録: 再認証の後の再送は記録・枚数・容量を増やさず
   const plan = planPhotoRegistration({ existing: stored(), session: null, usage: { photos: 300, bytes: 0 }, facilityId: "f1", sha256: SHA_A, bytes: 10 });
   assert.equal(plan.action, "existing");
   assert.equal(plan.created, false);
-  assert.equal(plan.discardObject, false);
+  assert.equal(plan.discardObject, true, "記録が指すのは別の試行のオブジェクト。この試行の分だけを消す");
   assert.equal(plan.usage, undefined);
   assert.equal(plan.session, undefined);
 });
@@ -274,6 +276,13 @@ test("回数制限: max を超えると停止し、窓を過ぎると数え直�
   const later = recordRateLimitFailure(state, STICKER_RATE_LIMITS.tokenMax, NOW + 16 * MIN);
   assert.equal(later.count, 1);
   assert.equal(isRateLimited(null, NOW), false);
+});
+
+test("回数制限: 確認に成功した1回を返す。停止は解除しない", () => {
+  assert.deepEqual(refundRateLimitAttempt({ count: 3, windowStart: NOW, blockedUntil: 0 }), { count: 2, windowStart: NOW, blockedUntil: 0 });
+  assert.equal(refundRateLimitAttempt({ count: 0, blockedUntil: NOW + 5 }).count, 0);
+  assert.equal(refundRateLimitAttempt({ count: 3, blockedUntil: NOW + 5 }).blockedUntil, NOW + 5);
+  assert.equal(refundRateLimitAttempt(null), null);
 });
 
 test("回数制限の文書の ID に元の値を含めない", () => {

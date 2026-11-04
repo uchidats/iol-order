@@ -25,6 +25,9 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { createMailDispatchService, createResendSender, verifyWebhookSignature } from "./src/order-mail-outbox.js";
 import { createSettingsAuditService } from "./src/settings-audit.js";
 import { createDealerPortalService, parseTestAccess } from "./src/dealer-portal.js";
+import { getStorage } from "firebase-admin/storage";
+import { createStickerPhotoService, clientIpOf, STICKER_ORIGIN } from "./src/sticker-photo-service.js";
+import { createStickerBucket } from "./src/sticker-bucket.js";
 
 initializeApp();
 
@@ -258,3 +261,33 @@ export const indexDealerReceipts = onDocumentCreated({ region: REGION, maxInstan
     try { await dealerPortal.indexOrderEvent({ facilityId: event.params.facilityId, orderId: event.params.orderId, eventTime: event.time }); }
     catch (e) { console.error("dealer receipt indexing failed (will retry):", event.params.facilityId, event.params.orderId, e); throw e; }
   });
+
+// IOL シール写真(R09。docs/iol-sticker-photo-design.md)。注文の受付・メール・受注一覧の処理とは別の機能スイッチで止められる(既定は停止)。
+// 有効にする施設は STICKER_PHOTO_FACILITY_IDS(カンマ区切り)。ログインなしで呼べるのは確認(stickerEntryApi)と、チケットでの保存(stickerPhotoUpload)だけ
+const STICKER_PHOTO_ENABLED = defineBoolean("STICKER_PHOTO_ENABLED", { default: false });
+const STICKER_PHOTO_FACILITY_IDS = defineString("STICKER_PHOTO_FACILITY_IDS", { default: "" });
+const STICKER_PHOTO_BUCKET = defineString("STICKER_PHOTO_BUCKET", { default: "medconf-iol-dev-sticker-photos" });
+const STICKER_TICKET_SECRET = defineSecret("STICKER_TICKET_SECRET");   // 送信チケットの署名の鍵。確認と保存の関数だけに渡す
+const stickerPhotos = createStickerPhotoService({
+  db: getFirestore(), FieldValue, Timestamp,
+  bucket: createStickerBucket(() => getStorage().bucket(STICKER_PHOTO_BUCKET.value())),
+  isEnabled: () => STICKER_PHOTO_ENABLED.value(),
+  facilityIds: () => csv(STICKER_PHOTO_FACILITY_IDS.value()),
+  ticketSecret: () => STICKER_TICKET_SECRET.value(),
+  verifyIdToken: (token) => getAuth().verifyIdToken(token),
+  // 受注閲覧の許可は使わない。担当者本人の確認だけを既存の処理に任せる(ディーラー画面の停止中は通さない)
+  authorizeDealer: async (auth, companyId, deviceToken) => {
+    if (!DEALER_PORTAL_ENABLED.value()) throw new RegistrationError("failed-precondition", "ディーラー画面は現在ご利用いただけません");
+    return dealerPortal.authorizeStaff({ ...auth, dealerDevice: deviceToken, dealerTestMode: false }, companyId);
+  },
+  isAllowedOrigin: (origin) => origin === STICKER_ORIGIN || (isDemoProject() && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
+});
+export const stickerEntryApi = onCall({ ...options, secrets: [STICKER_TICKET_SECRET] },
+  (request) => wrap(({ data }) => stickerPhotos.verify({ data, ip: clientIpOf(request.rawRequest) }))(request));
+export const stickerPhotoApi = onCall(options, wrap(stickerPhotos.api));
+export const stickerPhotoUpload = onRequest({ region: REGION, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [STICKER_TICKET_SECRET],
+  timeoutSeconds: 300, memory: "1GiB", maxInstances: 10, concurrency: 1 }, stickerPhotos.handleUpload);
+export const stickerPhotoImage = onRequest({ region: REGION, serviceAccount: RUNTIME_SERVICE_ACCOUNT,
+  timeoutSeconds: 60, memory: "512MiB", maxInstances: 10 }, stickerPhotos.handleImage);
+export const stickerPhotoCleanup = onSchedule({ region: REGION, maxInstances: 1, serviceAccount: RUNTIME_SERVICE_ACCOUNT, schedule: "every 24 hours", timeZone: "Asia/Tokyo" },
+  async () => { if (STICKER_PHOTO_ENABLED.value()) await stickerPhotos.cleanup(); });

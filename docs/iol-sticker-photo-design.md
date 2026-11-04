@@ -203,7 +203,7 @@ IOLシール写真 ▲ ⓘ
 
 - **アクセスコード**: 未設定なら「未設定」+[設定]。設定後は「設定済み」と変更日だけを表示し、コードは再表示しない(決定 §0-8)。[変更] で半角数字6桁以上を入力 / [自動で作る] → [変更する](確認ダイアログ)。変更後はその画面に1回だけ新しいコードを表示し、看護師へ共有する案内を出す(閉じると再表示しない)。変更はすぐ有効。
 - **QRコード**: 施設に入口トークンがまだなければ、最初に [QRコードを表示] か印刷を押したときにサーバーが発行する(§8-1)。3つのボタンは補助ボタンの大きさ(36px)。[QRコードを作り直す] は、印刷した古い QR を無効にしたいとき(紛失など)だけ使う(確認ダイアログ:「これまでに印刷・貼付したQRコードは使えなくなります。新しいQRコードを印刷して貼り替えてください」)。
-- **ディーラーへの共有**: 運営者が関連付けた発注先(`dealerPortalLinks` が active)ごとにチェック。受注一覧の閲覧の許可(「ディーラー画面での閲覧」)とは別で、どちらか一方だけでもよい。関連付けがなければ「共有できるディーラーはありません」とだけ表示する(理由は ⓘ)。チェックを入れた時点以降に送られた写真だけが共有される。許可は `stickerPhotoGrants` に記録する(§8-3)。
+- **ディーラーへの共有**: 運営者が会社に関連付けた発注先(`dealerPortalLinks` に `companyId` がある。`status` は問わない)ごとにチェック。受注一覧の閲覧の許可(「ディーラー画面での閲覧」)とは別で、どちらか一方だけでもよい。関連付けがなければ「共有できるディーラーはありません」とだけ表示する(理由は ⓘ)。チェックを入れた時点以降に送られた写真だけが共有される。許可は `stickerPhotoGrants` に記録する(§8-3)。
 - ⓘ: 「看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。」
 - 「送信の受け付け」の一時停止・保存期間は第2段階。
 
@@ -359,12 +359,12 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
   1. `verify { token, code }` → トークンが active・コードのハッシュが一致なら、**送信チケット**(サーバー署名の HMAC トークン。`STICKER_TICKET_SECRET` で署名。中身: 施設 ID・セッション ID・コードの世代・発行時刻・有効期限 30 分・乱数)と施設名、**前回の送信の情報** `lastSentAt`(ISO。なければ null)と `lastSurgeryDate`(YYYY-MM-DD。その写真のセッションで未入力なら null)を返す。チケットはタブのメモリにだけ置く。失敗の応答には施設名・最終送信日時を含めない。
      - `lastSentAt` = その施設の写真のうち、**保存が正常に完了した**(`status: "stored"`。削除した写真は除く)最新の `takenAt`。`lastSurgeryDate` = その同じ写真の `lastSurgeryDate`(セッションの値)。`stickerPhotos` を `status`・`takenAt` の降順で1件だけ読む(複合インデックスを1つ追加)。画像・枚数・ID は返さない。
      - アップロードの応答(`stickerPhotoUpload`)にも、その写真の `takenAt` と `lastSurgeryDate` を含める(画面の表示の更新用)。
-  2. 失敗はトークンの有無・コードの違いを区別しない同じ応答。**回数制限**: 失敗の回数を、トークンごとに 10 回/10 分、送信元 IP ごとに 30 回/10 分で数え、超えたら 15 分停止する。記録は専用の `stickerRateLimits/{SHA-256(種類 + 値)}` に置く(既存の `rateLimits` は uid 単位のため変更しない。IP はハッシュだけ)。6桁の総当たり(100万通り)はこの制限で実用上不可能。コードを変えると、旧コードでの確認は以後失敗し、発行済みのチケットも世代の不一致で拒否する。
+  2. 失敗はトークンの有無・コードの違いを区別しない同じ応答。**回数制限**: 失敗の回数を、トークンごとに 10 回/10 分、送信元 IP ごとに 30 回/10 分で数え、超えたら 15 分停止する。記録は専用の `stickerRateLimits/{SHA-256(種類 + 値)}` に置く(既存の `rateLimits` は uid 単位のため変更しない。IP はハッシュだけ)。6桁の総当たり(100万通り)はこの制限で実用上不可能。コードを変えると、旧コードでの確認は以後失敗し、発行済みのチケットも世代の不一致で拒否する。 回数は**確認の前に確保**し、成功したら返す(同時に送っても上限を超えて試せない)。トークンが無効なときも同じ読み取りとコードの計算を行い、応答と処理の差を抑える。機能の停止中も同じ応答。
 - 監査: `verify` の成功・停止、コードの変更、QR の作り直し、ディーラーへの共有の変更、写真の削除を `stickerAuditLogs` に記録(IP は保存せずハッシュのみ)。写真の保存は `stickerPhotos` の記録で足りる。
 
 ### 8-2. 画像の保存(専用の GCS バケット)
 
-- バケットは写真専用に新設する(`medconf-iol-dev-sticker-photos`。同じプロジェクト内。別のプロジェクトは作らない)。Firebase Storage には連携せず、GCS のバケットと IAM で管理する(決定 §0-36)。クライアントには権限がないため、読み書きは Functions を通すしかない。パスは `{facilityId}/{photoId}_{SHA-256 の先頭 32 文字}.jpg`(再送でも同じ名前になるよう、日付を含めない。画像の SHA-256 を含めるので、同じIDで内容の違う送信が同時に届いても互いを上書きしない)。サムネイル(長辺 400px)は同じ名前に `_thumb` を付けたパスに Functions が作る(一覧の読み込みを軽くする。原本は触らない)。
+- バケットは写真専用に新設する(`medconf-iol-dev-sticker-photos`。同じプロジェクト内。別のプロジェクトは作らない)。Firebase Storage には連携せず、GCS のバケットと IAM で管理する(決定 §0-36)。クライアントには権限がないため、読み書きは Functions を通すしかない。パスは `{facilityId}/{photoId}_{試行のID}.jpg`。試行のIDは送信の試行ごとの乱数で、同時の送信が互いのオブジェクトを上書き・削除しない(記録が指すのは1つの試行のオブジェクトだけ)。サムネイル(長辺 400px)は同じ名前に `_thumb` を付けたパスに Functions が作る(一覧の読み込みを軽くする。原本は触らない)。
 - **送受信の経路: A 案(Functions がプロキシ)を採用**(決定 §0-10。B 案は比較のために残す)。権限の確認・アクセスコードの認証・送信チケットの検証はすべてサーバー(Functions)で行い、ブラウザの判定は表示の補助にすぎない。
   - **A 案(採用): Functions がプロキシ**。アップロードは HTTP 関数 `stickerPhotoUpload`(onRequest)に、ブラウザが画像のバイト列をそのまま PUT する(ヘッダーにチケット・アップロードID・SHA-256)。関数が検証してから自分の資格情報でバケットに書く。閲覧も HTTP 関数 `stickerPhotoImage`(onRequest)が、所属・許可を確認してからバケットから読み出して返す(`Cache-Control: private, no-store`。許可の取消をすぐ反映するため)。**署名付き URL を使わないので `iam.serviceAccountTokenCreator` は不要**。必要なのはバケットへのオブジェクトの読み書き・削除だけ。関数の帯域と実行時間を使うが、量(§8-2 末尾)からみて問題ない。
   - **Functions(第2世代 = Cloud Run)の容量の制限(確認)**: HTTP 関数のリクエスト本文は **32MiB** まで、レスポンスも **32MiB** まで(ストリーミングでなければ)。画像の上限 15MB(§下)はどちらにも収まる。callable(`onCall`)はこの経路に使わない(JSON で base64 にすると 1.33 倍になり、メタデータ以外には向かない)。タイムアウトは `stickerPhotoUpload` を 300 秒、`stickerPhotoImage` を 60 秒に設定(既定 60 秒では遅い回線の 15MB の受信が切れうる)。メモリはサムネイル作成(`sharp`)のため 1GiB。同時実行は `maxInstances` 10・`concurrency` 1(画像処理のメモリを分けない)。**ウォームアップは行わない**(決定 §0-35。`verify` と `stickerPhotoUpload` は別の関数で、一方を呼んでも他方は起動しない。`minInstances` も設定しない)。送信の最初の1枚が数秒遅いことがあるが、画面は「送信中…」のまま待つ。実際の時間は §9-1 の検証で確かめる。
@@ -374,7 +374,7 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
   | 関数 | `Access-Control-Allow-Methods` | `Access-Control-Allow-Headers` |
   | --- | --- | --- |
   | `stickerPhotoUpload` | `PUT, OPTIONS` | `Content-Type, X-Sticker-Ticket, X-Upload-Id, X-Content-Sha256, X-Last-Surgery-Date, X-Blur-Warned` |
-  | `stickerPhotoImage` | `GET, OPTIONS` | `Authorization` |
+  | `stickerPhotoImage` | `GET, OPTIONS` | `Authorization, X-Dealer-Company, X-Dealer-Device`(後の2つはディーラーの担当者の確認) |
 
   - どちらも `Access-Control-Allow-Origin: https://iol.medconf.jp`(ほかのオリジンは拒否)・`Vary: Origin`・`Access-Control-Max-Age: 3600`。Cookie を使わないので `Access-Control-Allow-Credentials` は付けない。応答の項目は JSON の本文で返すので `Access-Control-Expose-Headers` も不要。
   - 上の表にないメソッドは 405。ローカルの検証でオリジン `http://127.0.0.1:*` を許可するのはエミュレータの設定だけ。callable(`stickerEntryApi`・`stickerPhotoApi`)の CORS は既存の callable と同じ。
@@ -392,7 +392,7 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 - **送信途中の失敗・再送時の重複防止**(**撮影ごとに固定のアップロードID** を基本とする。決定 §0-12・§0-30):
   1. ブラウザは **撮影した写真ごとに1回だけ** アップロードID(`crypto.randomUUID()`。UUID v4)を作り、画像と一緒に画面のメモリに持つ。自動の再送・[再送信]・チケットの期限切れの後のコードの再入力を経ても、その写真ではずっと同じIDを使う(`X-Upload-Id`)。「撮り直す」で新しい写真になったら新しいID。あわせて画像の SHA-256 を計算して送る。
   2. サーバーは `photoId = SHA-256(facilityId + ":" + uploadId)` で決める。**チケットとセッションを含めない**ので、再認証の後の再送も同じ `photoId` になる。施設を含むので、別の施設の写真とは衝突しない。形式が UUID v4 でないIDは 400。
-  3. 保存の順序: (a) チケットと本文を検証する → (b) `photoId` の記録があれば、バケットに書かず既存の記録を返して 200(`created: false`)。SHA-256 が記録と違うときは 409(既存の写真を上書きしない)。削除済みの写真は復元しない → (c) 上限を事前に確認する → (d) メタデータを除去してバケットに保存する(同じ内容は同じ名前なので途中で失敗した再試行は上書きになる。内容が違えば別の名前になる)→ (e) トランザクションで記録を登録する(下の「送信枚数・容量の管理」)。同じ写真の同時送信でも登録は1件だけ → (f) サムネイルを作る。
+  3. 保存の順序: (a) チケットと本文を検証する → (b) `photoId` の記録があれば、バケットに書かず既存の記録を返して 200(`created: false`)。SHA-256 が記録と違うときは 409(既存の写真を上書きしない)。削除済みの写真は復元しない → (c) 上限を事前に確認する → (d) メタデータを除去し、この試行だけの名前でバケットに保存する → (e) トランザクションで記録を登録する(下の「送信枚数・容量の管理」)。同じ写真の同時送信でも登録は1件だけで、登録できなかった試行(再送・内容の違い・上限・確認の後の削除)は**自分のオブジェクトだけ**を消す → (f) サムネイルを作り、まだ保存済みなら記録に付ける(作る間に削除されたら消す)。
   4. **SHA-256 は受信内容の検証と記録にだけ使う**。IDが違う送信は、画像が同じ内容でも別の写真として保存する(看護師が意図して同じ台紙をもう一度送る場合もあるため、内容の一致だけで自動的に除外しない)。
   5. 本文の受信が途中で切れたとき(`Content-Length` に満たない)は保存せず 400。ブラウザは自動で最大 3 回(1・2・4 秒後)再送し、それでも失敗したら [再送信] を出す(画像は画面のメモリに残す)。チケットの期限切れ(401)は §3-4 のとおりコードの再入力へ進む。
   6. 保存に成功したのに応答がブラウザに届かなかった場合も、再送(再認証の後を含む)が同じIDで既存の記録を返すので二重にならない。「送信しました」の枚数は、サーバーの応答の `created: true/false` で数える(重複は数えない)。タブを閉じると写真もIDも消えるので再送は起きず、もう一度撮れば別の写真になる。
@@ -409,7 +409,7 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 - **今回の最終手術日の受け渡し**(決定 §0-18〜20): アップロードのヘッダー `X-Last-Surgery-Date`(任意。YYYY-MM-DD)で、画面が持つセッションの値を毎回送る。サーバーは形式と範囲(**日本時間の今日より後は不可**。過去は制限しない)を確かめ、形式違い・未来の日付は 400(画面は送る前に同じ確認をする)。
   - **セッションの値はサーバーが最初の写真で固定する**: 登録のトランザクションの中で、`stickerSessions` の文書があればその値を使い、ヘッダーの値が違っても新しい写真にはセッションの値を付ける(応答で返すので、画面の表示もそれにそろう)。文書がなければヘッダーの値(または null)をセッションの値として作る。
   - 送信済みの写真の値をまとめて付け直す API(`setSessionInfo` など)は初期実装では作らない(決定 §0-20)。
-- **メタデータと画像の読み出し**(決定 §0-37): 一覧は `list { facilityId, from, to, cursor }`・`dealerList`(callable。最大 60 件/回)で受け取る。権限の確認は関数の中の1か所で行い、返す項目を列挙する(`photoId`・`sessionId`・`seq`・`takenAt`・`lastSurgeryDate`・`width`・`height`・`blurWarned`。`storagePath`・`uploadId`・`sha256` は返さない)。サムネイル・原本は `stickerPhotoImage?facility=…&photo=…&size=thumb|full`(HTTP 関数。所属または共有の許可を毎回確認)から読む。`<img>` の `src` は認証のヘッダーを送れないので、画面が `fetch` に Firebase Auth の ID トークンのヘッダーを付けて取得し、Blob の URL を `<img>` に渡す(画面を閉じたら解放する)。URL をページの外へ持ち出さない(ダウンロード・共有ボタンは置かない)。
+- **メタデータと画像の読み出し**(決定 §0-37): 一覧は `list { facilityId, from, to, cursor }`・`dealerList { companyId, deviceToken, facilityId, from, to, cursor }`(callable。最大 60 件/回。`dealerList` は `facilityId` を省くと閲覧できる施設だけを返す)で受け取る。権限の確認は関数の中の1か所で行い、返す項目を列挙する(`photoId`・`sessionId`・`seq`・`takenAt`・`lastSurgeryDate`・`width`・`height`・`blurWarned`。`storagePath`・`uploadId`・`sha256` は返さない)。サムネイル・原本は `stickerPhotoImage?facility=…&photo=…&size=thumb|full`(HTTP 関数。所属または共有の許可を毎回確認)から読む。`<img>` の `src` は認証のヘッダーを送れないので、画面が `fetch` に Firebase Auth の ID トークンのヘッダーを付けて取得し、Blob の URL を `<img>` に渡す(画面を閉じたら解放する)。URL をページの外へ持ち出さない(ダウンロード・共有ボタンは置かない)。
 - **削除**(医療機関の管理者・副管理者): `delete { facilityId, photoId }` → Firestore に削除の記録を残し(`status: "deleted"`)、バケットの原本とサムネイルを削除する(復元なし。誤送信用)。
 - 容量と料金の目安: 1枚 1.7MB(実測)〜5MB(シールの多い台紙の見込み)× 月 100 枚 ≈ 0.17〜0.5GB/月/施設。1年で 2〜6GB/施設。保存料は仮に $0.03/GB・月として 1年後でも月 $0.2 未満/施設(東京の単価は導入前に見積もりツールで確認する。Firebase の無料枠の対象は米国の一部のリージョンだけ)。保存期間を決めるまでは残す(第3段階で自動削除)。
 
@@ -420,13 +420,13 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 | 看護師(ログインなし) | 送信と、確認の後の最終送信日時の表示だけ(過去の画像・枚数・注文の情報は見られない。一覧・削除もできない) | 入口トークン + アクセスコード → 送信チケット(§8-1) |
 | 医療機関の所属者(4 役割) | 自施設の写真の一覧・拡大 | `stickerPhotoApi` の `list` と `stickerPhotoImage` が、ログインと施設の所属をサーバーで確認する |
 | 医療機関の管理者・副管理者 | 上に加えて、アクセスコードの設定・QR の表示と印刷・ディーラーへの共有の許可と取消・写真の削除 | `isFacilityManager(fid)`(サーバーで再確認) |
-| ディーラーの担当者 | 共有を許可した施設の写真の一覧・拡大(削除不可) | 会社の担当者として有効(既存の `dealerPortalApi` と同じ確認。`authorizeStaff`)× `stickerPhotoGrants` の許可が有効 × 発注先の関連付け(`dealerPortalLinks`)が有効 × 許可の後に送られた写真 |
+| ディーラーの担当者 | 共有を許可した施設の写真の一覧・拡大(削除不可) | 会社の担当者として有効(既存の `dealerPortalApi` と同じ確認。`authorizeStaff`)× `stickerPhotoGrants` の許可が有効 × 関連付けの会社と発注先が許可の時点と同じ × 許可の後に送られた写真 |
 | 運営者(platformAdmin) | 停止・復旧の運用操作のみ(写真の閲覧は施設の所属者と同じ条件に限る) | 既存の運営者の確認 |
 
 - **ディーラーへの共有の許可**(決定 §0-26): 受注一覧の閲覧の許可とは**別のコレクション** `stickerPhotoGrants/{facilityId}_{localDealerId}` で管理する。`dealerPortalGrants` には写真の許可を入れない(既存の受注閲覧の処理は、会社と状態だけで `dealerPortalGrants` を読むため、同じコレクションに入れると写真の許可が受注の閲覧に影響する)。受注閲覧の処理は変更しない。
   - 項目: `{ facilityId, localDealerId, companyId, status: active|revoked, effectiveFrom, dealerFingerprint, grantedBy, grantedByRole, revokedAt?, revokedBy? }`。Rules はクライアントの読み書きをすべて拒否し、サーバーだけが扱う。
   - 施設設定「IOLシール写真」の「ディーラーへの共有」(§4)のチェックで、管理者・副管理者が ON(`effectiveFrom` を設定)・OFF(取消)する。再び ON にすると `effectiveFrom` を新しくし、取消の間と以前の写真は見えない。操作は `stickerAuditLogs` に記録する。
-  - 許可できるのは、運営者が関連付けた発注先(`dealerPortalLinks` が active)だけ。受注一覧の許可がなくても写真だけ共有でき、逆も同じ。許可した時点の発注先の指紋の照合は受注の許可と同じ考え方で、関連付けの会社が変わった・発注先の識別項目が変わった許可は無効として扱う。
+  - 許可できるのは、運営者が会社に関連付けた発注先(`dealerPortalLinks` に `companyId` がある)だけ。関連付けの `status`(`active` は受注閲覧の許可中を表す)と `currentGrantId` は読まないので、受注閲覧の許可・取消は写真の共有に影響しない。受注一覧の許可がなくても写真だけ共有でき、逆も同じ。許可した時点の発注先の指紋の照合は受注の許可と同じ考え方で、関連付けの会社が変わった・発注先の識別項目が変わった許可は無効として扱う。
 - ディーラー側の一覧は `dealerPortalApi` ではなく `stickerPhotoApi` の `dealerList` と、同じ `stickerPhotoImage`(ディーラーの担当者の確認を含む)で返す(受注一覧の処理に組み込まない方針)。返すのは写真のメタデータと画像だけ(施設名は許可の範囲の表示用)。
 - 許可より前に送られた写真は返さない(`takenAt >= effectiveFrom`)。取消の後は一覧から消え、画像も読めなくなる(毎回確認する)。
 
@@ -495,7 +495,7 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 | # | 範囲 | 主な成果物 | テスト |
 | --- | --- | --- | --- |
 | 1 | 純粋な処理(共通) | `src/domain/sticker-photo.js`(コードの形式・上限の定数・セッションのまとまり・QR の URL)、`functions/src/sticker-photo.js`(同じ定数・チケットの署名/検証・`photoId` の決定・上限の判定・コードのハッシュ・メタデータの除去)。ピンぼけ判定は既存の `src/domain/image-sharpness.js` を使う。**実装済み(2026-11-04。ブランチ `feature/r09-sticker-photo`。どこからも呼ばれていない)** | unit(上限の一致を含む) |
-| 2 | サーバー | `stickerEntryApi`(`verify`)、`stickerPhotoUpload`、`stickerPhotoApi`(`list`・`dealerList`・`delete`・`getSettings`・`setAccessCode`・`getEntryQr`・`rotateEntryQr`・`setDealerShare`〔`stickerPhotoGrants`〕)、`stickerPhotoImage`、`stickerPhotoCleanup`。サムネイル作成、バケットの部品、機能スイッチ・施設の一覧 | Functions(Firestore エミュレータと偽のバケット) |
+| 2 | サーバー | `stickerEntryApi`(`verify`)、`stickerPhotoUpload`、`stickerPhotoApi`(`list`・`dealerList`・`delete`・`getSettings`・`setAccessCode`・`getEntryQr`・`rotateEntryQr`・`setDealerShare`〔`stickerPhotoGrants`〕)、`stickerPhotoImage`、`stickerPhotoCleanup`。サムネイル作成、バケットの部品、機能スイッチ・施設の一覧。**実装済み(2026-11-05。ブランチ `feature/r09-sticker-photo`。未配備。`functions/src/sticker-photo-service.js`・`functions/src/sticker-bucket.js`)** | Functions(Firestore エミュレータと偽のバケット) |
 | 3 | Rules | Firestore Rules とインデックス(§8-4 の一覧を全拒否) | Rules |
 | 4 | 看護師用画面 | `sticker.html`・`src/sticker/main.js`・`sticker-app.js`(4画面・最終送信日時と最終手術日の表示・今回の最終手術日の欄・カメラ〔既存の `src/ui/sticker-camera.js` を使う〕・セッション・再送・チケットの期限切れの再認証)、CSS、`stamp-assets` の対象に追加 | ブラウザ(仮想カメラ) |
 | 5 | 施設設定 | セクション「IOLシール写真」(コードの設定・「設定済み」・QR のモーダル〔「サイトを共有」と同じ部品の見た目〕・台紙を印刷〔A4・2列×5行。上部の表示の編集と発注先の選択。§4-2〕・QRコードのみ印刷〔8枚・切り取り線〕・ディーラーへの共有のチェック) | ブラウザ(印刷は `emulateMedia print` と PDF で確認) |

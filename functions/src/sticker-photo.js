@@ -5,7 +5,7 @@
  * 方針:
  * - 送信チケットは Secret の鍵で署名する。施設 ID はチケットから取り、クライアントの申告を使わない。
  * - photoId は施設とアップロードIDだけから決める。チケットとセッションを含めないので、再認証の後の再送も同じ写真になる。
- * - オブジェクト名に画像の SHA-256 を含める。同じIDで内容の違う送信が同時に届いても、互いのオブジェクトを上書きしない。
+ * - オブジェクト名は送信の試行ごとに固有。記録を作れなかった試行は自分のオブジェクトだけを消すので、同時の送信が保存済みの写真を消さない。
  * - 上限の判定と記録の決定は planPhotoRegistration にまとめ、呼び出し側は1つのトランザクションの中で使う。
  * - JPEG のメタデータの除去はバイト列の操作だけで、画像データは再圧縮しない。
  * - 上限の定数は src/domain/sticker-photo.js と同じ値(tests/sticker-photo.test.js で確かめる)。
@@ -191,15 +191,27 @@ export function photoIdOf(facilityId, uploadId) {
   return sha256Hex(`${facilityId}:${uploadId}`);
 }
 
+/** 送信の試行の ID(オブジェクト名に使う) */
+export const newAttemptId = () => randomBytes(8).toString("hex");
+
+const ATTEMPT_ID = /^[0-9a-f]{16}$/;
+const OBJECT_NAME = /^(.+)\/([0-9a-f]{64})_([0-9a-f]{16})(_thumb)?\.jpg$/;
+
 /**
- * 原本とサムネイルのオブジェクト名。同じ内容の再送は同じ名前(上書き)、内容が違えば別の名前になる。
- * @param {string} sha256 受信した画像の SHA-256
+ * 原本とサムネイルのオブジェクト名。試行ごとに別の名前なので、同時の送信が互いのオブジェクトを上書き・削除しない。
+ * @param {string} attemptId newAttemptId の値
  */
-export function photoObjectPaths(facilityId, photoId, sha256) {
+export function photoObjectPaths(facilityId, photoId, attemptId) {
   if (!isFacilityId(facilityId)) throw new Error("施設 ID の形式が違います");
-  if (!isSha256Hex(photoId) || !isSha256Hex(sha256)) throw new Error("写真の ID の形式が違います");
-  const name = `${facilityId}/${photoId}_${sha256.slice(0, 32)}`;
+  if (!isSha256Hex(photoId) || typeof attemptId !== "string" || !ATTEMPT_ID.test(attemptId)) throw new Error("写真の ID の形式が違います");
+  const name = `${facilityId}/${photoId}_${attemptId}`;
   return { storagePath: `${name}.jpg`, thumbPath: `${name}_thumb.jpg` };
+}
+
+/** オブジェクト名から施設と写真を読む(片付けに使う)。形が違えば null */
+export function parseObjectName(name) {
+  const m = OBJECT_NAME.exec(String(name ?? ""));
+  return m && isFacilityId(m[1]) ? { facilityId: m[1], photoId: m[2], thumb: Boolean(m[4]) } : null;
 }
 
 /** 写真の記録がその施設のものか(閲覧・削除の前に確かめる) */
@@ -237,13 +249,13 @@ export function checkUploadLimits({ session, usage, bytes }, limits = STICKER_LI
  * トランザクションの再試行で最新の値で判定し直されるので、同時に送っても上限を超えず seq も重複しない。
  * 同じ写真の再送は枚数・容量に数えない。
  * - create: photo・session・usage を書く
- * - existing: 何も書かない(保存したオブジェクトは同じ名前なので残す。ただし削除済みの写真は復元せず、discardObject でオブジェクトを消す)
- * - conflict / limit: 何も書かない。discardObject が true なので、保存したオブジェクトを消す
+ * - existing / conflict / limit: 何も書かない。discardObject が true なので、この試行で保存したオブジェクトを消す
+ *   (記録が指すのは別の試行のオブジェクトなので消えない。削除済みの写真も復元しない)
  * @param {{existing?:object|null, session?:object|null, usage?:object|null, facilityId:string, sha256:string, bytes:number, lastSurgeryDate?:string|null}} input
  */
 export function planPhotoRegistration({ existing, session, usage, facilityId, sha256, bytes, lastSurgeryDate = null }, limits = STICKER_LIMITS) {
   const known = decideExistingPhoto(existing, { facilityId, sha256 });
-  if (known) return { ...known, discardObject: known.action === "conflict" || known.deleted === true };
+  if (known) return { ...known, discardObject: true };
   const limit = checkUploadLimits({ session, usage, bytes }, limits);
   if (!limit.ok) return { action: "limit", reason: limit.reason, discardObject: true };
   const count = (session?.count ?? 0) + 1;
@@ -277,6 +289,11 @@ export function recordRateLimitFailure(state, max, nowMs, limits = STICKER_RATE_
   const windowStart = fresh ? nowMs : state.windowStart;
   const blockedUntil = count > max ? nowMs + limits.blockMs : (state?.blockedUntil ?? 0);
   return { count, windowStart, blockedUntil, expiresAt: Math.max(windowStart + limits.windowMs, blockedUntil) };
+}
+
+/** 確認に成功したときに、先に確保した1回を返す(停止の状態は変えない) */
+export function refundRateLimitAttempt(state) {
+  return state ? { ...state, count: Math.max(0, (state.count ?? 0) - 1) } : state;
 }
 
 /* ---------- JPEG の検証とメタデータの除去 ---------- */
