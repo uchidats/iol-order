@@ -10,6 +10,39 @@ import { groupPhotosBySession } from "./sticker-photo.js";
  */
 export const STICKER_VIEWER_ENABLED = false;
 
+/**
+ * メニューを出すかを、対象(医療機関は施設、ディーラーは会社)ごとにサーバーへ確かめて覚える。
+ * 対象が変わったら確かめ直し、答えが届くまでは出さない。古い対象への答えは捨てる。確かめられないときは出さない。
+ * 表示だけの判定で、権限はサーバーが毎回確かめる。
+ * @param {object} deps
+ * @param {(target:string) => Promise<boolean>} deps.check
+ * @param {() => void} [deps.onChange] 答えが変わったとき(メニューを描き直す)
+ * @param {boolean} [deps.active] 公開の設定(既定 STICKER_VIEWER_ENABLED。false の間は問い合わせもしない)
+ */
+export function createStickerAvailability({ check, onChange = () => {}, active = STICKER_VIEWER_ENABLED }) {
+  let key = null, enabled = false, seq = 0;
+  const reset = () => { key = null; enabled = false; seq += 1; };
+  return {
+    /** 今の対象でメニューを出すか */
+    of(target) {
+      if (!active || typeof target !== "string" || !target) { if (key !== null) reset(); return false; }
+      if (target !== key) {
+        reset();
+        key = target;
+        const mine = seq;
+        Promise.resolve().then(() => check(target)).then(v => v === true, () => false).then((ok) => {
+          if (mine !== seq || key !== target || !ok) return;
+          enabled = true;
+          onChange();
+        });
+      }
+      return enabled;
+    },
+    /** 覚えた答えを捨てる(ログアウト・会社の入り直し) */
+    reset
+  };
+}
+
 /** 既定の期間(直近4週)の日数 */
 export const DEFAULT_PERIOD_DAYS = 28;
 

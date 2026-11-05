@@ -562,11 +562,28 @@ export function createStickerPhotoService({
     }, { maxAttempts: TX_ATTEMPTS });
   }
 
+  /**
+   * この施設で IOL シール写真を使えるか(メニューを出すかの問い合わせ)。所属していて、機能と施設が有効なときだけ true。
+   * 表示のための答えで、権限は各処理が毎回確かめる。使えない理由(停止中・対象外・未所属)は区別しない
+   */
+  async function status(auth, data) {
+    strict(data, ["facilityId"]);
+    try {
+      const user = assertVerifiedUser(auth);
+      await assertMember(null, user.uid, data.facilityId);
+      return { enabled: true };
+    } catch (e) {
+      if (e instanceof RegistrationError) return { enabled: false };
+      throw e;
+    }
+  }
+
   /** stickerPhotoApi(ログイン必須)。すべての処理の先頭で確認する */
   async function api({ auth, data }) {
     if (!auth || !auth.uid) throw new RegistrationError("unauthenticated", "ログインが必要です");
-    if (!isEnabled()) throw unavailable();
     const d = data && typeof data === "object" && !Array.isArray(data) ? data : null;
+    if (d && d.action === "status") { const { action: _a, ...q } = d; return status(auth, q); }   // 停止中も「使えない」と答える(エラーにしない)
+    if (!isEnabled()) throw unavailable();
     if (!d || typeof d.action !== "string") throw bad();
     const { action, ...rest } = d;
     if (action === "dealerList") return dealerList(auth, rest);   // 担当者の確認は authorizeDealer(ログイン方法ごとの確認を含む)

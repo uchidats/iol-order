@@ -911,3 +911,78 @@ test("共有の許可: 記録の中の施設・発注先が違えば使わない
   await db.doc("stickerPhotoGrants/other").set(good);
   assert.deepEqual((await dealerList()).facilities, []);
 });
+
+// ================= メニューの表示のための問い合わせ =================
+test("利用できる施設か: 所属していて、機能と施設が有効なときだけ true。理由は区別せず、権限の代わりにはならない", async () => {
+  const status = (uid, fid = F) => api(uid, "status", { facilityId: fid });
+  for (const uid of ["adminA", "subA", "ordA", "proxyA"]) assert.deepEqual(await status(uid), { enabled: true }, uid);
+  assert.deepEqual(await status("adminB"), { enabled: false }, "別の施設の所属者");
+  assert.deepEqual(await status("staffX"), { enabled: false }, "ディーラーの担当者");
+  assert.deepEqual(await status("adminA", "nope"), { enabled: false });
+  assert.deepEqual(await svc.api({ auth: user("adminA", { email_verified: false }), data: { action: "status", facilityId: F } }), { enabled: false }, "メール未確認");
+  await rejects(api(null, "status", { facilityId: F }), "unauthenticated");
+  await rejects(api("adminA", "status", { facilityId: F, extra: 1 }), "invalid-argument");
+  // 対象の施設から外す → その施設だけ false(ほかの施設は変わらない)
+  enabled.facilities = [G];
+  assert.deepEqual([await status("adminA"), await status("adminB", G)], [{ enabled: false }, { enabled: true }]);
+  // 機能の停止中はエラーにせず false。ほかの処理は停止のエラーのまま
+  enabled.facilities = [F, G];
+  enabled.on = false;
+  assert.deepEqual(await status("adminA"), { enabled: false });
+  await rejects(api("adminA", "list", { facilityId: F }), "failed-precondition");
+  // 施設が停止 → false
+  enabled.on = true;
+  await db.doc("facilities/" + F).update({ status: "suspended" });
+  assert.deepEqual(await status("adminA"), { enabled: false });
+});
+
+test("ディーラーのメニュー: 共有を許可された施設があるときだけ施設が返り、取り消すと空に戻る", async () => {
+  assert.deepEqual((await dealerList()).facilities, []);
+  await share(true);
+  assert.equal((await dealerList()).facilities.length, 1);
+  await share(false);
+  assert.deepEqual((await dealerList()).facilities, []);
+});
+
+// ================= 機能の停止中の、外部から呼べる入口 =================
+test("機能の停止中: ログインなしで呼べる確認・保存と、画像・API は、正しいコード・チケット・所属があっても拒否し、写真を読み書きしない", async () => {
+  const stored = await put();   // 有効な間に保存した写真
+  assert.equal(stored.statusCode, 200);
+  await share(true);
+  const ticket = ticketFor();
+  const before = { objects: bucket.objects.size, photos: (await db.collection("facilities/" + F + "/stickerPhotos").get()).size };
+  enabled.on = false;
+
+  // 確認(ログインなし): 正しい入口とコードでも、誤りと同じ応答。チケット・施設名を返さない
+  await rejects(verify(TOKEN, CODE), "permission-denied");
+  await rejects(verify(newEntryToken(), CODE), "permission-denied");
+  // 保存(ログインなし): 有効な間に発行したチケットでも 503。チケットなし・別オリジン・別メソッドも通らない
+  assert.equal((await put({ ticket, uploadId: uuid(9) })).statusCode, 503);
+  assert.equal((await put({ ticket: "x.y", uploadId: uuid(9) })).statusCode, 503);
+  const evil = resOf();
+  await svc.handleUpload(reqOf({ rawBody: baseJpeg, headers: { Origin: "https://evil.example", "X-Sticker-Ticket": ticket } }), evil);
+  assert.equal(evil.statusCode, 403);
+  const post = resOf();
+  await svc.handleUpload(reqOf({ method: "POST", rawBody: baseJpeg, headers: { Origin: ORIGIN, "X-Sticker-Ticket": ticket } }), post);
+  assert.equal(post.statusCode, 405);
+  // 画像: 未ログインは 401、所属者・共有先のディーラーでも 404(存在を示さない)
+  assert.equal((await image(null, { photo: stored.body.photoId })).statusCode, 401);
+  assert.equal((await image("adminA", { photo: stored.body.photoId })).statusCode, 404);
+  assert.equal((await image("staffX", { photo: stored.body.photoId, headers: dealerHeaders })).statusCode, 404);
+  // API: 未ログインは unauthenticated、ログイン済みは停止のエラー(一覧・削除・設定・共有・ディーラーの一覧)
+  await rejects(api(null, "list", { facilityId: F }), "unauthenticated");
+  for (const [uid, action, data] of [["adminA", "list", { facilityId: F }], ["adminA", "delete", { facilityId: F, photoId: stored.body.photoId }],
+    ["adminA", "getSettings", { facilityId: F }], ["adminA", "setAccessCode", { facilityId: F, code: "135790" }], ["adminA", "getEntryQr", { facilityId: F }],
+    ["adminA", "rotateEntryQr", { facilityId: F }], ["adminA", "setDealerShare", { facilityId: F, localDealerId: "dA", shared: false }], ["staffX", "dealerList", { companyId: "cX" }]]) {
+    await rejects(api(uid, action, data), "failed-precondition");
+  }
+  // 何も変わっていない(写真・画像・コード・QR・共有)
+  assert.deepEqual({ objects: bucket.objects.size, photos: (await db.collection("facilities/" + F + "/stickerPhotos").get()).size }, before);
+  assert.equal((await photoDoc(stored.body.photoId)).get("status"), "stored");
+  assert.equal((await db.doc("facilities/" + F + "/stickerSettings/access").get()).get("codeGeneration"), 1);
+  assert.equal((await db.doc("stickerEntries/" + TOKEN).get()).get("status"), "active");
+  assert.equal((await db.doc("stickerPhotoGrants/" + F + "_dA").get()).get("status"), "active");
+  // 再び有効にすると、元のとおり使える
+  enabled.on = true;
+  assert.equal((await image("adminA", { photo: stored.body.photoId })).statusCode, 200);
+});

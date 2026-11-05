@@ -13,7 +13,7 @@ import { createRegistrationApi, describeCallableError } from "./data/registratio
 import { createOrderApi } from "./data/order-api.js";
 import { createDealerPortalApi } from "./data/dealer-portal-api.js";
 import { createStickerPhotoApi, stickerImageUrl } from "./data/sticker-photo-api.js";
-import { STICKER_VIEWER_ENABLED } from "./domain/sticker-photo-view.js";
+import { createStickerAvailability } from "./domain/sticker-photo-view.js";
 import { canOpenDealerPortalMenu } from "./domain/dealer-portal.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
 import { loadSubTheme } from "./ui/sub-theme.js";
@@ -93,6 +93,12 @@ async function bootstrapWithFirebase(config) {
   const relatedLinksView = createRelatedLinksView();
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
   let stickerViewer = null;  // IOLシール写真の一覧・拡大(所属メンバー全員が閲覧。初回表示時に生成)
+  // メニュー「IOLシール写真」は、サーバーが「この施設で使える」と答えた施設だけに出す(施設が変わったら確かめ直す)。表示だけの判定で、権限はサーバーが毎回確かめる
+  const stickerAvailability = createStickerAvailability({
+    check: (facilityId) => (ctx && ctx.stickerPhotoApi ? ctx.stickerPhotoApi.facilityEnabled(facilityId) : false),
+    onChange: () => render()
+  });
+  const stickerMenuFor = (facilityId) => stickerAvailability.of(ctx && ctx.stickerPhotoApi ? facilityId : null);
   let orderHistory = null;  // 注文履歴（所属メンバー全員が閲覧。管理者・副管理者は削除も・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
@@ -305,7 +311,7 @@ async function bootstrapWithFirebase(config) {
   /** IOLシール写真を開く(閲覧のみ。削除は管理者・副管理者に表示)。権限は stickerPhotoApi・stickerPhotoImage が毎回確認する */
   async function openStickerPhotos() {
     const access = decideAccess(state);
-    if (!STICKER_VIEWER_ENABLED || access.state !== ACCESS.GRANTED || !ctx || !ctx.stickerPhotoApi) return;
+    if (access.state !== ACCESS.GRANTED || !ctx || !ctx.stickerPhotoApi || !stickerMenuFor(access.facilityId)) return;
     for (const v of [settings, orderHistory, applications, preregistrations, dealerOperator]) if (v && v.isOpen()) v.close();
     if (!stickerViewer) {
       const { createStickerPhotoViewer } = await import("./ui/sticker-photo-viewer.js");
@@ -438,13 +444,14 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canStickerPhotos: STICKER_VIEWER_ENABLED, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
+        canSwitch: access.memberships.length > 1, canStickerPhotos: stickerMenuFor(access.facilityId), canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
         canDealerPortal: canOpenDealerPortalMenu({ isPlatformAdmin, memberships: access.memberships }),   // ディーラー用受注一覧(運営者・テスト眼科の利用者。表示だけ)
         canAbout: canViewIntroduction({ isPlatformAdmin })
       });
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (stickerViewer && stickerViewer.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       relatedLinksView.clear();
+      stickerAvailability.reset();
       menu.update(null);
     }
     if (manual && manual.isOpen()) manual.updateAudience();   // 閲覧範囲(ログイン・役割の確認が進んだら表示し直す)・戻るボタンの文言

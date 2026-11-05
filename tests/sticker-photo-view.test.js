@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  STICKER_VIEWER_ENABLED, defaultPeriod, dayLabel, timeLabel, surgeryLabel, sessionLabel, groupForView, jstDate
+  STICKER_VIEWER_ENABLED, createStickerAvailability, defaultPeriod, dayLabel, timeLabel, surgeryLabel, sessionLabel, groupForView, jstDate
 } from "../src/domain/sticker-photo-view.js";
 import { createStickerPhotoApi, stickerImageUrl } from "../src/data/sticker-photo-api.js";
 
@@ -96,4 +96,82 @@ test("画像: 見えないものは null、それ以外の失敗は例外", asyn
   assert.equal(await hidden.readImage({ facilityId: "fA", photoId: "p", size: "full" }), null);
   const broken = fakeApi({ response: { status: 503, ok: false } }).api.facilitySource({ facilityId: "fA", facilityName: "A" });
   await assert.rejects(broken.readImage({ facilityId: "fA", photoId: "p", size: "full" }));
+});
+
+// ---------- メニューを出す対象(サーバーの許可の設定に基づく) ----------
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+test("メニューの表示: 公開の設定が false の間は、問い合わせもせず出さない", async () => {
+  const asked = [];
+  const a = createStickerAvailability({ check: async (t) => { asked.push(t); return true; } });
+  assert.equal(a.of("fA"), false);
+  await tick();
+  assert.deepEqual([a.of("fA"), asked], [false, []]);
+});
+
+test("メニューの表示: サーバーが使えると答えた施設だけに出す。答えが届くまでは出さず、施設が変わると確かめ直す", async () => {
+  const asked = [], changes = [];
+  const a = createStickerAvailability({ active: true, check: async (t) => { asked.push(t); return t === "tachikawa"; }, onChange: () => changes.push(1) });
+  assert.equal(a.of("tachikawa"), false, "答えが届く前");
+  await tick();
+  assert.deepEqual([a.of("tachikawa"), changes.length, asked], [true, 1, ["tachikawa"]], "同じ施設は問い合わせ直さない");
+  // 別の施設へ切り替え → すぐに消し、確かめ直す
+  assert.equal(a.of("other"), false);
+  await tick();
+  assert.deepEqual([a.of("other"), changes.length, asked], [false, 1, ["tachikawa", "other"]]);
+  // 元の施設へ戻る → もう一度確かめる(前の答えを使い回さない)
+  assert.equal(a.of("tachikawa"), false);
+  await tick();
+  assert.deepEqual([a.of("tachikawa"), asked.length], [true, 3]);
+  // 対象なし(ログアウト・施設に入る前)
+  assert.equal(a.of(null), false);
+  assert.equal(a.of("tachikawa"), false, "入り直したら確かめ直す");
+});
+
+test("メニューの表示: 切り替えの前の施設への答えが遅れて届いても、今の施設には出さない。確かめられないときも出さない", async () => {
+  const pending = {};
+  const a = createStickerAvailability({ active: true, check: (t) => new Promise((resolve, reject) => { pending[t] = { resolve, reject }; }) });
+  a.of("tachikawa");
+  await tick();
+  a.of("other");
+  await tick();
+  pending.tachikawa.resolve(true);   // 古い施設への答え
+  await tick();
+  assert.equal(a.of("other"), false);
+  pending.other.reject(new Error("network"));
+  await tick();
+  assert.equal(a.of("other"), false);
+  // true 以外の答えは出さない
+  const b = createStickerAvailability({ active: true, check: async () => "yes" });
+  b.of("x");
+  await tick();
+  assert.equal(b.of("x"), false);
+  // reset の後は確かめ直す
+  const asked = [];
+  const c = createStickerAvailability({ active: true, check: async (t) => { asked.push(t); return true; } });
+  c.of("x"); await tick();
+  c.reset();
+  assert.equal(c.of("x"), false);
+  await tick();
+  assert.deepEqual([c.of("x"), asked.length], [true, 2]);
+});
+
+test("呼び出し: 利用できるかは status、ディーラーは dealerList の施設の有無。失敗は「出さない」", async () => {
+  const calls = [];
+  let answer = { enabled: true };
+  const api = createStickerPhotoApi({
+    functions: {}, httpsCallable: (_, name) => async (p) => { calls.push([name, p]); if (answer instanceof Error) throw answer; return { data: answer }; },
+    imageUrl: "https://example.invalid/i", getIdToken: async () => "t", device: { get: () => "dev-1" }
+  });
+  assert.equal(await api.facilityEnabled("fA"), true);
+  assert.deepEqual(calls.pop(), ["stickerPhotoApi", { action: "status", facilityId: "fA" }]);
+  answer = { enabled: "true" };
+  assert.equal(await api.facilityEnabled("fA"), false, "true そのものだけ");
+  answer = { facilities: [{ facilityId: "fA", name: "A" }], photos: [] };
+  assert.equal(await api.dealerHasShares({ companyId: "cX" }), true);
+  assert.deepEqual(calls.pop(), ["stickerPhotoApi", { action: "dealerList", companyId: "cX", deviceToken: "dev-1" }]);
+  answer = { facilities: [] };
+  assert.equal(await api.dealerHasShares({ companyId: "cX" }), false);
+  answer = new Error("failed-precondition");
+  assert.deepEqual([await api.facilityEnabled("fA"), await api.dealerHasShares({ companyId: "cX" })], [false, false]);
 });

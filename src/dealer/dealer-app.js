@@ -1,6 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { STICKER_VIEWER_ENABLED } from "../domain/sticker-photo-view.js";
+import { createStickerAvailability } from "../domain/sticker-photo-view.js";
 import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekStartLabel, spanLabel, dateFieldLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { historyCardGroups } from "../domain/order-history-view.js";
 import { lensDayHead, lensRow } from "../ui/history-lens.js";
@@ -104,12 +104,19 @@ export function createDealerApp({ mount, api, stickerApi = null, onSignOut, setS
 
   // ---------- シール写真(☰メニューから開く。受注一覧の処理とは別で、施設が写真の共有を許可した分だけをサーバーが返す) ----------
   let stickerView = null;
+  // メニュー「シール写真」は、写真の共有を許可された医療機関が1つ以上ある会社にだけ出す(会社に入るたびに確かめ直す)。表示だけの判定で、権限はサーバーが毎回確かめる
+  let menuInfo = null;
+  const stickerAvailability = createStickerAvailability({
+    check: (companyId) => stickerApi.dealerHasShares({ companyId }),
+    onChange: () => { if (ctx && menuInfo) setMenu(menuInfo()); }
+  });
+  const stickerMenu = () => stickerAvailability.of(ctx && !ctx.testMode && stickerApi ? ctx.company.id : null);
   function dropStickerView() {
     if (stickerView) stickerView.close();
     panel.hidden = false;
   }
   async function openStickerPhotos() {
-    if (!ctx || ctx.testMode || !stickerApi || !STICKER_VIEWER_ENABLED) return;
+    if (!ctx || ctx.testMode || !stickerApi || !stickerMenu()) return;
     if (!stickerView) {
       const { createStickerPhotoViewer } = await import("../ui/sticker-photo-viewer.js");
       stickerView = createStickerPhotoViewer({
@@ -279,8 +286,10 @@ export function createDealerApp({ mount, api, stickerApi = null, onSignOut, setS
     ctx.subTheme = readSubTheme(ctx.subTheme);   // 会社のサブテーマカラー(サーバーが所属を確かめた値。未設定は従来の青)。端末には覚えない
     applySubTheme(ctx.subTheme);
     // 氏名・所属会社・ディーラー設定(会社管理者・支店管理者)・会社の切り替え・ログアウトはヘッダーの「☰」メニュー(サーバーが確かめた context の値)
-    setMenu({ name: ctx.me.name || "", companyName: ctx.company.name, branchName: ctx.me.branch ? ctx.me.branch.name : "",
-      canSwitch: choices.length > 1, canStickerPhotos: STICKER_VIEWER_ENABLED && !ctx.testMode && Boolean(stickerApi), canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
+    stickerAvailability.reset();   // 入り直すたびに確かめ直す(共有の許可・取消の後の表示を合わせる)
+    menuInfo = () => ({ name: ctx.me.name || "", companyName: ctx.company.name, branchName: ctx.me.branch ? ctx.me.branch.name : "",
+      canSwitch: choices.length > 1, canStickerPhotos: stickerMenu(), canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
+    setMenu(menuInfo());
     if (ctx.testMode) return showTestMode();
     // 医療機関のチェック: 端末に記憶した選択(今の閲覧可能な施設だけ)。未保存ならサーバーの初期選択(担当施設 → 全施設)
     const restored = restoreFacilitySelection(facilityView.load(ctx.company.id), ctx.facilities || [], ctx.selectedFacilityIds || []);

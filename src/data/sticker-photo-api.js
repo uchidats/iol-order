@@ -40,6 +40,17 @@ export function createStickerPhotoApi({ functions, httpsCallable, imageUrl, getI
   return {
     /** 施設設定「IOLシール写真」の呼び出し(data/sticker-settings-api.js へ渡す。受注閲覧の許可とは別の関数) */
     settingsCall: call,
+    /** この施設でメニューを出すか(サーバーの許可の設定と所属で決まる)。確かめられないときは出さない */
+    facilityEnabled: async (facilityId) => {
+      try { return (await call({ action: "status", facilityId })).enabled === true; } catch { return false; }
+    },
+    /** ディーラー: 写真の共有を許可された医療機関が1つでもあるか。確かめられないときは出さない */
+    dealerHasShares: async ({ companyId }) => {
+      try {
+        const r = await call({ action: "dealerList", companyId, ...pick({ deviceToken: deviceToken() }, ["deviceToken"]) });
+        return Array.isArray(r.facilities) && r.facilities.length > 0;
+      } catch { return false; }
+    },
     /** 閲覧画面の部品へ渡す、医療機関用の読み出し(施設は1つ) */
     facilitySource: ({ facilityId, facilityName, canDelete }) => ({
       loadFacilities: async () => [{ facilityId, name: facilityName }],
