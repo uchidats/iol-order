@@ -23,8 +23,11 @@
 .sticker-preview-box { max-height: 60vh; overflow: auto; border-radius: 8px; background: #f1f5f9; touch-action: pinch-zoom; }
 .sticker-preview { display: block; width: 100%; height: auto; }
 .sticker-warning { margin: 0; padding: 6px 8px; border-radius: 6px; font-size: 0.9rem; color: #78350f; background: #fef3c7; }
-.sticker-date { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin: 0; font-size: 0.9rem; }
-.sticker-date .form-control { width: auto; min-height: 40px; }
+.sticker-date { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0; font-size: 0.9rem; }
+.sticker-date > span { min-width: 0; }   /* 狭い画面ではラベルを折り返し、入力欄は右のまま */
+/* 空のときから同じ大きさにする。文字は 16px 以上(スマートフォンの入力時の自動ズームを防ぐ) */
+.sticker-date input[type="date"].form-control { flex: none; width: 160px; height: 48px; min-height: 48px; padding: 0 10px; font-size: 16px; line-height: normal; }
+.sticker-date input[type="date"].form-control::-webkit-date-and-time-value { min-height: 1.5em; text-align: left; }
 .sticker-done { align-items: center; text-align: center; }
 .sticker-done-title { margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--primary); }
 .sticker-done-detail { margin: 0; font-size: 0.9rem; color: var(--text-muted); }

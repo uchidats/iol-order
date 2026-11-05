@@ -6,7 +6,7 @@ import { MESSAGES, formatSentAt, lastSentLabel, shortDate } from "../domain/stic
 
 const CODE_HELP = "施設から共有されたアクセスコードを入力してください。コードは施設の管理者・副管理者が設定・変更します。患者情報が写らないように撮影してください。";
 const CAMERA_HELP = "台紙全体が枠に入るように、真上から撮ってください。文字が読めるよう明るい場所で。患者情報が写らないようにしてください。「カメラで撮影」の方法では、端末によって写真が端末に残ることがあります。";
-const REVIEW_HELP = "今回の最終手術日は、台紙のどの手術日の分まで撮ったかの目安です(任意)。";
+const REVIEW_HELP = "最後の手術日は、台紙のどの手術日の分まで撮ったかの目安です(任意)。";
 
 /** ファイル選択の写真を、同じ解像度のまま描き直す(EXIF を落とす。向きは反映する) */
 async function redrawFile(file) {
@@ -117,13 +117,13 @@ export function createStickerApp({ mount, controller, now = Date.now }) {
   const preview = h("img", { class: "sticker-preview", "data-f": "preview", alt: "撮影した画像" });
   const warnBlur = h("p", { class: "sticker-warning", "data-f": "warnBlur", hidden: true }, `⚠ ${MESSAGES.blurry}`);
   const warnLow = h("p", { class: "sticker-warning", "data-f": "warnLow", hidden: true }, `⚠ ${MESSAGES.lowResolution}`);
-  const dateInput = h("input", { type: "date", class: "form-control", "data-f": "surgeryDate", "aria-label": "今回の最終手術日" });
-  const dateRow = h("div", { class: "sticker-date", "data-f": "dateRow" }, h("span", {}, "今回の最終手術日(任意)"), dateInput);
+  const dateInput = h("input", { type: "date", class: "form-control", "data-f": "surgeryDate", "aria-label": "最後の手術日" });
+  const dateRow = h("div", { class: "sticker-date", "data-f": "dateRow" }, h("span", {}, "最後の手術日（任意）"), dateInput);
   const dateFixed = h("p", { class: "sticker-date", "data-f": "dateFixed", hidden: true });
   const retake = h("button", { type: "button", class: "btn btn-secondary", "data-act": "retake" }, "撮り直す");
   const sendBtn = h("button", { type: "button", class: "btn btn-primary", "data-act": "send" }, "送信");
   const reviewScreen = h("section", { class: "sticker-screen", "data-screen": "review", hidden: true },
-    h("div", { class: "sticker-label" }, h("span", {}, "画像の確認"), createInfoTip(REVIEW_HELP, { label: "最終手術日の説明" }).root),
+    h("div", { class: "sticker-label" }, h("span", {}, "画像の確認"), createInfoTip(REVIEW_HELP, { label: "最後の手術日の説明" }).root),
     h("div", { class: "sticker-preview-box" }, preview), warnBlur, warnLow, dateRow, dateFixed, h("div", { class: "sticker-actions sticker-actions-split" }, retake, sendBtn));
   retake.addEventListener("click", () => controller.retake());
   sendBtn.addEventListener("click", () => controller.send());
@@ -164,7 +164,7 @@ export function createStickerApp({ mount, controller, now = Date.now }) {
     warnLow.hidden = !(p && isLowResolution(p.width, p.height));
     dateRow.hidden = state.surgeryLocked;
     dateFixed.hidden = !state.surgeryLocked;
-    dateFixed.textContent = `今回の最終手術日 ${state.surgeryDate ? shortDate(state.surgeryDate, t) : "未入力"}`;
+    dateFixed.textContent = `最後の手術日 ${state.surgeryDate ? shortDate(state.surgeryDate, t) : "未入力"}`;
     dateInput.max = jstDateOf(t);
     if (dateInput.value !== state.surgeryDate) dateInput.value = state.surgeryDate;
     sendBtn.textContent = state.sending ? "送信中…" : state.canResend ? "再送信" : "送信";

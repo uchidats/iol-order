@@ -84,6 +84,43 @@ async function shoot(page) {
 }
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox]]) {
+  test(`確認画面の日付の欄: 空のときから見やすい大きさで、文字は 16px 以上。ラベルは左・入力欄は右。ほかの要素は変えず、拡大の操作も禁止しない(スマートフォンの幅): ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const { context, page } = await openPage(browser, name);
+      assert.doesNotMatch(await page.getAttribute('meta[name="viewport"]', "content"), /user-scalable|maximum-scale/);
+      await enterCode(page);
+      const started = await shoot(page);
+      if (started === false) return t.skip("仮想カメラを起動できない環境");
+      const row = page.locator('[data-f="dateRow"]'), input = page.locator('[data-f="surgeryDate"]');
+      await row.waitFor();
+      assert.equal(await row.locator("span").first().innerText(), "最後の手術日（任意）");
+      for (const width of [320, 360, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 });
+        for (const value of ["", "2026-11-04"]) {
+          await input.fill(value);
+          const m = await page.evaluate(() => {
+            const box = (e) => e.getBoundingClientRect();
+            const row = document.querySelector('[data-f="dateRow"]'), label = row.querySelector("span"), input = row.querySelector("input"), c = getComputedStyle(input);
+            return { label: box(label), input: box(input), row: box(row), fontSize: parseFloat(c.fontSize), overflow: input.scrollWidth > input.clientWidth + 1, page: document.documentElement.scrollWidth <= innerWidth };
+          });
+          assert.ok(m.fontSize >= 16, `${width}: 自動ズームしない文字の大きさ`);
+          assert.equal(m.input.height, 48, `${width}: 高さ`);
+          assert.equal(m.input.width, 160, `${width}: 幅(空でも同じ)`);
+          assert.equal(m.overflow, false, `${width}: 日付が見切れない`);
+          assert.ok(m.label.right <= m.input.left, `${width}: ラベルは左`);
+          assert.ok(Math.abs(m.input.right - m.row.right) < 0.5, `${width}: 入力欄は右端`);
+          assert.ok(m.label.top < m.input.bottom && m.input.top < m.label.bottom, `${width}: 同じ行`);
+          assert.equal(m.page, true, `${width}: 横にはみ出さない`);
+        }
+      }
+      // ほかの要素の大きさは変えない
+      assert.deepEqual(await page.evaluate(() => ["retake", "send"].map(a => getComputedStyle(document.querySelector(`[data-act="${a}"]`)).minHeight)), ["48px", "48px"]);
+      await context.close();
+    } finally { await browser.close(); }
+  });
+
   test(`撮影画面: コード → 撮影 → プレビュー → 送信 → 続けて撮影 → 終了: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません`);
@@ -113,7 +150,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox]]) {
       await page.click('[data-act="again"]');
       await shoot(page);
       assert.equal(await page.isVisible('[data-f="dateRow"]'), false, "2枚目以降は変更できない");
-      assert.match(await page.innerText('[data-f="dateFixed"]'), /今回の最終手術日 11\/4/);
+      assert.match(await page.innerText('[data-f="dateFixed"]'), /最後の手術日 11\/4/);
       await page.click('[data-act="send"]');
       await page.waitForFunction(() => /この回 2枚目/.test(document.querySelector('[data-f="doneDetail"]').textContent));
       assert.equal(fake.verifies.length, 1, "コードを再入力しない");
