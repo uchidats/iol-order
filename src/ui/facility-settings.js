@@ -1041,7 +1041,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   if (canManageMembers) built.members = memberSection();
   if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
   // IOLシール写真(アクセスコード・QR・写真の共有)。受注閲覧の許可とは別の設定(機能が使えないときは表示しない)
-  if (stickerSettingsEnabled && dealerPortalApi?.stickerPhotoCall && isManagerRole(actorRole)) built.stickerPhotos = createStickerSettingsSection({ api: createStickerSettingsApi(dealerPortalApi.stickerPhotoCall) });
+  if (stickerSettingsEnabled && dealerPortalApi?.stickerPhotoCall && isManagerRole(actorRole)) built.stickerPhotos = createStickerSettingsSection({ api: createStickerSettingsApi(dealerPortalApi.stickerPhotoCall), getDealers: () => data.dealers });
   // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → ディーラー画面での閲覧 → IOLシール写真 → 注文メール → 関連リンク → テーマカラー
   const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.stickerPhotos ? { stickerPhotos: built.stickerPhotos } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.relatedLinks ? { relatedLinks: built.relatedLinks } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------

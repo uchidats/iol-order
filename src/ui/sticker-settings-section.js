@@ -15,13 +15,14 @@ const isUnavailable = (e) => {
 };
 
 /** QR のモーダル(「サイトを共有」と同じ見た目。閉じる: 「閉じる」・Escape・背景のクリック)。URL の文字列は出さない */
-function openQrDialog({ svg, facilityName }) {
+function openQrDialog({ svg, facilityName, printActions = [] }) {
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", "data-act": "close" }, "閉じる");
   const img = h("img", { class: "share-qr", alt: "IOLシール写真のQRコード", src: qrImageUrl(svg) });
   const overlay = h("div", { class: "modal-overlay share-dialog sticker-qr-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "stickerQrTitle" },
     h("div", { class: "modal-card" },
       h("div", { class: "modal-header modal-header-simple" }, h("h2", { class: "modal-title", id: "stickerQrTitle" }, "IOLシール写真のQRコード")),
-      h("div", { class: "modal-body" }, h("div", { class: "share-qr-box" }, img), h("p", { class: "share-url", "data-f": "facility" }, facilityName)),
+      h("div", { class: "modal-body" }, h("div", { class: "share-qr-box" }, img), h("p", { class: "share-url", "data-f": "facility" }, facilityName),
+        h("div", { class: "settings-actions" }, printActions.map(a => { const b = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": a.act }, a.label); b.addEventListener("click", () => { close(); a.run(); }); return b; }))),
       h("div", { class: "modal-footer" }, closeBtn)));
   const before = document.activeElement, overflow = document.body.style.overflow;
   const close = () => {
@@ -43,9 +44,9 @@ function openQrDialog({ svg, facilityName }) {
  * 施設設定の「IOLシール写真」(管理者・副管理者)。アクセスコード・QR コード・ディーラーへの写真の共有。
  * 写真の共有は stickerPhotoGrants で、受注閲覧の許可(「ディーラー画面での閲覧」)とは別の設定。
  * 文字はすべて textContent。新しいコードはこの画面に1回だけ出し、端末には保存しない。
- * @param {{api: ReturnType<import("../data/sticker-settings-api.js").createStickerSettingsApi>, confirm?: Function}} deps
+ * @param {{api: ReturnType<import("../data/sticker-settings-api.js").createStickerSettingsApi>, confirm?: Function, getDealers?: () => Array<object>}} deps getDealers: 施設の発注先(台紙の上部の表示の初期値。読むだけ)
  */
-export function createStickerSettingsSection({ api, confirm = confirmDialog }) {
+export function createStickerSettingsSection({ api, confirm = confirmDialog, getDealers = () => [] }) {
   const msg = h("p", { class: "form-hint", "data-msg": "", role: "status" });
   let facilityId = null, facilityName = "", settings = null, busy = false, gen = 0;
 
@@ -98,12 +99,29 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog }) {
   /* ---------- QR コード ---------- */
   const showQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "showQr" }, "QRコードを表示");
   const rotateQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "rotateQr" }, "QRコードを作り直す");
+  const printSheet = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "printSheet" }, "台紙を印刷");
+  const printQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "printQr" }, "QRコードのみ印刷");
+  /** 印刷の画面を開く。QR は毎回サーバーから有効な入口を受け取る(作り直した後に古い QR を印刷しない) */
+  const openPrint = async (kind) => {
+    if (busy) return;
+    busy = true; msg.textContent = "";
+    try {
+      const [{ svg }, print] = await Promise.all([api.getEntryQr(facilityId), import("./sticker-print-view.js")]);
+      if (kind === "sheet") print.openSheetPrint({ facilityName, dealers: getDealers(), qrSvg: svg });
+      else print.openQrPrint({ facilityName, qrSvg: svg });
+    } catch (e) {
+      msg.textContent = describeCallableError(e);
+    } finally { busy = false; }
+  };
+  const printActions = [{ act: "printSheet", label: "台紙を印刷", run: () => openPrint("sheet") }, { act: "printQr", label: "QRコードのみ印刷", run: () => openPrint("qr") }];
+  printSheet.addEventListener("click", () => openPrint("sheet"));
+  printQr.addEventListener("click", () => openPrint("qr"));
   const qrAction = async (fn) => {
     if (busy) return;
     busy = true; msg.textContent = "";
     try {
       const { svg } = await fn(facilityId);
-      openQrDialog({ svg, facilityName });
+      openQrDialog({ svg, facilityName, printActions });
       await load();
     } catch (e) {
       msg.textContent = describeCallableError(e);
@@ -152,7 +170,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog }) {
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), codeForm, newCodeBox,
-    h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, rotateQr),
+    h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr),
     h("h4", {}, "ディーラーへの共有"), dealerList,
     msg);
 
