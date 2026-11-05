@@ -2777,8 +2777,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .sticker-qr-row { position: relative; }   /* 「QRコード」の見出しと「表示」の行。ⓘの説明は行の幅で開く */
 /* この欄の項目の間隔: 見出し・内容・次の項目を詰めない */
 .settings-section[data-section="stickerPhotos"] > h4 { margin: 16px 0 6px; }
-.settings-section[data-section="stickerPhotos"] > .settings-heading + h4 { margin-top: 10px; }
-.settings-section[data-section="stickerPhotos"] > .sticker-code-row { margin-top: 0; }
+.settings-section[data-section="stickerPhotos"] > .settings-heading + .sticker-code-row { margin-top: 10px; }
 .settings-section[data-section="stickerPhotos"] > .sticker-qr-row { margin-top: 16px; }
 .sticker-qr-dialog .settings-actions { justify-content: center; }   /* 「IOLシール写真のQRコード」のモーダルの印刷のボタンは中央 */
 

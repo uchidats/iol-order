@@ -60,7 +60,8 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const manage = () => canManage && (!settings || settings.canManage !== false);
 
   /* ---------- アクセスコード ---------- */
-  const codeStatus = h("span", { "data-f": "codeStatus" });
+  const codeStatus = h("span", { "data-f": "codeStatus" });   // 状態のバッジ(「ディーラー画面での閲覧」の「許可中」「未許可」と同じ見た目)
+  setShown(codeStatus, false);
   const lockNote = h("p", { class: "error-message", "data-f": "verifyLock", role: "status", hidden: true });   // コードの確認の停止中だけ出す
   const codeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editCode" });   // 「ディーラー画面での閲覧」の「許可する」と同じ見た目
   const codeInput = h("input", { type: "text", class: "form-control", "data-f": "code", inputmode: "numeric", autocomplete: "off", maxlength: "12", "aria-label": "新しいアクセスコード" });
@@ -185,6 +186,8 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   function renderSettings() {
     codeStatus.textContent = accessCodeStatus(settings);
+    codeStatus.className = `member-role-badge dealer-portal-state${settings.accessCodeSet ? " is-active" : ""}`;
+    setShown(codeStatus, true);
     const editable = manage();
     // QR の初回の発行は管理者・副管理者だけ。未発行なら、注文者・代理入力者には表示・印刷を出さず、依頼の案内を出す
     const canUseQr = editable || settings.entryIssued !== false;
@@ -208,7 +211,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
-    h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions sticker-code-row" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
+    h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm, newCodeBox,
     h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
     shareHead, dealerList,
     msg);
@@ -225,6 +228,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   /** 施設を開いたときに読み込む(失敗しても施設設定の他の項目は使える) */
   section._render = async (fid, name) => {
     facilityId = fid; facilityName = name || ""; settings = null;
+    setShown(codeStatus, false);
     msg.textContent = "";
     clearNewCode(); closeForm();
     try {

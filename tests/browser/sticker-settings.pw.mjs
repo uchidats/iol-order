@@ -51,7 +51,7 @@ const stickerPhotoCall = async (p) => {
   if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
   throw new Error("unknown " + p.action);
 };
-const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: q.get("portalDealer") ? [{ localDealerId: "p1", dealerName: "発注先P", link: { status: "proposed", companyActive: true, companyName: "P社", revision: 1 } }] : [] } : { ok: true }; };
+const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: q.get("portalDealer") ? [{ localDealerId: "p1", dealerName: "発注先P", link: { status: q.get("portalDealer") === "active" ? "active" : "proposed", companyActive: true, companyName: "P社", revision: 1, ...(q.get("portalDealer") === "active" ? { grant: { effectiveFrom: "2026-11-01T00:00:00.000Z" } } : {}) } }] : [] } : { ok: true }; };
 const dealerPortalApi = q.get("portal") === "none" ? null : { facilityStatus: portal("facilityStatus"), grant: portal("grant"), revoke: portal("revoke") };
 if (q.get("view") === "member") {
   // 注文者・代理入力者の「施設設定」(main.js と同じ組み立て)
@@ -112,7 +112,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const [role, width] of [["admin", 390], ["subadmin", 1100]]) {
         const page = await openPage(browser, `?role=${role}`, width);
         await ready(page);
-        assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03)");
+        assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み");
         assert.equal(await section(page).locator('[data-act="editCode"]').innerText(), "変更");
         assert.deepEqual(await section(page).locator("[data-share] label span:first-of-type").allInnerTexts(), ["X商事 立川", "Y医療"], "関連付けのない発注先は出さない");
         assert.deepEqual(await section(page).locator("[data-dealer]").evaluateAll(l => l.map(i => i.checked)), [false, true]);
@@ -167,7 +167,7 @@ test("アクセスコード: 変更は確認の後に保存し、新しいコー
     assert.equal(await s.locator('[data-f="newCode"]').innerText(), "654321");
     assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
     assert.equal(await s.locator('[data-f="code"]').inputValue(), "", "入力欄に残さない");
-    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/05)");
+    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み");
     assert.deepEqual(await page.evaluate(() => [localStorage.length ? JSON.stringify({ ...localStorage }).includes("654321") : false, sessionStorage.length]), [false, 0], "端末に保存しない");
     await s.locator('[data-act="hideNewCode"]').click();
     assert.equal(await s.locator('[data-f="newCode"]').innerText({ timeout: 1000 }).catch(() => ""), "");
@@ -304,7 +304,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
 
         const a = await code.boundingBox(), b = await grant.boundingBox(), st = await s.locator('[data-f="codeStatus"]').boundingBox();
         assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 0.5, `${width}: 右端が同じ`);
-        assert.ok(st.x + st.width <= a.x, `${width}: 状態はボタンの左`);
+        const label = await s.locator(".sticker-code-row h4").first().boundingBox();
+        assert.ok(st.x >= label.x + label.width && st.x - (label.x + label.width) <= 8, `${width}: バッジは見出しのすぐ右`);
+        assert.ok(st.x + st.width <= a.x, `${width}: バッジはボタンの左`);
         assert.ok(st.y < a.y + a.height && a.y < st.y + st.height, `${width}: 同じ行`);
         // QRコード: 見出しと同じ行で、「変更」と同じ見た目・同じ右端
         const show = s.locator('[data-act="showQr"]');
@@ -315,10 +317,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 項目の間隔
         const heads = await s.evaluate((el) => {
           const box = (n) => n.getBoundingClientRect();
-          const h4s = [...el.querySelectorAll(":scope > h4")], row = el.querySelector(":scope > .sticker-code-row:not(.sticker-qr-row)"), qr = el.querySelector(".sticker-qr-row");
-          return { headToContent: box(row).top - box(h4s[0]).bottom, contentToQr: box(qr).top - box(row).bottom, qrToShare: box(h4s[1]).top - box(qr).bottom };
+          const share = el.querySelector(":scope > h4"), row = el.querySelector(":scope > .sticker-code-row:not(.sticker-qr-row)"), qr = el.querySelector(".sticker-qr-row");
+          return { contentToQr: box(qr).top - box(row).bottom, qrToShare: box(share).top - box(qr).bottom };
         });
-        assert.ok(heads.headToContent > 5.9 && heads.contentToQr > 15.9 && heads.qrToShare > 15.9, `${width}: ${JSON.stringify(heads)}`);
+        assert.ok(heads.contentToQr > 15.9 && heads.qrToShare > 15.9, `${width}: ${JSON.stringify(heads)}`);
         assert.equal(await s.locator('[data-f="rotateTip"] [data-act="rotateQr"]').evaluate(e => getComputedStyle(e).minHeight), "36px", "ほかの補助ボタンは変えない");
 
         await code.click();
@@ -385,6 +387,45 @@ test("QR のモーダル: 設定の読み直しの途中でも、印刷と QR �
       assert.deepEqual(page.errors, []);
       await page.close();
     }
+  } finally { await browser.close(); }
+});
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`アクセスコードの状態: 「設定済み」は「許可中」、「未設定」は「未許可」と同じバッジ。日付は出さない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [320, 1100]) {
+        for (const [query, text, sample] of [["?portalDealer=active", "設定済み", "許可中"], ["?portalDealer=1&code=unset", "未設定", "未許可"]]) {
+          const page = await openPage(browser, query, width);
+          await ready(page);
+          const s = section(page);
+          const badge = s.locator('[data-f="codeStatus"]'), same = page.locator('[data-section="dealerPortal"] .dealer-portal-state');
+          await same.waitFor();
+          assert.equal(await same.innerText(), sample);
+          const look = (l) => l.evaluate((el) => {
+            const c = getComputedStyle(el);
+            return { background: c.backgroundColor, color: c.color, border: c.border, height: Math.round(el.getBoundingClientRect().height * 10) / 10, padding: c.padding, radius: c.borderRadius, fontSize: c.fontSize, fontWeight: c.fontWeight, lineHeight: c.lineHeight };
+          });
+          assert.equal(await badge.innerText(), text);
+          assert.deepEqual(await look(badge), await look(same), `${width}: ${text}`);
+          assert.doesNotMatch(await s.innerText(), /\d{4}\/\d{2}\/\d{2}/, "日付を出さない");
+          assert.deepEqual(page.errors, []);
+          await page.close();
+        }
+      }
+    } finally { await browser.close(); }
+  });
+}
+
+test("アクセスコードの状態: 読み込みに失敗したときは、空のバッジを出さない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser, "?mode=error");
+    await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]')?.textContent);
+    assert.equal(await section(page).locator('[data-f="codeStatus"]').isVisible(), false);
+    await page.close();
   } finally { await browser.close(); }
 });
 
@@ -504,7 +545,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await ready(page);
         const s = section(page);
         assert.equal(await s.isVisible(), true, role);
-        assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03)");
+        assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み");
         // 出すもの(印刷はモーダルの中)
         assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);

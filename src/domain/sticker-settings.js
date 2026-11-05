@@ -51,13 +51,9 @@ export function generateAccessCode(fill = (a) => crypto.getRandomValues(a), digi
   return code;
 }
 
-/** アクセスコードの状態の表示「設定済み(2026/11/03)」「未設定」。日付は最後に設定・変更した日。コードそのものは扱わない */
-export function accessCodeStatus({ accessCodeSet, accessCodeUpdatedAt }) {
-  if (!accessCodeSet) return "未設定";
-  const ms = Date.parse(accessCodeUpdatedAt);
-  if (Number.isNaN(ms)) return "設定済み";
-  const d = new Date(ms + JST_MS);
-  return `設定済み(${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())})`;
+/** アクセスコードの状態のバッジの文字「設定済み」「未設定」。コードそのものは扱わない */
+export function accessCodeStatus({ accessCodeSet }) {
+  return accessCodeSet ? "設定済み" : "未設定";
 }
 
 /**
