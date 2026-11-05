@@ -33,9 +33,9 @@ test("台紙: 行数は定数1つで変えられ、線と枠が合わせて変�
   assert.equal(four.bottom, 44 + 57 * 4);
 });
 
-test("印刷の文言に患者氏名・ID の記入欄がない(書かない注意だけ)", () => {
+test("印刷の文言: 台紙の注意書きは✕の書き方だけ。患者氏名・ID の記入欄はない", () => {
   assert.equal(SHEET_TITLE, "IOLシール貼付台紙");
-  assert.match(SHEET_NOTE, /患者氏名・IDは書かない/);
+  assert.equal(SHEET_NOTE, "挿入されなかったレンズのシールには上から大きく✕を書く");
   assert.equal(QR_LABEL, "IOLシール写真");
 });
 

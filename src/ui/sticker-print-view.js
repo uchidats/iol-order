@@ -9,7 +9,6 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const FONT = "'Yu Gothic', 'Meiryo', 'Hiragino Sans', 'Noto Sans CJK JP', sans-serif";
 const PT = 0.3528;   // 1pt の mm
 const LINE = { stroke: "#999999", "stroke-width": "0.2" };
-const SCALE_LENGTH = 50;   // 実寸の確認線の長さ(mm)
 
 function svgEl(tag, attrs = {}, text = null) {
   const el = document.createElementNS(SVG_NS, tag);
@@ -31,17 +30,13 @@ function pageSvg(children) {
 function sheetSvg({ headerText, qrUrl }) {
   const lay = sheetLayout();
   const footY = lay.bottom + 5;
-  const scaleX = lay.right - SCALE_LENGTH, scaleY = footY + 3;
   return pageSvg([
     label(PAGE.margin, PAGE.margin + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
     ...wrapHeader(headerText).map((t, i) => label(PAGE.margin, PAGE.margin + 15 + i * 5.5, t, 11, { "data-f": "header" })),
     qrImage(qrUrl, lay.qr),
     ...lay.lines.map(l => line(l)),
     ...lay.dates.map(d => label(d.x, d.y + 1.5, "／", 12, { "text-anchor": "middle" })),
-    label(PAGE.margin, footY, SHEET_NOTE, 9),
-    line({ x1: scaleX, y1: scaleY, x2: lay.right, y2: scaleY }, { stroke: "#000000" }),
-    ...[scaleX, lay.right].map(x => line({ x1: x, y1: scaleY - 1, x2: x, y2: scaleY + 1 }, { stroke: "#000000" })),
-    label(scaleX - 1.5, scaleY + 1, `実寸確認 ${SCALE_LENGTH}mm`, 7, { "text-anchor": "end", "fill-opacity": "0.6" })
+    label(PAGE.margin, footY, SHEET_NOTE, 9)
   ]);
 }
 

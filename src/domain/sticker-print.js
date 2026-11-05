@@ -11,7 +11,7 @@ export const SHEET = Object.freeze({ rows: 5, columns: 2, columnWidth: 90, colum
 export const QR_SHEET = Object.freeze({ rows: 4, columns: 2, qrSize: 40 });
 
 export const SHEET_TITLE = "IOLシール貼付台紙";
-export const SHEET_NOTE = "挿入できなかったレンズのシールには大きく×を書いて貼る ・ 患者氏名・IDは書かない";
+export const SHEET_NOTE = "挿入されなかったレンズのシールには上から大きく✕を書く";
 export const QR_LABEL = "IOLシール写真";
 export const HEADER_MAX_LENGTH = 100;
 

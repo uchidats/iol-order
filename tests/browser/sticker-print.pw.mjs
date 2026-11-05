@@ -91,6 +91,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const page = await openPage(browser);
       await openPrint(page, "printSheet");
       assert.deepEqual(await headerLines(page), ["立川病院　眼科　→　栗原医療器械店　立川支店"]);
+      const sheetText = await page.locator(".sticker-print-svg").textContent();
+      assert.ok(sheetText.includes("挿入されなかったレンズのシールには上から大きく✕を書く"), "下部の注意書き");
+      assert.ok(!/実寸確認|50mm|挿入できなかった|患者氏名/.test(sheetText), "以前の文言を出さない");
+      assert.equal(await page.locator('.sticker-print-svg line[stroke="#000000"]').count(), 0, "確認線を出さない");
       assert.equal(await page.locator(".sticker-print-svg image").count(), 1);
       assert.equal(await page.locator(".sticker-print-svg text", { hasText: "／" }).count(), 10);
       assert.equal(await page.locator('[data-f="sheetDealer"]').count(), 0, "1社なら選択を出さない");

@@ -2,28 +2,26 @@
 
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
-- **日時**: 2026-11-05
-- **作業**: QR のモーダルの施設名を、撮影ページを開くアイコンに変更し、運営者の承認の後に本番へ反映。Zenbook で実施。
-- 直前の作業(同日): 保存の後のコードの表示の削除(`4ddeafd`)、「自動で作る」の削除(`ba92b0f`)、R09 を立川病院だけで有効化(`415ebad`)。
+- **日時**: 2026-11-06
+- **作業**: R09 の「台紙を印刷」の下部を修正(画面のみ)。Zenbook で実施。
+- 直前の作業(2026-11-05): QR のモーダルのリンクのアイコン(`stickerPhotoApi` だけを配備。`5cf8fd0`)、R09 を立川病院だけで有効化(`415ebad`)。
 
 ## 変更内容
-- `functions/src/sticker-photo-service.js`: `getEntryQr`・`rotateEntryQr` の応答に、SVG に符号化した同じ `url` を追加。URL の組み立て・権限・トークン・再発行の無効化は変更なし。
-- `src/ui/sticker-settings-section.js`: モーダルの施設名を外し、リンクのアイコンだけを中央に(名称とツールチップは「撮影ページを開く」)。URL の文字列は出さない。想定外の URL ならリンクを出さない。
-- `src/ui/related-links.js`: `linkIcon` を export(動作の変更なし)。`styles.css`: アイコンの指定を追加(モーダルの中だけ)。
-- 文書: 設計書(決定 50・§4-1)、配備の手順書、ROADMAP。
+- `src/ui/sticker-print-view.js`: 「実寸確認 50mm」の文字と確認線を削除。
+- `src/domain/sticker-print.js`: 注意書きを「挿入されなかったレンズのシールには上から大きく✕を書く」に変更。患者氏名・ID の注意は台紙から外した(撮影画面の ⓘ と手順書には残る)。
+- 変更していないもの: A4 縦・2列×5行、貼付枠の寸法、日付欄、上部の表示、QR、「QRコードのみ印刷」、注文画面、サーバー。
+- 文書: 設計書(決定 51・§4-2)、ROADMAP。
 
 ## commit ID
-- 本体: `fd1824b`。配備の記録は本ファイルを含む commit(`git log -1`)。
+- 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- ブラウザ: `tests/browser/sticker-settings.pw.mjs`・`tests/browser/sticker-print.pw.mjs` 50 件成功(`fd1824b`)。
-- Functions(Firestore エミュレータ。R09 の4ファイル): 73 件成功(`fd1824b`)。
-- unit: `tests/asset-stamp.test.js` 成功。
-- 全テストは運営者の指示で再実行していない。
+- ブラウザ: `tests/browser/sticker-print.pw.mjs`(3ブラウザを含む。注意書き、以前の文言と確認線が出ないこと、A4 の1ページ、枠の実寸、QR のみの印刷)。印刷の見た目もスクリーンショットで確認。
+- unit: `tests/sticker-print.test.js`・`tests/asset-stamp.test.js` 成功。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実際のプリンターでの確認は未実施。
 
 ## push・Firebaseデプロイ
-- Firebase: `stickerPhotoApi` だけを配備(2026-11-05 22:56)。ほかの 42 関数は更新なし。環境変数の差はプラットフォームの `FUNCTION_SIGNATURE_TYPE` だけ。バケット・Secret・IAM・Rules の変更なし。
-- `feature/r09-qr-open-link` を `main` へ fast-forward で統合して通常の push。公開サイトの配信の確認は完了回答に記録。
+- `main` へ fast-forward で統合して通常の push(公開サイトに反映)。Firebase のデプロイなし。
 
 ## 残課題
 - R09 の実機の確認(手順書の段階 8-2、`docs/r09-pilot-guide.md`)。
