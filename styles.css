@@ -2774,6 +2774,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 /* 施設設定「IOLシール写真」のアクセスコードの行: 状態は左、ボタンは右端(狭い画面でも折り返さない) */
 .sticker-code-row { flex-wrap: nowrap; align-items: center; justify-content: space-between; }
 .sticker-code-row > .btn { flex: none; }
+.sticker-qr-dialog .settings-actions { justify-content: center; }   /* 「IOLシール写真のQRコード」のモーダルの印刷のボタンは中央 */
 
 /* ---------- IOL シール写真の閲覧画面(医療機関用・ディーラー用で共通。src/ui/sticker-photo-viewer.js) ---------- */
 .sticker-viewer-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }

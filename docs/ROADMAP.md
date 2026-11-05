@@ -197,6 +197,7 @@
 
 最新報告は上書きされるため、後日の確認では上記commitの `docs/CLAUDE_REPORT.md` と履歴も参照する。過去資料に残る「dryrun」「未実装」などの記述だけで、現在の状態を判断しない。
 
+- 2026-11-05(Claude Code、ユーザーの指示): R09 の「IOLシール写真のQRコード」のモーダル: 「台紙を印刷」「QRコードのみ印刷」を中央揃えに(モーダルの中だけ。ボタンの大きさ・間隔は変更なし。320px の画面は幅が 6px 足りないので2行で中央)。画面のみで、Functions の配備なし
 - 2026-11-05(Claude Code、ユーザーの指示): R09 の施設設定: アクセスコードの「変更」ボタンを「ディーラー画面での閲覧」の「許可する」と同じ見た目にし、行の右端へ(状態は左。文言・機能・確認ダイアログは変更なし)。画面のみで、Functions の配備なし。テスト: `tests/browser/sticker-settings.pw.mjs`(3ブラウザ)、`tests/asset-stamp.test.js`
 - 2026-11-05(Claude Code、ユーザーの指示): R09 の施設設定: 「QRコードを作り直す」を通常の表示から外し、「QRコード」の見出しのⓘの中へ移した(管理者・副管理者だけ。確認ダイアログ・サーバーの権限は変更なし)。画面のみで、Functions の配備なし。テスト: `tests/browser/sticker-settings.pw.mjs`(3ブラウザ)、`tests/asset-stamp.test.js`、`tests/sticker-settings.test.js`
 - 2026-11-05(Claude Code、ユーザーの指示): **R09 を立川病院だけで有効化**(Zenbook。手順書の段階 7・8-1)。R09 の5関数だけを配備(`STICKER_PHOTO_ENABLED=true`、対象は立川病院の1件。既存の 38 関数は更新なし・設定値の変更なし)。画面の設定(`STICKER_VIEWER_ENABLED`・`STICKER_SETTINGS_ENABLED`)を true にして `main` へ統合。配備の前後に、関数・Secret・Rules・インデックス・バケット・施設 ID を読み取りで確認し、入口の応答と CORS を実環境で確認(認証なしの範囲)。テスト: unit、R09 の Functions、実際の画面を読み込むブラウザテスト。ディーラー画面のヘルプのテストが描画を待たずに読む不具合(Zenbook で失敗。今回の変更と無関係)を修正。QR・コードの発行、実機の撮影・送信・閲覧・削除は運営者が行う(未実施)。記録は `r09-deploy-runbook.md`

@@ -313,6 +313,48 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
   });
 }
 
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`QR のモーダル: 印刷の2つのボタンは同じ行で中央(幅が足りない 320px だけ2行で、それぞれ中央)。ボタンの大きさ・間隔は変えず、施設の画面の並びは左のまま: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [320, 340, 360, 390, 1100]) {
+        const page = await openPage(browser, "", width);
+        await ready(page);
+        const s = section(page);
+        const outer = await s.locator('[data-act="printSheet"]').evaluate((el) => { const c = getComputedStyle(el), r = el.getBoundingClientRect(); return { justify: getComputedStyle(el.parentElement).justifyContent, height: r.height, width: r.width, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize }; });
+        assert.equal(outer.justify, "normal", "施設設定の画面の並びは変えない");
+        await s.locator('[data-act="showQr"]').click();
+        await page.waitForSelector(".sticker-qr-dialog");
+        const m = await page.evaluate(() => {
+          const box = (el) => el.getBoundingClientRect();
+          const d = document.querySelector(".sticker-qr-dialog");
+          const a = d.querySelector('[data-act="printSheet"]'), b = d.querySelector('[data-act="printQr"]'), body = d.querySelector(".modal-body"), c = getComputedStyle(a);
+          const cs = getComputedStyle(body);
+          return { a: box(a), b: box(b), left: box(body).left + parseFloat(cs.paddingLeft), right: box(body).right - parseFloat(cs.paddingRight), labels: [a.textContent, b.textContent], gap: box(b).left - box(a).right,
+            style: { height: box(a).height, width: box(a).width, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize } };
+        });
+        assert.deepEqual(m.labels, ["台紙を印刷", "QRコードのみ印刷"]);
+        const center = (m.left + m.right) / 2;
+        if (width === 320) {
+          // 2つで 286px 必要で、内側は 280px。大きさを変えないので2行のまま、それぞれ中央
+          assert.ok(m.b.top > m.a.top, "2行");
+          for (const box of [m.a, m.b]) assert.ok(Math.abs((box.left + box.right) / 2 - center) < 1, "それぞれ中央");
+        } else {
+          assert.equal(m.a.top, m.b.top, `${width}: 同じ行`);
+          assert.ok(Math.abs((m.a.left + m.b.right) / 2 - center) < 1, `${width}: 中央`);
+          assert.ok(Math.abs(m.gap - 8) < 0.01, `間隔は変えない: ${m.gap}`);
+        }
+        const { justify, ...size } = outer;
+        assert.deepEqual(m.style, size, "ボタンは施設設定の画面と同じ見た目");
+        await page.click('.sticker-qr-dialog [data-act="close"]');
+        assert.deepEqual(page.errors, []);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
+
 test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
