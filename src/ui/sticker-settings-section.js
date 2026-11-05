@@ -6,6 +6,7 @@ import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shar
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
 const VIEW_HELP = "看護師が台紙を撮影して送るためのQRコードと台紙を、表示・印刷できます。アクセスコードは台紙やQRコードには載りません。アクセスコードの設定・変更、QRコードの作り直し、ディーラーへの共有は、施設の管理者・副管理者が行います。";
+const QR_NOT_ISSUED_NOTE = "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください。";
 const NOT_LINKED_HELP = "ディーラーの会社との関連付けは運営者が登録します。受注一覧の閲覧の許可とは別の設定です。";
 const STALE_NOTE = "許可の後に発注先の情報が変わったため、公開を止めています。チェックを外して、入れ直してください。";
 
@@ -172,6 +173,10 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   function renderSettings() {
     codeStatus.textContent = accessCodeStatus(settings);
     const editable = manage();
+    // QR の初回の発行は管理者・副管理者だけ。未発行なら、注文者・代理入力者には表示・印刷を出さず、依頼の案内を出す
+    const canUseQr = editable || settings.entryIssued !== false;
+    for (const el of [showQr, printSheet, printQr]) setShown(el, canUseQr);
+    setShown(qrNote, !canUseQr);
     lockNote.textContent = verifyLockNotice(settings, { canManage: editable });
     lockNote.hidden = !lockNote.textContent;
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
@@ -184,12 +189,14 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   }
 
   const shareHead = h("h4", { "data-f": "shareHead" }, "ディーラーへの共有");
+  const qrNote = h("p", { class: "form-hint", "data-f": "qrNotIssued" }, QR_NOT_ISSUED_NOTE);
+  setShown(qrNote, false);
   const manageOnly = [codeBtn, rotateQr, shareHead, dealerList];
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
-    h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr),
+    h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr), qrNote,
     shareHead, dealerList,
     msg);
 

@@ -1039,14 +1039,30 @@ test("役割ごとの権限: 注文者・代理入力者は、設定の表示・
   assert.deepEqual(await api("subA", "delete", { facilityId: F, photoId: stored.body.photoId }), { ok: true });
 });
 
-test("役割ごとの権限: QR がまだない施設では、注文者の表示で発行される。コードの確認が停止中のときは、注文者にも停止の時刻だけを返す", async () => {
+test("役割ごとの権限: QR の初回の発行は管理者・副管理者だけ。注文者・代理入力者は未発行なら案内で拒否され、何も作られない。コードの確認が停止中のときは、注文者にも停止の時刻だけを返す", async () => {
   // 施設 G の QR をまだ出していない状態にする
   await db.doc("facilities/" + G + "/stickerSettings/entry").delete();
   assert.equal((await api("adminB", "getSettings", { facilityId: G })).entryIssued, false);
-  await db.doc("facilities/" + G + "/members/ordG").set({ uid: "ordG", role: "orderer" });
-  const qr = await api("ordG", "getEntryQr", { facilityId: G });
+  const entries = async () => (await db.collection("stickerEntries").where("facilityId", "==", G).where("status", "==", "active").get()).size;
+  const activeBefore = await entries();
+  for (const [uid, role] of [["ordG", "orderer"], ["proxyG", "proxy"]]) {
+    await db.doc("facilities/" + G + "/members/" + uid).set({ uid, role });
+    await assert.rejects(api(uid, "getEntryQr", { facilityId: G }), (e) => e.code === "failed-precondition" && /管理者・副管理者に発行を依頼/.test(e.message), uid);
+    assert.equal((await api(uid, "getSettings", { facilityId: G })).entryIssued, false, uid);
+  }
+  assert.equal((await db.doc("facilities/" + G + "/stickerSettings/entry").get()).exists, false, "発行の記録を作らない");
+  assert.equal(await entries(), activeBefore, "入口を作らない");
+  // 副管理者は初回の発行ができ、発行の後は注文者・代理入力者も同じ QR を表示できる
+  await db.doc("facilities/" + G + "/members/subG").set({ uid: "subG", role: "subadmin" });
+  const qr = await api("subG", "getEntryQr", { facilityId: G });
   assert.match(qr.svg, /sticker\.html#f=[A-Za-z0-9_-]{22}/);
-  assert.equal((await api("adminB", "getEntryQr", { facilityId: G })).svg, qr.svg, "同じ入口を使う");
+  for (const uid of ["ordG", "proxyG", "adminB"]) assert.equal((await api(uid, "getEntryQr", { facilityId: G })).svg, qr.svg, uid);
+  assert.equal((await api("ordG", "getSettings", { facilityId: G })).entryIssued, true);
+  // 発行済みの入口が無効になっていても、注文者は発行し直せない(管理者はできる)
+  const token = (await db.doc("facilities/" + G + "/stickerSettings/entry").get()).get("token");
+  await db.doc("stickerEntries/" + token).update({ status: "revoked" });
+  await assert.rejects(api("ordG", "getEntryQr", { facilityId: G }), (e) => e.code === "failed-precondition");
+  assert.notEqual((await api("adminB", "getEntryQr", { facilityId: G })).svg, qr.svg);
   // 停止中
   for (let i = 0; i < 12; i++) await verify(TOKEN, "000000").catch(() => {});
   const s = await api("ordA", "getSettings", { facilityId: F });

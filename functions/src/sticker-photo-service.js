@@ -38,6 +38,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const bad = (message = "入力内容を確認してください") => new RegistrationError("invalid-argument", message);
 const denied = (message = NOT_ALLOWED) => new RegistrationError("permission-denied", message);
 const unavailable = () => new RegistrationError("failed-precondition", "IOLシール写真は現在ご利用いただけません");
+const QR_NOT_ISSUED = "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください";
 
 function strict(data, allowed) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw bad();
@@ -495,16 +496,17 @@ export function createStickerPhotoService({
 
   const qrOf = async (token) => ({ svg: await makeQrSvg(buildEntryUrl(token, entryUrl)) });
 
-  /** 入口の QR(なければ発行)。所属者全員が取得できる(表示・印刷のため。作り直しは管理者・副管理者だけ)。トークンは SVG の中の URL にだけ含める */
+  /** 入口の QR。発行済みの QR は所属者全員が取得できる(表示・印刷のため)。初回の発行と作り直しは管理者・副管理者だけ。トークンは SVG の中の URL にだけ含める */
   async function getEntryQr(user, data) {
     strict(data, ["facilityId"]);
     const fid = data.facilityId;
     const token = await db.runTransaction(async (tx) => {
-      await assertMember(tx, user.uid, fid);
+      const { role } = await assertMember(tx, user.uid, fid);
       const setting = await tx.get(entrySettingRef(fid));
       const current = setting.exists ? setting.get("token") : null;
       const entry = isEntryToken(current) ? await tx.get(entryRef(current)) : null;
       if (entry?.exists && entry.get("status") === "active" && entry.get("facilityId") === fid) return current;
+      if (!isManagerRole(role)) throw new RegistrationError("failed-precondition", QR_NOT_ISSUED);
       const fresh = newEntryToken();
       tx.create(entryRef(fresh), { facilityId: fid, status: "active", createdAt: FieldValue.serverTimestamp() });
       tx.set(setting.ref, { token: fresh, updatedAt: FieldValue.serverTimestamp() });

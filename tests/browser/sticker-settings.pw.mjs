@@ -27,7 +27,7 @@ const repository = {
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveIolOrder: async () => {}, deleteOrderer: async () => {}, deleteDealer: async () => {},
   saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {} };
 const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
-const state = { lock: q.get("lock") === "1", set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
+const state = { entry: q.get("entry") !== "none", lock: q.get("lock") === "1", set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
   dealers: [
     { localDealerId: "dA", dealerName: "X商事 立川", linked: true, companyName: "X商事", shared: false, stale: false, sharedFrom: null },
     { localDealerId: "dB", dealerName: "Y医療", linked: true, companyName: "Y医療", shared: true, stale: q.get("stale") === "1", sharedFrom: "2026-11-01T00:00:00.000Z" },
@@ -43,9 +43,10 @@ const stickerPhotoCall = async (p) => {
   const manager = role === "admin" || role === "subadmin";
   // サーバーと同じ規則: 注文者・代理入力者の変更の操作は拒否し、表示には共有の状態を含めない
   if (!manager && ["setAccessCode", "rotateEntryQr", "setDealerShare", "delete"].includes(p.action)) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます");
-  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: true, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
+  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: state.entry, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
   if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.lock = false; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
-  if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>' }; }
+  if (p.action === "getEntryQr" && !state.entry && !manager) fail("functions/failed-precondition", "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください");
+  if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { state.entry = true; if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>' }; }
   if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
   throw new Error("unknown " + p.action);
 };
@@ -427,5 +428,38 @@ test("役割ごとの表示: 管理者・副管理者の画面でも、サーバ
     assert.equal(await section(denied).locator('[data-act="showQr"]').isVisible(), true);
     assert.deepEqual(denied.errors, []);
     await denied.close();
+  } finally { await browser.close(); }
+});
+
+test("QR の初回の発行: 未発行なら、注文者・代理入力者には表示・印刷を出さず依頼の案内を出す。管理者・副管理者は発行できる", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    for (const role of ["orderer", "proxy"]) {
+      const page = await openPage(browser, `?view=member&role=${role}&entry=none`);
+      await ready(page);
+      const s = section(page);
+      assert.match(await s.locator('[data-f="qrNotIssued"]').innerText(), /管理者・副管理者に発行を依頼してください/);
+      for (const act of ["showQr", "printSheet", "printQr", "rotateQr"]) assert.equal(await s.locator(`[data-act="${act}"]`).isVisible(), false, act);
+      assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "getEntryQr"), false, "発行の呼び出しをしない");
+      assert.deepEqual(page.errors, []);
+      await page.close();
+    }
+    // 発行済みなら案内は出さない
+    const issued = await openPage(browser, "?view=member&role=orderer");
+    await ready(issued);
+    assert.equal(await section(issued).locator('[data-f="qrNotIssued"]').isVisible(), false);
+    await issued.close();
+    // 管理者・副管理者は、未発行でも案内を出さず、表示の操作で発行できる
+    for (const role of ["admin", "subadmin"]) {
+      const page = await openPage(browser, `?role=${role}&entry=none`);
+      await ready(page);
+      const s = section(page);
+      assert.equal(await s.locator('[data-f="qrNotIssued"]').isVisible(), false, role);
+      await s.locator('[data-act="showQr"]').click();
+      await page.waitForSelector(".sticker-qr-dialog");
+      assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "getEntryQr"), true, role);
+      await page.close();
+    }
   } finally { await browser.close(); }
 });
