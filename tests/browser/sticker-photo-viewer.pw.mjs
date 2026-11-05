@@ -14,7 +14,8 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="/styles.css"></head><body>
 <div class="header-inner"></div><main class="main-content"></main>
 <script type="module">
-import { createStickerPhotoViewer } from "/src/ui/sticker-photo-viewer.js";
+import { createStickerPhotoViewer, ORDER_BACK_CLASS } from "/src/ui/sticker-photo-viewer.js";
+const order = new URLSearchParams(location.search).get("back") === "order";
 const NOW = Date.parse("2026-11-05T01:00:00Z");
 const pixel = async () => { const c = document.createElement("canvas"); c.width = 30; c.height = 40; c.getContext("2d").fillRect(0, 0, 30, 40); return new Promise(r => c.toBlob(r, "image/jpeg")); };
 const p = (id, sessionId, seq, takenAt, over = {}) => ({ photoId: id, sessionId, seq, takenAt, lastSurgeryDate: null, width: 30, height: 40, blurWarned: false, ...over });
@@ -38,8 +39,10 @@ window.__source = (kind) => ({
   readImage: async (a) => { window.__reads.push(a); if (a.photoId === window.__hidden) return null; return pixel(); },
   deletePhoto: kind === "manager" ? async (id, photoId) => { if (window.__failDelete) throw Object.assign(new Error("x"), { code: "functions/permission-denied", message: "この施設の管理者・副管理者のみ操作できます" }); window.__deleted.push(photoId); return { ok: true }; } : null
 });
-window.__viewer = createStickerPhotoViewer({ mount: document.querySelector("main"), title: "IOLシール写真", info: "説明", backLabel: "注文画面に戻る", now: () => NOW,
+window.__viewer = createStickerPhotoViewer({ mount: document.querySelector("main"), title: "IOLシール写真", info: "説明", backLabel: "注文画面に戻る", ...(order ? { backClass: ORDER_BACK_CLASS } : {}), now: () => NOW,
   onClose: () => { window.__closed += 1; }, confirm: async () => window.__confirm !== false });
+// 比較の基準: 施設設定の「注文画面に戻る」と同じ要素
+if (order) document.body.insertAdjacentHTML("beforeend", '<button type="button" class="btn btn-outline-sm" id="btnSettingsClose">注文画面に戻る</button>');
 window.__ready = true;
 </script></body></html>`;
 
@@ -167,6 +170,42 @@ test("シール写真: ディーラーは施設を選べ、2施設以上なら�
     await page.close();
   } finally { await browser.close(); }
 });
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`「注文画面に戻る」: 施設設定の同じボタンと同じ見た目で、右上のまま。文言と動作は変えない。ディーラー画面の既定は変わらない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [390, 1100]) {
+        const page = await browser.newPage({ viewport: { width, height: 800 } });
+        await page.goto(`${base}?back=order`);
+        await page.waitForFunction(() => window.__ready);
+        await page.evaluate(() => window.__viewer.open(window.__source("member")));
+        const back = page.locator('#stickerPhotoViewer [data-act="back"]');
+        await back.waitFor();
+        const look = (l) => l.evaluate((e) => {
+          const c = getComputedStyle(e);
+          return { background: c.backgroundColor, color: c.color, font: [c.fontSize, c.fontWeight, c.fontFamily], height: e.getBoundingClientRect().height, padding: c.padding, radius: c.borderRadius, border: c.border, minWidth: c.minWidth };
+        });
+        assert.deepEqual(await look(back), await look(page.locator("#btnSettingsClose")), `${width}: 同じ見た目`);
+        assert.equal(await back.innerText(), "注文画面に戻る");
+        const pos = await page.evaluate(() => {
+          const box = (s) => document.querySelector(s).getBoundingClientRect(), b = box('#stickerPhotoViewer [data-act="back"]'), head = box("#stickerPhotoViewer .settings-head"), title = box("#stickerPhotoViewer h2");
+          return { right: Math.abs(b.right - head.right), sameRow: title.top < b.bottom && b.top < title.bottom };
+        });
+        assert.ok(pos.right < 1 && pos.sameRow, `${width}: 右上 ${JSON.stringify(pos)}`);
+        assert.equal(await page.locator(".sticker-viewer-period .form-control").first().evaluate(e => getComputedStyle(e).minHeight), "36px", "検索の欄は変えない");
+        await back.click();
+        assert.equal(await page.evaluate(() => window.__closed), 1, "戻る動作はそのまま");
+        await page.close();
+      }
+      // 既定(ディーラー画面)は従来のまま
+      const page = await openPage(browser, "dealer");
+      assert.equal(await page.getAttribute('#stickerPhotoViewer [data-act="back"]', "class"), "btn btn-secondary");
+      await page.close();
+    } finally { await browser.close(); }
+  });
+}
 
 test("シール写真: もっと見るで続きを足す。見えない画像・権限エラー・共有なしの案内", async (t) => {
   const browser = await launch(chromium, "chromium");

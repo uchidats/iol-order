@@ -6,6 +6,9 @@ import { defaultPeriod, dayLabel, sessionLabel, groupForView, timeLabel, jstDate
 
 const IMAGE_WORKERS = 4;   // サムネイルを同時に読む数
 
+/** 注文画面の「注文画面に戻る」のクラス(施設設定の同じボタンと同じ見た目) */
+export const ORDER_BACK_CLASS = "btn btn-outline-sm sticker-viewer-back";
+
 /**
  * IOL シール写真の閲覧(一覧・拡大。docs/iol-sticker-photo-design.md §5・§6)。医療機関用とディーラー用で同じ部品。
  * 権限はサーバーが毎回確認し、ここでは表示だけを分ける。文字はすべて textContent。画像は Blob の URL で表示し、閉じたら解放する。
@@ -16,11 +19,12 @@ const IMAGE_WORKERS = 4;   // サムネイルを同時に読む数
  * @param {string} deps.title 見出し
  * @param {string} deps.info ⓘ の説明
  * @param {string} deps.backLabel 戻るボタンの文言
+ * @param {string} [deps.backClass] 戻るボタンのクラス(注文画面は ORDER_BACK_CLASS。ディーラー画面は既定のまま)
  * @param {() => void} deps.onClose
  * @param {() => number} [deps.now]
  * @param {(opts:object) => Promise<boolean>} [deps.confirm]
  */
-export function createStickerPhotoViewer({ mount, title, info, backLabel, onClose, now = Date.now, confirm = confirmDialog }) {
+export function createStickerPhotoViewer({ mount, title, info, backLabel, backClass = "btn btn-secondary", onClose, now = Date.now, confirm = confirmDialog }) {
   const root = h("section", { id: "stickerPhotoViewer", class: "settings-view sticker-viewer", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -37,7 +41,7 @@ export function createStickerPhotoViewer({ mount, title, info, backLabel, onClos
   let workers = 0;
   let lightbox = null;
 
-  const back = h("button", { type: "button", class: "btn btn-secondary", "data-act": "back" }, backLabel);
+  const back = h("button", { type: "button", class: backClass, "data-act": "back" }, backLabel);
   back.addEventListener("click", () => { close(); onClose(); });
   const status = h("p", { class: "form-hint", role: "status" });
   const filters = h("div", { class: "sticker-viewer-filters" });
