@@ -39,3 +39,11 @@ test("dealer.html(ディーラー専用画面の入口)のバージョンも最�
   assert.match(dealer, /src="src\/dealer\/main\.js\?v=[0-9a-f]{10}"/);
   assert.ok(dealer.indexOf('type="importmap"') < dealer.indexOf('type="module"'));
 });
+
+test("sticker.html(看護師の撮影画面の入口)のバージョンも最新", () => {
+  const sticker = fs.readFileSync(new URL("../sticker.html", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(stampHtml(sticker), sticker, "sticker.html is stale: run `npm run stamp`");
+  assert.match(sticker, /src="src\/sticker\/main\.js\?v=[0-9a-f]{10}"/);
+  assert.match(sticker, /href="sticker\.css\?v=[0-9a-f]{10}"/);
+  assert.ok(sticker.indexOf('type="importmap"') < sticker.indexOf('type="module"'));
+});

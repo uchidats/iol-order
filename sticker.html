@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>IOLシール写真</title>
+  <!-- 看護師の撮影画面(docs/iol-sticker-photo-design.md §3)。注文画面とは別の入口で、ログインなし。Firebase SDK は読み込まない -->
+  <link rel="stylesheet" href="styles.css?v=5c3bdc15eb">
+  <link rel="stylesheet" href="sticker.css?v=4816be3c8d">
+  <!-- asset-stamp:begin -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./src/biometry/biometry-ui.js": "./src/biometry/biometry-ui.js?v=0b8f28e142",
+      "./src/biometry/ocr.js": "./src/biometry/ocr.js?v=0191908359",
+      "./src/biometry/parser.js": "./src/biometry/parser.js?v=15007724d3",
+      "./src/biometry/state.js": "./src/biometry/state.js?v=3e1f62fd6e",
+      "./src/config.js": "./src/config.js?v=9e38d5f398",
+      "./src/config.local.example.js": "./src/config.local.example.js?v=5fddd2e633",
+      "./src/data/dealer-portal-api.js": "./src/data/dealer-portal-api.js?v=fb52b4f60c",
+      "./src/data/firestore-repository.js": "./src/data/firestore-repository.js?v=2ae346f1d9",
+      "./src/data/iol-models.js": "./src/data/iol-models.js?v=97e06f32e6",
+      "./src/data/order-api.js": "./src/data/order-api.js?v=98c75132ec",
+      "./src/data/registration-api.js": "./src/data/registration-api.js?v=bcff07525e",
+      "./src/data/schema.js": "./src/data/schema.js?v=b1f0b3e260",
+      "./src/data/static-repository.js": "./src/data/static-repository.js?v=d1620275ba",
+      "./src/data/sticker-capture-api.js": "./src/data/sticker-capture-api.js?v=b8e332f5f2",
+      "./src/dealer/dealer-app.js": "./src/dealer/dealer-app.js?v=d656b4ea62",
+      "./src/dealer/dealer-export.js": "./src/dealer/dealer-export.js?v=cf8b7a510b",
+      "./src/dealer/dealer-header-menu.js": "./src/dealer/dealer-header-menu.js?v=90d90ca50e",
+      "./src/dealer/dealer-manage.js": "./src/dealer/dealer-manage.js?v=d5b72af7cc",
+      "./src/dealer/main.js": "./src/dealer/main.js?v=afa548b5b0",
+      "./src/domain/access.js": "./src/domain/access.js?v=ce87ba6b9f",
+      "./src/domain/dealer-export.js": "./src/domain/dealer-export.js?v=2df686fd66",
+      "./src/domain/dealer-portal.js": "./src/domain/dealer-portal.js?v=9e00349406",
+      "./src/domain/dealer-selection.js": "./src/domain/dealer-selection.js?v=9b02c5c29f",
+      "./src/domain/facility-selection.js": "./src/domain/facility-selection.js?v=f67f81b252",
+      "./src/domain/facility-settings.js": "./src/domain/facility-settings.js?v=f1abeb96d0",
+      "./src/domain/geo.js": "./src/domain/geo.js?v=cc70776997",
+      "./src/domain/header-theme.js": "./src/domain/header-theme.js?v=bb6c18374d",
+      "./src/domain/image-sharpness.js": "./src/domain/image-sharpness.js?v=b64096fbd5",
+      "./src/domain/iol-order.js": "./src/domain/iol-order.js?v=5d868f52bf",
+      "./src/domain/lens-labels.js": "./src/domain/lens-labels.js?v=095e7149ab",
+      "./src/domain/lens-options.js": "./src/domain/lens-options.js?v=7ca06e7e90",
+      "./src/domain/manual-access.js": "./src/domain/manual-access.js?v=22ad3f969e",
+      "./src/domain/member-admin.js": "./src/domain/member-admin.js?v=ddffdda1f0",
+      "./src/domain/order-draft.js": "./src/domain/order-draft.js?v=cc6a895ef5",
+      "./src/domain/order-duplicates.js": "./src/domain/order-duplicates.js?v=cd6ffb5e47",
+      "./src/domain/order-history-view.js": "./src/domain/order-history-view.js?v=9ac8d7b4e0",
+      "./src/domain/order-history.js": "./src/domain/order-history.js?v=539c29f0e2",
+      "./src/domain/order-lines.js": "./src/domain/order-lines.js?v=5cd460c4ce",
+      "./src/domain/order-mail-profiles.js": "./src/domain/order-mail-profiles.js?v=61db1f34d8",
+      "./src/domain/order-mail.js": "./src/domain/order-mail.js?v=f2fe9dacf7",
+      "./src/domain/order-request.js": "./src/domain/order-request.js?v=8b49e8157c",
+      "./src/domain/order-validation.js": "./src/domain/order-validation.js?v=432a8bd522",
+      "./src/domain/pending-order.js": "./src/domain/pending-order.js?v=ea9edfe707",
+      "./src/domain/power-filter.js": "./src/domain/power-filter.js?v=9165d28630",
+      "./src/domain/registration-flow.js": "./src/domain/registration-flow.js?v=f354be2979",
+      "./src/domain/related-links.js": "./src/domain/related-links.js?v=ed66392552",
+      "./src/domain/self-doctor.js": "./src/domain/self-doctor.js?v=e2ba492122",
+      "./src/domain/service-introduction.js": "./src/domain/service-introduction.js?v=21415aa6a5",
+      "./src/domain/sticker-capture.js": "./src/domain/sticker-capture.js?v=00cc428a26",
+      "./src/domain/sticker-photo.js": "./src/domain/sticker-photo.js?v=b23effc101",
+      "./src/domain/sub-theme.js": "./src/domain/sub-theme.js?v=9d08e19c74",
+      "./src/domain/surgery-date.js": "./src/domain/surgery-date.js?v=15f4106041",
+      "./src/domain/xlsx-writer.js": "./src/domain/xlsx-writer.js?v=8a261e3b3f",
+      "./src/firebase/app-check.js": "./src/firebase/app-check.js?v=2158dbf358",
+      "./src/firebase/auth-service.js": "./src/firebase/auth-service.js?v=798916eed6",
+      "./src/firebase/firebase-config.js": "./src/firebase/firebase-config.js?v=491da30194",
+      "./src/firebase/sdk.js": "./src/firebase/sdk.js?v=82975b38ab",
+      "./src/main.js": "./src/main.js?v=49272405a4",
+      "./src/manual/dealer-manual-pages.js": "./src/manual/dealer-manual-pages.js?v=e81ef73cf8",
+      "./src/manual/manual-pages.js": "./src/manual/manual-pages.js?v=39f496c68d",
+      "./src/manual/markdown.js": "./src/manual/markdown.js?v=47a476164f",
+      "./src/sticker/camera-check.js": "./src/sticker/camera-check.js?v=d0e0c55623",
+      "./src/sticker/capture-controller.js": "./src/sticker/capture-controller.js?v=84c4860f98",
+      "./src/sticker/main.js": "./src/sticker/main.js?v=dc9fcb6d65",
+      "./src/sticker/sticker-app.js": "./src/sticker/sticker-app.js?v=dce2fea74c",
+      "./src/ui/about-view.js": "./src/ui/about-view.js?v=1d9edf48d6",
+      "./src/ui/action-icons.js": "./src/ui/action-icons.js?v=6f87cf218f",
+      "./src/ui/auth-ui.js": "./src/ui/auth-ui.js?v=46678db6ff",
+      "./src/ui/confirm-dialog.js": "./src/ui/confirm-dialog.js?v=fb2cac1420",
+      "./src/ui/confirm-lines.js": "./src/ui/confirm-lines.js?v=0dd1d691f5",
+      "./src/ui/custom-select.js": "./src/ui/custom-select.js?v=f9a0120a62",
+      "./src/ui/dealer-portal-grants.js": "./src/ui/dealer-portal-grants.js?v=59dab9a77c",
+      "./src/ui/dealer-portal-operator.js": "./src/ui/dealer-portal-operator.js?v=c86ac2594b",
+      "./src/ui/dom.js": "./src/ui/dom.js?v=202e763703",
+      "./src/ui/draft-store.js": "./src/ui/draft-store.js?v=73d3fd5df9",
+      "./src/ui/duplicate-warning.js": "./src/ui/duplicate-warning.js?v=77956e01fd",
+      "./src/ui/facility-applications.js": "./src/ui/facility-applications.js?v=8473fcfd55",
+      "./src/ui/facility-preregistrations.js": "./src/ui/facility-preregistrations.js?v=44be7aee8d",
+      "./src/ui/facility-settings.js": "./src/ui/facility-settings.js?v=502f894a04",
+      "./src/ui/geolocation.js": "./src/ui/geolocation.js?v=5e0829112f",
+      "./src/ui/header-menu.js": "./src/ui/header-menu.js?v=7483eb4cb2",
+      "./src/ui/header-theme.js": "./src/ui/header-theme.js?v=0e06a1922d",
+      "./src/ui/history-lens.js": "./src/ui/history-lens.js?v=cd2f84dd16",
+      "./src/ui/info-tip.js": "./src/ui/info-tip.js?v=12fc5cf1eb",
+      "./src/ui/lens-badges.js": "./src/ui/lens-badges.js?v=2cbcdb7739",
+      "./src/ui/lens-lines.js": "./src/ui/lens-lines.js?v=9ae6c3b02a",
+      "./src/ui/manual-view.js": "./src/ui/manual-view.js?v=98ececbbff",
+      "./src/ui/markdown-view.js": "./src/ui/markdown-view.js?v=84a3505cc4",
+      "./src/ui/order-form.js": "./src/ui/order-form.js?v=07150b5c08",
+      "./src/ui/order-history.js": "./src/ui/order-history.js?v=8f3fef1fed",
+      "./src/ui/related-links-settings.js": "./src/ui/related-links-settings.js?v=290a43e2c7",
+      "./src/ui/related-links.js": "./src/ui/related-links.js?v=5800feac02",
+      "./src/ui/settings-autosave.js": "./src/ui/settings-autosave.js?v=476bcee629",
+      "./src/ui/share-site.js": "./src/ui/share-site.js?v=011e48d9e9",
+      "./src/ui/sticker-camera.js": "./src/ui/sticker-camera.js?v=38abe7d0f5",
+      "./src/ui/sub-theme.js": "./src/ui/sub-theme.js?v=aff3529809",
+      "./src/ui/theme-color-section.js": "./src/ui/theme-color-section.js?v=63ba76d777",
+      "./src/ui/undo-toast.js": "./src/ui/undo-toast.js?v=a5922dc06d"
+    }
+  }
+  </script>
+  <!-- asset-stamp:end -->
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-text">
+          <h1 class="header-title">IOLシール写真</h1>
+        </div>
+      </div>
+    </header>
+    <main class="main-content sticker-main" id="stickerMain"></main>
+  </div>
+  <script type="module" src="src/sticker/main.js?v=dc9fcb6d65"></script>
+</body>
+</html>
