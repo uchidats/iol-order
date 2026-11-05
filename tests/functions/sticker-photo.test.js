@@ -247,11 +247,14 @@ test("QR: 所属者が取得でき、SVG の中身は URL だけ。作り直し�
   await rejects(api("adminB", "rotateEntryQr", { facilityId: F }), "permission-denied");
   const first = await api("adminA", "getEntryQr", { facilityId: F });
   assert.ok(first.svg.includes(`sticker.html#f=${TOKEN}`));
+  assert.ok(first.url.endsWith(`sticker.html#f=${TOKEN}`) && first.svg.includes(first.url), "リンクの URL は QR に符号化した値と同じ");
   assert.ok(!first.svg.includes(F) && !first.svg.includes(CODE));
   const again = await api("subA", "getEntryQr", { facilityId: F });
   assert.equal(again.svg, first.svg, "作り直すまで同じ");
   const rotated = await api("adminA", "rotateEntryQr", { facilityId: F });
   assert.notEqual(rotated.svg, first.svg);
+  assert.notEqual(rotated.url, first.url);
+  assert.ok(rotated.svg.includes(rotated.url), "作り直した後のリンクも QR と同じ");
   await rejects(verify(TOKEN, CODE), "permission-denied");
   const fresh = /#f=([A-Za-z0-9_-]{22})/.exec(rotated.svg)[1];
   assert.ok((await verify(fresh, CODE)).ticket);
@@ -1005,7 +1008,8 @@ test("役割ごとの権限: 注文者・代理入力者は、設定の表示・
     assert.deepEqual([s.accessCodeSet, s.entryIssued, s.canManage, s.verifyBlockedUntil], [true, true, false, null], uid);
     assert.ok(!JSON.stringify(s).includes(TOKEN) && !JSON.stringify(s).includes((await access()).get("hash")), uid);
     // QR: 管理者と同じ(作り直さない)
-    assert.equal((await api(uid, "getEntryQr", { facilityId: F })).svg, adminQr.svg, uid);
+    const memberQr = await api(uid, "getEntryQr", { facilityId: F });
+    assert.deepEqual(memberQr, adminQr, uid);
     // 写真の閲覧
     assert.equal((await api(uid, "list", { facilityId: F })).photos.length, 1, uid);
     assert.equal((await image(uid, { photo: stored.body.photoId })).statusCode, 200, uid);

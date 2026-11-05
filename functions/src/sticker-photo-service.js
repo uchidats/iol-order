@@ -494,7 +494,11 @@ export function createStickerPhotoService({
     }, { maxAttempts: TX_ATTEMPTS });
   }
 
-  const qrOf = async (token) => ({ svg: await makeQrSvg(buildEntryUrl(token, entryUrl)) });
+  /** QR の SVG と、符号化した URL(同じ値。モーダルのリンクに使う)。トークンを含むのでログに出さない */
+  const qrOf = async (token) => {
+    const url = buildEntryUrl(token, entryUrl);
+    return { svg: await makeQrSvg(url), url };
+  };
 
   /** 入口の QR。発行済みの QR は所属者全員が取得できる(表示・印刷のため)。初回の発行と作り直しは管理者・副管理者だけ。トークンは SVG の中の URL にだけ含める */
   async function getEntryQr(user, data) {

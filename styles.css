@@ -2780,6 +2780,11 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .settings-section[data-section="stickerPhotos"] > .settings-heading + .sticker-code-row { margin-top: 10px; }
 .settings-section[data-section="stickerPhotos"] > .sticker-qr-row { margin-top: 16px; }
 .settings-section[data-section="stickerPhotos"] > [data-f="codeForm"] { margin-top: 8px; }
+/* QR の下の、撮影ページを開くアイコン。色は関連リンクと同じ。見た目は小さいまま、タップできる範囲を広げる */
+.sticker-qr-open { position: relative; display: inline-flex; vertical-align: middle; color: var(--primary); }
+.sticker-qr-open::after { content: ""; position: absolute; inset: -11px; }
+.sticker-qr-open .ext-icon { display: block; width: 18px; height: 18px; }
+.sticker-qr-open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
 .sticker-qr-dialog .settings-actions { justify-content: center; }   /* 「IOLシール写真のQRコード」のモーダルの印刷のボタンは中央 */
 
 /* ---------- IOL シール写真の閲覧画面(医療機関用・ディーラー用で共通。src/ui/sticker-photo-viewer.js) ---------- */

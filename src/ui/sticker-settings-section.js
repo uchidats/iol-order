@@ -1,7 +1,9 @@
 import { h } from "./markdown-view.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
+import { linkIcon } from "./related-links.js";
 import { describeCallableError } from "../data/registration-api.js";
+import { STICKER_ENTRY_URL } from "../domain/sticker-photo.js";
 import { accessCodeError, accessCodeStatus, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
@@ -21,14 +23,20 @@ const isUnavailable = (e) => {
 /** 表示・非表示(ボタンは見た目の指定が hidden より強いので、display も切り替える) */
 const setShown = (el, on) => { el.hidden = !on; el.style.display = on ? "" : "none"; };
 
+/** 撮影ページを開くリンク(アイコンだけ)。URL は QR と同じ値で、文字列は出さない。別タブへ参照元を渡さない */
+function entryLink(url) {
+  if (typeof url !== "string" || !url.startsWith(`${STICKER_ENTRY_URL}#f=`)) return null;
+  return h("a", { class: "sticker-qr-open", href: url, target: "_blank", rel: "noopener noreferrer", title: "撮影ページを開く", "aria-label": "撮影ページを開く", "data-act": "openEntry" }, linkIcon());
+}
+
 /** QR のモーダル(「サイトを共有」と同じ見た目。閉じる: 「閉じる」・Escape・背景のクリック)。URL の文字列は出さない */
-function openQrDialog({ svg, facilityName, printActions = [] }) {
+function openQrDialog({ svg, url, printActions = [] }) {
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary", "data-act": "close" }, "閉じる");
   const img = h("img", { class: "share-qr", alt: "IOLシール写真のQRコード", src: qrImageUrl(svg) });
   const overlay = h("div", { class: "modal-overlay share-dialog sticker-qr-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "stickerQrTitle" },
     h("div", { class: "modal-card" },
       h("div", { class: "modal-header modal-header-simple" }, h("h2", { class: "modal-title", id: "stickerQrTitle" }, "IOLシール写真のQRコード")),
-      h("div", { class: "modal-body" }, h("div", { class: "share-qr-box" }, img), h("p", { class: "share-url", "data-f": "facility" }, facilityName),
+      h("div", { class: "modal-body" }, h("div", { class: "share-qr-box" }, img), h("p", { class: "share-url" }, entryLink(url)),
         h("div", { class: "settings-actions" }, printActions.map(a => { const b = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": a.act }, a.label); b.addEventListener("click", () => { close(); a.run(); }); return b; }))),
       h("div", { class: "modal-footer" }, closeBtn)));
   const before = document.activeElement, overflow = document.body.style.overflow;
@@ -119,14 +127,14 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const qrAction = async (fn) => {
     if (busy) return;
     busy = true; msg.textContent = "";
-    let svg;
+    let svg, url;
     try {
-      ({ svg } = await fn(facilityId));
+      ({ svg, url } = await fn(facilityId));
     } catch (e) {
       msg.textContent = describeCallableError(e);
       return;
     } finally { busy = false; }
-    openQrDialog({ svg, facilityName, printActions });
+    openQrDialog({ svg, url, printActions });
     try {
       await load();
     } catch (e) {

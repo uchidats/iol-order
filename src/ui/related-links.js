@@ -1,7 +1,7 @@
 import { visibleRelatedLinks } from "../domain/related-links.js";
 
 /** 既存のリンクと同じアイコン(右上向きの矢印) */
-function linkIcon() {
+export function linkIcon() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   for (const [k, v] of Object.entries({ class: "ext-icon", viewBox: "0 0 24 24", width: "13", height: "13", fill: "none", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true", focusable: "false" })) svg.setAttribute(k, v);
   const p = document.createElementNS(svg.namespaceURI, "path");

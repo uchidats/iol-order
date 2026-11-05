@@ -3,26 +3,33 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-05
-- **作業**: 施設設定「IOLシール写真」のアクセスコードの保存の後の表示を簡素化(画面のみ)。Zenbook で実施。
-- 直前の作業(同日): 「自動で作る」の削除(`ba92b0f`)、状態のバッジ化(`7219ab0`)、R09 を立川病院だけで有効化(`415ebad`)。QR・アクセスコードは未発行、実機の確認は未実施。
+- **作業**: QR のモーダルの施設名を、撮影ページを開くアイコンに変更。Zenbook で実施。**ブランチ `feature/r09-qr-open-link` まで。`main` 未統合・Functions 未配備(判断待ち)**。
+- 直前の作業(同日): 保存の後のコードの表示の削除(`4ddeafd`)、「自動で作る」の削除(`ba92b0f`)、R09 を立川病院だけで有効化(`415ebad`)。QR・アクセスコードは未発行、実機の確認は未実施。
 
 ## 変更内容
-- `src/ui/sticker-settings-section.js`: 保存の後の「新しいアクセスコード」の表示・案内・「閉じる」を削除。保存に成功すると入力欄を閉じ、通常の表示に戻る。入力の画面に「設定したコードは後から確認できません。控えてから保存してください。」を追加。
-- 成功の通知は、この欄の既存の通知の場所に「アクセスコードを変更しました。」「アクセスコードを設定しました。」を出す。失敗は従来どおり入力欄の下に理由を出し、入力を残す。
-- 保存の後の読み直しに失敗しても、保存自体は成功なので成功の通知を残す(従来は閉じた入力欄の中に失敗の文言が入り、見えなかった)。
-- 変更していないもの: サーバーの保存・ハッシュ化・権限・桁数の検証・チケットの無効化、変更時の確認ダイアログ、ほかの項目。
-- 文書: 設計書(決定 49・§4)、試験運用の手順書、ROADMAP。
+- `functions/src/sticker-photo-service.js`: `getEntryQr`・`rotateEntryQr` の応答に、SVG に符号化した同じ `url` を追加。権限と無効化の処理は変更なし。
+- `src/ui/sticker-settings-section.js`: モーダルの施設名を外し、リンクのアイコンだけを中央に(名称とツールチップは「撮影ページを開く」)。URL の文字列は出さない。想定外の URL ならリンクを出さない。
+- `src/ui/related-links.js`: `linkIcon` を export(動作の変更なし)。`styles.css`: アイコンの指定を追加(モーダルの中だけ)。
+- 文書: 設計書(決定 50・§4-1)、ROADMAP。
+
+## 配備が必要な理由
+- 本番の `getEntryQr` は SVG だけを返し、入口トークンは Rules で読めないので、画面は URL を持っていない。依頼の「再配備は不要」と異なり、この変更には `stickerPhotoApi` の配備が必要。配備はしていない。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- ブラウザ: `tests/browser/sticker-settings.pw.mjs` 全体(案内の表示、保存の後に入力欄が閉じること、コードが画面の HTML に残らないこと、成功の通知、失敗の表示、役割ごとの表示)。スクリーンショットでも確認。
-- unit: `tests/asset-stamp.test.js`・`tests/sticker-settings.test.js` 成功。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions(サーバーの変更なし)、Rules。実機での確認は未実施。
+- ブラウザ: `tests/browser/sticker-settings.pw.mjs`・`tests/browser/sticker-print.pw.mjs` 50 件成功(3ブラウザを含む。320・390・1100px。リンクの URL・名称・アイコン・中央・行の高さ、注文者の表示、作り直しの後の URL、想定外の URL)。スクリーンショットでも確認。
+- Functions(Firestore エミュレータ。R09 の4ファイル): 73 件成功(`url` が SVG に符号化した値と同じ、作り直しで変わる、所属者にも同じ値)。
+- unit: `tests/asset-stamp.test.js`。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Rules。実機での確認は未実施。
 
 ## push・Firebaseデプロイ
-- `main` へ fast-forward で統合して通常の push(公開サイトに反映)。Firebase のデプロイなし。
+- `feature/r09-qr-open-link` へ通常の push。`main` への統合なし。Firebase のデプロイなし。
+
+## 本番への反映に必要な作業(未実施)
+1. `firebase deploy --only functions:stickerPhotoApi --project medconf-iol-dev`(運営者の承認の後)。
+2. このブランチを `main` へ fast-forward で統合して push。順序は配備が先(逆だと施設名もアイコンも出ない)。
 
 ## 残課題
 - R09 の実機の確認(手順書の段階 8-2、`docs/r09-pilot-guide.md`)。

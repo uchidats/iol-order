@@ -47,7 +47,7 @@ const stickerPhotoCall = async (p) => {
   if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: state.entry, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
   if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.lock = false; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
   if (p.action === "getEntryQr" && !state.entry && !manager) fail("functions/failed-precondition", "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください");
-  if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { state.entry = true; if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>' }; }
+  if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { state.entry = true; if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>', url: window.__badUrl ? "javascript:alert(1)" : "https://iol.medconf.jp/sticker.html#f=" + "abcdefghijklmnopqrstu" + state.gen }; }
   if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
   throw new Error("unknown " + p.action);
 };
@@ -133,7 +133,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await section(page).locator('[data-act="showQr"]').click();
       await page.waitForSelector(".sticker-qr-dialog");
       const box = await page.locator(".sticker-qr-dialog .modal-card").innerText();
-      assert.ok(box.includes("IOLシール写真のQRコード") && box.includes("A眼科"));
+      assert.ok(box.includes("IOLシール写真のQRコード") && !box.includes("A眼科"));
       assert.ok(!/https?:|sticker\.html/.test(box), "URL は文字で出さない");
       assert.ok((await page.locator(".sticker-qr-dialog img").getAttribute("src")).startsWith("data:image/svg+xml"));
       assert.equal(await page.evaluate(() => window.__evil === undefined), true, "SVG の中のスクリプトは動かない");
@@ -437,6 +437,59 @@ test("アクセスコードの状態: 読み込みに失敗したときは、空
   } finally { await browser.close(); }
 });
 
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`QR のモーダル: 施設名の代わりに撮影ページを開くアイコンだけを中央に出す。URL は QR と同じ値で文字列は出さない。モーダルの大きさは変えない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const [width, query] of [[320, ""], [390, ""], [1100, ""], [390, "?view=member&role=orderer"]]) {
+        const page = await openPage(browser, query, width);
+        await ready(page);
+        await section(page).locator('[data-act="showQr"]').click();
+        await page.waitForSelector(".sticker-qr-dialog");
+        const d = page.locator(".sticker-qr-dialog"), link = d.locator('[data-act="openEntry"]');
+        assert.deepEqual(await link.evaluate(a => [a.getAttribute("href"), a.target, a.rel, a.title, a.getAttribute("aria-label"), a.textContent]),
+          ["https://iol.medconf.jp/sticker.html#f=abcdefghijklmnopqrstu0", "_blank", "noopener noreferrer", "撮影ページを開く", "撮影ページを開く", ""]);
+        assert.equal(await link.locator("svg.ext-icon path").getAttribute("d"), "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3", "関連リンクと同じアイコン");
+        const text = await d.innerText();
+        assert.ok(!text.includes("sticker.html") && !text.includes("A眼科") && !text.includes("立川"), "URL の文字列と施設名を出さない");
+        const m = await page.evaluate(() => {
+          const row = document.querySelector(".sticker-qr-dialog .share-url"), a = row.querySelector("a").getBoundingClientRect(), box = document.querySelector(".sticker-qr-dialog .share-qr").getBoundingClientRect();
+          const before = row.cloneNode(false); before.textContent = "立川病院"; row.after(before);
+          const r = { row: row.getBoundingClientRect().height, before: before.getBoundingClientRect().height, center: (a.left + a.right) / 2, qrCenter: (box.left + box.right) / 2 };
+          before.remove();
+          return r;
+        });
+        assert.ok(Math.abs(m.center - m.qrCenter) < 1, `${width}: QR の中央`);
+        assert.ok(Math.abs(m.row - m.before) < 0.5, `${width}: 行の高さは施設名のときと同じ ${m.row} / ${m.before}`);
+        assert.deepEqual(page.errors, []);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
+
+test("QR のモーダル: 作り直すとリンクも新しい URL になる。想定外の URL ならリンクを出さない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const page = await openPage(browser);
+    await ready(page);
+    const s = section(page);
+    await openRotateTip(s);
+    await s.locator('[data-act="rotateQr"]').click();
+    await confirmDialog(page, "ok");
+    await page.waitForSelector(".sticker-qr-dialog");
+    assert.equal(await page.getAttribute('.sticker-qr-dialog [data-act="openEntry"]', "href"), "https://iol.medconf.jp/sticker.html#f=abcdefghijklmnopqrstu1");
+    await page.click('.sticker-qr-dialog [data-act="close"]');
+    await page.evaluate(() => { window.__badUrl = true; });
+    await s.locator('[data-act="showQr"]').click();
+    await page.waitForSelector(".sticker-qr-dialog");
+    assert.equal(await page.locator('.sticker-qr-dialog [data-act="openEntry"]').count(), 0);
+    await page.close();
+  } finally { await browser.close(); }
+});
+
 test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
@@ -570,7 +623,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // QR の表示(モーダルの中の印刷も使える。作り直しはない)
         await s.locator('[data-act="showQr"]').click();
         await page.waitForSelector(".sticker-qr-dialog");
-        assert.deepEqual(await page.locator(".sticker-qr-dialog [data-act]").evaluateAll(l => l.map(b => b.getAttribute("data-act"))), ["printSheet", "printQr", "close"]);
+        assert.deepEqual(await page.locator(".sticker-qr-dialog [data-act]").evaluateAll(l => l.map(b => b.getAttribute("data-act"))), ["openEntry", "printSheet", "printQr", "close"]);
         await page.keyboard.press("Escape");
         const calls = await page.evaluate(() => window.__calls);
         assert.deepEqual(calls.filter(c => SETTERS.includes(c.action)), [], "変更の呼び出しをしない");
