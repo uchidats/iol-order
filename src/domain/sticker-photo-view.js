@@ -8,7 +8,7 @@ import { groupPhotosBySession } from "./sticker-photo.js";
  * 閲覧画面のメニューを出すか。false の間は画面に項目を出さない(撮影と配備の準備ができて、運営者が承認してから true にする)。
  * メニューの表示だけの設定で、権限は stickerPhotoApi・stickerPhotoImage が毎回確認する。
  */
-export const STICKER_VIEWER_ENABLED = false;
+export const STICKER_VIEWER_ENABLED = true;
 
 /**
  * メニューを出すかを、対象(医療機関は施設、ディーラーは会社)ごとにサーバーへ確かめて覚える。

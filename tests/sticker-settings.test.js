@@ -9,7 +9,7 @@ import { createStickerSettingsApi } from "../src/data/sticker-settings-api.js";
 import { createDealerPortalApi } from "../src/data/dealer-portal-api.js";
 import { createStickerPhotoApi } from "../src/data/sticker-photo-api.js";
 
-test("公開の前は項目を出さない", () => assert.equal(STICKER_SETTINGS_ENABLED, false));
+test("項目の公開の設定は true(試験運用。出す施設はサーバーの答えで決まる)", () => assert.equal(STICKER_SETTINGS_ENABLED, true));
 
 test("コードの形式: 半角数字6〜12桁だけ", () => {
   for (const ok of ["123456", "123456789012"]) assert.equal(accessCodeError(ok), "");

@@ -9,7 +9,7 @@ import { createStickerPhotoApi, stickerImageUrl } from "../src/data/sticker-phot
 const NOW = Date.parse("2026-11-05T01:00:00Z");   // 日本時間 11/5 10:00
 const photo = (sessionId, seq, takenAt, over = {}) => ({ photoId: `${sessionId}${seq}`, sessionId, seq, takenAt, lastSurgeryDate: null, facilityId: "fA", facilityName: "A眼科", ...over });
 
-test("公開の前は閲覧のメニューを出さない", () => assert.equal(STICKER_VIEWER_ENABLED, false));
+test("閲覧のメニューの公開の設定は true(試験運用。出す施設・会社はサーバーの答えで決まる)", () => assert.equal(STICKER_VIEWER_ENABLED, true));
 
 test("既定の期間は今日を含む直近4週(日本時間)", () => {
   assert.deepEqual(defaultPeriod(NOW), { from: "2026-10-09", to: "2026-11-05" });
@@ -103,7 +103,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 
 test("メニューの表示: 公開の設定が false の間は、問い合わせもせず出さない", async () => {
   const asked = [];
-  const a = createStickerAvailability({ check: async (t) => { asked.push(t); return true; } });
+  const a = createStickerAvailability({ active: false, check: async (t) => { asked.push(t); return true; } });
   assert.equal(a.of("fA"), false);
   await tick();
   assert.deepEqual([a.of("fA"), asked], [false, []]);

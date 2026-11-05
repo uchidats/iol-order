@@ -1290,7 +1290,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: 目次が横にはみ出さない`);
         // ページの移動(目次のリンク)。3. は会社管理者のみの印(赤い *)と、その説明
         await page.locator('.manual-body a[href="#help/03-settings"]').click();
-        await page.waitForFunction(() => location.hash === "#help/03-settings");
+        await page.waitForFunction(() => location.hash === "#help/03-settings" && /^3\. /.test(document.querySelector(".manual-body h1")?.textContent || ""));   // 見出しの描き直しを待つ
         assert.match(await page.locator(".manual-body h1").innerText(), /^3\. ディーラー設定/);
         assert.ok(await page.locator(".manual-body .manual-admin-mark").count() > 0);
         assert.equal(await page.locator(".manual-body .manual-admin-mark").first().getAttribute("title"), "会社管理者のみ");

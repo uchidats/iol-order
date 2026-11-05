@@ -8,7 +8,7 @@ import { MEMBER_ROLES, isManagerRole } from "./member-admin.js";
  * 施設設定にセクションを出すか。false の間は表示しない(撮影と配備の準備ができて、運営者が承認してから true にする)。
  * 表示だけの設定で、操作の権限は stickerPhotoApi が毎回確認する。
  */
-export const STICKER_SETTINGS_ENABLED = false;
+export const STICKER_SETTINGS_ENABLED = true;
 
 /**
  * アクセスコードの変更・QR の作り直し・ディーラーへの共有の操作を出すか(管理者・副管理者だけ)。
