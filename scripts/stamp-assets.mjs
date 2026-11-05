@@ -43,6 +43,8 @@ export function stampHtml(html) {
   out = out.replace(/href="styles\.css(\?v=[0-9a-f]+)?"/, `href="styles.css?v=${hashOf(rootPath("styles.css"))}"`);
   out = out.replace(/src="src\/main\.js(\?v=[0-9a-f]+)?"/, `src="src/main.js?v=${hashOf(rootPath("src/main.js"))}"`);
   out = out.replace(/src="src\/dealer\/main\.js(\?v=[0-9a-f]+)?"/, `src="src/dealer/main.js?v=${hashOf(rootPath("src/dealer/main.js"))}"`);
+  out = out.replace(/src="src\/sticker\/main\.js(\?v=[0-9a-f]+)?"/, `src="src/sticker/main.js?v=${hashOf(rootPath("src/sticker/main.js"))}"`);
+  out = out.replace(/href="sticker\.css(\?v=[0-9a-f]+)?"/, `href="sticker.css?v=${hashOf(rootPath("sticker.css"))}"`);
   return out;
 }
 
@@ -50,7 +52,7 @@ if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].re
   // マニュアルの表示データを先に作り直す(医療機関用 docs/manual・ディーラー用 docs/dealer-manual の変更もバージョンに反映する)
   const { writeManualModule, MANUALS } = await import("./build-manual.mjs");
   for (const m of Object.values(MANUALS)) if (writeManualModule(m)) console.log(`${m.outPath} を更新しました`);
-  for (const name of ["index.html", "dealer.html"]) {   // dealer.html: ディーラー専用画面の入口
+  for (const name of ["index.html", "dealer.html", "sticker.html"]) {   // dealer.html: ディーラー専用画面の入口。sticker.html: 看護師の撮影画面の入口
     const file = rootPath(name);
     const html = fs.readFileSync(file, "utf8");
     const stamped = stampHtml(html);

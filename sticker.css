@@ -1,0 +1,30 @@
+/* 看護師の撮影画面(sticker.html)専用。共通の見た目は styles.css を読むだけで、変更しない */
+.sticker-main { display: flex; flex-direction: column; gap: 10px; padding-bottom: 24px; }
+.sticker-screen { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border-light); border-radius: var(--radius-md, 8px); background: #fff; }
+.sticker-screen[hidden], .sticker-facility[hidden], .sticker-last-sent[hidden], .sticker-warning[hidden], .sticker-date[hidden] { display: none; }
+.sticker-label { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.sticker-code { min-height: 44px; font-size: 1.2rem; letter-spacing: 0.2em; }
+.sticker-wide { width: 100%; }
+.sticker-facility { margin: 0; font-weight: 700; }
+.sticker-last-sent { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+.sticker-message:empty, .sticker-notice:empty { display: none; }
+.sticker-message, .sticker-notice { margin: 0; }
+.sticker-notice { font-size: 0.9rem; color: var(--text-muted); }
+.sticker-frame { position: relative; overflow: hidden; border-radius: 8px; background: #000; }
+.sticker-video { display: block; width: 100%; max-height: 62vh; object-fit: contain; }
+.sticker-guide { position: absolute; inset: 6%; border: 2px dashed rgba(255, 255, 255, 0.6); border-radius: 6px; pointer-events: none; }
+.sticker-shutter-row { display: flex; justify-content: center; }
+.sticker-shutter { width: 68px; height: 68px; padding: 0; border: 4px solid var(--primary); border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 30px var(--primary); cursor: pointer; }
+.sticker-shutter[hidden] { display: none; }
+.sticker-shutter:disabled { opacity: 0.5; }
+.sticker-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.sticker-actions-split { justify-content: space-between; }
+.sticker-actions-split .btn { flex: 1 1 0; }
+.sticker-preview-box { max-height: 60vh; overflow: auto; border-radius: 8px; background: #f1f5f9; touch-action: pinch-zoom; }
+.sticker-preview { display: block; width: 100%; height: auto; }
+.sticker-warning { margin: 0; padding: 6px 8px; border-radius: 6px; font-size: 0.9rem; color: #78350f; background: #fef3c7; }
+.sticker-date { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin: 0; font-size: 0.9rem; }
+.sticker-date .form-control { width: auto; min-height: 40px; }
+.sticker-done { align-items: center; text-align: center; }
+.sticker-done-title { margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--primary); }
+.sticker-done-detail { margin: 0; font-size: 0.9rem; color: var(--text-muted); }
