@@ -6,7 +6,8 @@ import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shar
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
 const VIEW_HELP = "看護師が台紙を撮影して送るためのQRコードと台紙を、表示・印刷できます。アクセスコードは台紙やQRコードには載りません。アクセスコードの設定・変更、QRコードの作り直し、ディーラーへの共有は、施設の管理者・副管理者が行います。";
-const QR_NOT_ISSUED_NOTE = "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください。";
+const ROTATE_HELP = "QRコードを紛失したときなどに作り直せます。これまでのQRコードは使えなくなります。";
+const QR_NOT_ISSUED_NOTE ="QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください。";
 const NOT_LINKED_HELP = "ディーラーの会社との関連付けは運営者が登録します。受注一覧の閲覧の許可とは別の設定です。";
 const STALE_NOTE = "許可の後に発注先の情報が変わったため、公開を止めています。チェックを外して、入れ直してください。";
 
@@ -138,7 +139,15 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     } finally { busy = false; }
   };
   showQr.addEventListener("click", () => qrAction(api.getEntryQr));
+  // 「QRコードを作り直す」は通常は出さず、見出しのⓘの中に置く(管理者・副管理者だけ)。
+  // ボタンを押す間に ⓘ のフォーカスが外れて閉じないようにする(Safari はボタンを押すとフォーカスを外す)
+  const rotateTip = createInfoTip(ROTATE_HELP, { label: "QRコードの作り直し" });
+  rotateTip.root.dataset.f = "rotateTip";
+  rotateTip.popup.removeAttribute("role");   // 操作を含むので tooltip にしない
+  rotateTip.popup.append(h("div", { class: "settings-actions" }, rotateQr));
+  rotateTip.popup.addEventListener("mousedown", (e) => e.preventDefault());
   rotateQr.addEventListener("click", async () => {
+    rotateTip.close();
     if (!manage()) return;
     if (!(await confirm({ message: "QRコードを作り直しますか？\nこれまでに印刷・貼付したQRコードは使えなくなります。新しいQRコードを印刷して貼り替えてください。", okLabel: "作り直す", cancelLabel: "キャンセル" }))) return;
     qrAction(api.rotateEntryQr);
@@ -191,12 +200,12 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const shareHead = h("h4", { "data-f": "shareHead" }, "ディーラーへの共有");
   const qrNote = h("p", { class: "form-hint", "data-f": "qrNotIssued" }, QR_NOT_ISSUED_NOTE);
   setShown(qrNote, false);
-  const manageOnly = [codeBtn, rotateQr, shareHead, dealerList];
+  const manageOnly = [codeBtn, rotateTip.root, shareHead, dealerList];
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
-    h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr), qrNote,
+    h("h4", { style: "position: relative" }, "QRコード", rotateTip.root), h("div", { class: "settings-actions" }, showQr, printSheet, printQr), qrNote,
     shareHead, dealerList,
     msg);
 

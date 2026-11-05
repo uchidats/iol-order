@@ -202,22 +202,80 @@ test("アクセスコード: 未設定なら確認なしで設定でき、自動
   } finally { await browser.close(); }
 });
 
-test("QR: 作り直しは確認の後に行い、新しい QR を出す。取り消せる", async (t) => {
+const openRotateTip = (s) => s.locator('[data-f="rotateTip"] .info-tip-btn').click();
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`QR: 作り直しは通常は出さず、ⓘの中から操作する。確認の後に行い、新しい QR を出す。取り消せる: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [320, 390, 1100]) {
+        const page = await openPage(browser, "", width);
+        await ready(page);
+        const s = section(page);
+        const rotate = s.locator('[data-act="rotateQr"]');
+        // 通常の表示: 3つのボタンだけ。作り直しは ⓘ の中
+        assert.equal(await rotate.isVisible(), false, "通常は出さない");
+        for (const act of ["showQr", "printSheet", "printQr"]) assert.equal(await s.locator(`[data-act="${act}"]`).isVisible(), true, act);
+        assert.deepEqual(await s.locator('[data-act="showQr"]').locator("xpath=..").locator("button").evaluateAll(l => l.map(b => b.dataset.act)), ["showQr", "printSheet", "printQr"]);
+
+        const scrollWidth = () => page.evaluate(() => document.documentElement.scrollWidth);
+        const closedWidth = await scrollWidth();
+        await openRotateTip(s);
+        assert.equal(await rotate.isVisible(), true, "ⓘ の中に出す");
+        assert.match(await s.locator('[data-f="rotateTip"] .info-tip-pop').innerText(), /これまでのQRコードは使えなくなります/);
+        const box = await rotate.boundingBox(), aux = await s.locator('[data-act="showQr"]').boundingBox();
+        assert.equal(box.height, aux.height, "ボタンの高さはほかの補助ボタンと同じ");
+        assert.ok(box.x >= 0 && box.x + box.width <= width, `${width}: 画面の中に収まる`);
+        assert.equal(await scrollWidth(), closedWidth, `${width}: ⓘ を開いても画面の幅は増えない`);
+
+        await rotate.click();
+        assert.equal(await rotate.isVisible(), false, "押すと ⓘ を閉じる");
+        await confirmDialog(page, "cancel");
+        assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "rotateEntryQr"), false);
+        await openRotateTip(s);
+        await rotate.click();
+        assert.match(await page.locator(".confirm-dialog-message").innerText(), /使えなくなります/);
+        await confirmDialog(page, "ok");
+        await page.waitForSelector(".sticker-qr-dialog");
+        assert.ok(decodeURIComponent(await page.locator(".sticker-qr-dialog img").getAttribute("src")).includes('data-gen="1"'));
+        await page.click('.sticker-qr-dialog [data-act="close"]');
+        assert.deepEqual(page.errors, []);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
+
+test("QR: 見出しの行の高さはほかの見出しと同じ。マウスで ⓘ からボタンへ移っても閉じない。キーボードでも操作できる", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
-    const page = await openPage(browser);
+    const page = await openPage(browser, "", 1100);
     await ready(page);
     const s = section(page);
-    await s.locator('[data-act="rotateQr"]').click();
+    const heights = await s.locator("h4").evaluateAll(l => l.map(e => e.getBoundingClientRect().height));
+    assert.equal(new Set(heights).size, 1, `見出しの高さ: ${heights}`);
+
+    // ホバーで開き、ⓘ からボタンへ動かす
+    await s.locator('[data-f="rotateTip"] .info-tip-btn').hover();
+    const rotate = s.locator('[data-act="rotateQr"]');
+    await rotate.waitFor();
+    const target = await rotate.boundingBox();
+    await page.mouse.move(target.x + 20, target.y + 10, { steps: 15 });
+    assert.equal(await rotate.isVisible(), true, "移動の途中で閉じない");
+    await page.mouse.down();
+    await page.mouse.up();
+    await confirmDialog(page, "cancel");
+
+    // キーボード: ⓘ を Enter で開き、Tab でボタンへ、Enter で押す
+    await s.locator('[data-f="rotateTip"] .info-tip-btn').focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.act), "rotateQr");
+    await page.keyboard.press("Enter");
     await confirmDialog(page, "cancel");
     assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "rotateEntryQr"), false);
-    await s.locator('[data-act="rotateQr"]').click();
-    assert.match(await page.locator(".confirm-dialog-message").innerText(), /使えなくなります/);
-    await confirmDialog(page, "ok");
-    await page.waitForSelector(".sticker-qr-dialog");
-    assert.ok(decodeURIComponent(await page.locator(".sticker-qr-dialog img").getAttribute("src")).includes('data-gen="1"'));
-    await page.click('.sticker-qr-dialog [data-act="close"]');
     await page.close();
   } finally { await browser.close(); }
 });
@@ -342,7 +400,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // 出すもの
         for (const act of ["showQr", "printSheet", "printQr"]) assert.equal(await s.locator(`[data-act="${act}"]`).isVisible(), true, act);
         // 出さないもの
-        for (const sel of ['[data-act="editCode"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="newCodeBox"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
+        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="newCodeBox"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
           assert.equal(await s.locator(sel).isVisible(), false, sel);
         assert.equal(await s.locator("[data-dealer]").count(), 0);
         assert.ok(!(await s.innerText()).includes("ディーラーへの共有"));
@@ -408,7 +466,7 @@ test("役割ごとの表示: 注文者の画面で、機能の停止・対象外
     // 画面の役割が注文者なら、サーバーの答えに関係なく変更の操作を出さない(view=member で役割だけ管理者にした場合)
     const page = await openPage(browser, "?view=member&role=admin");
     await ready(page);
-    for (const sel of ['[data-act="editCode"]', '[data-act="rotateQr"]', '[data-f="shareHead"]']) assert.equal(await section(page).locator(sel).isVisible(), false, sel);
+    for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="shareHead"]']) assert.equal(await section(page).locator(sel).isVisible(), false, sel);
     await page.close();
   } finally { await browser.close(); }
 });
@@ -420,11 +478,11 @@ test("役割ごとの表示: 管理者・副管理者の画面でも、サーバ
     const page = await openPage(browser, "?role=admin");
     await ready(page);
     const s = section(page);
-    for (const sel of ['[data-act="editCode"]', '[data-act="rotateQr"]', '[data-f="shareHead"]', '[data-dealer="dA"]']) assert.equal(await s.locator(sel).isVisible(), true, sel);
+    for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-f="shareHead"]', '[data-dealer="dA"]']) assert.equal(await s.locator(sel).isVisible(), true, sel);
     await page.close();
     const denied = await openPage(browser, "?role=admin&deny=1");
     await ready(denied);
-    for (const sel of ['[data-act="editCode"]', '[data-act="rotateQr"]', '[data-f="shareHead"]', '[data-f="dealers"]']) assert.equal(await section(denied).locator(sel).isVisible(), false, sel);
+    for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="shareHead"]', '[data-f="dealers"]']) assert.equal(await section(denied).locator(sel).isVisible(), false, sel);
     assert.equal(await section(denied).locator('[data-act="showQr"]').isVisible(), true);
     assert.deepEqual(denied.errors, []);
     await denied.close();
