@@ -13,7 +13,7 @@ import { RegistrationError, assertVerifiedUser } from "./registration.js";
 import { MEMBER_ROLES, isManagerRole } from "./roles.js";
 import { dealerFingerprintOf } from "./dealer-portal.js";
 import {
-  STICKER_LIMITS, STICKER_RATE_LIMITS, STICKER_ENTRY_URL,
+  STICKER_LIMITS, STICKER_RATE_LIMITS, STICKER_ENTRY_URL, SHEET_NOTE_MAX_LENGTH, SHEET_NOTE_DEFAULT, normalizeSheetNote,
   isAccessCode, isEntryToken, isFacilityId, isSha256Hex, isUploadId, isLastSurgeryDate, parseBlurWarned,
   newEntryToken, newAttemptId, buildEntryUrl, sha256Hex, usageDayKey,
   hashAccessCode, verifyAccessCode, issueTicket, verifyTicket,
@@ -109,6 +109,7 @@ export function createStickerPhotoService({
   const facilityRef = (fid) => db.doc(`facilities/${fid}`);
   const accessRef = (fid) => db.doc(`facilities/${fid}/stickerSettings/access`);
   const entrySettingRef = (fid) => db.doc(`facilities/${fid}/stickerSettings/entry`);
+  const sheetSettingRef = (fid) => db.doc(`facilities/${fid}/stickerSettings/sheet`);
   const entryRef = (token) => db.doc(`stickerEntries/${token}`);
   const photoRef = (fid, id) => db.doc(`facilities/${fid}/stickerPhotos/${id}`);
   const grantRef = (fid, lid) => db.doc(`stickerPhotoGrants/${fid}_${lid}`);
@@ -435,7 +436,7 @@ export function createStickerPhotoService({
     const fid = data.facilityId;
     const { role } = await assertMember(null, user.uid, fid);
     const canManage = isManagerRole(role);
-    const [access, entry] = await Promise.all([accessRef(fid).get(), entrySettingRef(fid).get()]);
+    const [access, entry, sheet] = await Promise.all([accessRef(fid).get(), entrySettingRef(fid).get(), sheetSettingRef(fid).get()]);
     // コードの確認の停止(今の QR のトークンの記録だけを読む。トークンは返さない)
     const token = entry.exists ? entry.get("token") : null;
     const limitSnaps = isEntryToken(token) ? await Promise.all(tokenLimitKeys(token).map(k => limitRef(k.id).get())) : [];
@@ -444,7 +445,8 @@ export function createStickerPhotoService({
     const day = limitSnaps[1];
     const dayFailures = day?.exists && t - day.get("windowStart") < rateLimits.dayWindowMs ? day.get("count") ?? 0 : 0;
     const base = { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists,
-      verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, canManage };
+      verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, canManage,
+      sheetNote: sheet.exists ? String(sheet.get("note") ?? "") : SHEET_NOTE_DEFAULT };   // 台紙を印刷するので所属者全員に返す
     if (!canManage) return base;
     const [dealers, links] = await Promise.all([
       db.collection(`facilities/${fid}/facilityDealers`).get(), db.collection(`facilities/${fid}/dealerPortalLinks`).get()
@@ -467,6 +469,21 @@ export function createStickerPhotoService({
   const isIdLike = (v) => typeof v === "string" && ID.test(v);
 
   /** アクセスコードの設定・変更。世代が進むので、旧コードの確認と発行済みのチケットは以後拒否される。平文は保存・記録しない */
+  /** 台紙の注意事項(施設ごと。管理者・副管理者だけ)。空欄も保存できる */
+  async function setSheetNote(user, data) {
+    strict(data, ["facilityId", "note"]);
+    if (typeof data.note !== "string") throw bad();
+    const note = normalizeSheetNote(data.note);
+    if (note.length > SHEET_NOTE_MAX_LENGTH) throw bad(`台紙の注意事項は${SHEET_NOTE_MAX_LENGTH}文字以内で入力してください`);
+    const fid = data.facilityId;
+    await db.runTransaction(async (tx) => {
+      const { role } = await assertMember(tx, user.uid, fid, { manager: true });
+      tx.set(sheetSettingRef(fid), { note, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid });
+      audit(tx, { action: "sheet.note", facilityId: fid, actorUid: user.uid, actorRole: role });
+    }, { maxAttempts: TX_ATTEMPTS });
+    return { ok: true, sheetNote: note };
+  }
+
   async function setAccessCode(user, data) {
     strict(data, ["facilityId", "code"]);
     if (!isAccessCode(data.code)) throw bad("アクセスコードは半角数字6〜12桁で入力してください");
@@ -604,6 +621,7 @@ export function createStickerPhotoService({
       case "delete": return deletePhoto(user, rest);
       case "getSettings": return getSettings(user, rest);
       case "setAccessCode": return setAccessCode(user, rest);
+      case "setSheetNote": return setSheetNote(user, rest);
       case "getEntryQr": return getEntryQr(user, rest);
       case "rotateEntryQr": return rotateEntryQr(user, rest);
       case "setDealerShare": return setDealerShare(user, rest);

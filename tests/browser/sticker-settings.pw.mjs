@@ -27,7 +27,7 @@ const repository = {
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveIolOrder: async () => {}, deleteOrderer: async () => {}, deleteDealer: async () => {},
   saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {} };
 const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
-const state = { entry: q.get("entry") !== "none", lock: q.get("lock") === "1", set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
+const state = { sheetNote: "1行目\\n2行目", entry: q.get("entry") !== "none", lock: q.get("lock") === "1", set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
   dealers: [
     { localDealerId: "dA", dealerName: "X商事 立川", linked: true, companyName: "X商事", shared: false, stale: false, sharedFrom: null },
     { localDealerId: "dB", dealerName: "Y医療", linked: true, companyName: "Y医療", shared: true, stale: q.get("stale") === "1", sharedFrom: "2026-11-01T00:00:00.000Z" },
@@ -42,9 +42,10 @@ const stickerPhotoCall = async (p) => {
   if (mode === "error") fail("functions/internal", "boom");
   const manager = role === "admin" || role === "subadmin";
   // サーバーと同じ規則: 注文者・代理入力者の変更の操作は拒否し、表示には共有の状態を含めない
-  if (!manager && ["setAccessCode", "rotateEntryQr", "setDealerShare", "delete"].includes(p.action)) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます");
+  if (!manager && ["setAccessCode", "setSheetNote", "rotateEntryQr", "setDealerShare", "delete"].includes(p.action)) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます");
   if (p.action === "getSettings" && window.__slowSettings) await new Promise(r => setTimeout(r, 1500));
-  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: state.entry, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
+  if (p.action === "setSheetNote") { if (window.__failNote) fail("functions/invalid-argument", "保存できませんでした"); state.sheetNote = p.note; return { ok: true, sheetNote: p.note }; }
+  if (p.action === "getSettings") return { sheetNote: state.sheetNote, accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: state.entry, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
   if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.lock = false; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
   if (p.action === "getEntryQr" && !state.entry && !manager) fail("functions/failed-precondition", "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください");
   if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { state.entry = true; if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>', url: window.__badUrl ? "javascript:alert(1)" : "https://iol.medconf.jp/sticker.html#f=" + "abcdefghijklmnopqrstu" + state.gen }; }
@@ -319,7 +320,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         // QRコード: 見出しと同じ行で、「変更」と同じ見た目・同じ右端
         const show = s.locator('[data-act="showQr"]');
         assert.deepEqual(await style(show), await style(code), `${width}: 「表示」は「変更」と同じ見た目`);
-        const q = await show.boundingBox(), head = await s.locator(".sticker-qr-row h4").boundingBox();
+        const q = await show.boundingBox(), head = await s.locator(".sticker-qr-row h4").first().boundingBox();
         assert.ok(Math.abs((q.x + q.width) - (a.x + a.width)) < 0.5, `${width}: 「表示」と「変更」の右端が同じ`);
         assert.ok(head.y < q.y + q.height && q.y < head.y + head.height && head.x + head.width <= q.x, `${width}: 見出しと同じ行`);
         // 項目の間隔
@@ -490,6 +491,58 @@ test("QR のモーダル: 作り直すとリンクも新しい URL になる。�
   } finally { await browser.close(); }
 });
 
+test("台紙の注意事項: 管理者が編集して保存できる。改行を保ち、空欄も保存でき、失敗は理由を出して入力を残す。取り消せる", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    for (const width of [390, 1100]) {
+      const page = await openPage(browser, "", width);
+      await ready(page);
+      const s = section(page);
+      const view = s.locator('[data-f="noteView"]'), input = s.locator('[data-f="note"]');
+      const notice = () => page.evaluate(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent);
+      const saves = () => page.evaluate(() => window.__calls.filter(c => c.action === "setSheetNote"));
+      assert.equal(await view.evaluate(e => e.textContent), "1行目\n2行目");
+      assert.equal(await view.evaluate(e => getComputedStyle(e).whiteSpace), "pre-line", "改行を見せる");
+      const code = await s.locator('[data-act="editCode"]').boundingBox(), edit = await s.locator('[data-act="editNote"]').boundingBox();
+      assert.ok(Math.abs((code.x + code.width) - (edit.x + edit.width)) < 0.5 && code.height === edit.height, "ほかの「変更」と同じ大きさ・右端");
+
+      await s.locator('[data-act="editNote"]').click();
+      assert.equal(await input.inputValue(), "1行目\n2行目");
+      assert.equal(await input.getAttribute("maxlength"), "150");
+      assert.equal(await view.isVisible(), false);
+      await input.fill("変更した");
+      await s.locator('[data-act="cancelNote"]').click();
+      assert.equal(await s.locator('[data-f="noteForm"]').isVisible(), false);
+      assert.equal(await view.evaluate(e => e.textContent), "1行目\n2行目", "取り消すと変わらない");
+      assert.deepEqual(await saves(), []);
+
+      await s.locator('[data-act="editNote"]').click();
+      await input.fill("新しい1行目\n新しい2行目\n\n");
+      await page.evaluate(() => { window.__failNote = true; });
+      await s.locator('[data-act="saveNote"]').click();
+      await page.waitForFunction(() => document.querySelector('[data-err="note"]').textContent.includes("保存できませんでした"));
+      assert.equal(await s.locator('[data-f="noteForm"]').isVisible(), true);
+      assert.equal(await input.inputValue(), "新しい1行目\n新しい2行目\n\n", "失敗したら入力を残す");
+      await page.evaluate(() => { window.__failNote = false; });
+      await s.locator('[data-act="saveNote"]').click();
+      await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent === "台紙の注意事項を保存しました。");
+      assert.equal(await s.locator('[data-f="noteForm"]').isVisible(), false);
+      assert.equal(await view.evaluate(e => e.textContent), "新しい1行目\n新しい2行目");
+      assert.deepEqual((await saves()).at(-1), { action: "setSheetNote", facilityId: "fA", note: "新しい1行目\n新しい2行目" });
+
+      await s.locator('[data-act="editNote"]').click();
+      assert.equal(await notice(), "", "次の入力を始めたら通知を消す");
+      await input.fill("");
+      await s.locator('[data-act="saveNote"]').click();
+      await page.waitForFunction(() => document.querySelector('[data-f="noteView"]').textContent === "なし");
+      assert.equal((await saves()).at(-1).note, "", "空欄も保存できる");
+      assert.deepEqual(page.errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
 test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
@@ -595,7 +648,7 @@ test("コードの確認の停止: 停止中だけ案内を出し、コードを
   } finally { await browser.close(); }
 });
 
-const SETTERS = ["setAccessCode", "rotateEntryQr", "setDealerShare", "delete"];
+const SETTERS = ["setAccessCode", "setSheetNote", "rotateEntryQr", "setDealerShare", "delete"];
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
   test(`役割ごとの表示: 注文者・代理入力者には欄を出し、コードの状態・QR の表示と印刷・台紙の印刷だけを出す(変更の操作・共有・ほかの設定項目は出さない): ${name}`, async (t) => {
     const browser = await launch(type, name);
@@ -611,7 +664,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);
         // 出さないもの
-        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
+        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="noteHead"]', '[data-f="noteView"]', '[data-f="noteForm"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
           assert.equal(await s.locator(sel).isVisible(), false, sel);
         assert.equal(await s.locator("[data-dealer]").count(), 0);
         assert.ok(!(await s.innerText()).includes("ディーラーへの共有"));

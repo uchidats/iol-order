@@ -3,7 +3,7 @@ import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { linkIcon } from "./related-links.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { STICKER_ENTRY_URL } from "../domain/sticker-photo.js";
+import { STICKER_ENTRY_URL, SHEET_NOTE_MAX_LENGTH, normalizeSheetNote } from "../domain/sticker-photo.js";
 import { accessCodeError, accessCodeStatus, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
@@ -116,7 +116,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     busy = true; msg.textContent = "";
     try {
       const [{ svg }, print] = await Promise.all([api.getEntryQr(facilityId), import("./sticker-print-view.js")]);
-      if (kind === "sheet") print.openSheetPrint({ facilityName, dealers: getDealers(), qrSvg: svg });
+      if (kind === "sheet") print.openSheetPrint({ facilityName, dealers: getDealers(), qrSvg: svg, sheetNote: (settings && settings.sheetNote) || "" });
       else print.openQrPrint({ facilityName, qrSvg: svg });
     } catch (e) {
       msg.textContent = describeCallableError(e);
@@ -155,6 +155,44 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     if (!manage()) return;
     if (!(await confirm({ message: "QRコードを作り直しますか？\nこれまでに印刷・貼付したQRコードは使えなくなります。新しいQRコードを印刷して貼り替えてください。", okLabel: "作り直す", cancelLabel: "キャンセル" }))) return;
     qrAction(api.rotateEntryQr);
+  });
+
+  /* ---------- 台紙の注意事項(施設ごと。管理者・副管理者だけが編集する。台紙の上部に印刷する) ---------- */
+  const noteBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editNote" }, "変更");
+  const noteHead = h("div", { class: "settings-actions sticker-code-row sticker-qr-row", "data-f": "noteHead" }, h("h4", {}, "台紙の注意事項"), noteBtn);
+  const noteView = h("p", { class: "sticker-note-view", "data-f": "noteView" });
+  const noteInput = h("textarea", { class: "form-control", "data-f": "note", rows: "3", maxlength: String(SHEET_NOTE_MAX_LENGTH), "aria-label": "台紙の注意事項" });
+  const noteError = h("p", { class: "error-message", "data-err": "note" });
+  const saveNote = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "saveNote" }, "保存する");
+  const cancelNote = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "cancelNote" }, "キャンセル");
+  const noteForm = h("div", { "data-f": "noteForm", hidden: true }, noteInput, noteError,
+    h("p", { class: "form-hint" }, `${SHEET_NOTE_MAX_LENGTH}文字以内。改行できます。空欄で保存すると、台紙に注意事項を印刷しません。`),
+    h("div", { class: "settings-actions" }, saveNote, cancelNote));
+  const closeNote = () => { noteInput.value = ""; noteError.textContent = ""; noteForm.hidden = true; setShown(noteView, manage()); };
+  noteBtn.addEventListener("click", () => {
+    if (!manage()) return;
+    msg.textContent = "";
+    noteInput.value = (settings && settings.sheetNote) || "";
+    noteForm.hidden = false;
+    setShown(noteView, false);
+    noteInput.focus();
+  });
+  cancelNote.addEventListener("click", closeNote);
+  saveNote.addEventListener("click", async () => {
+    if (busy || !manage()) return;
+    const note = normalizeSheetNote(noteInput.value);
+    if (note.length > SHEET_NOTE_MAX_LENGTH) { noteError.textContent = `${SHEET_NOTE_MAX_LENGTH}文字以内で入力してください`; return; }
+    busy = true; msg.textContent = ""; noteError.textContent = ""; saveNote.disabled = true;
+    try {
+      await api.setSheetNote(facilityId, note);
+      settings = { ...settings, sheetNote: note };
+      noteView.textContent = note || "なし";
+      closeNote();
+      msg.textContent = "台紙の注意事項を保存しました。";
+      await load().catch(() => {});   // 保存は成功している。表示の読み直しの失敗では通知を変えない
+    } catch (e) {
+      noteError.textContent = describeCallableError(e);
+    } finally { busy = false; saveNote.disabled = false; }
   });
 
   /* ---------- ディーラーへの共有 ---------- */
@@ -197,7 +235,9 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
     // 変更の操作は、管理者・副管理者だけに出す
     for (const el of manageOnly) setShown(el, editable);
-    if (!editable) { closeForm(); dealerList.replaceChildren(); return; }
+    noteView.textContent = settings.sheetNote || "なし";
+    if (!noteForm.hidden) setShown(noteView, false);
+    if (!editable) { closeForm(); noteForm.hidden = true; dealerList.replaceChildren(); return; }
     const dealers = shareableDealers(settings.dealers);
     dealerList.replaceChildren(...(dealers.length ? dealers.map(dealerRow)
       : [h("p", { class: "form-hint" }, "共有できるディーラーはありません", createInfoTip(NOT_LINKED_HELP, { label: "共有できるディーラーの説明" }).root)]));
@@ -206,12 +246,13 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const shareHead = h("h4", { "data-f": "shareHead" }, "ディーラーへの共有");
   const qrNote = h("p", { class: "form-hint", "data-f": "qrNotIssued" }, QR_NOT_ISSUED_NOTE);
   setShown(qrNote, false);
-  const manageOnly = [codeBtn, rotateTip.root, shareHead, dealerList];
+  const manageOnly = [codeBtn, rotateTip.root, noteHead, noteView, shareHead, dealerList];
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm,
     h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
+    noteHead, noteView, noteForm,
     shareHead, dealerList,
     msg);
 
@@ -229,7 +270,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     facilityId = fid; facilityName = name || ""; settings = null;
     setShown(codeStatus, false);
     msg.textContent = "";
-    closeForm();
+    closeForm(); noteInput.value = ""; noteError.textContent = ""; noteForm.hidden = true;
     try {
       await load();
     } catch (e) {
@@ -240,6 +281,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     }
   };
   /** 画面を閉じるときに、表示中の新しいコードと入力を消す */
-  section._clear = () => { gen += 1; msg.textContent = ""; closeForm(); };
+  section._clear = () => { gen += 1; msg.textContent = ""; closeForm(); closeNote(); };
   return section;
 }

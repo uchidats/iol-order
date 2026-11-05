@@ -7,6 +7,7 @@ export function createStickerSettingsApi(call) {
   return {
     getSettings: (facilityId) => call({ action: "getSettings", facilityId }),
     setAccessCode: (facilityId, code) => call({ action: "setAccessCode", facilityId, code }),
+    setSheetNote: (facilityId, note) => call({ action: "setSheetNote", facilityId, note }),
     getEntryQr: (facilityId) => call({ action: "getEntryQr", facilityId }),
     rotateEntryQr: (facilityId) => call({ action: "rotateEntryQr", facilityId }),
     setDealerShare: (facilityId, localDealerId, shared) => call({ action: "setDealerShare", facilityId, localDealerId, shared })

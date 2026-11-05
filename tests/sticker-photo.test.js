@@ -10,6 +10,8 @@ const NOW = Date.UTC(2026, 10, 4, 3, 0, 0);   // 2026-11-04 12:00 JST
 test("上限・コードの桁数・撮影ページの URL は画面とサーバーで同じ値", () => {
   assert.deepEqual({ ...client.STICKER_LIMITS }, { ...server.STICKER_LIMITS });
   assert.deepEqual({ ...client.ACCESS_CODE_DIGITS }, { ...server.ACCESS_CODE_DIGITS });
+  assert.equal(client.SHEET_NOTE_MAX_LENGTH, server.SHEET_NOTE_MAX_LENGTH);
+  assert.equal(client.normalizeSheetNote(" a\r\nb\r\n \n"), server.normalizeSheetNote(" a\r\nb\r\n \n"));
   assert.equal(client.STICKER_ENTRY_URL, server.STICKER_ENTRY_URL);
   assert.equal(client.STICKER_LIMITS.imageBytes, 15 * 1024 * 1024);
 });

@@ -35,6 +35,8 @@
 
 **2026-11-05 22:56 の追加の配備**: QR のモーダルのリンクのため、`stickerPhotoApi` だけを配備(`fd1824b`)。更新はこの関数だけで、ほかの 42 関数の更新時刻・状態・実行サービスアカウント・Secret・R09 の設定は同じ。環境変数の差は、プラットフォームが付け外しする `FUNCTION_SIGNATURE_TYPE` だけ。入口のトークン・QR は変更なし。
 
+**2026-11-06 の追加の配備**: 台紙の注意事項のため、`stickerPhotoApi` だけを配備(`setSheetNote` の追加、`getSettings` に `sheetNote`)。Rules・インデックス・バケット・Secret・IAM の変更なし。保存先の `stickerSettings/sheet` は全拒否の領域の中。
+
 **止めるとき**: `STICKER_PHOTO_ENABLED=false` にして同じ5関数を配備する(段階 7 の記載のとおり)。画面の設定は true のままでよい(サーバーが停止なら何も出ない)。
 
 以下は実行した手順。

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  PAGE, SHEET, QR_SHEET, SHEET_NOTE, SHEET_TITLE, QR_LABEL, dealerLabel, defaultHeaderText, initialDealer, wrapHeader, sheetLayout, qrSheetLayout
+  PAGE, SHEET, QR_SHEET, SHEET_TITLE, QR_LABEL, MM_PER_PT, fitSheetNote, dealerLabel, defaultHeaderText, initialDealer, wrapHeader, sheetLayout, qrSheetLayout
 } from "../src/domain/sticker-print.js";
 
 test("台紙: A4 縦・2列×5行の10枠で、貼付枠は 76×46mm。印刷範囲(余白 12mm)に収まる", () => {
@@ -33,10 +33,43 @@ test("台紙: 行数は定数1つで変えられ、線と枠が合わせて変�
   assert.equal(four.bottom, 44 + 57 * 4);
 });
 
-test("印刷の文言: 台紙の注意書きは✕の書き方だけ。患者氏名・ID の記入欄はない", () => {
+test("印刷の文言: 台紙の題名と QR の文言", () => {
   assert.equal(SHEET_TITLE, "IOLシール貼付台紙");
-  assert.equal(SHEET_NOTE, "挿入されなかったレンズのシールには上から大きく✕を書く");
   assert.equal(QR_LABEL, "IOLシール写真");
+});
+
+/** 注意事項の下端(mm) */
+const noteBottom = (n) => n.y + (n.lines.length - 1) * n.lineHeight + n.pt * MM_PER_PT * 0.25;
+const FRAME_TOP = PAGE.margin + SHEET.headHeight;
+
+test("台紙の注意事項: 2行の初期値は大きい文字のまま入り、改行を保つ。空欄は何も出さない", () => {
+  const n = fitSheetNote("挿入されなかったレンズのシールには上から大きく×を書く\n前回使用した台紙は、次の手術日の朝に撮影・送信する");
+  assert.deepEqual(n.lines, ["挿入されなかったレンズのシールには上から大きく×を書く", "前回使用した台紙は、次の手術日の朝に撮影・送信する"]);
+  assert.equal(n.pt, 9);
+  assert.equal(n.truncated, false);
+  for (const empty of ["", "  \n ", null, undefined]) assert.deepEqual([fitSheetNote(empty).lines, fitSheetNote(empty).truncated], [[], false]);
+  assert.deepEqual(fitSheetNote("a\r\nb").lines, ["a", "b"], "CRLF も改行");
+  assert.deepEqual(fitSheetNote("a\n\nb").lines, ["a", "", "b"], "空行を保つ");
+});
+
+test("台紙の注意事項: 長文でも貼付枠と重ならず、幅は QR の手前まで。入らない分だけ省略を知らせる", () => {
+  const width = PAGE.width - 2 * PAGE.margin - SHEET.qrSize - 4;
+  const notes = ["あ".repeat(150), "A".repeat(150), Array.from({ length: 10 }, () => "い".repeat(15)).join("\n"), Array.from({ length: 75 }, () => "う").join("\n")];
+  for (const note of notes) {
+    for (const headerLines of [0, 1, 2, 3]) {
+      const n = fitSheetNote(note, headerLines);
+      assert.ok(n.pt >= 6 && n.pt <= 9);
+      assert.ok(noteBottom(n) <= FRAME_TOP, `枠に重ならない: ${noteBottom(n)}`);
+      for (const line of n.lines) {
+        const units = [...line].reduce((sum, ch) => sum + (/[ -~]/.test(ch) ? 0.5 : 1), 0);
+        assert.ok(units * n.pt * MM_PER_PT <= width + 0.01, `QR に重ならない: ${line}`);
+      }
+    }
+  }
+  assert.equal(fitSheetNote("あ".repeat(150), 1).truncated, false, "150文字は1行の上部の表示なら入る");
+  const many = fitSheetNote(Array.from({ length: 75 }, () => "う").join("\n"), 1);
+  assert.equal(many.truncated, true);
+  assert.ok(many.lines.length < 75);
 });
 
 test("上部の表示: 施設名と発注先から作る。宛名があれば宛名。発注先がなければ施設名だけ", () => {

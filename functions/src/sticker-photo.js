@@ -28,6 +28,15 @@ export const STICKER_LIMITS = Object.freeze({
 /** アクセスコードの桁数(半角数字) */
 export const ACCESS_CODE_DIGITS = Object.freeze({ min: 6, max: 12 });
 
+/** 台紙の注意事項の最大の文字数(画面と同じ値) */
+export const SHEET_NOTE_MAX_LENGTH = 150;
+
+/** 台紙の注意事項の初期値(施設が保存するまで使う。空欄の保存は空欄のまま) */
+export const SHEET_NOTE_DEFAULT = "挿入されなかったレンズのシールには上から大きく×を書く\n前回使用した台紙は、次の手術日の朝に撮影・送信する";
+
+/** 台紙の注意事項の正規化(改行を LF にそろえ、末尾の空白を落とす) */
+export const normalizeSheetNote = (value) => String(value).replace(/\r\n?/g, "\n").trimEnd();
+
 /** 撮影ページの URL。QR にはこの URL と入口トークンだけを含める */
 export const STICKER_ENTRY_URL = "https://iol.medconf.jp/sticker.html";
 

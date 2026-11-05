@@ -1,13 +1,13 @@
 import { h } from "./markdown-view.js";
 import { qrImageUrl } from "../domain/sticker-settings.js";
 import {
-  PAGE, SHEET_TITLE, SHEET_NOTE, QR_LABEL, HEADER_MAX_LENGTH,
-  dealerLabel, defaultHeaderText, initialDealer, wrapHeader, sheetLayout, qrSheetLayout
+  PAGE, SHEET_TITLE, QR_LABEL, HEADER_MAX_LENGTH, MM_PER_PT,
+  dealerLabel, defaultHeaderText, initialDealer, wrapHeader, fitSheetNote, sheetLayout, qrSheetLayout
 } from "../domain/sticker-print.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const FONT = "'Yu Gothic', 'Meiryo', 'Hiragino Sans', 'Noto Sans CJK JP', sans-serif";
-const PT = 0.3528;   // 1pt の mm
+const PT = MM_PER_PT;
 const LINE = { stroke: "#999999", "stroke-width": "0.2" };
 
 function svgEl(tag, attrs = {}, text = null) {
@@ -26,17 +26,16 @@ function pageSvg(children) {
   return svg;
 }
 
-/** 台紙の SVG(A4 実寸の座標)。枠の中には何も描かない */
-function sheetSvg({ headerText, qrUrl }) {
+/** 台紙の SVG(A4 実寸の座標)。枠の中には何も描かない。注意事項は上部の余白に出す(fitSheetNote の結果) */
+function sheetSvg({ headerText, qrUrl, note }) {
   const lay = sheetLayout();
-  const footY = lay.bottom + 5;
   return pageSvg([
     label(PAGE.margin, PAGE.margin + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
     ...wrapHeader(headerText).map((t, i) => label(PAGE.margin, PAGE.margin + 15 + i * 5.5, t, 11, { "data-f": "header" })),
     qrImage(qrUrl, lay.qr),
     ...lay.lines.map(l => line(l)),
     ...lay.dates.map(d => label(d.x, d.y + 1.5, "／", 12, { "text-anchor": "middle" })),
-    label(PAGE.margin, footY, SHEET_NOTE, 9)
+    ...note.lines.map((t, i) => label(note.x, note.y + i * note.lineHeight, t, note.pt, { "data-f": "sheetNote" }))
   ]);
 }
 
@@ -117,10 +116,11 @@ const SCALE_HINT = "印刷の倍率は100%(実際のサイズ)にしてくださ
  * 発注先の表示は案内のためだけで、写真の閲覧の権限には関係しない。
  * @param {{facilityName:string, dealers?:Array<{id:string, name?:string, mailName?:string}>, qrSvg:string, print?:() => void}} p
  */
-export function openSheetPrint({ facilityName, dealers = [], qrSvg, print = () => window.print() }) {
+export function openSheetPrint({ facilityName, dealers = [], qrSvg, sheetNote = "", print = () => window.print() }) {
   const qrUrl = qrImageUrl(qrSvg);
   const header = h("input", { type: "text", class: "form-control", "data-f": "sheetHeader", maxlength: String(HEADER_MAX_LENGTH), autocomplete: "off", "aria-label": "台紙の上部の表示" });
   header.value = defaultHeaderText(facilityName, initialDealer(dealers));
+  const noteWarning = h("p", { class: "error-message", "data-f": "noteTruncated", role: "status" }, "注意事項が長いため、入りきらない部分は印刷されません。施設設定で短くしてください。");
   let view = null;
   header.addEventListener("input", () => view.render());
   const select = dealers.length > 1 ? h("select", { class: "form-control", "data-f": "sheetDealer", "aria-label": "発注先" },
@@ -128,8 +128,12 @@ export function openSheetPrint({ facilityName, dealers = [], qrSvg, print = () =
   if (select) select.addEventListener("change", () => { header.value = defaultHeaderText(facilityName, dealers.find(d => d.id === select.value)); view.render(); });
   view = openView({
     title: "台紙を印刷", hint: `${SCALE_HINT}上部の表示は、この印刷のときだけ変更できます(設定は変わりません)。`,
-    controls: [select, header].filter(Boolean), qrUrl, print,
-    renderPage: () => sheetSvg({ headerText: header.value, qrUrl })
+    controls: [select, header, noteWarning].filter(Boolean), qrUrl, print,
+    renderPage: () => {
+      const note = fitSheetNote(sheetNote, wrapHeader(header.value).length);
+      noteWarning.style.display = note.truncated ? "" : "none";
+      return sheetSvg({ headerText: header.value, qrUrl, note });
+    }
   });
   return view;
 }

@@ -240,6 +240,35 @@ test("設定: コードは平文で保存せず再表示もしない。形式違
   assert.ok(!JSON.stringify(settings).includes(stored.hash));
 });
 
+test("台紙の注意事項: 初期値は2行。施設ごとに保存し、編集は管理者・副管理者だけ。空欄も保存でき、150文字を超えると拒否する", async () => {
+  const DEFAULT = "挿入されなかったレンズのシールには上から大きく×を書く\n前回使用した台紙は、次の手術日の朝に撮影・送信する";
+  const note = async (uid, fid) => (await api(uid, "getSettings", { facilityId: fid })).sheetNote;
+  assert.equal(await note("adminA", F), DEFAULT);
+  assert.equal(await note("ordA", F), DEFAULT, "印刷するので所属者全員に返す");
+  await rejects(api("ordA", "setSheetNote", { facilityId: F, note: "x" }), "permission-denied");
+  await rejects(api("adminB", "setSheetNote", { facilityId: F, note: "x" }), "permission-denied");
+  await rejects(api("staffX", "setSheetNote", { facilityId: F, note: "x" }), "permission-denied");
+  await rejects(api("adminA", "setSheetNote", { facilityId: F, note: 1 }), "invalid-argument");
+  await rejects(api("adminA", "setSheetNote", { facilityId: F }), "invalid-argument");
+  await rejects(api("adminA", "setSheetNote", { facilityId: F, note: "x", extra: 1 }), "invalid-argument");
+  await rejects(api("adminA", "setSheetNote", { facilityId: F, note: "あ".repeat(151) }), "invalid-argument");
+  assert.equal((await db.doc(`facilities/${F}/stickerSettings/sheet`).get()).exists, false, "拒否したときは保存しない");
+
+  assert.deepEqual(await api("subA", "setSheetNote", { facilityId: F, note: "1行目\r\n2行目\n \n" }), { ok: true, sheetNote: "1行目\n2行目" });
+  assert.equal(await note("ordA", F), "1行目\n2行目");
+  assert.equal(await note("adminB", G), DEFAULT, "ほかの施設と混ざらない");
+  await api("adminA", "setSheetNote", { facilityId: F, note: "あ".repeat(150) });
+  assert.equal((await note("adminA", F)).length, 150);
+  await api("adminA", "setSheetNote", { facilityId: F, note: "" });
+  assert.equal(await note("adminA", F), "", "空欄は初期値に戻さない");
+
+  const logs = (await db.collection("stickerAuditLogs").get()).docs.map(d => d.data()).filter(l => l.action === "sheet.note");
+  assert.equal(logs.length, 3);
+  assert.equal(logs[0].facilityId, F);
+  await rejects(api("adminA", "setSheetNote", { facilityId: F, note: "x" }, mk({ isEnabled: () => false })), "failed-precondition");
+  await rejects(api("adminA", "setSheetNote", { facilityId: F, note: "x" }, mk({ facilityIds: () => [] })), "permission-denied");
+});
+
 test("QR: 所属者が取得でき、SVG の中身は URL だけ。作り直しは管理者・副管理者だけで、旧トークンは確実に無効になる", async () => {
   await rejects(api("adminB", "getEntryQr", { facilityId: F }), "permission-denied");
   await rejects(api("staffX", "getEntryQr", { facilityId: F }), "permission-denied");
@@ -1004,7 +1033,7 @@ test("役割ごとの権限: 注文者・代理入力者は、設定の表示・
   for (const uid of ["ordA", "proxyA"]) {
     // 表示: コードの状態と停止の有無だけ。共有の状態・失敗の数・ハッシュ・トークンは返さない
     const s = await api(uid, "getSettings", { facilityId: F });
-    assert.deepEqual(Object.keys(s).sort(), ["accessCodeSet", "accessCodeUpdatedAt", "canManage", "entryIssued", "verifyBlockedUntil"], uid);
+    assert.deepEqual(Object.keys(s).sort(), ["accessCodeSet", "accessCodeUpdatedAt", "canManage", "entryIssued", "sheetNote", "verifyBlockedUntil"], uid);
     assert.deepEqual([s.accessCodeSet, s.entryIssued, s.canManage, s.verifyBlockedUntil], [true, true, false, null], uid);
     assert.ok(!JSON.stringify(s).includes(TOKEN) && !JSON.stringify(s).includes((await access()).get("hash")), uid);
     // QR: 管理者と同じ(作り直さない)

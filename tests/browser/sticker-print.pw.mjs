@@ -22,7 +22,7 @@ window.__calls = []; window.__printed = 0; window.__qrGen = 0;
 window.print = () => { window.__printed += 1; };
 const svg = () => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + window.__qrGen + '"><rect width="10" height="10"/></svg>';
 const api = {
-  getSettings: async (f) => { window.__calls.push(["getSettings", f]); return { accessCodeSet: true, accessCodeUpdatedAt: "2026-11-02T15:30:00.000Z", entryIssued: true, dealers: [] }; },
+  getSettings: async (f) => { window.__calls.push(["getSettings", f]); return { accessCodeSet: true, accessCodeUpdatedAt: "2026-11-02T15:30:00.000Z", entryIssued: true, dealers: [], sheetNote: q.get("note") ?? "1行目の注意\\n2行目の注意" }; },
   setAccessCode: async () => { window.__calls.push(["setAccessCode"]); return { ok: true }; },
   getEntryQr: async (f) => { window.__calls.push(["getEntryQr", f]); if (window.__failQr) throw Object.assign(new Error("この施設の写真を操作する権限がありません"), { code: "functions/permission-denied" }); return { svg: svg() }; },
   rotateEntryQr: async (f) => { window.__calls.push(["rotateEntryQr", f]); window.__qrGen += 1; return { svg: svg() }; },
@@ -92,8 +92,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await openPrint(page, "printSheet");
       assert.deepEqual(await headerLines(page), ["立川病院　眼科　→　栗原医療器械店　立川支店"]);
       const sheetText = await page.locator(".sticker-print-svg").textContent();
-      assert.ok(sheetText.includes("挿入されなかったレンズのシールには上から大きく✕を書く"), "下部の注意書き");
+      assert.deepEqual(await page.locator('.sticker-print-svg [data-f="sheetNote"]').allTextContents(), ["1行目の注意", "2行目の注意"], "施設の注意事項を改行どおり印刷");
       assert.ok(!/実寸確認|50mm|挿入できなかった|患者氏名/.test(sheetText), "以前の文言を出さない");
+      assert.equal(await page.locator('[data-f="noteTruncated"]').isVisible(), false);
       assert.equal(await page.locator('.sticker-print-svg line[stroke="#000000"]').count(), 0, "確認線を出さない");
       assert.equal(await page.locator(".sticker-print-svg image").count(), 1);
       assert.equal(await page.locator(".sticker-print-svg text", { hasText: "／" }).count(), 10);
@@ -122,6 +123,43 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+test("台紙の注意事項: 長文でも QR・貼付枠に重ならず、入らないときは知らせる。空欄なら出さない。QR のみの印刷には出さない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const overlaps = (page) => page.evaluate(() => {
+      const svg = document.querySelector(".sticker-print-svg"), box = (e) => e.getBoundingClientRect();
+      const notes = [...svg.querySelectorAll('[data-f="sheetNote"]')].map(box), qr = box(svg.querySelector("image"));
+      const frameTop = Math.min(...[...svg.querySelectorAll('line[stroke="#999999"]')].map(l => box(l).top));
+      const title = box(svg.querySelector("text")), header = [...svg.querySelectorAll('[data-f="header"]')].map(box);
+      return { count: notes.length, qr: notes.some(n => n.right > qr.left && n.bottom > qr.top && n.top < qr.bottom), frame: notes.some(n => n.bottom > frameTop + 0.5),
+        header: notes.some(n => header.some(h => n.top < h.bottom - 1 && n.bottom > h.top + 1)), title: notes.some(n => n.top < title.bottom - 1) };
+    });
+    for (const [note, truncated] of [["あ".repeat(150), false], [Array.from({ length: 12 }, () => "長い注意事項の行").join("\n"), true]]) {
+      const page = await openPage(browser, `?note=${encodeURIComponent(note)}`);
+      await openPrint(page, "printSheet");
+      const m = await overlaps(page);
+      assert.ok(m.count > 0);
+      assert.deepEqual([m.qr, m.frame, m.header, m.title], [false, false, false, false], JSON.stringify(m));
+      assert.equal(await page.locator('[data-f="noteTruncated"]').isVisible(), truncated);
+      // 上部の表示を長くしても重ならない
+      await page.fill('[data-f="sheetHeader"]', "長い表示".repeat(25));
+      const longHeader = await overlaps(page);
+      assert.deepEqual([longHeader.qr, longHeader.frame, longHeader.header], [false, false, false], JSON.stringify(longHeader));
+      await page.close();
+    }
+    const empty = await openPage(browser, "?note=");
+    await openPrint(empty, "printSheet");
+    assert.equal(await empty.locator('.sticker-print-svg [data-f="sheetNote"]').count(), 0);
+    await empty.close();
+    const qrOnly = await openPage(browser);
+    await openPrint(qrOnly, "printQr");
+    assert.equal(await qrOnly.locator('.sticker-print-svg [data-f="sheetNote"]').count(), 0);
+    assert.ok(!(await qrOnly.locator(".sticker-print-svg").textContent()).includes("1行目の注意"));
+    await qrOnly.close();
+  } finally { await browser.close(); }
+});
 
 test("印刷の出力: 台紙も QR のみも A4 の1ページで、実寸(210×297mm)で出る", async (t) => {
   const browser = await launch(chromium, "chromium");

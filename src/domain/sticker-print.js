@@ -11,7 +11,6 @@ export const SHEET = Object.freeze({ rows: 5, columns: 2, columnWidth: 90, colum
 export const QR_SHEET = Object.freeze({ rows: 4, columns: 2, qrSize: 40 });
 
 export const SHEET_TITLE = "IOLシール貼付台紙";
-export const SHEET_NOTE = "挿入されなかったレンズのシールには上から大きく✕を書く";
 export const QR_LABEL = "IOLシール写真";
 export const HEADER_MAX_LENGTH = 100;
 
@@ -34,18 +33,59 @@ export const initialDealer = (dealers) => (Array.isArray(dealers) && dealers.len
 
 const unitsOf = (ch) => (/[ -~｡-ﾟ]/.test(ch) ? 0.5 : 1);
 
-/** 上部の表示を幅に合わせて折り返す(全角 1・半角 0.5 で数える)。入らない分は出さない */
-export function wrapHeader(text, unitsPerLine = HEADER_LINE_UNITS, maxLines = HEADER_MAX_LINES) {
+/** 1pt の mm */
+export const MM_PER_PT = 0.3528;
+
+/** 文字列を幅に合わせて折り返す(全角 1・半角 0.5 で数える) */
+function wrapUnits(text, unitsPerLine) {
   const lines = [];
   let line = "", units = 0;
-  for (const ch of String(text || "").replace(/\s*[\r\n]+\s*/g, " ").trim()) {
+  for (const ch of text) {
     const u = unitsOf(ch);
     if (units + u > unitsPerLine) { lines.push(line); line = ""; units = 0; }
     line += ch;
     units += u;
   }
   if (line) lines.push(line);
-  return lines.slice(0, maxLines);
+  return lines;
+}
+
+/** 上部の表示を幅に合わせて折り返す(全角 1・半角 0.5 で数える)。入らない分は出さない */
+export function wrapHeader(text, unitsPerLine = HEADER_LINE_UNITS, maxLines = HEADER_MAX_LINES) {
+  return wrapUnits(String(text || "").replace(/\s*[\r\n]+\s*/g, " ").trim(), unitsPerLine).slice(0, maxLines);
+}
+
+/** 台紙の注意事項の文字の大きさ(大きい順に試す) */
+const NOTE_POINTS = [9, 8.5, 8, 7.5, 7, 6.5, 6];
+const NOTE_LINE_RATIO = 1.2;
+const NOTE_QR_GAP = 4;       // QR との間(mm)
+const NOTE_FRAME_GAP = 1.5;  // 貼付枠との間(mm)
+
+/**
+ * 台紙の注意事項を、上部の表示の下・QR の左・貼付枠の上の余白に収める。入る最大の文字の大きさを選ぶ。
+ * 最小の大きさでも入らない分は出さず truncated を返す(QR・貼付枠には重ねない)。枠の寸法は変えない。
+ * @param {string} note 改行を含む文字列
+ * @param {number} headerLines 上部の表示の行数
+ * @returns {{lines:string[], pt:number, x:number, y:number, lineHeight:number, truncated:boolean}} y は1行目のベースライン(mm)
+ */
+export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE) {
+  const rows = String(note ?? "").replace(/\r\n?/g, "\n").trimEnd().split("\n").map(l => l.trimEnd());
+  const top = page.margin + 15 + (Math.max(1, headerLines) - 1) * 5.5 + 2.2;
+  const bottom = page.margin + s.headHeight - NOTE_FRAME_GAP;
+  const width = page.width - 2 * page.margin - s.qrSize - NOTE_QR_GAP;
+  const place = (pt) => {
+    const lineHeight = pt * MM_PER_PT * NOTE_LINE_RATIO;
+    const unitsPerLine = Math.floor(width / (pt * MM_PER_PT));
+    const lines = rows.flatMap(r => (r ? wrapUnits(r, unitsPerLine) : [""]));
+    return { lines, pt, lineHeight, x: page.margin, y: top + pt * MM_PER_PT, capacity: Math.max(0, Math.floor((bottom - top) / lineHeight)) };
+  };
+  if (rows.length === 1 && !rows[0]) return { ...place(NOTE_POINTS[0]), lines: [], capacity: undefined, truncated: false };
+  for (const pt of NOTE_POINTS) {
+    const { capacity, ...fit } = place(pt);
+    if (fit.lines.length <= capacity) return { ...fit, truncated: false };
+  }
+  const { capacity, ...fit } = place(NOTE_POINTS[NOTE_POINTS.length - 1]);
+  return { ...fit, lines: fit.lines.slice(0, capacity), truncated: true };
 }
 
 /** 台紙の線・日付欄・貼付枠の位置 */
