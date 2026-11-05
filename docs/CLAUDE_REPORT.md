@@ -3,33 +3,27 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-05
-- **作業**: QR のモーダルの施設名を、撮影ページを開くアイコンに変更。Zenbook で実施。**ブランチ `feature/r09-qr-open-link` まで。`main` 未統合・Functions 未配備(判断待ち)**。
-- 直前の作業(同日): 保存の後のコードの表示の削除(`4ddeafd`)、「自動で作る」の削除(`ba92b0f`)、R09 を立川病院だけで有効化(`415ebad`)。QR・アクセスコードは未発行、実機の確認は未実施。
+- **作業**: QR のモーダルの施設名を、撮影ページを開くアイコンに変更し、運営者の承認の後に本番へ反映。Zenbook で実施。
+- 直前の作業(同日): 保存の後のコードの表示の削除(`4ddeafd`)、「自動で作る」の削除(`ba92b0f`)、R09 を立川病院だけで有効化(`415ebad`)。
 
 ## 変更内容
-- `functions/src/sticker-photo-service.js`: `getEntryQr`・`rotateEntryQr` の応答に、SVG に符号化した同じ `url` を追加。権限と無効化の処理は変更なし。
+- `functions/src/sticker-photo-service.js`: `getEntryQr`・`rotateEntryQr` の応答に、SVG に符号化した同じ `url` を追加。URL の組み立て・権限・トークン・再発行の無効化は変更なし。
 - `src/ui/sticker-settings-section.js`: モーダルの施設名を外し、リンクのアイコンだけを中央に(名称とツールチップは「撮影ページを開く」)。URL の文字列は出さない。想定外の URL ならリンクを出さない。
 - `src/ui/related-links.js`: `linkIcon` を export(動作の変更なし)。`styles.css`: アイコンの指定を追加(モーダルの中だけ)。
-- 文書: 設計書(決定 50・§4-1)、ROADMAP。
-
-## 配備が必要な理由
-- 本番の `getEntryQr` は SVG だけを返し、入口トークンは Rules で読めないので、画面は URL を持っていない。依頼の「再配備は不要」と異なり、この変更には `stickerPhotoApi` の配備が必要。配備はしていない。
+- 文書: 設計書(決定 50・§4-1)、配備の手順書、ROADMAP。
 
 ## commit ID
-- 本体: 本ファイルを含む commit(`git log -1`)。
+- 本体: `fd1824b`。配備の記録は本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- ブラウザ: `tests/browser/sticker-settings.pw.mjs`・`tests/browser/sticker-print.pw.mjs` 50 件成功(3ブラウザを含む。320・390・1100px。リンクの URL・名称・アイコン・中央・行の高さ、注文者の表示、作り直しの後の URL、想定外の URL)。スクリーンショットでも確認。
-- Functions(Firestore エミュレータ。R09 の4ファイル): 73 件成功(`url` が SVG に符号化した値と同じ、作り直しで変わる、所属者にも同じ値)。
-- unit: `tests/asset-stamp.test.js`。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Rules。実機での確認は未実施。
+- ブラウザ: `tests/browser/sticker-settings.pw.mjs`・`tests/browser/sticker-print.pw.mjs` 50 件成功(`fd1824b`)。
+- Functions(Firestore エミュレータ。R09 の4ファイル): 73 件成功(`fd1824b`)。
+- unit: `tests/asset-stamp.test.js` 成功。
+- 全テストは運営者の指示で再実行していない。
 
 ## push・Firebaseデプロイ
-- `feature/r09-qr-open-link` へ通常の push。`main` への統合なし。Firebase のデプロイなし。
-
-## 本番への反映に必要な作業(未実施)
-1. `firebase deploy --only functions:stickerPhotoApi --project medconf-iol-dev`(運営者の承認の後)。
-2. このブランチを `main` へ fast-forward で統合して push。順序は配備が先(逆だと施設名もアイコンも出ない)。
+- Firebase: `stickerPhotoApi` だけを配備(2026-11-05 22:56)。ほかの 42 関数は更新なし。環境変数の差はプラットフォームの `FUNCTION_SIGNATURE_TYPE` だけ。バケット・Secret・IAM・Rules の変更なし。
+- `feature/r09-qr-open-link` を `main` へ fast-forward で統合して通常の push。公開サイトの配信の確認は完了回答に記録。
 
 ## 残課題
 - R09 の実機の確認(手順書の段階 8-2、`docs/r09-pilot-guide.md`)。
