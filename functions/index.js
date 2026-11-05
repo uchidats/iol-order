@@ -282,7 +282,10 @@ const stickerPhotos = createStickerPhotoService({
   },
   isAllowedOrigin: (origin) => origin === STICKER_ORIGIN || (isDemoProject() && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
 });
-export const stickerEntryApi = onCall({ ...options, secrets: [STICKER_TICKET_SECRET] },
+// 確認はログインなしで呼べるので、ブラウザからは正規のオリジンだけに応答する(保存・画像の取得と同じ。エミュレータでは 127.0.0.1 も)。
+// CORS はブラウザの読み取りの制限で、認可ではない。不正な利用はコード・回数制限・チケットで止める
+const STICKER_CORS = isDemoProject() ? [STICKER_ORIGIN, /^http:\/\/127\.0\.0\.1:\d+$/] : [STICKER_ORIGIN];
+export const stickerEntryApi = onCall({ ...options, cors: STICKER_CORS, secrets: [STICKER_TICKET_SECRET] },
   (request) => wrap(({ data }) => stickerPhotos.verify({ data, ip: clientIpOf(request.rawRequest) }))(request));
 export const stickerPhotoApi = onCall(options, wrap(stickerPhotos.api));
 export const stickerPhotoUpload = onRequest({ region: REGION, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [STICKER_TICKET_SECRET],

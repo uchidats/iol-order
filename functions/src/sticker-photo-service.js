@@ -119,6 +119,14 @@ export function createStickerPhotoService({
   let placeholderRecord = null;
   const placeholder = async () => (placeholderRecord ??= await hashAccessCode(PLACEHOLDER_CODE));
 
+  /** 入口トークンごとの回数制限の記録(短い窓と、24 時間の窓)。ID はトークンのハッシュ */
+  const dayLimits = { windowMs: rateLimits.dayWindowMs, blockMs: rateLimits.dayBlockMs };
+  const tokenLimitKeys = (token) => [
+    { id: rateLimitDocId("token", token), max: rateLimits.tokenMax, scope: "token" },
+    { id: rateLimitDocId("tokenDay", token), max: rateLimits.tokenDayMax, scope: "tokenDay", limits: dayLimits }
+  ];
+  const limitRef = (id) => db.doc(`stickerRateLimits/${id}`);
+
   /**
    * 確認の前に回数を確保する。同時に送っても上限を超えて確認できない。上限を超えた回は確認しない。
    * @returns {Promise<Array<{ref:object}>>} 成功のときに返す確保
@@ -129,11 +137,20 @@ export function createStickerPhotoService({
       const snaps = await Promise.all(refs.map(r => tx.get(r.ref)));
       const t = now();
       if (snaps.some(s => s.exists && isRateLimited(s.data(), t))) return true;
-      const next = snaps.map((s, i) => recordRateLimitFailure(s.exists ? s.data() : null, refs[i].max, t, rateLimits));
-      next.forEach((state, i) => tx.set(refs[i].ref, state));
-      const stopped = next.some(state => isRateLimited(state, t));
-      if (stopped) audit(tx, { action: "verify.blocked", ipHash });
-      return stopped;
+      const next = snaps.map((s, i) => recordRateLimitFailure(s.exists ? s.data() : null, refs[i].max, t, refs[i].limits ?? rateLimits));
+      next.forEach((state, i) => tx.set(refs[i].ref, { ...state, scope: refs[i].scope }));
+      // 日の窓が終わっていたら、その窓の失敗の数を監査に残してから数え直す(コード・トークンの平文は残さない)
+      snaps.forEach((s, i) => {
+        if (refs[i].scope === "tokenDay" && s.exists && (s.get("count") ?? 0) > 0 && s.get("windowStart") !== next[i].windowStart) {
+          audit(tx, { action: "verify.daySummary", tokenHash: refs[i].id, failures: s.get("count"), windowStart: s.get("windowStart") });
+        }
+      });
+      const scopes = refs.filter((_, i) => isRateLimited(next[i], t)).map(r => r.scope);
+      if (scopes.length) {
+        const day = refs.findIndex(r => r.scope === "tokenDay");
+        audit(tx, { action: "verify.blocked", ipHash, scopes, ...(day >= 0 ? { tokenHash: refs[day].id, dayFailures: next[day].count } : {}) });
+      }
+      return scopes.length > 0;
     }, { maxAttempts: TX_ATTEMPTS });
     if (blocked) throw new RegistrationError("resource-exhausted", VERIFY_BLOCKED);
     return refs;
@@ -158,8 +175,8 @@ export function createStickerPhotoService({
     const tokenOk = isEntryToken(d.token);
     const codeOk = isAccessCode(d.code);
     const ipHash = rateLimitDocId("ip", ip || "unknown");
-    const keys = [{ id: ipHash, max: rateLimits.ipMax }];
-    if (tokenOk) keys.push({ id: rateLimitDocId("token", d.token), max: rateLimits.tokenMax });
+    const keys = [{ id: ipHash, max: rateLimits.ipMax, scope: "ip" }];
+    if (tokenOk) keys.push(...tokenLimitKeys(d.token));
     const reserved = await reserveAttempts(keys, ipHash);
 
     const entry = tokenOk ? await entryRef(d.token).get() : null;
@@ -317,9 +334,12 @@ export function createStickerPhotoService({
     return { role, facility: f };
   }
 
+  /** 許可の記録が、その施設・発注先のものか(記録の ID だけに頼らず、中の施設 ID・発注先 ID も確かめる) */
+  const grantOf = (grant, fid, lid) => grant.exists && grant.id === `${fid}_${lid}` && grant.get("facilityId") === fid && grant.get("localDealerId") === lid;
+
   /** 許可が今も有効か。受注閲覧の許可・関連付けの status は見ない。関連付けの会社と発注先の同一性だけを確かめる */
-  function grantValid(grant, link, dealer) {
-    return grant.exists && grant.get("status") === "active" && link.exists && link.get("companyId") === grant.get("companyId")
+  function grantValid(grant, link, dealer, fid, lid) {
+    return grantOf(grant, fid, lid) && grant.get("status") === "active" && link.exists && link.get("companyId") === grant.get("companyId")
       && dealer.exists && typeof grant.get("dealerFingerprint") === "string" && grant.get("dealerFingerprint") === dealerFingerprintOf(dealer);
   }
 
@@ -337,7 +357,7 @@ export function createStickerPhotoService({
         db.doc(`facilities/${fid}/dealerPortalLinks/${lid}`).get(), db.doc(`facilities/${fid}/facilityDealers/${lid}`).get(), facilityRef(fid).get()
       ]);
       const from = millisOf(g.get("effectiveFrom"));
-      if (from === null || !grantValid(g, link, dealer) || !fac.exists || fac.get("status") !== "active") return;
+      if (from === null || !grantValid(g, link, dealer, fid, lid) || !fac.exists || fac.get("status") !== "active") return;
       const prev = out.get(fid);
       out.set(fid, { facilityId: fid, facilityName: String(fac.get("name") || ""), effectiveFromMs: prev ? Math.min(prev.effectiveFromMs, from) : from });
     }));
@@ -415,20 +435,28 @@ export function createStickerPhotoService({
       accessRef(fid).get(), entrySettingRef(fid).get(),
       db.collection(`facilities/${fid}/facilityDealers`).get(), db.collection(`facilities/${fid}/dealerPortalLinks`).get()
     ]);
+    // コードの確認の停止(今の QR のトークンの記録だけを読む。トークンは返さない)
+    const token = entry.exists ? entry.get("token") : null;
+    const limitSnaps = isEntryToken(token) ? await Promise.all(tokenLimitKeys(token).map(k => limitRef(k.id).get())) : [];
+    const t = now();
+    const blockedUntil = Math.max(0, ...limitSnaps.map(l => (l.exists && isRateLimited(l.data(), t) ? l.get("blockedUntil") : 0)));
+    const day = limitSnaps[1];
+    const dayFailures = day?.exists && t - day.get("windowStart") < rateLimits.dayWindowMs ? day.get("count") ?? 0 : 0;
     const linkBy = new Map(links.docs.map(l => [l.id, l]));
     const rows = await Promise.all(dealers.docs.map(async (d) => {
       const link = linkBy.get(d.id);
       const companyId = link?.get("companyId");
       if (!isIdLike(companyId)) return { localDealerId: d.id, dealerName: String(d.get("name") || ""), linked: false, shared: false, stale: false };
       const [g, c] = await Promise.all([grantRef(fid, d.id).get(), db.doc(`dealerCompanies/${companyId}`).get()]);
-      const active = g.exists && g.get("status") === "active";
+      const active = grantOf(g, fid, d.id) && g.get("status") === "active";
       return {
         localDealerId: d.id, dealerName: String(d.get("name") || ""), linked: true, companyName: c.exists ? String(c.get("name") || "") : "",
-        shared: active, stale: active && !grantValid(g, link, d), sharedFrom: active ? isoOf(g.get("effectiveFrom")) : null
+        shared: active, stale: active && !grantValid(g, link, d, fid, d.id), sharedFrom: active ? isoOf(g.get("effectiveFrom")) : null
       };
     }));
     rows.sort((a, b) => a.dealerName.localeCompare(b.dealerName, "ja"));
-    return { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists, dealers: rows };
+    return { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists,
+      verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, verifyFailures24h: dayFailures, dealers: rows };
   }
   const isIdLike = (v) => typeof v === "string" && ID.test(v);
 
@@ -443,8 +471,19 @@ export function createStickerPhotoService({
       const { role } = await assertMember(tx, user.uid, fid, { manager: true });
       const a = await tx.get(accessRef(fid));
       const codeGeneration = (a.exists ? a.get("codeGeneration") || 0 : 0) + 1;
+      // コードが変わると、それまでの試行は新しいコードの手がかりにならない。今の QR のトークンの回数制限(短い窓・24 時間)を消して、すぐに使えるようにする。
+      // 送信元 IP の制限は消さない。失敗の数は監査に残す
+      const setting = await tx.get(entrySettingRef(fid));
+      const token = setting.exists ? setting.get("token") : null;
+      const limitSnaps = isEntryToken(token) ? await Promise.all(tokenLimitKeys(token).map(k => tx.get(limitRef(k.id)))) : [];
+      const t = now();
+      const cleared = limitSnaps.filter(l => l.exists);
       tx.set(a.ref, { ...hashed, codeGeneration, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid });
-      audit(tx, { action: "code.change", facilityId: fid, actorUid: user.uid, actorRole: role });
+      cleared.forEach(l => tx.delete(l.ref));
+      audit(tx, {
+        action: "code.change", facilityId: fid, actorUid: user.uid, actorRole: role,
+        ...(cleared.length ? { limitsCleared: true, wasBlocked: cleared.some(l => isRateLimited(l.data(), t)), clearedDayFailures: limitSnaps[1]?.exists ? limitSnaps[1].get("count") ?? 0 : 0 } : {})
+      });
       return { ok: true };
     }, { maxAttempts: TX_ATTEMPTS });
   }
@@ -501,6 +540,8 @@ export function createStickerPhotoService({
       const ref = grantRef(fid, lid);
       const [g, link, dealer] = await Promise.all([tx.get(ref), tx.get(db.doc(`facilities/${fid}/dealerPortalLinks/${lid}`)), tx.get(db.doc(`facilities/${fid}/facilityDealers/${lid}`))]);
       const companyId = link.exists ? link.get("companyId") : null;
+      // 別の施設・発注先の記録が同じ ID にあるときは、読み書きしない(取消も上書きもしない)
+      if (g.exists && !grantOf(g, fid, lid)) throw new RegistrationError("failed-precondition", "このディーラーは写真を共有できません");
       if (!shared) {
         if (g.exists && g.get("status") === "active") {
           tx.update(ref, { status: "revoked", revokedAt: FieldValue.serverTimestamp(), revokedBy: user.uid });
@@ -511,7 +552,7 @@ export function createStickerPhotoService({
       if (!isIdLike(companyId) || !dealer.exists) throw new RegistrationError("failed-precondition", "このディーラーは写真を共有できません");
       const company = await tx.get(db.doc(`dealerCompanies/${companyId}`));
       if (!company.exists || company.get("status") !== "active" || company.get("testOnly") === true) throw new RegistrationError("failed-precondition", "このディーラーは写真を共有できません");
-      if (grantValid(g, link, dealer)) return { ok: true, shared: true };
+      if (grantValid(g, link, dealer, fid, lid)) return { ok: true, shared: true };
       tx.set(ref, {
         facilityId: fid, localDealerId: lid, companyId, status: "active", effectiveFrom: Timestamp.fromMillis(now()),
         dealerFingerprint: dealerFingerprintOf(dealer), grantedBy: user.uid, grantedByRole: role
@@ -611,10 +652,15 @@ export function createStickerPhotoService({
       pageToken = page.nextPageToken;
     } while (pageToken);
     for (;;) {
-      const expired = await db.collection("stickerRateLimits").where("expiresAt", "<", t).limit(300).get();
+      const expired = await db.collection("stickerRateLimits").where("expiresAt", "<", t).limit(200).get();   // 監査の書き込みを足しても 1 回の上限(500)を超えない数
       if (expired.empty) break;
       const batch = db.batch();
-      expired.docs.forEach(d => batch.delete(d.ref));
+      expired.docs.forEach(d => {
+        if (d.get("scope") === "tokenDay" && (d.get("count") ?? 0) > 0) {
+          batch.create(db.collection("stickerAuditLogs").doc(), { action: "verify.daySummary", tokenHash: d.id, failures: d.get("count"), windowStart: d.get("windowStart"), at: FieldValue.serverTimestamp() });
+        }
+        batch.delete(d.ref);
+      });
       await batch.commit();
       removedLimits += expired.size;
     }

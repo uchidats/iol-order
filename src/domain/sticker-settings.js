@@ -44,6 +44,17 @@ export function accessCodeStatus({ accessCodeSet, accessCodeUpdatedAt }) {
   return `設定済み(${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} 変更)`;
 }
 
+/**
+ * コードの確認が停止中のときの案内(誤ったコードの入力が続いたとき)。停止していなければ空。
+ * 復旧はコードの変更(すぐに再開)。心当たりがなければ QR も作り直す
+ */
+export function verifyLockNotice({ verifyBlockedUntil } = {}) {
+  const ms = Date.parse(verifyBlockedUntil);
+  if (Number.isNaN(ms)) return "";
+  const d = new Date(ms + JST_MS);
+  return `誤ったコードの入力が続いたため、撮影画面でのコードの確認を停止しています(${d.getUTCMonth() + 1}/${d.getUTCDate()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} まで)。アクセスコードを変更すると、すぐに再開できます。心当たりがないときは、QRコードも作り直してください。`;
+}
+
 /** 写真を共有できる発注先(運営者が会社に関連付けたものだけ)。受注閲覧の許可の有無は関係しない */
 export const shareableDealers = (dealers) => (dealers || []).filter(d => d && d.linked === true);
 

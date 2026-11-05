@@ -406,3 +406,18 @@ test("JPEG: 12.5MP 相当の大きな入力でも短時間で処理する", () =
   assert.equal(sanitizeJpeg(input).ok, true);
   assert.ok(performance.now() - start < 2000);
 });
+
+test("回数制限: 入口トークンごとの 24 時間の窓は 50 回までで、超えると 24 時間止まる", () => {
+  const day = { windowMs: STICKER_RATE_LIMITS.dayWindowMs, blockMs: STICKER_RATE_LIMITS.dayBlockMs };
+  assert.deepEqual([STICKER_RATE_LIMITS.tokenDayMax, day.windowMs, day.blockMs], [50, 24 * 60 * MIN, 24 * 60 * MIN]);
+  let state = null;
+  // 10 分に 10 回ずつ(短い窓では止まらない速さ)
+  for (let i = 0; i < 50; i++) state = recordRateLimitFailure(state, STICKER_RATE_LIMITS.tokenDayMax, NOW + Math.floor(i / 10) * 11 * MIN, day);
+  assert.deepEqual([state.count, isRateLimited(state, NOW + 60 * MIN)], [50, false]);
+  state = recordRateLimitFailure(state, STICKER_RATE_LIMITS.tokenDayMax, NOW + 60 * MIN, day);
+  assert.equal(isRateLimited(state, NOW + 60 * MIN + 24 * 60 * MIN - 1), true);
+  assert.equal(isRateLimited(state, NOW + 60 * MIN + 24 * 60 * MIN), false);
+  assert.equal(state.expiresAt, NOW + 60 * MIN + 24 * 60 * MIN, "停止が終わるまで記録を残す");
+  // 窓が過ぎれば数え直す
+  assert.equal(recordRateLimitFailure({ count: 30, windowStart: NOW, blockedUntil: 0 }, 50, NOW + 24 * 60 * MIN, day).count, 1);
+});

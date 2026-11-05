@@ -3,41 +3,47 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-05
-- **作業**: R09(使用済みIOLシール写真)の各ブランチを Lenovo で統合。統合作業ブランチ `feature/r09-integration`(基点 `feature/r09-sticker-photo` の `f1d14f6`。`main` 未統合)。
-- 統合の順序(`git merge --no-ff`。競合なし): `feature/r09-capture-screen`(撮影画面)→ `feature/r09-photo-viewer`(閲覧画面)→ `feature/r09-sheet-print`(台紙・QR の印刷。`feature/r09-facility-settings` を含むので、施設設定は重ねて統合していない)。
-- 統合の後の整備:
-  - 施設設定「IOLシール写真」の呼び出しを、受注閲覧の API(`dealer-portal-api.js`)から切り離し、閲覧と同じ `sticker-photo-api.js` に統一(`createFacilitySettings` の `stickerPhotoApi`)。受注閲覧の API がなくても写真の設定が動く。
-  - 閲覧画面の見た目を `styles.css` へ移動(別ファイルの読み込みを廃止)。印刷の CSS は専用のまま(`@page` の余白 0 がほかの印刷に効かないようにするため)。
-  - スタンプを更新(`index.html`・`dealer.html`・`sticker.html`)。
-  - 画面をまたぐ統合テスト `tests/functions/sticker-screens-flow.test.js` を追加(施設設定のコード・QR → 撮影・送信 → 医療機関とディーラーの閲覧を、画面側の部品と本物のサーバーの処理でつなぐ)。
-  - 設計書 §4-2・§9-2・§9-4、ROADMAP を更新。統合メモ(`docs/r09-*-handoff.md` の4件)を削除。
-- 変更していないもの: `functions/`、`firestore.rules`、`firestore.indexes.json`、注文・メール送信の処理。表示の設定 `STICKER_VIEWER_ENABLED`・`STICKER_SETTINGS_ENABLED` と、サーバーの `STICKER_PHOTO_ENABLED` は既定 false のまま。
+- **作業**: R09(使用済みIOLシール写真)の公開前のセキュリティレビューの修正。ブランチ `feature/r09-integration`(`main` 未統合・未配備)。レビュー(対象 `bcae9d5`)は Critical・High なし、Medium 4・Low 6。
+- 修正(コード):
+  - **M-1**: 入口トークンごとに 24 時間で 50 回の失敗の上限を追加(コードは6桁以上・自動生成は8桁のまま)。成功した確認は数えない。超えると 24 時間停止し、ほかの施設には波及しない。停止(範囲・トークンのハッシュ・失敗の数)と、24 時間の窓ごとの失敗の数を `stickerAuditLogs` に残す。コード・トークン・IP の平文は残さない。
+  - **復旧**: 専用の解除の操作は作らず、管理者・副管理者の「アクセスコードの変更」で今の QR の制限をすぐに解除(監査に記録。送信元 IP の制限は解除しない)。「QR の作り直し」でも新しい QR はすぐに使える。施設設定に、停止中だけ案内(いつまで・復旧の方法)を表示。撮影画面の停止の案内に「続くときは、施設の管理者にお知らせください」を追加。
+  - **L-2**: `stickerEntryApi` の CORS を正規のオリジンだけに限定(エミュレータでは 127.0.0.1 も)。送信・画像の取得は元から同じ制限。`stickerPhotoApi`(ログイン必須)は変更なし。
+  - **L-3**: 共有の許可の記録は、ID に加えて中の施設 ID・発注先 ID が一致するときだけ使う(一覧・画像・設定の表示・許可・取消)。一致しない記録は読まず、取り消さず、上書きもしない。
+- 設計・手順(`docs/iol-sticker-photo-design.md` §0-38〜41・§8-1・§8-4・§8-6・§9-3、ROADMAP):
+  - **M-2**: 配備の後(機能は停止のまま)に、別々の回線からの失敗が `stickerRateLimits` の別の文書になることで、送信元 IP の取り方を確かめる手順。IP そのものは記録しない。
+  - **M-3**: バケットは Soft Delete 無効(0 日)・バージョニング無効。削除は復元できないことを明記。
+  - **M-4**: 配備の順序(バケットと IAM → Secret → Rules・インデックス → Functions → 確認 → 画面 → 有効化)と、Secret の登録前に Functions 全体を配備しないこと、公開前に e2e を実行することを明記。
+  - **L-4〜L-6**: 受容(コードの変更なし)。
+- 変更していないもの: 注文・メール送信の処理、`firestore.rules`、`firestore.indexes.json`。機能スイッチ・表示の設定は既定 false のまま。
 
 ## commit ID
-- 本体: `035c289`(統合と整備)。統合元は `dcdb686`(撮影)・`49fb579`(閲覧)・`84fda58`(印刷と施設設定)。この報告は直後の commit に含む(書き込みの失敗で本体に入らなかったため)。
+- 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果
-- unit(`npm test`): 402 成功・1 スキップ(スタンプの整合性を含む)。
-- Functions(Firestore エミュレータ・偽のバケット。`npm run test:functions` 全体): 320 成功。新しい統合テスト 3 件を含む(別の施設・別の会社・共有の前と取消の後は読めない、受注閲覧の記録に触らない、コード変更の後の 401 と再入力で同じ写真を1回だけ保存、QR の作り直し)。
+- unit(`npm test`): 404 成功・1 スキップ(スタンプの整合性を含む)。
+- Functions(Firestore エミュレータ。`npm run test:functions` 全体): 329 成功。新規 11 件(24 時間の上限で止まる・ほかの施設に波及しない・時間で戻る・通常の利用では止まらない・コードの変更での復旧と権限・QR の作り直しでの復旧・送信元の制限は解除しない・監査に平文を残さない・共有の許可の一致・CORS 2件)。1回目は注文の連番の並列のテスト 2 件が時間切れで失敗(ブラウザテストなどを同時に実行した負荷。注文のコードは無変更)。単独の再実行で全件成功。
+- わざと不具合を入れた確認: 24 時間の上限を無効・許可の一致の確認を無効・CORS の指定を削除は、いずれもテストが失敗して検出した(元に戻した)。
 - Rules(`npm run test:rules` 全体): 77 成功。
-- ブラウザ(R09 の4ファイル: 撮影・施設設定・閲覧・印刷): 44 成功。施設設定に、受注閲覧の API なしで動く確認を追加(成功)。
-- ブラウザの回帰(`dealer-portal`・`dealer-portal-settings`・`settings-collapse`・`facility-switch`・`order-history`・`manual`): 89 成功。
-- 未実行: `npm run test:browser` の残りのファイル、`npm run test:functions:e2e`。
+- ブラウザ(施設設定・撮影画面): 23 成功(停止中の案内と、コードの変更で消えることを含む)。
+- e2e(`npm run test:functions:e2e`): 16 件中 15 成功(R09 の確認の関数への正規のオリジンからの要求を含む)。失敗の 1 件は既存の「施設設定の変更履歴」(エミュレータで Firestore のトリガーが動かない)。`main`(`5ea5fce`)でも同じテストが失敗することを確認した(R09 とは無関係。前回から継続の環境の問題)。
+- Functions エミュレータは CORS を常に全許可にするため、ほかのオリジンの拒否は関数を直接呼ぶテスト(`tests/functions/sticker-cors.test.js`)で確かめた。
+- 未実行: `npm run test:browser` の残りのファイル(今回の変更は施設設定の項目と撮影画面の文言だけ)。
 
 ## push・Firebaseデプロイ
 - `feature/r09-integration` へ通常の push。`main` への統合なし。Firebase のデプロイなし。バケット・IAM・Secret の変更なし。
-- `feature/r09-sticker-photo` とほかの R09 のブランチは変更していない。
 
-## 残課題
-- 未検証: 実機(Galaxy・iPhone)での撮影と送信、iPhone の Safari(自動テストの撮影は Chromium と Firefox だけ)、配備した Functions での確認の呼び出し(`fetch` での callable の形式と CORS)、実際のバケットでの保存・閲覧・削除、Linux での `sharp`、応答時間。
-- 表示の設定を true にした状態で、実際の注文画面・ディーラー画面全体を通した確認はしていない(部品ごとのブラウザテストと、メニューの接続のテストまで)。
-- 公開のとき: 2つの表示の設定を true にし、マニュアル(医療機関用 2・3、ディーラー用 02)と `firestore-data-model.md` を更新する。App Check を必須にするときは `sticker.html` にトークンの追加が要る。動的に読む `src/ui/sticker-print.css` にはバージョンが付かない。
-- 台紙の試し刷りと行数の確定(`SHEET.rows`)。
-- Zenbook: 未コミットの作業が残っている可能性がある。使うときは最初に `git status -sb` を確認し、変更があれば別のブランチ(例 `wip/zenbook-capture`)へ commit・push してから比べる。`feature/r09-sticker-photo` へそのまま push しない。
+## 残課題(公開前)
+- 配備の後の確認: 送信元 IP の取り方(設計書 §8-6 (4))、実際の環境での `stickerEntryApi` の CORS と `fetch` での呼び出し、バケットの設定(Soft Delete 0 日・バージョニング無効)の読み取り。
+- 実機(Galaxy・iPhone。iPhone の Safari は自動テストなし)、実際のバケットでの保存・閲覧・削除、Linux での `sharp`、応答時間。
+- e2e の環境の問題(Firestore のトリガーのテスト)の解消。公開前に e2e を全件成功させるなら、この対応が先に要る。
+- 表示の設定を true にした状態での、注文画面・ディーラー画面全体を通した確認。マニュアル(医療機関用 2・3、ディーラー用 02)と `firestore-data-model.md`。
+- 台紙の試し刷りと行数の確定。
+- Zenbook: 未コミットの作業が残っている可能性がある。使うときは最初に `git status -sb` を確認し、変更があれば別のブランチへ commit・push してから比べる。
 
 ## 判断待ち事項
-- R09: `feature/r09-integration` を `feature/r09-sticker-photo` へ反映するか(早送りで反映できる)、統合済みの4つの作業ブランチを残すか。
+- R09: e2e の既存の失敗(トリガー)を公開前に直すか、R09 と無関係として進めるか。
+- R09: `feature/r09-integration` を `feature/r09-sticker-photo` へ反映するか、統合済みの作業ブランチを残すか。
 - R09: バケットと権限の付与・Secret の登録の承認、最初に有効にする施設、アクセスコードの運用、実機検証の進め方。
 - 立川病院の発注用メール5件が、すべて現在の正しい宛先かの確認。
 - Google フォームの受付をいつ終えるか。
-- NP-T の下限の取り込み、E2E の環境の問題、使わなくなった複合インデックスの削除(前回から継続)。
+- NP-T の下限の取り込み、使わなくなった複合インデックスの削除(前回から継続)。

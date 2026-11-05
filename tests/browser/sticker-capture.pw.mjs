@@ -175,7 +175,7 @@ test("撮影画面: コードの誤り・停止の案内。回数の超過を区
     await enterCode(page, "999999");
     await page.waitForFunction(() => document.querySelector('[data-f="error"]').textContent === "コードが違います");
     await enterCode(page, "999999");
-    await page.waitForFunction(() => document.querySelector('[data-f="error"]').textContent === "しばらくしてからお試しください");
+    await page.waitForFunction(() => document.querySelector('[data-f="error"]').textContent === "しばらくしてからお試しください。続くときは、施設の管理者にお知らせください");
     assert.equal(await screen(page, "code").isVisible(), true);
     await context.close();
   } finally { await browser.close(); }

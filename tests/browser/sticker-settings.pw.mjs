@@ -27,7 +27,7 @@ const repository = {
 const settingsApi = { saveOrderers: async () => {}, saveAdoptedIols: async () => {}, saveIolOrder: async () => {}, deleteOrderer: async () => {}, deleteDealer: async () => {},
   saveDealers: async () => {}, saveMailSettings: async () => {}, saveHeaderTheme: async () => {}, resetHeaderTheme: async () => {}, saveMemberOrder: async () => {} };
 const inviteApi = { removeMember: async () => {}, addMember: async () => ({}), cancelPendingMember: async () => {}, changeMemberRole: async () => {} };
-const state = { set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
+const state = { lock: q.get("lock") === "1", set: q.get("code") !== "unset", updatedAt: "2026-11-02T15:30:00.000Z", gen: 0,
   dealers: [
     { localDealerId: "dA", dealerName: "X商事 立川", linked: true, companyName: "X商事", shared: false, stale: false, sharedFrom: null },
     { localDealerId: "dB", dealerName: "Y医療", linked: true, companyName: "Y医療", shared: true, stale: q.get("stale") === "1", sharedFrom: "2026-11-01T00:00:00.000Z" },
@@ -40,8 +40,8 @@ const stickerPhotoCall = async (p) => {
   if (mode === "off") fail("functions/failed-precondition", "IOLシール写真は現在ご利用いただけません");
   if (mode === "outside") fail("functions/permission-denied", "この施設の写真を操作する権限がありません");
   if (mode === "error") fail("functions/internal", "boom");
-  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: true, dealers: state.dealers };
-  if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
+  if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: true, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, dealers: state.dealers };
+  if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.lock = false; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
   if (p.action === "getEntryQr" || p.action === "rotateEntryQr") { if (p.action === "rotateEntryQr") state.gen += 1; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" data-gen="' + state.gen + '"><script>window.__evil = true</scr' + 'ipt><rect width="10" height="10"/></svg>' }; }
   if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
   throw new Error("unknown " + p.action);
@@ -286,6 +286,29 @@ test("独立: 受注閲覧の API がなくても写真の設定は動き、写�
     await section(page).locator('[data-dealer="dA"]').check();
     await page.waitForFunction(() => window.__calls.some(c => c.action === "setDealerShare"));
     assert.deepEqual(await page.evaluate(() => window.__portalCalls), [], "受注閲覧の処理は1回も呼ばない");
+    assert.deepEqual(page.errors, []);
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("コードの確認の停止: 停止中だけ案内を出し、コードを変更すると消える", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const normal = await openPage(browser, "?role=admin");
+    await ready(normal);
+    assert.equal(await section(normal).locator('[data-f="verifyLock"]').isHidden(), true);
+    await normal.close();
+    const page = await openPage(browser, "?role=subadmin&lock=1");
+    await ready(page);
+    const note = section(page).locator('[data-f="verifyLock"]');
+    assert.equal(await note.isVisible(), true);
+    assert.match(await note.innerText(), /11\/6 12:05 まで.*アクセスコードを変更すると、すぐに再開できます/s);
+    await section(page).locator('[data-act="editCode"]').click();
+    await section(page).locator('[data-f="code"]').fill("13579024");
+    await section(page).locator('[data-act="saveCode"]').click();
+    await confirmDialog(page, "ok");
+    await page.waitForFunction(() => document.querySelector('[data-f="verifyLock"]').hidden);
     assert.deepEqual(page.errors, []);
     await page.close();
   } finally { await browser.close(); }

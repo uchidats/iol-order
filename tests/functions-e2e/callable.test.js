@@ -566,3 +566,17 @@ test("ディーラー専用画面の本人確認(AB-02): 旧 Microsoft B の更�
   // 本人(A・確認したブラウザ)は使える
   assert.equal((await api({ action: "context", deviceToken: aDevice }, a.idToken)).body.result.company.id, cid);
 });
+
+// ================= IOL シール写真(R09): 確認の関数 =================
+// Functions エミュレータは CORS を常に全許可にするので、ほかのオリジンの拒否は tests/functions/sticker-cors.test.js で確かめる。ここでは正規のオリジンからの要求が通ることだけを確かめる
+test("stickerEntryApi: 正規のオリジンからの事前確認と要求が通り、無効な入口は理由を区別せず拒否する(ログインなし)", async () => {
+  const url = "http://" + FN + "/" + PROJECT + "/" + REGION + "/stickerEntryApi";
+  const pre = await fetch(url, { method: "OPTIONS", headers: { Origin: "https://iol.medconf.jp", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" } });
+  assert.equal(pre.headers.get("access-control-allow-origin"), "https://iol.medconf.jp");
+  const post = (origin) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify({ data: { token: "A".repeat(22), code: "123456" } }) });
+  const real = await post("https://iol.medconf.jp");
+  assert.equal(real.headers.get("access-control-allow-origin"), "https://iol.medconf.jp");
+  assert.equal((await real.json()).error.status, "PERMISSION_DENIED");
+  // オリジンのない要求(ブラウザ以外)も同じ処理で拒否される(CORS では止まらないので、コードと回数制限で止める)
+  assert.equal((await (await post(null)).json()).error.status, "PERMISSION_DENIED");
+});

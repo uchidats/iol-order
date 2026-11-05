@@ -9,7 +9,7 @@ export const UPLOAD_RETRY_DELAYS = Object.freeze([1000, 2000, 4000]);
 export const MESSAGES = Object.freeze({
   noToken: "台紙のQRコードを読み取って開いてください",
   codeWrong: "コードが違います",
-  codeBlocked: "しばらくしてからお試しください",
+  codeBlocked: "しばらくしてからお試しください。続くときは、施設の管理者にお知らせください",
   connection: "接続できません。通信状態を確認して、もう一度お試しください",
   sendFailed: "送信できませんでした。通信状態を確認して、もう一度お試しください",
   tooLarge: "画像が大きすぎます。もう一度撮影してください",

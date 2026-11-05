@@ -36,7 +36,11 @@ export const STICKER_RATE_LIMITS = Object.freeze({
   tokenMax: 10,
   ipMax: 30,
   windowMs: 10 * 60 * 1000,
-  blockMs: 15 * 60 * 1000
+  blockMs: 15 * 60 * 1000,
+  // 入口トークンごとの長い窓(10 分に 10 回までを続ける低速の総当たりを止める)。解除はコードの変更か QR の作り直し
+  tokenDayMax: 50,
+  dayWindowMs: 24 * 60 * 60 * 1000,
+  dayBlockMs: 24 * 60 * 60 * 1000
 });
 
 /** 受け付ける画像の画素数の上限(§8-2) */

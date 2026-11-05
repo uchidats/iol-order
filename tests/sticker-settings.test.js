@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  STICKER_SETTINGS_ENABLED, GENERATED_CODE_DIGITS, accessCodeError, accessCodeStatus, generateAccessCode, shareableDealers, qrImageUrl
+  STICKER_SETTINGS_ENABLED, GENERATED_CODE_DIGITS, accessCodeError, accessCodeStatus, generateAccessCode, shareableDealers, qrImageUrl, verifyLockNotice
 } from "../src/domain/sticker-settings.js";
 import { isAccessCode } from "../src/domain/sticker-photo.js";
 import { createStickerSettingsApi } from "../src/data/sticker-settings-api.js";
@@ -65,4 +65,13 @@ test("呼び出しの関数: 写真の設定は stickerPhotoApi で、受注閲�
   assert.deepEqual(names, ["stickerPhotoApi"]);
   // 受注閲覧の API は写真の設定の呼び出しを持たない(互いに独立)
   assert.equal("stickerPhotoCall" in createDealerPortalApi({ functions: {}, httpsCallable }), false);
+});
+
+test("コードの確認の停止中だけ案内を出し、復旧の方法(コードの変更)を書く", () => {
+  assert.equal(verifyLockNotice({ verifyBlockedUntil: null }), "");
+  assert.equal(verifyLockNotice({}), "");
+  assert.equal(verifyLockNotice(), "");
+  const text = verifyLockNotice({ verifyBlockedUntil: "2026-11-06T03:05:00.000Z" });
+  assert.match(text, /11\/6 12:05 まで/);
+  assert.match(text, /アクセスコードを変更すると、すぐに再開できます/);
 });

@@ -2,7 +2,7 @@ import { h } from "./markdown-view.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shareableDealers } from "../domain/sticker-settings.js";
+import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
 const NOT_LINKED_HELP = "ディーラーの会社との関連付けは運営者が登録します。受注一覧の閲覧の許可とは別の設定です。";
@@ -52,6 +52,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   /* ---------- アクセスコード ---------- */
   const codeStatus = h("span", { "data-f": "codeStatus" });
+  const lockNote = h("p", { class: "error-message", "data-f": "verifyLock", role: "status", hidden: true });   // コードの確認の停止中だけ出す
   const codeBtn = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "editCode" });
   const codeInput = h("input", { type: "text", class: "form-control", "data-f": "code", inputmode: "numeric", autocomplete: "off", maxlength: "12", "aria-label": "新しいアクセスコード" });
   const codeError = h("p", { class: "error-message", "data-err": "code" });
@@ -161,6 +162,8 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   function renderSettings() {
     codeStatus.textContent = accessCodeStatus(settings);
+    lockNote.textContent = verifyLockNotice(settings);
+    lockNote.hidden = !lockNote.textContent;
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
     const dealers = shareableDealers(settings.dealers);
     dealerList.replaceChildren(...(dealers.length ? dealers.map(dealerRow)
@@ -169,7 +172,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", HELP),
-    h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), codeForm, newCodeBox,
+    h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
     h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr),
     h("h4", {}, "ディーラーへの共有"), dealerList,
     msg);

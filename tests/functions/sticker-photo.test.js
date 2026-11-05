@@ -753,11 +753,16 @@ test("片付け: 記録のない古いオブジェクトだけを消し、新し
 
 test("片付け: 期限切れの回数制限の記録だけを消す", async () => {
   await rejects(verify(TOKEN, "999999"), "permission-denied");
-  assert.equal((await db.collection("stickerRateLimits").get()).size, 2);
+  assert.equal((await db.collection("stickerRateLimits").get()).size, 3, "送信元・トークン(短い窓)・トークン(24時間)");
   assert.equal((await svc.cleanup()).removedLimits, 0);
   clock.t += STICKER_RATE_LIMITS.windowMs + 1;
   assert.equal((await svc.cleanup()).removedLimits, 2);
+  assert.equal((await db.collection("stickerRateLimits").get()).size, 1, "24時間の窓の記録は残る");
+  clock.t += STICKER_RATE_LIMITS.dayWindowMs;
+  assert.equal((await svc.cleanup()).removedLimits, 1);
   assert.equal((await db.collection("stickerRateLimits").get()).size, 0);
+  const summary = (await db.collection("stickerAuditLogs").where("action", "==", "verify.daySummary").get()).docs.map(d => d.data());
+  assert.deepEqual(summary.map(d => [d.tokenHash, d.failures]), [[rateLimitDocId("tokenDay", TOKEN), 1]], "消す前に、その日の失敗の数を監査に残す");
 });
 
 // ================= バケットの部品 =================
@@ -779,4 +784,130 @@ test("バケットの部品: 保存はキャッシュ禁止、ないものの読
   const page = await b.list();
   assert.deepEqual([page.items[0].name, page.nextPageToken], ["a", "n"]);
   assert.equal((await b.list({ pageToken: "n" })).nextPageToken, null);
+});
+
+// ================= 入口トークンごとの 24 時間の失敗の上限 =================
+const DAY_KEY = rateLimitDocId("tokenDay", TOKEN);
+const auditOf = async (action) => (await db.collection("stickerAuditLogs").where("action", "==", action).get()).docs.map(d => d.data());
+/** 短い窓の制限にかからない速さ(10 分に 10 回)で、誤ったコードを n 回送る。送信元は毎回変える */
+async function slowFailures(n, token = TOKEN) {
+  for (let i = 0; i < n; i += 1) {
+    if (i > 0 && i % STICKER_RATE_LIMITS.tokenMax === 0) clock.t += STICKER_RATE_LIMITS.windowMs + 1;
+    await rejects(verify(token, String(100000 + i), "198.51.100." + (i % 250)), "permission-denied");
+  }
+  clock.t += STICKER_RATE_LIMITS.windowMs + 1;
+}
+
+test("24時間の上限: 短い窓の制限を避けた低速の総当たりも 50 回で止まり、正しいコードも通らない。ほかの施設には波及しない", async () => {
+  await slowFailures(STICKER_RATE_LIMITS.tokenDayMax);
+  assert.equal(codeChecks.n, STICKER_RATE_LIMITS.tokenDayMax);
+  await rejects(verify(TOKEN, CODE, "203.0.113.1"), "resource-exhausted");
+  await rejects(verify(TOKEN, CODE, "203.0.113.2"), "resource-exhausted");
+  assert.equal(codeChecks.n, STICKER_RATE_LIMITS.tokenDayMax, "停止の後はコードを確かめない");
+  clock.t += 23 * 60 * MIN;
+  await rejects(verify(TOKEN, CODE, "203.0.113.3"), "resource-exhausted");
+  assert.ok((await verify(TOKEN_B, CODE, "203.0.113.1")).ticket, "別の施設の QR は使える");
+  // 監査: 停止の範囲・トークンのハッシュ・失敗の数。コードとトークンの平文は残さない
+  const blocked = await auditOf("verify.blocked");
+  assert.equal(blocked.length, 1);
+  assert.deepEqual([blocked[0].scopes, blocked[0].tokenHash, blocked[0].dayFailures], [["tokenDay"], DAY_KEY, STICKER_RATE_LIMITS.tokenDayMax + 1]);
+  const all = JSON.stringify((await db.collection("stickerAuditLogs").get()).docs.map(d => d.data())) + JSON.stringify((await db.collection("stickerRateLimits").get()).docs.map(d => [d.id, d.data()]));
+  for (const secret of [TOKEN, "198.51.100.", "203.0.113."]) assert.ok(!all.includes(secret), "平文を残さない: " + secret);
+  const keys = new Set((await db.collection("stickerAuditLogs").get()).docs.flatMap(d => Object.keys(d.data())));
+  for (const k of keys) assert.ok(["action", "at", "ipHash", "scopes", "tokenHash", "dayFailures", "facilityId", "sessionId"].includes(k), "監査の項目: " + k);
+});
+
+test("24時間の上限: 時間が過ぎると戻り、その日の失敗の数を監査に残す", async () => {
+  await slowFailures(STICKER_RATE_LIMITS.tokenDayMax);
+  await rejects(verify(TOKEN, CODE), "resource-exhausted");
+  clock.t += STICKER_RATE_LIMITS.dayBlockMs + 1;
+  assert.ok((await verify(TOKEN, CODE)).ticket);
+  assert.deepEqual((await auditOf("verify.daySummary")).map(d => [d.tokenHash, d.failures]), [[DAY_KEY, STICKER_RATE_LIMITS.tokenDayMax + 1]]);
+});
+
+test("24時間の上限: 正しい入力は数えない。誤入力をはさんだ通常の利用が続いても止まらない", async () => {
+  for (let i = 0; i < 70; i += 1) {
+    clock.t += 2 * MIN;
+    if (i % 3 === 0) await rejects(verify(TOKEN, "999999"), "permission-denied");   // ときどき打ち間違える(1 日で 24 回)
+    assert.ok((await verify(TOKEN, CODE)).ticket);
+  }
+  const day = await db.doc("stickerRateLimits/" + DAY_KEY).get();
+  assert.ok(day.get("count") < STICKER_RATE_LIMITS.tokenDayMax);
+  assert.deepEqual(await auditOf("verify.blocked"), []);
+});
+
+test("復旧: 管理者・副管理者がコードを変更すると、停止はすぐに解ける。権限のない人は解除できず、解除は監査に残る", async () => {
+  await slowFailures(STICKER_RATE_LIMITS.tokenDayMax);
+  await rejects(verify(TOKEN, CODE), "resource-exhausted");
+  const before = await api("adminA", "getSettings", { facilityId: F });
+  assert.equal(before.verifyBlockedUntil, new Date(clock.t + STICKER_RATE_LIMITS.dayBlockMs).toISOString());
+  assert.equal(before.verifyFailures24h, STICKER_RATE_LIMITS.tokenDayMax + 1);
+  assert.equal((await api("adminB", "getSettings", { facilityId: G })).verifyBlockedUntil, null, "別の施設の表示には出ない");
+  // 注文者・別の施設の管理者は解除できない
+  await rejects(api("ordA", "setAccessCode", { facilityId: F, code: "135790" }), "permission-denied");
+  await rejects(api("adminB", "setAccessCode", { facilityId: F, code: "135790" }), "permission-denied");
+  await rejects(verify(TOKEN, CODE), "resource-exhausted");
+  // 副管理者が変更 → すぐに新しいコードで通る。古いコードは通らない
+  await api("subA", "setAccessCode", { facilityId: F, code: "135790" });
+  await rejects(verify(TOKEN, CODE), "permission-denied");
+  assert.ok((await verify(TOKEN, "135790")).ticket);
+  const after = await api("adminA", "getSettings", { facilityId: F });
+  assert.deepEqual([after.verifyBlockedUntil, after.verifyFailures24h], [null, 1]);
+  const change = (await auditOf("code.change"))[0];
+  assert.deepEqual([change.limitsCleared, change.wasBlocked, change.clearedDayFailures, change.actorUid], [true, true, STICKER_RATE_LIMITS.tokenDayMax + 1, "subA"]);
+  assert.ok(!JSON.stringify(change).includes("135790"));
+  // 解除の後も制限は効く(新しいコードへの総当たりも 50 回で止まる。解除の後の失敗は、上の 1 回とここの 49 回)
+  clock.t += STICKER_RATE_LIMITS.windowMs + 1;
+  await slowFailures(STICKER_RATE_LIMITS.tokenDayMax - 1);
+  await rejects(verify(TOKEN, "999999"), "resource-exhausted");
+  await rejects(verify(TOKEN, "135790"), "resource-exhausted");
+});
+
+test("復旧: QR を作り直すと、新しい QR は同じコードですぐに使える。停止した古い QR は無効のまま", async () => {
+  await slowFailures(STICKER_RATE_LIMITS.tokenDayMax);
+  await rejects(verify(TOKEN, CODE), "resource-exhausted");
+  const svg = (await api("adminA", "rotateEntryQr", { facilityId: F })).svg;
+  const fresh = /#f=([A-Za-z0-9_-]{22})/.exec(svg)[1];
+  assert.ok((await verify(fresh, CODE)).ticket);
+  clock.t += STICKER_RATE_LIMITS.dayBlockMs + 1;
+  await rejects(verify(TOKEN, CODE), "permission-denied");
+});
+
+test("コードの変更: 停止していなくても短い窓の停止を解き、送信元の制限は解かない", async () => {
+  for (let i = 0; i <= STICKER_RATE_LIMITS.tokenMax; i += 1) await verify(TOKEN, "999999", "203.0.113." + i).catch(() => {});
+  await rejects(verify(TOKEN, CODE, "203.0.113.99"), "resource-exhausted");
+  await api("adminA", "setAccessCode", { facilityId: F, code: "135790" });
+  assert.ok((await verify(TOKEN, "135790", "203.0.113.99")).ticket);
+  // 送信元の制限は残る
+  for (let i = 0; i <= STICKER_RATE_LIMITS.ipMax; i += 1) await verify(newEntryToken(), CODE, "192.0.2.77").catch(() => {});
+  await api("adminA", "setAccessCode", { facilityId: F, code: "246802" });
+  await rejects(verify(TOKEN, "246802", "192.0.2.77"), "resource-exhausted");
+});
+
+// ================= 共有の許可の記録と、施設・発注先の一致 =================
+test("共有の許可: 記録の中の施設・発注先が違えば使わない。読まず、取り消さず、上書きもしない", async () => {
+  const r = await put();
+  await share(true);
+  const ref = db.doc("stickerPhotoGrants/" + F + "_dA");
+  const good = (await ref.get()).data();
+  // 同じ ID に、別の施設の内容の記録がある状態
+  for (const wrong of [{ facilityId: G }, { localDealerId: "dZ" }]) {
+    await ref.set({ ...good, ...wrong });
+    assert.deepEqual((await dealerList()).facilities, [], JSON.stringify(wrong));
+    await rejects(dealerList({ facilityId: F }), "permission-denied");
+    await rejects(dealerList({ facilityId: G }), "permission-denied");
+    assert.equal((await image("staffX", { photo: r.body.photoId, headers: dealerHeaders })).statusCode, 404);
+    const s = await api("adminA", "getSettings", { facilityId: F });
+    assert.deepEqual([s.dealers[0].shared, s.dealers[0].stale], [false, false]);
+    await rejects(share(true), "failed-precondition");
+    await rejects(share(false), "failed-precondition");
+    assert.deepEqual((await ref.get()).data(), { ...good, ...wrong }, "記録を変えない");
+  }
+  // ID と中身が一致する記録は、これまでどおり
+  await ref.set(good);
+  assert.deepEqual((await dealerList()).facilities.map(f => f.facilityId), [F]);
+  // 中身は正しいが、別の ID に置かれた記録も使わない
+  await ref.delete();
+  await db.doc("stickerPhotoGrants/other").set(good);
+  assert.deepEqual((await dealerList()).facilities, []);
 });
