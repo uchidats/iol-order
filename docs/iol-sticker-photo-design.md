@@ -231,7 +231,7 @@ IOLシール写真 ▲ ⓘ
 [台紙を印刷] を押すと、印刷の画面(見本・上部の表示の編集・発注先の選択・[印刷する])を開く。画面の部品は R07 の帳票と同じ流儀。
 
 ```
-┌──────────────────────────────────────────┐  A4 縦(余白 12mm = 既存の印刷の設定)
+┌──────────────────────────────────────────┐  A4 縦(様式の中で 12mm の余白を取る。用紙の余白の指定は 0)
 │ IOLシール貼付台紙                         ┌──────┐ │
 │ 立川病院 眼科 → 栗原医療器械店 立川支店   │ [QR] │ │  ← 上部の表示(下記)。QR は約 28mm 角
 │                                          └──────┘ │
@@ -259,6 +259,7 @@ IOLシール写真 ▲ ⓘ
   - 発注先の表示は**案内のためだけ**で、写真の閲覧の権限には使わない(閲覧は §8-3 の `stickerPhotoGrants`)。QR は施設で1つなので、台紙の発注先を変えても写真の送り先は変わらない。
 - 上部の QR は施設専用の入口(`getEntryQr`)。印刷日・アクセスコード・URL の文字列は載せない。
 - **印刷・PDF**(決定 §0-25): `@media print`(R07 の帳票と同じ方式)で、台紙の画面を開いている間だけ台紙を A4 に出す。[印刷する] はブラウザの印刷を開き、印刷先に「PDF に保存」を選べば PDF になる。拡大縮小は 100%。PDF のライブラリは追加しない。
+- **実装(2026-11-05)**: 様式は `src/domain/sticker-print.js`(行数は `SHEET.rows` の1か所)、画面は `src/ui/sticker-print-view.js`。印刷の指定は専用の `src/ui/sticker-print.css` に置き、印刷の画面を開いている間だけ読み込む(`@page` の余白 0 がほかの印刷〔注文履歴など〕に効かないようにするため。`styles.css` へは移さない)。
 - **複数ページ**: どのページも同じ様式。必要な枚数はブラウザの部数で指定する(ページ番号は付けない)。
 
 ### 4-3. QRコードのみ印刷(A4 に8枚・切り取り線付き。既存の台紙に貼る場合)
@@ -497,17 +498,23 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 | 1 | 純粋な処理(共通) | `src/domain/sticker-photo.js`(コードの形式・上限の定数・セッションのまとまり・QR の URL)、`functions/src/sticker-photo.js`(同じ定数・チケットの署名/検証・`photoId` の決定・上限の判定・コードのハッシュ・メタデータの除去)。ピンぼけ判定は既存の `src/domain/image-sharpness.js` を使う。**実装済み(2026-11-04。ブランチ `feature/r09-sticker-photo`。どこからも呼ばれていない)** | unit(上限の一致を含む) |
 | 2 | サーバー | `stickerEntryApi`(`verify`)、`stickerPhotoUpload`、`stickerPhotoApi`(`list`・`dealerList`・`delete`・`getSettings`・`setAccessCode`・`getEntryQr`・`rotateEntryQr`・`setDealerShare`〔`stickerPhotoGrants`〕)、`stickerPhotoImage`、`stickerPhotoCleanup`。サムネイル作成、バケットの部品、機能スイッチ・施設の一覧。**実装済み(2026-11-05。ブランチ `feature/r09-sticker-photo`。未配備。`functions/src/sticker-photo-service.js`・`functions/src/sticker-bucket.js`)** | Functions(Firestore エミュレータと偽のバケット) |
 | 3 | Rules | Firestore Rules とインデックス(§8-4 の一覧を全拒否)。**実装済み(2026-11-05。ブランチ `feature/r09-sticker-photo`。未配備)** | Rules |
-| 4 | 看護師用画面 | `sticker.html`・`src/sticker/main.js`・`sticker-app.js`(4画面・最終送信日時と最終手術日の表示・今回の最終手術日の欄・カメラ〔既存の `src/ui/sticker-camera.js` を使う〕・セッション・再送・チケットの期限切れの再認証)、CSS、`stamp-assets` の対象に追加 | ブラウザ(仮想カメラ) |
-| 5 | 施設設定 | セクション「IOLシール写真」(コードの設定・「設定済み」・QR のモーダル〔「サイトを共有」と同じ部品の見た目〕・台紙を印刷〔A4・2列×5行。上部の表示の編集と発注先の選択。§4-2〕・QRコードのみ印刷〔8枚・切り取り線〕・ディーラーへの共有のチェック) | ブラウザ(印刷は `emulateMedia print` と PDF で確認) |
-| 6 | 医療機関用の一覧・拡大 | メニュー「IOLシール写真」、セッションの枠、拡大表示の部品(前後・回転)、削除 | ブラウザ |
-| 7 | ディーラー用の一覧・拡大 | `dealer.html` のメニュー「シール写真」、医療機関の選択、同じ部品 | ブラウザ(ディーラーの偽 API) |
+| 4 | 看護師用画面 | `sticker.html`・`src/sticker/main.js`・`sticker-app.js`(4画面・最終送信日時と最終手術日の表示・今回の最終手術日の欄・カメラ〔既存の `src/ui/sticker-camera.js` を使う〕・セッション・再送・チケットの期限切れの再認証)、CSS、`stamp-assets` の対象に追加 **実装済み(2026-11-05。`src/sticker/capture-controller.js`〔流れ。DOM なし〕・`src/domain/sticker-capture.js`・`src/data/sticker-capture-api.js`・`sticker.css` を含む。Firebase SDK は読み込まず、確認は callable の形式を `fetch` で呼ぶ。App Check を必須にするときはトークンの追加が要る)** | ブラウザ(仮想カメラ) |
+| 5 | 施設設定 | セクション「IOLシール写真」(コードの設定・「設定済み」・QR のモーダル〔「サイトを共有」と同じ部品の見た目〕・台紙を印刷〔A4・2列×5行。上部の表示の編集と発注先の選択。§4-2〕・QRコードのみ印刷〔8枚・切り取り線〕・ディーラーへの共有のチェック) **実装済み(2026-11-05。`src/ui/sticker-settings-section.js`・`src/ui/sticker-print-view.js`。項目は `STICKER_SETTINGS_ENABLED`〔既定 false〕で非表示)** | ブラウザ(印刷は `emulateMedia print` と PDF で確認) |
+| 6 | 医療機関用の一覧・拡大 | メニュー「IOLシール写真」、セッションの枠、拡大表示の部品(前後・回転)、削除 **実装済み(2026-11-05。`src/ui/sticker-photo-viewer.js`。メニューは `STICKER_VIEWER_ENABLED`〔既定 false〕で非表示)** | ブラウザ |
+| 7 | ディーラー用の一覧・拡大 | `dealer.html` のメニュー「シール写真」、医療機関の選択、同じ部品 **実装済み(2026-11-05。6 と同じ部品・同じ設定で非表示)** | ブラウザ(ディーラーの偽 API) |
 | 8 | 文書 | マニュアル(医療機関用 2・3、ディーラー用 02)、`firestore-data-model.md`、ROADMAP、作業報告 | manual のテスト |
+
+**統合(2026-11-05。ブランチ `feature/r09-integration`。`main` 未統合・未配備)**: 1〜7 を1つのブランチにまとめた(8 のマニュアル・`firestore-data-model.md` は機能を公開するときに行う)。
+- 画面の表示の設定: `STICKER_VIEWER_ENABLED`(`src/domain/sticker-photo-view.js`)・`STICKER_SETTINGS_ENABLED`(`src/domain/sticker-settings.js`)は false のまま。サーバーの `STICKER_PHOTO_ENABLED` も既定 false。`sticker.html` は設定によらず開けるが、サーバーが停止中は確認が通らない。
+- 接続: 施設設定と閲覧は同じ `src/data/sticker-photo-api.js`(`stickerPhotoApi`)を使い、受注閲覧の `src/data/dealer-portal-api.js` とは別(片方がなくても動く)。施設設定の QR の URL を `sticker.html` が読み、送った写真を医療機関・ディーラーの一覧が読むところまでを、`tests/functions/sticker-screens-flow.test.js`(画面側の部品と本物のサーバーの処理。Firestore エミュレータと偽のバケット)で確かめる。
+- 閲覧画面の見た目は `styles.css` に入れた。印刷は専用の CSS のまま(§4-2)。
+- 公開のとき: 2つの設定を true にし、マニュアル(8)を更新する。動的に読む `src/ui/sticker-print.css` はバージョンが付かないので、内容を変えたときの配信のキャッシュに注意する。
 
 ### 9-3. 配備(すべてユーザーの承認後。§8-5 の順)
 バケットと IAM・Secret(9-1-2)→ Firestore Rules・インデックス → Functions(新規の関数だけ。既存の関数は触らない)→ 画面(main へ push)。機能スイッチは最初は許可した施設だけ。配備後、読み取りだけの確認(クライアント・匿名からバケットが読めないこと、関数の未認証の応答)と、許可した施設での実際のバケットへの保存・閲覧・削除の確認。
 
-### 9-4. 今回行っていないこと
-IAM の変更、バケットの作成、Secret の登録、コードの実装、Functions・Rules・画面の配備。いずれも §9-1 の準備とユーザーの指示の後に行う。
+### 9-4. 行っていないこと(2026-11-05 時点)
+IAM の変更、バケットの作成、Secret の登録、Functions・Rules・インデックス・画面の配備、`main` への統合、実機(Galaxy・iPhone)と実際のバケットでの確認、マニュアル。いずれも §9-1 の準備とユーザーの指示の後に行う。
 
 
 ## 10. 将来のアイデア: OCR・バーコード認識によるディーラー別の写真表示(未実装)

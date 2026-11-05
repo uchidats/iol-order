@@ -337,6 +337,7 @@ async function bootstrapWithFirebase(config) {
         onRelatedLinksSaved: (fid, docs) => relatedLinksView.saved(fid, docs),
         onDeleted: () => { selection.clearRemembered(window.localStorage); selection.setForceSelect(window.sessionStorage); location.reload(); },   // 削除後は所属を取得し直し、残りの施設の選択(なければ登録・参加)へ
         dealerPortalApi: ctx.dealerPortalApi,   // ディーラー画面での閲覧の許可・取消(管理者・副管理者)
+        stickerPhotoApi: ctx.stickerPhotoApi,   // IOLシール写真の設定(アクセスコード・QR・写真の共有。受注閲覧の許可とは別)
         onRenamed: (id, name) => { const f = state.facilities.find(x => x.id === id); if (f) f.name = name; render(); },   // ヘッダー・メニューの施設名を更新
         onClose: () => setOrderViewHidden(false)
       });

@@ -63,10 +63,11 @@ const SAVE_ERROR = "保存できませんでした。権限がない、または
  * @param {(facilityId:string) => void} [deps.onDeleted] 施設の削除後(所属の取得し直し・施設選択へ)
  * @param {(facilityId:string, name:string) => void} [deps.onRenamed] 施設名の変更後(ヘッダー等の表示更新)
  * @param {object|null} [deps.dealerPortalApi] ディーラー画面の閲覧の許可・取消(data/dealer-portal-api.js。null なら項目を出さない)
+ * @param {object|null} [deps.stickerPhotoApi] 「IOLシール写真」の設定の呼び出し(data/sticker-photo-api.js。dealerPortalApi とは別で、片方だけでも動く。null なら項目を出さない)
  * @param {boolean} [deps.stickerSettingsEnabled] 「IOLシール写真」の項目を出すか(既定は公開の設定 STICKER_SETTINGS_ENABLED。テストだけが指定する)
  * @param {{removeMember?:Function, addMember?:Function, renameFacility?:Function, deleteFacility?:Function}} [deps.inviteApi] 利用者管理・施設の操作（サーバー側関数）。未指定なら招待セクションは出さない
  */
-export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onRelatedLinksSaved = () => {}, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {}, stickerSettingsEnabled = STICKER_SETTINGS_ENABLED }) {
+export function createFacilitySettings({ mount, repository, settingsApi, masters, onSaved, onRelatedLinksSaved = () => {}, onClose, inviteApi = null, currentUser = null, actorRole = "admin", onRenamed = () => {}, dealerPortalApi = null, onDeleted = () => {}, stickerPhotoApi = null, stickerSettingsEnabled = STICKER_SETTINGS_ENABLED }) {
   const root = h("section", { id: "facilitySettings", class: "settings-view", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 
@@ -1041,7 +1042,7 @@ export function createFacilitySettings({ mount, repository, settingsApi, masters
   if (canManageMembers) built.members = memberSection();
   if (dealerPortalApi && isManagerRole(actorRole)) built.dealerPortal = createDealerPortalSection({ api: dealerPortalApi });   // ディーラー画面での閲覧の許可・取消(機能が使えないときは表示しない)
   // IOLシール写真(アクセスコード・QR・写真の共有)。受注閲覧の許可とは別の設定(機能が使えないときは表示しない)
-  if (stickerSettingsEnabled && dealerPortalApi?.stickerPhotoCall && isManagerRole(actorRole)) built.stickerPhotos = createStickerSettingsSection({ api: createStickerSettingsApi(dealerPortalApi.stickerPhotoCall), getDealers: () => data.dealers });
+  if (stickerSettingsEnabled && stickerPhotoApi?.settingsCall && isManagerRole(actorRole)) built.stickerPhotos = createStickerSettingsSection({ api: createStickerSettingsApi(stickerPhotoApi.settingsCall), getDealers: () => data.dealers });
   // 表示順: 担当医 → 利用者管理(管理者・副管理者のみ) → 採用IOL → ディーラー → ディーラー画面での閲覧 → IOLシール写真 → 注文メール → 関連リンク → テーマカラー
   const sections = { orderers: built.orderers, ...(built.members ? { members: built.members } : {}), iols: built.iols, dealers: built.dealers, ...(built.dealerPortal ? { dealerPortal: built.dealerPortal } : {}), ...(built.stickerPhotos ? { stickerPhotos: built.stickerPhotos } : {}), ...(built.mail ? { mail: built.mail } : {}), ...(built.relatedLinks ? { relatedLinks: built.relatedLinks } : {}), ...(built.theme ? { theme: built.theme } : {}) };
   // ---------- 折りたたみ: 各セクションの見出しで独立して開閉する(複数同時に開ける)。初期はすべて開く ----------

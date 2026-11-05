@@ -7,18 +7,6 @@ import { defaultPeriod, dayLabel, sessionLabel, groupForView, timeLabel, jstDate
 const IMAGE_WORKERS = 4;   // サムネイルを同時に読む数
 
 /**
- * 見た目は専用の CSS。styles.css は撮影画面の作業でも変更するため、統合の後に移す(リンクを1回だけ足す)
- */
-function ensureStyles() {
-  if (document.getElementById("stickerViewerStyles")) return;
-  const link = document.createElement("link");
-  link.id = "stickerViewerStyles";
-  link.rel = "stylesheet";
-  link.href = new URL("./sticker-photo-viewer.css", import.meta.url).href;
-  document.head.append(link);
-}
-
-/**
  * IOL シール写真の閲覧(一覧・拡大。docs/iol-sticker-photo-design.md §5・§6)。医療機関用とディーラー用で同じ部品。
  * 権限はサーバーが毎回確認し、ここでは表示だけを分ける。文字はすべて textContent。画像は Blob の URL で表示し、閉じたら解放する。
  * ダウンロード・共有のボタンは置かない。
@@ -33,7 +21,6 @@ function ensureStyles() {
  * @param {(opts:object) => Promise<boolean>} [deps.confirm]
  */
 export function createStickerPhotoViewer({ mount, title, info, backLabel, onClose, now = Date.now, confirm = confirmDialog }) {
-  ensureStyles();
   const root = h("section", { id: "stickerPhotoViewer", class: "settings-view sticker-viewer", hidden: true });
   mount.insertBefore(root, mount.firstChild);
 

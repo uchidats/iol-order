@@ -38,6 +38,8 @@ export function createStickerPhotoApi({ functions, httpsCallable, imageUrl, getI
   }
 
   return {
+    /** 施設設定「IOLシール写真」の呼び出し(data/sticker-settings-api.js へ渡す。受注閲覧の許可とは別の関数) */
+    settingsCall: call,
     /** 閲覧画面の部品へ渡す、医療機関用の読み出し(施設は1つ) */
     facilitySource: ({ facilityId, facilityName, canDelete }) => ({
       loadFacilities: async () => [{ facilityId, name: facilityName }],

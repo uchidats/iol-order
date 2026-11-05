@@ -49,8 +49,6 @@ export function createDealerPortalApi({ functions, httpsCallable, device = null 
     setSubTheme: (a) => portal({ action: "setSubTheme", ...pick(a, ["companyId", "color"]) }),   // 会社のサブテーマカラー(選んだ元の色だけ)
     resetSubTheme: (a) => portal({ action: "resetSubTheme", ...pick(a, ["companyId"]) }),
     listWeek: (a) => portal({ action: "week", ...pick(a, ["companyId", "weekStart", "facilityFilter"]) }),   // 手術日の週表示(月曜〜日曜)
-    // 施設設定「IOLシール写真」の呼び出し(data/sticker-settings-api.js が使う。受注閲覧の許可とは別の関数)
-    stickerPhotoCall: call("stickerPhotoApi"),
     // 施設の管理者・副管理者
     facilityStatus: (a) => facility({ action: "status", ...pick(a, ["facilityId"]) }),
     grant: (a) => facility({ action: "grant", ...pick(a, ["facilityId", "localDealerId", "revision"]) }),

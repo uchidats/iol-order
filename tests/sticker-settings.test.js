@@ -7,6 +7,7 @@ import {
 import { isAccessCode } from "../src/domain/sticker-photo.js";
 import { createStickerSettingsApi } from "../src/data/sticker-settings-api.js";
 import { createDealerPortalApi } from "../src/data/dealer-portal-api.js";
+import { createStickerPhotoApi } from "../src/data/sticker-photo-api.js";
 
 test("公開の前は項目を出さない", () => assert.equal(STICKER_SETTINGS_ENABLED, false));
 
@@ -56,9 +57,12 @@ test("呼び出し: すべて stickerPhotoApi へ、必要な項目だけを送�
   ]);
 });
 
-test("呼び出しの関数: 写真の設定は stickerPhotoApi で、受注閲覧の関数を使わない", async () => {
+test("呼び出しの関数: 写真の設定は stickerPhotoApi で、受注閲覧の関数・API を使わない", async () => {
   const names = [];
-  const api = createDealerPortalApi({ functions: {}, httpsCallable: (_, name) => async () => { names.push(name); return { data: {} }; } });
-  await createStickerSettingsApi(api.stickerPhotoCall).setDealerShare("fA", "dA", true);
+  const httpsCallable = (_, name) => async () => { names.push(name); return { data: {} }; };
+  const api = createStickerPhotoApi({ functions: {}, httpsCallable, imageUrl: "https://example.invalid/img", getIdToken: async () => "t" });
+  await createStickerSettingsApi(api.settingsCall).setDealerShare("fA", "dA", true);
   assert.deepEqual(names, ["stickerPhotoApi"]);
+  // 受注閲覧の API は写真の設定の呼び出しを持たない(互いに独立)
+  assert.equal("stickerPhotoCall" in createDealerPortalApi({ functions: {}, httpsCallable }), false);
 });

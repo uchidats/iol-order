@@ -47,8 +47,8 @@ const stickerPhotoCall = async (p) => {
   throw new Error("unknown " + p.action);
 };
 const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: [] } : { ok: true }; };
-const dealerPortalApi = { stickerPhotoCall, facilityStatus: portal("facilityStatus"), grant: portal("grant"), revoke: portal("revoke") };
-window.__settings = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, inviteApi, masters: IOL_MODELS, dealerPortalApi,
+const dealerPortalApi = q.get("portal") === "none" ? null : { facilityStatus: portal("facilityStatus"), grant: portal("grant"), revoke: portal("revoke") };
+window.__settings = createFacilitySettings({ mount: document.querySelector("main"), repository, settingsApi, inviteApi, masters: IOL_MODELS, dealerPortalApi, stickerPhotoApi: { settingsCall: stickerPhotoCall },
   stickerSettingsEnabled: q.get("flag") !== "off", currentUser: { uid: "me", displayName: "自分" }, actorRole: role, onSaved: async () => {}, onClose() {} });
 await window.__settings.open({ id: "fA", name: "A眼科" });
 window.__ready = true;
@@ -271,6 +271,22 @@ test("表示の条件: 公開の前・注文者・機能の停止・対象外の
     await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]')?.textContent !== "");
     assert.equal(await section(page).isVisible(), true);
     assert.equal(await page.locator('[data-section="dealers"]').isVisible(), true);
+    await page.close();
+  } finally { await browser.close(); }
+});
+
+test("独立: 受注閲覧の API がなくても写真の設定は動き、写真の API がなければ受注閲覧の項目だけが出る", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    // 受注閲覧の API なし → 写真の設定だけ
+    const page = await openPage(browser, "?role=admin&portal=none");
+    await ready(page);
+    assert.equal(await page.locator('[data-section="dealerPortal"]').count(), 0);
+    await section(page).locator('[data-dealer="dA"]').check();
+    await page.waitForFunction(() => window.__calls.some(c => c.action === "setDealerShare"));
+    assert.deepEqual(await page.evaluate(() => window.__portalCalls), [], "受注閲覧の処理は1回も呼ばない");
+    assert.deepEqual(page.errors, []);
     await page.close();
   } finally { await browser.close(); }
 });
