@@ -17,7 +17,7 @@ const PAGE = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 import { createStickerPhotoViewer, ORDER_BACK_CLASS } from "/src/ui/sticker-photo-viewer.js";
 const order = new URLSearchParams(location.search).get("back") === "order";
 const NOW = Date.parse("2026-11-05T01:00:00Z");
-const pixel = async () => { const c = document.createElement("canvas"); c.width = 30; c.height = 40; c.getContext("2d").fillRect(0, 0, 30, 40); return new Promise(r => c.toBlob(r, "image/jpeg")); };
+const pixel = async () => { const big = window.__bigImage, c = document.createElement("canvas"); c.width = big ? 1200 : 30; c.height = big ? 1600 : 40; c.getContext("2d").fillRect(0, 0, c.width, c.height); return new Promise(r => c.toBlob(r, "image/jpeg")); };
 const p = (id, sessionId, seq, takenAt, over = {}) => ({ photoId: id, sessionId, seq, takenAt, lastSurgeryDate: null, width: 30, height: 40, blurWarned: false, ...over });
 const DATA = {
   fA: [p("a3", "s1", 3, "2026-11-04T01:35:00Z", { lastSurgeryDate: "2026-11-04" }), p("a2", "s1", 2, "2026-11-04T01:33:00Z", { lastSurgeryDate: "2026-11-04", blurWarned: true }), p("a1", "s1", 1, "2026-11-04T01:32:00Z", { lastSurgeryDate: "2026-11-04" }), p("a0", "s0", 1, "2026-11-03T05:05:00Z")],
@@ -202,6 +202,188 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       // 既定(ディーラー画面)は従来のまま
       const page = await openPage(browser, "dealer");
       assert.equal(await page.getAttribute('#stickerPhotoViewer [data-act="back"]', "class"), "btn btn-secondary");
+      await page.close();
+    } finally { await browser.close(); }
+  });
+}
+
+/** 拡大の状態(transform の値)。画像は倍率 1 の大きさと領域の大きさも返す */
+const zoomState = (page) => page.evaluate(() => {
+  const img = document.querySelector(".sticker-lightbox-img"), stage = document.querySelector(".sticker-lightbox-stage"), t = img.style.transform;
+  const shown = img.getBoundingClientRect(), area = stage.getBoundingClientRect();
+  const scale = Number(/scale\(([\d.]+)\)/.exec(t)?.[1] ?? 1), m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(t);
+  return { scale, x: Number(m?.[1] ?? 0), y: Number(m?.[2] ?? 0), visible: shown.right > area.left + 1 && shown.left < area.right - 1 && shown.bottom > area.top + 1 && shown.top < area.bottom - 1,
+    covers: shown.left <= area.left + 1 && shown.right >= area.right - 1, width: parseFloat(getComputedStyle(img).width), height: parseFloat(getComputedStyle(img).height), stageWidth: area.width, stageHeight: area.height, center: [area.left + area.width / 2, area.top + area.height / 2], pageScale: visualViewport.scale, scrollY: window.scrollY };
+});
+
+/** 大きな画像の拡大表示を開く */
+async function openZoom(page) {
+  await page.evaluate(() => { window.__bigImage = true; });
+  await page.click('[data-photo="a2"]');
+  await page.waitForFunction(() => document.querySelector(".sticker-lightbox-img")?.naturalWidth > 100);
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`拡大表示(PC): ホイールで拡大・縮小、ドラッグで移動、ダブルクリックで拡大と元に戻す。5倍まで。画像は領域の外へ消えない。ボタンは今までどおり: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const page = await openPage(browser, "manager", 1100);
+      await openZoom(page);
+      const s0 = await zoomState(page);
+      assert.deepEqual([s0.scale, s0.x, s0.y], [1, 0, 0], "初期表示は全体が収まる倍率");
+      assert.ok(s0.width <= s0.stageWidth + 1 && s0.height <= s0.stageHeight + 1, "画像全体が領域に収まる");
+      const [cx, cy] = s0.center;
+      await page.mouse.move(cx, cy);
+
+      // ホイール
+      await page.mouse.wheel(0, -300);
+      await page.waitForFunction(() => /scale/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      const s1 = await zoomState(page);
+      assert.ok(s1.scale > 1.5, `拡大: ${s1.scale}`);
+      for (let i = 0; i < 12; i += 1) await page.mouse.wheel(0, -500);
+      await page.waitForFunction(() => /scale\(5\)/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      assert.equal((await zoomState(page)).scale, 5, "上限は5倍");
+
+      // ドラッグ: 大きく動かしても画像は領域の外へ消えない
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx + 120, cy + 60, { steps: 5 });
+      const moved = await zoomState(page);
+      assert.ok(Math.abs(moved.x - 120) < 2 && Math.abs(moved.y - 60) < 2, `移動: ${moved.x}, ${moved.y}`);
+      await page.mouse.move(4, 4, { steps: 3 });
+      await page.mouse.up();
+      assert.equal(await page.locator(".sticker-lightbox").count(), 1, "ドラッグを背景で離しても閉じない");
+
+      // 同じ向きへ何度動かしても、画像の端で止まる
+      for (let i = 0; i < 6; i += 1) {
+        await page.mouse.move(cx + 300, cy);
+        await page.mouse.down();
+        await page.mouse.move(cx - 300, cy, { steps: 4 });
+        await page.mouse.up();
+      }
+      const edge = await zoomState(page);
+      assert.equal(edge.visible, true, "画像が領域の外へ消えない");
+      assert.equal(edge.covers, true, "端で止まり、領域に空きができない");
+      assert.ok(Math.abs(-edge.x - (edge.width * 5 - edge.stageWidth) / 2) < 1, `移動の上限: ${edge.x}`);
+      await page.mouse.move(cx, cy);
+
+      // 縮小
+      for (let i = 0; i < 12; i += 1) await page.mouse.wheel(0, 500);
+      await page.waitForFunction(() => !/scale/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      assert.deepEqual(await zoomState(page).then(s => [s.scale, s.x, s.y]), [1, 0, 0], "1倍で中央へ戻る");
+
+      // ダブルクリック
+      await page.mouse.dblclick(cx, cy);
+      await page.waitForFunction(() => /scale\(2\.5\)/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      await page.mouse.dblclick(cx, cy);
+      await page.waitForFunction(() => document.querySelector(".sticker-lightbox-img").style.transform === "");
+
+      // ボタン: 回転・移動は倍率を初期へ戻す。閉じる・削除は今までどおり
+      await page.mouse.move(cx, cy);
+      await page.mouse.wheel(0, -300);
+      await page.waitForFunction(() => /scale/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      await page.click('[data-act="rotate"]');
+      assert.equal(await page.locator(".sticker-lightbox-img").evaluate(i => i.style.transform), "rotate(90deg)");
+      await page.mouse.move(cx, cy);
+      await page.mouse.wheel(0, -300);
+      await page.waitForFunction(() => /scale.*rotate\(90deg\)/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+      await page.click('[data-act="next"]');
+      await page.waitForFunction(() => document.querySelector(".sticker-lightbox-position").textContent === "3 / 3");
+      assert.equal(await page.locator(".sticker-lightbox-img").evaluate(i => i.style.transform), "", "別の写真は初期表示");
+      assert.equal(await page.locator('.sticker-lightbox [data-act="delete"]').isVisible(), true, "権限のある人の削除は残る");
+      await page.mouse.click(4, 4);
+      assert.equal(await page.locator(".sticker-lightbox").count(), 0, "背景のクリックでは閉じる");
+      await page.close();
+    } finally { await browser.close(); }
+  });
+}
+
+test("拡大表示(スマートフォン): 実際のタッチで2本指の拡大・縮小、ドラッグ、ダブルタップ。ブラウザの画面はズーム・スクロールしない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const page = await context.newPage();
+    await page.goto(base);
+    await page.waitForFunction(() => window.__ready);
+    await page.evaluate((k) => window.__viewer.open(window.__source(k)), "member");
+    await page.waitForSelector('[data-photo="a2"]');
+    await page.evaluate(() => { window.__bigImage = true; });
+    await page.tap('[data-photo="a2"]');
+    await page.waitForFunction(() => document.querySelector(".sticker-lightbox-img")?.naturalWidth > 100);
+    const cdp = await context.newCDPSession(page);
+    const touch = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
+    const s0 = await zoomState(page);
+    assert.deepEqual([s0.scale, s0.pageScale], [1, 1]);
+    const [cx, cy] = s0.center;
+
+    // 2本指で広げる
+    await touch("touchStart", [[cx - 40, cy], [cx + 40, cy]]);
+    for (const d of [60, 90, 120]) await touch("touchMove", [[cx - d, cy], [cx + d, cy]]);
+    await touch("touchEnd", []);
+    const pinched = await zoomState(page);
+    assert.ok(Math.abs(pinched.scale - 3) < 0.05, `ピンチで3倍: ${pinched.scale}`);
+    assert.deepEqual([pinched.pageScale, pinched.scrollY], [1, 0], "ブラウザの画面はズーム・スクロールしない");
+
+    // 1本指で移動
+    await touch("touchStart", [[cx, cy]]);
+    for (const d of [20, 50, 80]) await touch("touchMove", [[cx + d, cy + d / 2]]);
+    await touch("touchEnd", []);
+    const dragged = await zoomState(page);
+    assert.ok(Math.abs(dragged.x - pinched.x - 80) < 2 && Math.abs(dragged.y - pinched.y - 40) < 2, `ドラッグで移動: ${dragged.x}, ${dragged.y}`);
+    assert.deepEqual([dragged.pageScale, dragged.scrollY], [1, 0]);
+
+    // 大きく動かしても消えない
+    await touch("touchStart", [[cx, cy]]);
+    await touch("touchMove", [[cx - 3000, cy - 3000]]);
+    await touch("touchEnd", []);
+    assert.equal((await zoomState(page)).visible, true);
+
+    // 2本指で縮める
+    await touch("touchStart", [[cx - 150, cy], [cx + 150, cy]]);
+    for (const d of [100, 50, 20]) await touch("touchMove", [[cx - d, cy], [cx + d, cy]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await zoomState(page).then(s => [s.scale, s.x, s.y]), [1, 0, 0], "元の倍率より小さくならず、中央へ戻る");
+
+    // ダブルタップ
+    const doubleTap = async () => { for (let i = 0; i < 2; i += 1) { await touch("touchStart", [[cx, cy]]); await touch("touchEnd", []); } };
+    await doubleTap();
+    await page.waitForFunction(() => /scale\(2\.5\)/.test(document.querySelector(".sticker-lightbox-img").style.transform));
+    await doubleTap();
+    await page.waitForFunction(() => document.querySelector(".sticker-lightbox-img").style.transform === "");
+
+    // 1回のタップでは倍率を変えない
+    await touch("touchStart", [[cx, cy]]);
+    await touch("touchEnd", []);
+    await page.waitForTimeout(350);
+    assert.equal((await zoomState(page)).scale, 1);
+
+    // 領域の外は従来どおり(touch-action は領域だけ)。ページのズームを禁止しない
+    assert.equal(await page.locator(".sticker-lightbox-stage").evaluate(e => getComputedStyle(e).touchAction), "none");
+    assert.equal(await page.locator(".sticker-lightbox-card").evaluate(e => getComputedStyle(e).touchAction), "auto");
+    assert.doesNotMatch(await page.evaluate(() => document.querySelector('meta[name="viewport"]').content), /user-scalable|maximum-scale/);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+for (const [name, type] of [["firefox", firefox], ["webkit", webkit]]) {
+  test(`拡大表示(2本指の処理): ポインターの操作で拡大・移動できる: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      const page = await openPage(browser, "member");
+      await openZoom(page);
+      const [cx, cy] = (await zoomState(page)).center;
+      await page.evaluate(([x, y]) => {
+        const stage = document.querySelector(".sticker-lightbox-stage");
+        const send = (type, pointerId, px) => stage.dispatchEvent(new PointerEvent(type, { pointerId, pointerType: "touch", clientX: px, clientY: y, bubbles: true, cancelable: true, isPrimary: pointerId === 1 }));
+        send("pointerdown", 1, x - 40); send("pointerdown", 2, x + 40);
+        send("pointermove", 1, x - 100); send("pointermove", 2, x + 100);
+        send("pointerup", 1, x - 100); send("pointerup", 2, x + 100);
+      }, [cx, cy]);
+      const s = await zoomState(page);
+      assert.ok(Math.abs(s.scale - 2.5) < 0.05, `2本指で拡大: ${s.scale}`);
       await page.close();
     } finally { await browser.close(); }
   });

@@ -3,22 +3,25 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-06
-- **作業**: 「IOLシール写真」の一覧の「注文画面に戻る」を、施設設定の同じボタンと同じ見た目に統一(画面のみ)。Zenbook で実施。
-- 直前の作業(同日): 台紙を 2列×6行に変更(`b6764fd`)、撮影の確認画面の日付の欄の調整(`2de2373`)。
+- **作業**: 写真の拡大表示をスマートフォンの写真アプリに近い操作に改善(画面のみ)。Zenbook で実施。
+- 直前の作業(同日): 一覧の「注文画面に戻る」の統一(`a848ca8`)、台紙を 2列×6行に変更(`b6764fd`)。
 
 ## 変更内容
-- `src/ui/sticker-photo-viewer.js`: 戻るボタンのクラスを指定できるようにした。既定は従来のまま。
-- `src/main.js`: 注文画面から開くときだけ `btn btn-outline-sm sticker-viewer-back` を渡す。
-- `styles.css`: 既存の `#btnSettingsClose` の大きさの指定の対象に `.sticker-viewer-back` を追加(1行)。
-- 一覧の部品はディーラー画面と共用なので、ディーラー画面の「受注一覧に戻る」は変更していない。文言・遷移先・右上の配置、日付検索の欄、検索ボタン、写真の一覧は変更なし。
+- 新規: `src/domain/image-zoom.js`(倍率と移動範囲の計算)、`src/ui/image-zoom.js`(Pointer Events の操作)。ライブラリの追加なし。
+- タッチ: 2本指の拡大・縮小、ドラッグの移動、ダブルタップで拡大(2.5 倍)と元に戻す。PC: ホイール、ドラッグ、ダブルクリック。最大 5 倍。移動は画像の端が領域の端より内側へ入らない範囲。
+- `src/ui/sticker-photo-viewer.js`: 従来のクリックで原寸に切り替える処理を置き換え。別の写真・回転で初期表示に戻す。
+- `styles.css`: `touch-action: none` を画像の表示領域だけに付け、原寸表示の指定を削除。viewport の設定は変更なし(ページ全体のズームは禁止していない)。
+- 背景で押して背景で離したときだけ閉じるように変更(画像のドラッグを背景で離しても閉じない)。
+- 「←」「→」「回転」「閉じる」「削除」と権限、写真の保存データ、サーバーは変更なし。
+- 文書: 設計書(決定 55)、試験運用の手順書、ROADMAP。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- ブラウザ: `tests/browser/sticker-photo-viewer.pw.mjs`(新規 3 件: 3ブラウザ、390・1100px で施設設定のボタンと計算後の見た目が同じ、右上、戻る動作、ディーラーの既定は変わらない)。スクリーンショットでも確認。
-- unit: `tests/asset-stamp.test.js` 成功。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。
+- unit: `tests/image-zoom.test.js`(新規)、`tests/asset-stamp.test.js`。
+- ブラウザ: `tests/browser/sticker-photo-viewer.pw.mjs`。PC の操作は3ブラウザ。タッチは Chromium で実際のタッチ入力を送り、ブラウザの画面がズーム・スクロールしないことを確認。Firefox・WebKit の2本指は合成のポインターの操作で処理を確認。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実機(iPhone の Safari・Galaxy の Chrome)での確認は未実施。
 
 ## push・Firebaseデプロイ
 - `main` へ fast-forward で統合して通常の push(公開サイトに反映)。Firebase のデプロイなし。

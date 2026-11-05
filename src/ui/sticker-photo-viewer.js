@@ -1,4 +1,5 @@
 import { h } from "./markdown-view.js";
+import { createImageZoom } from "./image-zoom.js";
 import { createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
@@ -171,11 +172,11 @@ export function createStickerPhotoViewer({ mount, title, info, backLabel, backCl
     closeLightbox();
     let items = session.photos;
     let index = start;
-    let rotation = 0;
     let shown = null;   // 表示中の原本の Blob の URL
     let seq = 0;
     const img = h("img", { class: "sticker-lightbox-img", alt: "", draggable: "false" });
     const stage = h("div", { class: "sticker-lightbox-stage" }, img);
+    const zoom = createImageZoom({ stage, img });
     const position = h("span", { class: "sticker-lightbox-position" });
     const meta = h("div", { class: "form-hint sticker-lightbox-meta" });
     const message = h("p", { class: "form-hint", role: "status" });
@@ -191,9 +192,7 @@ export function createStickerPhotoViewer({ mount, title, info, backLabel, backCl
     async function show() {
       const photo = items[index];
       const mySeq = ++seq;
-      rotation = 0;
-      img.style.transform = "";
-      stage.classList.remove("is-actual");
+      zoom.reset();
       dropShown();
       img.removeAttribute("src");
       position.textContent = `${index + 1} / ${items.length}`;
@@ -215,10 +214,13 @@ export function createStickerPhotoViewer({ mount, title, info, backLabel, backCl
     const move = (d) => { const n = index + d; if (n >= 0 && n < items.length) { index = n; show(); } };
     prev.addEventListener("click", () => move(-1));
     next.addEventListener("click", () => move(1));
-    rotate.addEventListener("click", () => { rotation = (rotation + 90) % 360; img.style.transform = rotation ? `rotate(${rotation}deg)` : ""; });
-    img.addEventListener("click", () => stage.classList.toggle("is-actual"));   // 全体 ↔ 原寸(スマートフォンはピンチでも拡大できる)
+    rotate.addEventListener("click", () => zoom.reset((zoom.rotation + 90) % 360));
+    img.addEventListener("load", () => zoom.reset(zoom.rotation));   // 画像の大きさが分かってから移動の範囲を合わせる
     closeBtn.addEventListener("click", closeLightbox);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeLightbox(); });
+    // 背景で押して背景で離したときだけ閉じる(画像のドラッグを背景で離しても閉じない)
+    let pressedOverlay = false;
+    overlay.addEventListener("pointerdown", (e) => { pressedOverlay = e.target === overlay; });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay && pressedOverlay) closeLightbox(); });
     const onKey = (e) => {
       if (e.key === "Escape") closeLightbox();
       else if (e.key === "ArrowLeft") move(-1);
@@ -253,6 +255,7 @@ export function createStickerPhotoViewer({ mount, title, info, backLabel, backCl
       dispose() {
         seq += 1;
         dropShown();
+        zoom.dispose();
         document.removeEventListener("keydown", onKey);
         document.body.style.overflow = overflow;
         overlay.remove();

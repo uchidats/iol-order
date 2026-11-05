@@ -2809,8 +2809,9 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .sticker-lightbox-card { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 960px; max-height: 96vh; padding: 10px; border-radius: var(--radius-lg, 12px); background: #fff; color: #0f172a; }
 .sticker-lightbox-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
 .sticker-lightbox-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.sticker-lightbox-stage { flex: 1 1 auto; min-height: 240px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f8fafc; touch-action: pinch-zoom; }
-.sticker-lightbox-img { display: block; max-width: 100%; max-height: 70vh; cursor: zoom-in; }
-.sticker-lightbox-stage.is-actual { display: block; overflow: auto; height: 70vh; }
-.sticker-lightbox-stage.is-actual .sticker-lightbox-img { max-width: none; max-height: none; cursor: zoom-out; }
+/* 拡大・移動は表示領域の中だけで受ける(src/ui/image-zoom.js)。touch-action はこの領域だけで、ページ全体のズームは禁止しない */
+.sticker-lightbox-stage { flex: 1 1 auto; min-height: 240px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f8fafc; touch-action: none; user-select: none; -webkit-user-select: none; cursor: zoom-in; }
+.sticker-lightbox-stage.is-zoomed { cursor: grab; }
+.sticker-lightbox-stage.is-zoomed.is-dragging { cursor: grabbing; }
+.sticker-lightbox-img { display: block; max-width: 100%; max-height: 70vh; pointer-events: none; }
 .sticker-lightbox-foot { display: flex; justify-content: flex-end; }
