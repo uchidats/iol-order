@@ -50,7 +50,7 @@ const stickerPhotoCall = async (p) => {
   if (p.action === "setDealerShare") { if (window.__failShare) fail("functions/failed-precondition", "このディーラーは写真を共有できません"); state.dealers.find(d => d.localDealerId === p.localDealerId).shared = p.shared; return { ok: true, shared: p.shared }; }
   throw new Error("unknown " + p.action);
 };
-const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: [] } : { ok: true }; };
+const portal = (name) => async (a) => { window.__portalCalls.push([name, a]); return name === "facilityStatus" ? { portalEnabled: true, dealers: q.get("portalDealer") ? [{ localDealerId: "p1", dealerName: "発注先P", link: { status: "proposed", companyActive: true, companyName: "P社", revision: 1 } }] : [] } : { ok: true }; };
 const dealerPortalApi = q.get("portal") === "none" ? null : { facilityStatus: portal("facilityStatus"), grant: portal("grant"), revoke: portal("revoke") };
 if (q.get("view") === "member") {
   // 注文者・代理入力者の「施設設定」(main.js と同じ組み立て)
@@ -279,6 +279,39 @@ test("QR: 見出しの行の高さはほかの見出しと同じ。マウスで 
     await page.close();
   } finally { await browser.close(); }
 });
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`アクセスコードの「変更」: 「許可する」と同じ見た目で、状態は左、ボタンは同じ右端。ほかのボタンは変えない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [320, 390, 1100]) {
+        const page = await openPage(browser, "?portalDealer=1", width);
+        await ready(page);
+        const s = section(page);
+        const code = s.locator('[data-act="editCode"]'), grant = page.locator('[data-section="dealerPortal"] [data-act="grant"]');
+        await grant.waitFor();
+        const style = (l) => l.evaluate((el) => {
+          const c = getComputedStyle(el), r = el.getBoundingClientRect();
+          return { background: c.backgroundColor, color: c.color, height: r.height, padding: c.padding, radius: c.borderRadius, border: c.border, fontSize: c.fontSize, fontWeight: c.fontWeight, fontFamily: c.fontFamily, lineHeight: c.lineHeight };
+        });
+        assert.deepEqual(await style(code), await style(grant), `${width}: 見た目が同じ`);
+        assert.equal(await code.innerText(), "変更");
+
+        const a = await code.boundingBox(), b = await grant.boundingBox(), st = await s.locator('[data-f="codeStatus"]').boundingBox();
+        assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 0.5, `${width}: 右端が同じ`);
+        assert.ok(st.x + st.width <= a.x, `${width}: 状態はボタンの左`);
+        assert.ok(st.y < a.y + a.height && a.y < st.y + st.height, `${width}: 同じ行`);
+        assert.equal(await s.locator('[data-act="showQr"]').evaluate(e => getComputedStyle(e).minHeight), "36px", "ほかの補助ボタンは変えない");
+
+        await code.click();
+        assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), true, "機能はそのまま");
+        assert.deepEqual(page.errors, []);
+        await page.close();
+      }
+    } finally { await browser.close(); }
+  });
+}
 
 test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");

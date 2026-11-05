@@ -62,7 +62,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   /* ---------- アクセスコード ---------- */
   const codeStatus = h("span", { "data-f": "codeStatus" });
   const lockNote = h("p", { class: "error-message", "data-f": "verifyLock", role: "status", hidden: true });   // コードの確認の停止中だけ出す
-  const codeBtn = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "editCode" });
+  const codeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editCode" });   // 「ディーラー画面での閲覧」の「許可する」と同じ見た目
   const codeInput = h("input", { type: "text", class: "form-control", "data-f": "code", inputmode: "numeric", autocomplete: "off", maxlength: "12", "aria-label": "新しいアクセスコード" });
   const codeError = h("p", { class: "error-message", "data-err": "code" });
   const generate = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "generateCode" }, "自動で作る");
@@ -204,7 +204,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
-    h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
+    h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions sticker-code-row" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
     h("h4", { style: "position: relative" }, "QRコード", rotateTip.root), h("div", { class: "settings-actions" }, showQr, printSheet, printQr), qrNote,
     shareHead, dealerList,
     msg);

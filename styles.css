@@ -2604,7 +2604,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-date-clear[hidden] { display: none; }
 .dealer-date-tilde { flex: none; margin: 0 -6px; }   /* 「〜」の前後は詰める(行の間隔10pxから差し引き) */
 .dealer-date-row > #btnDealerSearch { flex: none; padding-left: 12px; padding-right: 12px; white-space: nowrap; }
-.dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm, #dealerBackToOrder { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }   /* 「IOL注文フォームに戻る」は受注一覧の「今週」などと同じ大きさ */
+.dealer-panel .btn-outline-sm, .dealer-portal-section .btn-outline-sm, .dealer-operator .btn-outline-sm, .sticker-code-row .btn-outline-sm, #dealerBackToOrder { padding: 6px 12px; font-size: 0.85rem; min-height: 34px; }   /* 「IOL注文フォームに戻る」は受注一覧の「今週」などと同じ大きさ */
 /* 運営者の会社の鉛筆・ゴミ箱は、施設設定の「担当医」のアイコンボタン(.orderer-icon)と同じ寸法に戻す */
 .dealer-operator .btn-outline-sm.orderer-icon { min-height: 32px; height: 32px; min-width: 32px; padding-left: 8px; padding-right: 8px; }
 .dealer-row-facility { font-weight: 600; }
@@ -2770,6 +2770,10 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .related-setting-row.is-deleting { opacity: .6; }
 
 .related-link-editor input::placeholder { color: #9ca3af; opacity: 1; }
+
+/* 施設設定「IOLシール写真」のアクセスコードの行: 状態は左、ボタンは右端(狭い画面でも折り返さない) */
+.sticker-code-row { flex-wrap: nowrap; align-items: center; justify-content: space-between; }
+.sticker-code-row > .btn { flex: none; }
 
 /* ---------- IOL シール写真の閲覧画面(医療機関用・ディーラー用で共通。src/ui/sticker-photo-viewer.js) ---------- */
 .sticker-viewer-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }

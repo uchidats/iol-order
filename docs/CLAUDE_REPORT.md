@@ -3,22 +3,21 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-05
-- **作業**: R09 の施設設定で、「QRコードを作り直す」を「QRコード」の見出しのⓘの中へ移した(画面のみ)。Zenbook で実施。
-- 直前の作業(同日): R09 を立川病院だけで有効化(`415ebad`。記録は `docs/r09-deploy-runbook.md`)。QR・アクセスコードは未発行、実機の確認は未実施。
+- **作業**: R09 の施設設定で、アクセスコードの「変更」ボタンの見た目と位置を修正(画面のみ)。Zenbook で実施。
+- 直前の作業(同日): 「QRコードを作り直す」を見出しのⓘの中へ移動(`314a8f1`)、R09 を立川病院だけで有効化(`415ebad`。記録は `docs/r09-deploy-runbook.md`)。QR・アクセスコードは未発行、実機の確認は未実施。
 
 ## 変更内容
-- `src/ui/sticker-settings-section.js`: 再発行のボタンを通常の表示から外し、見出しのⓘの中に説明と一緒に置いた。ⓘは管理者・副管理者だけに出す。「QRコードを表示」「台紙を印刷」「QRコードのみ印刷」はそのまま。ボタンの大きさ・確認ダイアログ・`rotateEntryQr` の呼び出しは変更なし。
-- ⓘの共通部品(`src/ui/info-tip.js`)・`styles.css` は変更なし。ボタンを押す間にⓘが閉じないよう、この欄の側で対処した。
-- 文書: 設計書(決定 44・§4)、試験運用の手順書、ROADMAP。
-- 変更していないもの: サーバー、Rules、注文・メールの処理、ほかの画面。
+- `src/ui/sticker-settings-section.js`: 「変更」ボタンを「許可する」と同じクラス(`btn btn-outline-sm`)に。アクセスコードの行に `sticker-code-row` を追加。未設定のときの「設定」も同じボタン。
+- `styles.css`: 既存の `.btn-outline-sm` の大きさの指定の対象にこの行を追加し、行の配置の指定を2行追加(状態は左、ボタンは右端、折り返さない)。
+- 文言・機能・確認ダイアログ、ほかのボタンと入力欄、注文機能は変更なし。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- ブラウザ: `tests/browser/sticker-settings.pw.mjs` 24 件成功(3ブラウザ。320・390・1100px。通常の表示、ⓘからの操作、確認ダイアログ、役割ごとの表示、マウスの移動、キーボード)。
-- unit: `tests/asset-stamp.test.js`・`tests/sticker-settings.test.js` 成功。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実機(iPhone・Galaxy)での確認は未実施。
+- ブラウザ: `tests/browser/sticker-settings.pw.mjs` 27 件成功(新規 3 件: 3ブラウザ、320・390・1100px で「許可する」と計算後の見た目・右端が同じ、状態が左で同じ行、ほかの補助ボタンは変わらない)。スクリーンショットでも確認。
+- unit: `tests/asset-stamp.test.js` 成功。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実機での確認は未実施。
 
 ## push・Firebaseデプロイ
 - `main` へ fast-forward で統合して通常の push(公開サイトに反映)。Firebase のデプロイなし。
