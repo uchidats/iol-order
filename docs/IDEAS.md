@@ -1,6 +1,6 @@
 # IOL Order アイデア・将来構想
 
-最終確認日: 2026年10月27日（日本時間）
+最終確認日: 2026年11月5日（日本時間。I23 を追加）
 
 未確定の案、将来構想、保留事項と採否の根拠を管理する。実装方針が決まったものの優先順位・進捗は [ROADMAP.md](ROADMAP.md) を正とし、ここから参照する。
 
@@ -90,6 +90,7 @@
 | I18 | 検討中 | コード内IOLマスターからFirestoreの `iolCatalog` への移行 | 更新権限、度数・型番の検証、クライアントとサーバーの整合性、移行の必要性 | [firestore-data-model.mdの将来の置き場所](firestore-data-model.md)。古い資料のため着手前に現行設計を再確認 |
 | I19 | 検討中 | 施設数増加に備えた施設名検索・重複判定の見直し | 現状の走査方式を変更すべき規模・性能指標、検索用キーなどの方式 | [self-registration.mdの制限事項・今後](self-registration.md)。招待コードなどの旧記述は現行仕様として扱わない |
 | I20 | 検討中 | 基盤更新とデプロイ時に自動付与された権限の整理 | `firebase-functions` 更新の対象・検証範囲、不要権限の特定・影響確認。今回変更しない | 2026年10月27日の[作業報告の残課題](CLAUDE_REPORT.md)、[settings-audit.md](settings-audit.md) |
+| I23 | 検討中 | 公開サイトで配信するファイルを、Web アプリに必要なものだけにする。現在は GitHub Pages が `main` の全体を配信し、`docs/`・`functions/`・`tests/`・`firestore.rules`・`CLAUDE.md` なども URL で読める(ドットで始まるファイルは配信されない)。案: GitHub Actions で、画面のファイル(`index.html`・`dealer.html`・`sticker.html`・`sticker-camera-check.html`・`styles.css`・`sticker.css`・`src/`)だけを集めて Pages へ配信する | 採否、配信するファイルの一覧(検証用のページを残すか)、切り替えの時期と確認の手順。リポジトリ自体は公開のままなので、GitHub 上では引き続き全ファイルが読める(非公開にするかは別の判断) | 2026年11月5日の公開範囲の調査(作業報告)。配信の設定は未変更 |
 
 ## 見送り・廃止された方式
 
