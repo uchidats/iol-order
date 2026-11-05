@@ -249,7 +249,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const manageOnly = [codeBtn, rotateTip.root, noteHead, noteView, shareHead, dealerList];
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
-    createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
+    createSectionHeading("眼内レンズ使用報告", canManage ? HELP : VIEW_HELP),
     h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm,
     h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
     noteHead, noteView, noteForm,

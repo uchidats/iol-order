@@ -113,6 +113,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const [role, width] of [["admin", 390], ["subadmin", 1100]]) {
         const page = await openPage(browser, `?role=${role}`, width);
         await ready(page);
+        assert.equal(await section(page).locator(".settings-heading h3").innerText(), "眼内レンズ使用報告");
+        assert.equal(await section(page).locator('.settings-heading [aria-label="眼内レンズ使用報告の説明"]').count(), 1, "見出しの横の説明(ⓘ)は残る");
         assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み");
         assert.equal(await section(page).locator('[data-act="editCode"]').innerText(), "変更");
         assert.deepEqual(await section(page).locator("[data-share] label span:first-of-type").allInnerTexts(), ["X商事 立川", "Y医療"], "関連付けのない発注先は出さない");
