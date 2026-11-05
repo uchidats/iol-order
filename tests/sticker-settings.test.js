@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  STICKER_SETTINGS_ENABLED, GENERATED_CODE_DIGITS, accessCodeError, accessCodeStatus, generateAccessCode, shareableDealers, qrImageUrl, verifyLockNotice
+  STICKER_SETTINGS_ENABLED, GENERATED_CODE_DIGITS, accessCodeError, accessCodeStatus, generateAccessCode, shareableDealers, qrImageUrl, verifyLockNotice, canManageStickerSettings, showSettingsMenu
 } from "../src/domain/sticker-settings.js";
 import { isAccessCode } from "../src/domain/sticker-photo.js";
 import { createStickerSettingsApi } from "../src/data/sticker-settings-api.js";
@@ -74,4 +74,31 @@ test("コードの確認の停止中だけ案内を出し、復旧の方法(コ�
   const text = verifyLockNotice({ verifyBlockedUntil: "2026-11-06T03:05:00.000Z" });
   assert.match(text, /11\/6 12:05 まで/);
   assert.match(text, /アクセスコードを変更すると、すぐに再開できます/);
+});
+
+test("役割: 変更の操作は管理者・副管理者だけ。メニュー「施設設定」は、注文者・代理入力者には欄を使える施設だけに出す", () => {
+  assert.deepEqual(["admin", "subadmin", "orderer", "proxy", "dealer", undefined].map(canManageStickerSettings), [true, true, false, false, false, false]);
+  // 管理者・副管理者は従来どおり常に出す(公開の設定・施設の対象に関係しない)
+  for (const role of ["admin", "subadmin"]) {
+    assert.equal(showSettingsMenu({ role, stickerAvailable: false, enabled: false }), true, role);
+    assert.equal(showSettingsMenu({ role }), true, role);
+  }
+  for (const role of ["orderer", "proxy"]) {
+    assert.equal(showSettingsMenu({ role, stickerAvailable: true, enabled: true }), true, role);
+    assert.equal(showSettingsMenu({ role, stickerAvailable: false, enabled: true }), false, "対象外の施設");
+    assert.equal(showSettingsMenu({ role, stickerAvailable: true, enabled: false }), false, "公開の前");
+    assert.equal(showSettingsMenu({ role, stickerAvailable: "true", enabled: true }), false, "true そのものだけ");
+    assert.equal(showSettingsMenu({ role, stickerAvailable: true }), STICKER_SETTINGS_ENABLED, "既定は公開の設定");
+  }
+  for (const role of ["dealer", "", null, undefined]) assert.equal(showSettingsMenu({ role, stickerAvailable: true, enabled: true }), false, String(role));
+});
+
+test("コードの確認の停止の案内: 操作できない人には、変更の方法ではなく管理者へ知らせる案内にする", () => {
+  const lock = { verifyBlockedUntil: "2026-11-06T03:05:00.000Z" };
+  const viewer = verifyLockNotice(lock, { canManage: false });
+  assert.match(viewer, /11\/6 12:05 まで/);
+  assert.match(viewer, /管理者・副管理者にお知らせください/);
+  assert.ok(!viewer.includes("変更すると") && !viewer.includes("作り直して"));
+  assert.match(verifyLockNotice(lock), /アクセスコードを変更すると、すぐに再開できます/);
+  assert.equal(verifyLockNotice({}, { canManage: false }), "");
 });

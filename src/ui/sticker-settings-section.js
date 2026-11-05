@@ -5,14 +5,18 @@ import { describeCallableError } from "../data/registration-api.js";
 import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
+const VIEW_HELP = "看護師が台紙を撮影して送るためのQRコードと台紙を、表示・印刷できます。アクセスコードは台紙やQRコードには載りません。アクセスコードの設定・変更、QRコードの作り直し、ディーラーへの共有は、施設の管理者・副管理者が行います。";
 const NOT_LINKED_HELP = "ディーラーの会社との関連付けは運営者が登録します。受注一覧の閲覧の許可とは別の設定です。";
 const STALE_NOTE = "許可の後に発注先の情報が変わったため、公開を止めています。チェックを外して、入れ直してください。";
 
-/** 機能の停止中・この施設が対象外のときは項目ごと出さない(管理者・副管理者の画面でのみ使うので、権限のエラーは対象外を表す) */
+/** 機能の停止中・この施設が対象外のときは項目ごと出さない(施設の所属者の画面でのみ使うので、権限のエラーは対象外を表す) */
 const isUnavailable = (e) => {
   const code = String((e && e.code) || "");
   return code.endsWith("permission-denied") || code.endsWith("not-found") || (code.endsWith("failed-precondition") && /現在ご利用いただけません/.test(String(e.message)));
 };
+
+/** 表示・非表示(ボタンは見た目の指定が hidden より強いので、display も切り替える) */
+const setShown = (el, on) => { el.hidden = !on; el.style.display = on ? "" : "none"; };
 
 /** QR のモーダル(「サイトを共有」と同じ見た目。閉じる: 「閉じる」・Escape・背景のクリック)。URL の文字列は出さない */
 function openQrDialog({ svg, facilityName, printActions = [] }) {
@@ -41,14 +45,17 @@ function openQrDialog({ svg, facilityName, printActions = [] }) {
 }
 
 /**
- * 施設設定の「IOLシール写真」(管理者・副管理者)。アクセスコード・QR コード・ディーラーへの写真の共有。
+ * 施設設定の「IOLシール写真」。所属者全員に出し、コードの状態・QR コードの表示と印刷・台紙の印刷ができる。
+ * アクセスコードの設定と変更・QR コードの作り直し・ディーラーへの写真の共有は、管理者・副管理者だけに出す(canManage。サーバーも同じ規則で拒否する)。
  * 写真の共有は stickerPhotoGrants で、受注閲覧の許可(「ディーラー画面での閲覧」)とは別の設定。
  * 文字はすべて textContent。新しいコードはこの画面に1回だけ出し、端末には保存しない。
- * @param {{api: ReturnType<import("../data/sticker-settings-api.js").createStickerSettingsApi>, confirm?: Function, getDealers?: () => Array<object>}} deps getDealers: 施設の発注先(台紙の上部の表示の初期値。読むだけ)
+ * @param {{api: ReturnType<import("../data/sticker-settings-api.js").createStickerSettingsApi>, confirm?: Function, getDealers?: () => Array<object>, canManage?: boolean}} deps getDealers: 施設の発注先(台紙の上部の表示の初期値。読むだけ)。canManage: 変更の操作を出すか(既定は出す)
  */
-export function createStickerSettingsSection({ api, confirm = confirmDialog, getDealers = () => [] }) {
+export function createStickerSettingsSection({ api, confirm = confirmDialog, getDealers = () => [], canManage = true }) {
   const msg = h("p", { class: "form-hint", "data-msg": "", role: "status" });
   let facilityId = null, facilityName = "", settings = null, busy = false, gen = 0;
+  /** 変更の操作を出すか。画面の役割と、サーバーの答えの両方が許すときだけ */
+  const manage = () => canManage && (!settings || settings.canManage !== false);
 
   /* ---------- アクセスコード ---------- */
   const codeStatus = h("span", { "data-f": "codeStatus" });
@@ -69,6 +76,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const closeForm = () => { codeInput.value = ""; codeError.textContent = ""; codeForm.hidden = true; };
 
   codeBtn.addEventListener("click", () => {
+    if (!manage()) return;
     clearNewCode();
     saveCode.textContent = settings && settings.accessCodeSet ? "変更する" : "設定する";
     codeForm.hidden = false;
@@ -78,7 +86,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   cancelCode.addEventListener("click", closeForm);
   hideNew.addEventListener("click", clearNewCode);
   saveCode.addEventListener("click", async () => {
-    if (busy) return;
+    if (busy || !manage()) return;
     const code = codeInput.value.trim();
     const problem = accessCodeError(code);
     codeError.textContent = problem;
@@ -130,6 +138,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   };
   showQr.addEventListener("click", () => qrAction(api.getEntryQr));
   rotateQr.addEventListener("click", async () => {
+    if (!manage()) return;
     if (!(await confirm({ message: "QRコードを作り直しますか？\nこれまでに印刷・貼付したQRコードは使えなくなります。新しいQRコードを印刷して貼り替えてください。", okLabel: "作り直す", cancelLabel: "キャンセル" }))) return;
     qrAction(api.rotateEntryQr);
   });
@@ -162,19 +171,26 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   function renderSettings() {
     codeStatus.textContent = accessCodeStatus(settings);
-    lockNote.textContent = verifyLockNotice(settings);
+    const editable = manage();
+    lockNote.textContent = verifyLockNotice(settings, { canManage: editable });
     lockNote.hidden = !lockNote.textContent;
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
+    // 変更の操作は、管理者・副管理者だけに出す
+    for (const el of manageOnly) setShown(el, editable);
+    if (!editable) { closeForm(); clearNewCode(); dealerList.replaceChildren(); return; }
     const dealers = shareableDealers(settings.dealers);
     dealerList.replaceChildren(...(dealers.length ? dealers.map(dealerRow)
       : [h("p", { class: "form-hint" }, "共有できるディーラーはありません", createInfoTip(NOT_LINKED_HELP, { label: "共有できるディーラーの説明" }).root)]));
   }
 
+  const shareHead = h("h4", { "data-f": "shareHead" }, "ディーラーへの共有");
+  const manageOnly = [codeBtn, rotateQr, shareHead, dealerList];
+  if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
-    createSectionHeading("IOLシール写真", HELP),
+    createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
     h("h4", {}, "QRコード"), h("div", { class: "settings-actions" }, showQr, printSheet, printQr, rotateQr),
-    h("h4", {}, "ディーラーへの共有"), dealerList,
+    shareHead, dealerList,
     msg);
 
   async function load() {

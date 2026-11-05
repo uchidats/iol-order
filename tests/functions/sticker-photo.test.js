@@ -240,8 +240,10 @@ test("設定: コードは平文で保存せず再表示もしない。形式違
   assert.ok(!JSON.stringify(settings).includes(stored.hash));
 });
 
-test("QR: 管理者・副管理者だけが取得でき、SVG の中身は URL だけ。作り直すと旧トークンは確実に無効になる", async () => {
-  await rejects(api("ordA", "getEntryQr", { facilityId: F }), "permission-denied");
+test("QR: 所属者が取得でき、SVG の中身は URL だけ。作り直しは管理者・副管理者だけで、旧トークンは確実に無効になる", async () => {
+  await rejects(api("adminB", "getEntryQr", { facilityId: F }), "permission-denied");
+  await rejects(api("staffX", "getEntryQr", { facilityId: F }), "permission-denied");
+  await rejects(api("ordA", "rotateEntryQr", { facilityId: F }), "permission-denied");
   await rejects(api("adminB", "rotateEntryQr", { facilityId: F }), "permission-denied");
   const first = await api("adminA", "getEntryQr", { facilityId: F });
   assert.ok(first.svg.includes(`sticker.html#f=${TOKEN}`));
@@ -733,7 +735,8 @@ test("設定の表示: 関連付け・共有の状態を返し、コードのハ
   const s = await api("adminA", "getSettings", { facilityId: F });
   assert.deepEqual([s.accessCodeSet, s.entryIssued], [true, true]);
   assert.deepEqual([s.dealers[0].localDealerId, s.dealers[0].linked, s.dealers[0].shared, s.dealers[0].stale, s.dealers[0].companyName], ["dA", true, true, false, "X商事"]);
-  await rejects(api("ordA", "getSettings", { facilityId: F }), "permission-denied");
+  assert.equal(s.canManage, true);
+  await rejects(api("adminB", "getSettings", { facilityId: F }), "permission-denied");
 });
 
 // ================= 片付け =================
@@ -985,4 +988,68 @@ test("機能の停止中: ログインなしで呼べる確認・保存と、画
   // 再び有効にすると、元のとおり使える
   enabled.on = true;
   assert.equal((await image("adminA", { photo: stored.body.photoId })).statusCode, 200);
+});
+
+// ================= 役割ごとの権限(施設設定「IOLシール写真」) =================
+test("役割ごとの権限: 注文者・代理入力者は、設定の表示・QR の取得・写真の閲覧だけ。コード・QR の作り直し・共有・削除はサーバーが拒否し、何も変わらない", async () => {
+  const stored = await put();
+  assert.equal(stored.statusCode, 200);
+  const adminQr = await api("adminA", "getEntryQr", { facilityId: F });
+  const access = () => db.doc("facilities/" + F + "/stickerSettings/access").get();
+  const before = { generation: (await access()).get("codeGeneration"), audits: (await db.collection("stickerAuditLogs").get()).size };
+
+  for (const uid of ["ordA", "proxyA"]) {
+    // 表示: コードの状態と停止の有無だけ。共有の状態・失敗の数・ハッシュ・トークンは返さない
+    const s = await api(uid, "getSettings", { facilityId: F });
+    assert.deepEqual(Object.keys(s).sort(), ["accessCodeSet", "accessCodeUpdatedAt", "canManage", "entryIssued", "verifyBlockedUntil"], uid);
+    assert.deepEqual([s.accessCodeSet, s.entryIssued, s.canManage, s.verifyBlockedUntil], [true, true, false, null], uid);
+    assert.ok(!JSON.stringify(s).includes(TOKEN) && !JSON.stringify(s).includes((await access()).get("hash")), uid);
+    // QR: 管理者と同じ(作り直さない)
+    assert.equal((await api(uid, "getEntryQr", { facilityId: F })).svg, adminQr.svg, uid);
+    // 写真の閲覧
+    assert.equal((await api(uid, "list", { facilityId: F })).photos.length, 1, uid);
+    assert.equal((await image(uid, { photo: stored.body.photoId })).statusCode, 200, uid);
+    // 変更の操作はすべて拒否
+    await rejects(api(uid, "setAccessCode", { facilityId: F, code: "246810" }), "permission-denied");
+    await rejects(api(uid, "rotateEntryQr", { facilityId: F }), "permission-denied");
+    await rejects(api(uid, "setDealerShare", { facilityId: F, localDealerId: "dA", shared: true }), "permission-denied");
+    await rejects(api(uid, "setDealerShare", { facilityId: F, localDealerId: "dA", shared: false }), "permission-denied");
+    await rejects(api(uid, "delete", { facilityId: F, photoId: stored.body.photoId }), "permission-denied");
+    // 別の施設には届かない
+    await rejects(api(uid, "getSettings", { facilityId: G }), "permission-denied");
+    await rejects(api(uid, "getEntryQr", { facilityId: G }), "permission-denied");
+  }
+  // 何も変わっていない(コードの世代・QR・共有・写真・監査)
+  assert.equal((await access()).get("codeGeneration"), before.generation);
+  assert.equal((await db.doc("stickerEntries/" + TOKEN).get()).get("status"), "active");
+  assert.equal((await db.doc("stickerPhotoGrants/" + F + "_dA").get()).exists, false);
+  assert.equal((await photoDoc(stored.body.photoId)).get("status"), "stored");
+  assert.equal((await db.collection("stickerAuditLogs").get()).size, before.audits);
+  assert.ok((await verify(TOKEN, CODE)).ticket, "今のコードと QR はそのまま使える");
+
+  // 管理者・副管理者は、表示に共有の状態を含み、変更の操作ができる
+  for (const uid of ["adminA", "subA"]) {
+    const s = await api(uid, "getSettings", { facilityId: F });
+    assert.equal(s.canManage, true, uid);
+    assert.ok(Array.isArray(s.dealers) && typeof s.verifyFailures24h === "number", uid);
+  }
+  assert.deepEqual(await api("subA", "setDealerShare", { facilityId: F, localDealerId: "dA", shared: true }), { ok: true, shared: true });
+  assert.deepEqual(await api("subA", "setAccessCode", { facilityId: F, code: "246810" }), { ok: true });
+  assert.ok((await api("subA", "rotateEntryQr", { facilityId: F })).svg);
+  assert.deepEqual(await api("subA", "delete", { facilityId: F, photoId: stored.body.photoId }), { ok: true });
+});
+
+test("役割ごとの権限: QR がまだない施設では、注文者の表示で発行される。コードの確認が停止中のときは、注文者にも停止の時刻だけを返す", async () => {
+  // 施設 G の QR をまだ出していない状態にする
+  await db.doc("facilities/" + G + "/stickerSettings/entry").delete();
+  assert.equal((await api("adminB", "getSettings", { facilityId: G })).entryIssued, false);
+  await db.doc("facilities/" + G + "/members/ordG").set({ uid: "ordG", role: "orderer" });
+  const qr = await api("ordG", "getEntryQr", { facilityId: G });
+  assert.match(qr.svg, /sticker\.html#f=[A-Za-z0-9_-]{22}/);
+  assert.equal((await api("adminB", "getEntryQr", { facilityId: G })).svg, qr.svg, "同じ入口を使う");
+  // 停止中
+  for (let i = 0; i < 12; i++) await verify(TOKEN, "000000").catch(() => {});
+  const s = await api("ordA", "getSettings", { facilityId: F });
+  assert.ok(typeof s.verifyBlockedUntil === "string" && s.canManage === false);
+  assert.equal(s.verifyFailures24h, undefined);
 });

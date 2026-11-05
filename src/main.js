@@ -14,6 +14,7 @@ import { createOrderApi } from "./data/order-api.js";
 import { createDealerPortalApi } from "./data/dealer-portal-api.js";
 import { createStickerPhotoApi, stickerImageUrl } from "./data/sticker-photo-api.js";
 import { createStickerAvailability } from "./domain/sticker-photo-view.js";
+import { showSettingsMenu } from "./domain/sticker-settings.js";
 import { canOpenDealerPortalMenu } from "./domain/dealer-portal.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
 import { loadSubTheme } from "./ui/sub-theme.js";
@@ -93,7 +94,7 @@ async function bootstrapWithFirebase(config) {
   const relatedLinksView = createRelatedLinksView();
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
   let stickerViewer = null;  // IOLシール写真の一覧・拡大(所属メンバー全員が閲覧。初回表示時に生成)
-  // メニュー「IOLシール写真」は、サーバーが「この施設で使える」と答えた施設だけに出す(施設が変わったら確かめ直す)。表示だけの判定で、権限はサーバーが毎回確かめる
+  // 関連リンクの「IOLシール写真」は、サーバーが「この施設で使える」と答えた施設だけに出す(施設が変わったら確かめ直す)。表示だけの判定で、権限はサーバーが毎回確かめる
   const stickerAvailability = createStickerAvailability({
     check: (facilityId) => (ctx && ctx.stickerPhotoApi ? ctx.stickerPhotoApi.facilityEnabled(facilityId) : false),
     onChange: () => render()
@@ -150,7 +151,6 @@ async function bootstrapWithFirebase(config) {
       location.reload(); // 入力内容・計測値をメモリごと破棄(下書きは施設ごとに保存しているため、別の施設には引き継がない)
     },
     onOpenHistory: leaveSettings(() => { leaveOverlay(); openHistory(); }),
-    onOpenStickerPhotos: leaveSettings(() => { leaveOverlay(); openStickerPhotos(); }),
     onOpenSettings: leaveSettings(() => { leaveOverlay(); openSettings(); }),
     onOpenApplications: leaveSettings(() => { leaveOverlay(); openApplications(); }),
     onOpenPreregistrations: leaveSettings(() => { leaveOverlay(); openPreregistrations(); }),
@@ -325,10 +325,24 @@ async function bootstrapWithFirebase(config) {
     await stickerViewer.open(ctx.stickerPhotoApi.facilitySource({ facilityId: access.facilityId, facilityName: facilityName(access.facilityId), canDelete: isManagerRole(access.role) }));
   }
 
-  /** 施設設定を開く。表示は管理者・副管理者のみ（書き込みはFirestoreルール・Functionsでも検証される） */
+  /**
+   * 施設設定を開く。管理者・副管理者は従来の施設設定(書き込みは Firestore ルール・Functions でも検証される)。
+   * 注文者・代理入力者は、「IOLシール写真」の欄だけの画面(表示・印刷だけ。この欄を使える施設だけ。ほかの設定項目は出さない)
+   */
   async function openSettings() {
     const access = decideAccess(state);
-    if (access.state !== ACCESS.GRANTED || !isManagerRole(access.role)) return;
+    if (access.state !== ACCESS.GRANTED) return;
+    const manager = isManagerRole(access.role);
+    if (!manager && !(ctx && ctx.stickerPhotoApi && showSettingsMenu({ role: access.role, stickerAvailable: stickerMenuFor(access.facilityId) }))) return;
+    if (!settings && !manager) {
+      const [{ createStickerSettingsView }, { createStickerSettingsApi }] = await Promise.all([import("./ui/sticker-settings-view.js"), import("./data/sticker-settings-api.js")]);
+      settings = createStickerSettingsView({
+        mount: document.querySelector("main.main-content"),
+        api: createStickerSettingsApi(ctx.stickerPhotoApi.settingsCall),
+        listDealers: (facilityId) => ctx.repository.listDealers(facilityId),
+        onClose: () => setOrderViewHidden(false)
+      });
+    }
     if (!settings) {
       const { createFacilitySettings } = await import("./ui/facility-settings.js");
       settings = createFacilitySettings({
@@ -444,10 +458,12 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canStickerPhotos: stickerMenuFor(access.facilityId), canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
+        canSwitch: access.memberships.length > 1, canSettings: showSettingsMenu({ role: access.role, stickerAvailable: stickerMenuFor(access.facilityId) }), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
         canDealerPortal: canOpenDealerPortalMenu({ isPlatformAdmin, memberships: access.memberships }),   // ディーラー用受注一覧(運営者・テスト眼科の利用者。表示だけ)
         canAbout: canViewIntroduction({ isPlatformAdmin })
       });
+      // 関連リンクの中の「IOLシール写真」(この施設で利用できるときだけ。登録したリンクがなくても出す)
+      relatedLinksView.setStickerPhotos(stickerMenuFor(access.facilityId) ? () => openStickerPhotos() : null);
       if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (stickerViewer && stickerViewer.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       relatedLinksView.clear();

@@ -425,16 +425,16 @@ export function createStickerPhotoService({
     return { ok: true };
   }
 
-  /* ======================= 設定(管理者・副管理者) ======================= */
+  /* ======================= 設定(表示と QR の取得は所属者全員。変更は管理者・副管理者) ======================= */
+
+  /** 設定の表示。注文者・代理入力者には、コードの状態と確認の停止の有無だけを返す(共有の状態・失敗の数は返さない) */
 
   async function getSettings(user, data) {
     strict(data, ["facilityId"]);
     const fid = data.facilityId;
-    await assertMember(null, user.uid, fid, { manager: true });
-    const [access, entry, dealers, links] = await Promise.all([
-      accessRef(fid).get(), entrySettingRef(fid).get(),
-      db.collection(`facilities/${fid}/facilityDealers`).get(), db.collection(`facilities/${fid}/dealerPortalLinks`).get()
-    ]);
+    const { role } = await assertMember(null, user.uid, fid);
+    const canManage = isManagerRole(role);
+    const [access, entry] = await Promise.all([accessRef(fid).get(), entrySettingRef(fid).get()]);
     // コードの確認の停止(今の QR のトークンの記録だけを読む。トークンは返さない)
     const token = entry.exists ? entry.get("token") : null;
     const limitSnaps = isEntryToken(token) ? await Promise.all(tokenLimitKeys(token).map(k => limitRef(k.id).get())) : [];
@@ -442,6 +442,12 @@ export function createStickerPhotoService({
     const blockedUntil = Math.max(0, ...limitSnaps.map(l => (l.exists && isRateLimited(l.data(), t) ? l.get("blockedUntil") : 0)));
     const day = limitSnaps[1];
     const dayFailures = day?.exists && t - day.get("windowStart") < rateLimits.dayWindowMs ? day.get("count") ?? 0 : 0;
+    const base = { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists,
+      verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, canManage };
+    if (!canManage) return base;
+    const [dealers, links] = await Promise.all([
+      db.collection(`facilities/${fid}/facilityDealers`).get(), db.collection(`facilities/${fid}/dealerPortalLinks`).get()
+    ]);
     const linkBy = new Map(links.docs.map(l => [l.id, l]));
     const rows = await Promise.all(dealers.docs.map(async (d) => {
       const link = linkBy.get(d.id);
@@ -455,8 +461,7 @@ export function createStickerPhotoService({
       };
     }));
     rows.sort((a, b) => a.dealerName.localeCompare(b.dealerName, "ja"));
-    return { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists,
-      verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, verifyFailures24h: dayFailures, dealers: rows };
+    return { ...base, verifyFailures24h: dayFailures, dealers: rows };
   }
   const isIdLike = (v) => typeof v === "string" && ID.test(v);
 
@@ -490,12 +495,12 @@ export function createStickerPhotoService({
 
   const qrOf = async (token) => ({ svg: await makeQrSvg(buildEntryUrl(token, entryUrl)) });
 
-  /** 入口の QR(なければ発行)。トークンは SVG の中の URL にだけ含める */
+  /** 入口の QR(なければ発行)。所属者全員が取得できる(表示・印刷のため。作り直しは管理者・副管理者だけ)。トークンは SVG の中の URL にだけ含める */
   async function getEntryQr(user, data) {
     strict(data, ["facilityId"]);
     const fid = data.facilityId;
     const token = await db.runTransaction(async (tx) => {
-      await assertMember(tx, user.uid, fid, { manager: true });
+      await assertMember(tx, user.uid, fid);
       const setting = await tx.get(entrySettingRef(fid));
       const current = setting.exists ? setting.get("token") : null;
       const entry = isEntryToken(current) ? await tx.get(entryRef(current)) : null;

@@ -208,7 +208,7 @@ test("シール写真: 閉じると Blob の URL を解放し、閉じた後に�
   } finally { await browser.close(); }
 });
 
-test("シール写真: メニューは指定があるときだけ出す(医療機関・ディーラー)。公開の前の既定は出さない", async (t) => {
+test("シール写真: 医療機関は関連リンクの中に、利用できるときだけ出す(☰メニューには出さない)。ディーラーはメニューに、指定があるときだけ出す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -217,17 +217,50 @@ test("シール写真: メニューは指定があるときだけ出す(医療�
     await page.waitForFunction(() => window.__ready === true);
     const facility = await page.evaluate(async () => {
       const { createHeaderMenu } = await import("/src/ui/header-menu.js");
-      const { STICKER_VIEWER_ENABLED } = await import("/src/domain/sticker-photo-view.js");
-      let opened = 0;
-      const menu = createHeaderMenu({ onOpenStickerPhotos: () => { opened += 1; } });
-      const info = { user: { email: "a@x.jp" }, facilityName: "A" };
-      menu.update({ ...info, canStickerPhotos: STICKER_VIEWER_ENABLED });
-      const hidden = document.getElementById("menuStickerPhotos") === null;
-      menu.update({ ...info, canStickerPhotos: true });
-      document.getElementById("menuStickerPhotos").click();
-      return { hidden, opened };
+      const { createRelatedLinksView } = await import("/src/ui/related-links.js");
+      // ☰メニューには出さない(以前の指定を渡しても出ない)
+      const menu = createHeaderMenu({});
+      menu.update({ user: { email: "a@x.jp" }, facilityName: "A", canStickerPhotos: true, canSettings: true });
+      const inMenu = document.getElementById("menuStickerPhotos") !== null;
+      // 関連リンク
+      const root = document.createElement("details");
+      root.className = "ref-links-accordion"; root.hidden = true;
+      root.innerHTML = '<summary class="ref-links-summary">関連リンク</summary><ul class="ref-links-list"></ul>';
+      document.body.append(root);
+      const names = () => [...root.querySelectorAll(".ref-links-list a")].map(a => a.textContent);
+      const noStandard = ["std-tecnis", "std-alcon", "std-teleon", "std-santen", "std-escrs"].map(id => ({ id, enabled: false }));   // 標準のリンクを非表示にした施設
+      const docs = [...noStandard, { id: "l1", name: "資料", url: "https://example.jp/a", enabled: true, sortOrder: 10 }];
+      let opened = 0, resolve;
+      const view = createRelatedLinksView(root);
+      const out = {};
+      // 読み込みの途中: 利用できると分かる前は何も出さない
+      const loading = view.load("fA", { listRelatedLinks: () => new Promise(r => { resolve = r; }) });
+      out.beforeAnswer = [root.hidden, names()];
+      view.setStickerPhotos(() => { opened += 1; });
+      out.stickerOnly = [root.hidden, names()];   // 登録したリンクがなくても出る
+      resolve(docs); await loading;
+      out.both = names();                         // 登録したリンクの後ろ
+      const a = root.querySelector("#refLinkStickerPhotos");
+      const other = root.querySelector(".ref-links-list a");
+      out.sameLook = [a.className === other.className, a.querySelector("svg.ext-icon") !== null, a.querySelector("svg").outerHTML === other.querySelector("svg").outerHTML,
+        getComputedStyle(a).fontSize === getComputedStyle(other).fontSize, a.target === ""];
+      const hash = location.hash;
+      a.click();
+      out.clicked = [opened, location.hash === hash];
+      view.saved("fA", noStandard);
+      out.afterSaveEmpty = [root.hidden, names()];
+      view.setStickerPhotos(null);                // 対象外・停止
+      out.off = [root.hidden, names()];
+      view.setStickerPhotos(() => {});
+      view.clear();                               // 施設を出る
+      out.cleared = [root.hidden, names()];
+      await view.load("fB", { listRelatedLinks: async () => docs });
+      out.nextFacility = names();                 // 次の施設へ持ち越さない
+      root.remove();
+      return { inMenu, ...out };
     });
-    assert.deepEqual(facility, { hidden: true, opened: 1 });
+    assert.deepEqual(facility, { inMenu: false, beforeAnswer: [true, []], stickerOnly: [false, ["IOLシール写真"]], both: ["資料", "IOLシール写真"],
+      sameLook: [true, true, true, true, true], clicked: [1, true], afterSaveEmpty: [false, ["IOLシール写真"]], off: [true, []], cleared: [true, []], nextFacility: ["資料"] });
     await page.close();
     page = await browser.newPage();
     await page.goto(base);
