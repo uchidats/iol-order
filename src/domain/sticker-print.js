@@ -1,16 +1,22 @@
 /**
  * IOL シール写真の印刷の様式(純粋関数。docs/iol-sticker-photo-design.md §4-2・§4-3)。座標の単位はすべて mm。
- * 台紙の行数は試し刷りの結果で変えるので、SHEET.rows の1か所で決める(暫定 5 行)。患者氏名・ID の欄は作らない。
+ * 台紙は 2列×6行(12枠)。行数・行の高さは SHEET の定数で決める。患者氏名・ID の欄は作らない。
  */
 export const PAGE = Object.freeze({ width: 210, height: 297, margin: 12 });
 
-/** 台紙: A4 縦・2列。列 90mm(日付欄 14mm + 貼付枠 76mm)・列の間 6mm・行 46mm */
-export const SHEET = Object.freeze({ rows: 5, columns: 2, columnWidth: 90, columnGap: 6, dateWidth: 14, rowHeight: 46, headHeight: 32, qrSize: 28 });
+/**
+ * 台紙: A4 縦・2列×6行。列 90mm(日付欄 14mm + 貼付枠 76mm)・列の間 6mm・行 41mm。
+ * 縦の割り付け: 上の余白 8mm + 上部(題名・表示・注意事項・QR)32mm + 見出し行 5mm + 41mm×6 = 291mm(下の余白 6mm)
+ */
+export const SHEET = Object.freeze({ rows: 6, columns: 2, columnWidth: 90, columnGap: 6, dateWidth: 14, rowHeight: 41, headHeight: 32, headingHeight: 5, marginTop: 8, qrSize: 28 });
+
+/** 見出し行の文字(各列の上。左が日付欄、右が貼付枠) */
+export const SHEET_HEADINGS = Object.freeze({ date: "日付", lens: "使用レンズ" });
 
 /** QR のみ: A4 縦・2列×4行 = 8枚 */
 export const QR_SHEET = Object.freeze({ rows: 4, columns: 2, qrSize: 40 });
 
-export const SHEET_TITLE = "IOLシール貼付台紙";
+export const SHEET_TITLE = "眼内レンズ使用報告";
 export const QR_LABEL = "IOLシール写真";
 export const HEADER_MAX_LENGTH = 100;
 
@@ -70,8 +76,8 @@ const NOTE_FRAME_GAP = 1.5;  // 貼付枠との間(mm)
  */
 export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE) {
   const rows = String(note ?? "").replace(/\r\n?/g, "\n").trimEnd().split("\n").map(l => l.trimEnd());
-  const top = page.margin + 15 + (Math.max(1, headerLines) - 1) * 5.5 + 2.2;
-  const bottom = page.margin + s.headHeight - NOTE_FRAME_GAP;
+  const top = s.marginTop + 15 + (Math.max(1, headerLines) - 1) * 5.5 + 2.2;
+  const bottom = s.marginTop + s.headHeight - NOTE_FRAME_GAP;
   const width = page.width - 2 * page.margin - s.qrSize - NOTE_QR_GAP;
   const place = (pt) => {
     const lineHeight = pt * MM_PER_PT * NOTE_LINE_RATIO;
@@ -88,25 +94,30 @@ export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE) {
   return { ...fit, lines: fit.lines.slice(0, capacity), truncated: true };
 }
 
-/** 台紙の線・日付欄・貼付枠の位置 */
+/**
+ * 台紙の線・見出し行・貼付枠の位置。top は見出し行の上端、bodyTop は最初の枠の上端。
+ * headings は見出しの文字の中心(各列に 日付・使用レンズ)。日付欄の中には何も描かない(手書き)
+ */
 export function sheetLayout(s = SHEET, page = PAGE) {
-  const top = page.margin + s.headHeight;
-  const bottom = top + s.rowHeight * s.rows;
-  const lines = [], dates = [], slots = [];
+  const top = s.marginTop + s.headHeight;
+  const bodyTop = top + s.headingHeight;
+  const bottom = bodyTop + s.rowHeight * s.rows;
+  const lines = [], headings = [], slots = [];
   for (let c = 0; c < s.columns; c += 1) {
     const x = page.margin + c * (s.columnWidth + s.columnGap);
-    for (let r = 0; r <= s.rows; r += 1) lines.push({ x1: x, y1: top + r * s.rowHeight, x2: x + s.columnWidth, y2: top + r * s.rowHeight });
+    lines.push({ x1: x, y1: top, x2: x + s.columnWidth, y2: top });
+    for (let r = 0; r <= s.rows; r += 1) lines.push({ x1: x, y1: bodyTop + r * s.rowHeight, x2: x + s.columnWidth, y2: bodyTop + r * s.rowHeight });
     for (const lx of [x, x + s.dateWidth, x + s.columnWidth]) lines.push({ x1: lx, y1: top, x2: lx, y2: bottom });
+    const cy = top + s.headingHeight / 2;
+    headings.push({ x: x + s.dateWidth / 2, y: cy, text: SHEET_HEADINGS.date }, { x: x + s.dateWidth + (s.columnWidth - s.dateWidth) / 2, y: cy, text: SHEET_HEADINGS.lens });
     for (let r = 0; r < s.rows; r += 1) {
-      const y = top + r * s.rowHeight;
-      dates.push({ x: x + s.dateWidth / 2, y: y + s.rowHeight / 2 });
-      slots.push({ x: x + s.dateWidth, y, width: s.columnWidth - s.dateWidth, height: s.rowHeight });
+      slots.push({ x: x + s.dateWidth, y: bodyTop + r * s.rowHeight, width: s.columnWidth - s.dateWidth, height: s.rowHeight });
     }
   }
   return {
-    lines, dates, slots, top, bottom,
+    lines, headings, slots, top, bodyTop, bottom, headTop: s.marginTop,
     right: page.margin + s.columns * s.columnWidth + (s.columns - 1) * s.columnGap,
-    qr: { x: page.width - page.margin - s.qrSize, y: page.margin, size: s.qrSize }
+    qr: { x: page.width - page.margin - s.qrSize, y: s.marginTop, size: s.qrSize }
   };
 }
 

@@ -9,6 +9,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const FONT = "'Yu Gothic', 'Meiryo', 'Hiragino Sans', 'Noto Sans CJK JP', sans-serif";
 const PT = MM_PER_PT;
 const LINE = { stroke: "#999999", "stroke-width": "0.2" };
+const HEADING_PT = 9;   // 見出し行(日付・使用レンズ)の文字の大きさ
 
 function svgEl(tag, attrs = {}, text = null) {
   const el = document.createElementNS(SVG_NS, tag);
@@ -30,11 +31,11 @@ function pageSvg(children) {
 function sheetSvg({ headerText, qrUrl, note }) {
   const lay = sheetLayout();
   return pageSvg([
-    label(PAGE.margin, PAGE.margin + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
-    ...wrapHeader(headerText).map((t, i) => label(PAGE.margin, PAGE.margin + 15 + i * 5.5, t, 11, { "data-f": "header" })),
+    label(PAGE.margin, lay.headTop + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
+    ...wrapHeader(headerText).map((t, i) => label(PAGE.margin, lay.headTop + 15 + i * 5.5, t, 11, { "data-f": "header" })),
     qrImage(qrUrl, lay.qr),
     ...lay.lines.map(l => line(l)),
-    ...lay.dates.map(d => label(d.x, d.y + 1.5, "／", 12, { "text-anchor": "middle" })),
+    ...lay.headings.map(hd => label(hd.x, hd.y + HEADING_PT * PT * 0.36, hd.text, HEADING_PT, { "text-anchor": "middle", "data-f": "sheetHeading" })),
     ...note.lines.map((t, i) => label(note.x, note.y + i * note.lineHeight, t, note.pt, { "data-f": "sheetNote" }))
   ]);
 }

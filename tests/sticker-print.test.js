@@ -5,16 +5,26 @@ import {
   PAGE, SHEET, QR_SHEET, SHEET_TITLE, QR_LABEL, MM_PER_PT, fitSheetNote, dealerLabel, defaultHeaderText, initialDealer, wrapHeader, sheetLayout, qrSheetLayout
 } from "../src/domain/sticker-print.js";
 
-test("台紙: A4 縦・2列×5行の10枠で、貼付枠は 76×46mm。印刷範囲(余白 12mm)に収まる", () => {
+test("台紙: A4 縦・2列×6行の12枠で、貼付枠は 76×41mm・日付欄は 14mm。A4 の1枚に収まる", () => {
   const lay = sheetLayout();
-  assert.deepEqual([PAGE.width, PAGE.height, SHEET.rows, SHEET.columns], [210, 297, 5, 2]);
-  assert.equal(lay.slots.length, 10);
-  assert.ok(lay.slots.every(s => s.width === 76 && s.height === 46));
-  assert.equal(lay.dates.length, 10, "各枠に日付の手書き欄");
+  assert.deepEqual([PAGE.width, PAGE.height, SHEET.rows, SHEET.columns], [210, 297, 6, 2]);
+  assert.equal(lay.slots.length, 12);
+  assert.ok(lay.slots.every(s => s.width === 76 && s.height === 41));
+  assert.equal(SHEET.dateWidth, 14);
   assert.equal(lay.right, PAGE.width - PAGE.margin);
-  assert.ok(lay.bottom + 10 <= PAGE.height - PAGE.margin, "下の注意書きと確認線も余白の内側");
+  assert.deepEqual([lay.headTop, lay.top, lay.bodyTop, lay.bottom], [8, 40, 45, 291]);
+  assert.ok(lay.bottom <= PAGE.height - 6, "下の余白 6mm");
   assert.ok(lay.qr.y + lay.qr.size <= lay.top, "QR は枠に重ならない");
-  assert.deepEqual([lay.qr.size, lay.qr.x + lay.qr.size], [28, 198]);
+  assert.deepEqual([lay.qr.size, lay.qr.x + lay.qr.size, lay.qr.y], [28, 198, 8]);
+  assert.equal(lay.dates, undefined, "日付欄に斜線を描かない");
+});
+
+test("台紙: 各列の上に見出し行(日付・使用レンズ)。文字はそれぞれの欄の中央", () => {
+  const lay = sheetLayout();
+  assert.deepEqual(lay.headings.map(h => h.text), ["日付", "使用レンズ", "日付", "使用レンズ"]);
+  assert.deepEqual(lay.headings.map(h => h.x), [12 + 7, 26 + 38, 108 + 7, 122 + 38]);
+  assert.ok(lay.headings.every(h => h.y === 42.5), "見出し行(40〜45mm)の中央");
+  assert.equal(lay.slots[0].y, 45, "最初の枠は見出し行の下");
 });
 
 test("台紙: 枠の中に線が入らない(シールと文字の読み取りを妨げない)", () => {
@@ -30,17 +40,17 @@ test("台紙: 枠の中に線が入らない(シールと文字の読み取り�
 test("台紙: 行数は定数1つで変えられ、線と枠が合わせて変わる", () => {
   const four = sheetLayout({ ...SHEET, rows: 4, rowHeight: 57 });
   assert.equal(four.slots.length, 8);
-  assert.equal(four.bottom, 44 + 57 * 4);
+  assert.equal(four.bottom, 45 + 57 * 4);
 });
 
 test("印刷の文言: 台紙の題名と QR の文言", () => {
-  assert.equal(SHEET_TITLE, "IOLシール貼付台紙");
+  assert.equal(SHEET_TITLE, "眼内レンズ使用報告");
   assert.equal(QR_LABEL, "IOLシール写真");
 });
 
 /** 注意事項の下端(mm) */
 const noteBottom = (n) => n.y + (n.lines.length - 1) * n.lineHeight + n.pt * MM_PER_PT * 0.25;
-const FRAME_TOP = PAGE.margin + SHEET.headHeight;
+const FRAME_TOP = SHEET.marginTop + SHEET.headHeight;
 
 test("台紙の注意事項: 2行の初期値は大きい文字のまま入り、改行を保つ。空欄は何も出さない", () => {
   const n = fitSheetNote("挿入されなかったレンズのシールには上から大きく×を書く\n前回使用した台紙は、次の手術日の朝に撮影・送信する");

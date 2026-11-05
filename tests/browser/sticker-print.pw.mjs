@@ -84,7 +84,7 @@ async function pdfInfo(page) {
 }
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`台紙を印刷: 見本に上部の表示・QR・10枠を出し、印刷できる: ${name}`, async (t) => {
+  test(`台紙を印刷: 見本に題名・上部の表示・QR・見出し行・12枠を出し、斜線は出さない。印刷できる: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません`);
     try {
@@ -97,7 +97,18 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator('[data-f="noteTruncated"]').isVisible(), false);
       assert.equal(await page.locator('.sticker-print-svg line[stroke="#000000"]').count(), 0, "確認線を出さない");
       assert.equal(await page.locator(".sticker-print-svg image").count(), 1);
-      assert.equal(await page.locator(".sticker-print-svg text", { hasText: "／" }).count(), 10);
+      assert.equal(await page.locator(".sticker-print-svg text", { hasText: "／" }).count(), 0, "日付欄に斜線を出さない");
+      assert.equal(await page.locator(".sticker-print-svg text").first().textContent(), "眼内レンズ使用報告");
+      assert.deepEqual(await page.locator('.sticker-print-svg [data-f="sheetHeading"]').allTextContents(), ["日付", "使用レンズ", "日付", "使用レンズ"]);
+      // 見出しの文字は、それぞれの欄の中央(横・縦)。欄は 12〜26mm・26〜102mm、見出し行は 40〜45mm
+      const centers = await page.locator(".sticker-print-svg").evaluate((svg) => {
+        const b = svg.getBoundingClientRect(), mm = b.width / 210;
+        return [...svg.querySelectorAll('[data-f="sheetHeading"]')].map(t => { const r = t.getBoundingClientRect(); return [((r.left + r.right) / 2 - b.left) / mm, ((r.top + r.bottom) / 2 - b.top) / mm]; });
+      });
+      [19, 64, 115, 160].forEach((x, i) => {
+        assert.ok(Math.abs(centers[i][0] - x) < 0.5, `見出し ${i} の横の中央: ${centers[i][0]}`);
+        assert.ok(Math.abs(centers[i][1] - 42.5) < 0.7, `見出し ${i} の縦の中央: ${centers[i][1]}`);
+      });
       assert.equal(await page.locator('[data-f="sheetDealer"]').count(), 0, "1社なら選択を出さない");
       await page.click('[data-act="print"]');
       assert.equal(await page.evaluate(() => window.__printed), 1);
@@ -182,7 +193,7 @@ test("印刷の出力: 台紙も QR のみも A4 の1ページで、実寸(210×
   } finally { await browser.close(); }
 });
 
-test("印刷の出力: 貼付枠の実寸は 76×46mm で、線は薄いグレー", async (t) => {
+test("印刷の出力: 貼付枠の実寸は 76×41mm(12枠)で、線は薄いグレー。枠と文字は A4 の中に収まる", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -198,8 +209,16 @@ test("印刷の出力: 貼付枠の実寸は 76×46mm で、線は薄いグレ�
     });
     assert.ok(Math.abs(r.px - MM) < 0.01);
     assert.deepEqual(r.xs, [12, 26, 102, 108, 122, 198]);
-    assert.deepEqual(r.ys, [44, 90, 136, 182, 228, 274]);
+    assert.deepEqual(r.ys, [40, 45, 86, 127, 168, 209, 250, 291]);
     assert.deepEqual(r.widths, ["0.2"]);
+    // 印刷のページ(210×297mm)から欠けるものがない(線・文字・QR)
+    const out = await page.locator(".sticker-print-svg").evaluate((svg) => {
+      const b = svg.getBoundingClientRect();
+      return [...svg.querySelectorAll("line, text, image")].filter(e => { const r = e.getBoundingClientRect(); return r.left < b.left - 0.5 || r.top < b.top - 0.5 || r.right > b.right + 0.5 || r.bottom > b.bottom + 0.5; }).length;
+    });
+    assert.equal(out, 0, "ページの外に出る要素がない");
+    const pageBox = await page.locator(".sticker-print-page").evaluate(e => { const r = e.getBoundingClientRect(); return r.height / (r.width / 210); });
+    assert.ok(291 + 0.2 <= pageBox, `最下段の線(291mm)が印刷のページ(${pageBox}mm)の中`);
     await page.close();
   } finally { await browser.close(); }
 });
