@@ -175,7 +175,7 @@ test("アクセスコード: 変更は確認の後に保存し、新しいコー
   } finally { await browser.close(); }
 });
 
-test("アクセスコード: 未設定なら確認なしで設定でき、自動で作れる。失敗は理由を出す。画面を閉じると新しいコードは消える", async (t) => {
+test("アクセスコード: 未設定なら確認なしで設定でき、手入力だけ。失敗は理由を出す。画面を閉じると新しいコードは消える", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -185,9 +185,13 @@ test("アクセスコード: 未設定なら確認なしで設定でき、自動
     assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "未設定");
     assert.equal(await s.locator('[data-act="editCode"]').innerText(), "設定");
     await s.locator('[data-act="editCode"]').click();
-    await s.locator('[data-act="generateCode"]').click();
-    const code = await s.locator('[data-f="code"]').inputValue();
-    assert.match(code, /^\d{8}$/);
+    // 手入力だけ。残るボタンは「設定する」「キャンセル」で、補助ボタンの大きさのまま
+    assert.equal(await s.locator('[data-act="generateCode"]').count(), 0);
+    assert.deepEqual(await s.locator('[data-f="codeForm"] button').evaluateAll(l => l.map(b => [b.textContent, getComputedStyle(b).minHeight])), [["設定する", "36px"], ["キャンセル", "36px"]]);
+    const gap = await s.evaluate((el) => el.querySelector('[data-f="code"]').getBoundingClientRect().top - el.querySelector(".sticker-code-row").getBoundingClientRect().bottom);
+    assert.ok(gap > 7.9, `入力欄を上の行に接しない: ${gap}`);
+    const code = "24681357";
+    await s.locator('[data-f="code"]').fill(code);
     await page.evaluate(() => { window.__failCode = true; });
     await s.locator('[data-act="saveCode"]').click();
     await page.waitForFunction(() => document.querySelector('[data-err="code"]').textContent.includes("管理者"));

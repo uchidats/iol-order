@@ -25,30 +25,12 @@ export function showSettingsMenu({ role, stickerAvailable = false, enabled = STI
   return enabled === true && stickerAvailable === true && MEMBER_ROLES.includes(role);
 }
 
-/** 自動で作るコードの桁数 */
-export const GENERATED_CODE_DIGITS = 8;
-
 const JST_MS = 9 * 60 * 60 * 1000;
 const pad = (n) => String(n).padStart(2, "0");
 
 /** 入力のエラーの文言。問題がなければ空 */
 export function accessCodeError(value) {
   return isAccessCode(value) ? "" : `アクセスコードは半角数字${ACCESS_CODE_DIGITS.min}〜${ACCESS_CODE_DIGITS.max}桁で入力してください`;
-}
-
-/**
- * アクセスコードを乱数で作る。偏りが出ないよう、10 の倍数に収まらない値は捨てて引き直す。
- * @param {(array:Uint32Array) => Uint32Array} [fill] 乱数の取得(既定は crypto.getRandomValues)
- */
-export function generateAccessCode(fill = (a) => crypto.getRandomValues(a), digits = GENERATED_CODE_DIGITS) {
-  const limit = Math.floor(0x100000000 / 10) * 10;
-  let code = "";
-  while (code.length < digits) {
-    for (const v of fill(new Uint32Array(digits))) {
-      if (v < limit && code.length < digits) code += String(v % 10);
-    }
-  }
-  return code;
 }
 
 /** アクセスコードの状態のバッジの文字「設定済み」「未設定」。コードそのものは扱わない */

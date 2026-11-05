@@ -2,9 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  STICKER_SETTINGS_ENABLED, GENERATED_CODE_DIGITS, accessCodeError, accessCodeStatus, generateAccessCode, shareableDealers, qrImageUrl, verifyLockNotice, canManageStickerSettings, showSettingsMenu
+  STICKER_SETTINGS_ENABLED, accessCodeError, accessCodeStatus, shareableDealers, qrImageUrl, verifyLockNotice, canManageStickerSettings, showSettingsMenu
 } from "../src/domain/sticker-settings.js";
-import { isAccessCode } from "../src/domain/sticker-photo.js";
 import { createStickerSettingsApi } from "../src/data/sticker-settings-api.js";
 import { createDealerPortalApi } from "../src/data/dealer-portal-api.js";
 import { createStickerPhotoApi } from "../src/data/sticker-photo-api.js";
@@ -14,18 +13,6 @@ test("項目の公開の設定は true(試験運用。出す施設はサーバ�
 test("コードの形式: 半角数字6〜12桁だけ", () => {
   for (const ok of ["123456", "123456789012"]) assert.equal(accessCodeError(ok), "");
   for (const ng of ["", "12345", "1234567890123", "12345a", "１２３４５６", " 123456"]) assert.match(accessCodeError(ng), /半角数字6〜12桁/);
-});
-
-test("自動で作るコード: 形式に合い、毎回違い、偏りの出る値は捨てる", () => {
-  const code = generateAccessCode();
-  assert.equal(code.length, GENERATED_CODE_DIGITS);
-  assert.equal(isAccessCode(code), true);
-  assert.notEqual(generateAccessCode(), code);
-  // 0xFFFFFFFF は 10 の倍数に収まらない範囲の値なので使わない
-  let calls = 0;
-  const fill = (a) => { calls += 1; a.fill(calls === 1 ? 0xffffffff : 7); return a; };
-  assert.equal(generateAccessCode(fill, 6), "777777");
-  assert.equal(calls, 2);
 });
 
 test("コードの状態: 未設定・設定済み。日付は画面に出さない。コードそのものは扱わない", () => {

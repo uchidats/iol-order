@@ -2779,6 +2779,7 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .settings-section[data-section="stickerPhotos"] > h4 { margin: 16px 0 6px; }
 .settings-section[data-section="stickerPhotos"] > .settings-heading + .sticker-code-row { margin-top: 10px; }
 .settings-section[data-section="stickerPhotos"] > .sticker-qr-row { margin-top: 16px; }
+.settings-section[data-section="stickerPhotos"] > [data-f="codeForm"] { margin-top: 8px; }
 .sticker-qr-dialog .settings-actions { justify-content: center; }   /* 「IOLシール写真のQRコード」のモーダルの印刷のボタンは中央 */
 
 /* ---------- IOL シール写真の閲覧画面(医療機関用・ディーラー用で共通。src/ui/sticker-photo-viewer.js) ---------- */

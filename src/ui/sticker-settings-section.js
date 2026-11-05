@@ -2,7 +2,7 @@ import { h } from "./markdown-view.js";
 import { createSectionHeading, createInfoTip } from "./info-tip.js";
 import { confirmDialog } from "./confirm-dialog.js";
 import { describeCallableError } from "../data/registration-api.js";
-import { accessCodeError, accessCodeStatus, generateAccessCode, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
+import { accessCodeError, accessCodeStatus, qrImageUrl, shareableDealers, verifyLockNotice } from "../domain/sticker-settings.js";
 
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
 const VIEW_HELP = "看護師が台紙を撮影して送るためのQRコードと台紙を、表示・印刷できます。アクセスコードは台紙やQRコードには載りません。アクセスコードの設定・変更、QRコードの作り直し、ディーラーへの共有は、施設の管理者・副管理者が行います。";
@@ -66,10 +66,9 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const codeBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editCode" });   // 「ディーラー画面での閲覧」の「許可する」と同じ見た目
   const codeInput = h("input", { type: "text", class: "form-control", "data-f": "code", inputmode: "numeric", autocomplete: "off", maxlength: "12", "aria-label": "新しいアクセスコード" });
   const codeError = h("p", { class: "error-message", "data-err": "code" });
-  const generate = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "generateCode" }, "自動で作る");
   const saveCode = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "saveCode" });
   const cancelCode = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "cancelCode" }, "キャンセル");
-  const codeForm = h("div", { "data-f": "codeForm", hidden: true }, codeInput, codeError, h("div", { class: "settings-actions" }, generate, saveCode, cancelCode));
+  const codeForm = h("div", { "data-f": "codeForm", hidden: true }, codeInput, codeError, h("div", { class: "settings-actions" }, saveCode, cancelCode));
   const newCode = h("strong", { "data-f": "newCode" });
   const hideNew = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "hideNewCode" }, "閉じる");
   const newCodeBox = h("div", { "data-f": "newCodeBox", role: "status", hidden: true },
@@ -85,7 +84,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     codeForm.hidden = false;
     codeInput.focus();
   });
-  generate.addEventListener("click", () => { codeInput.value = generateAccessCode(); codeError.textContent = ""; });
   cancelCode.addEventListener("click", closeForm);
   hideNew.addEventListener("click", clearNewCode);
   saveCode.addEventListener("click", async () => {
