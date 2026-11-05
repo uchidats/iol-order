@@ -144,7 +144,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
   });
 }
 
-test("アクセスコード: 変更は確認の後に保存し、新しいコードを1回だけ出す。閉じると消える", async (t) => {
+test("アクセスコード: 変更は確認の後に保存し、入力欄を閉じて通常の表示に戻す。コードは画面に出さない", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -153,6 +153,7 @@ test("アクセスコード: 変更は確認の後に保存し、新しいコー
     const s = section(page);
     assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
     await s.locator('[data-act="editCode"]').click();
+    assert.match(await s.locator('[data-f="codeNote"]').innerText(), /後から確認できません。控えてから保存してください/);
     await s.locator('[data-f="code"]').fill("12345");
     await s.locator('[data-act="saveCode"]').click();
     assert.match(await s.locator('[data-err="code"]').innerText(), /半角数字6〜12桁/);
@@ -163,19 +164,21 @@ test("アクセスコード: 変更は確認の後に保存し、新しいコー
     assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "setAccessCode"), false, "確認で取り消せる");
     await s.locator('[data-act="saveCode"]').click();
     await confirmDialog(page, "ok");
-    await s.locator('[data-f="newCodeBox"]').waitFor();
-    assert.equal(await s.locator('[data-f="newCode"]').innerText(), "654321");
+    await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent === "アクセスコードを変更しました。");
     assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
+    assert.equal(await s.locator('[data-act="editCode"]').isVisible(), true);
+    assert.equal(await s.locator('[data-f="newCodeBox"], [data-f="newCode"], [data-act="hideNewCode"]').count(), 0, "コードの表示・案内・閉じるは出さない");
+    assert.ok(!(await s.evaluate(el => el.outerHTML)).includes("654321"), "コードを画面に残さない");
     assert.equal(await s.locator('[data-f="code"]').inputValue(), "", "入力欄に残さない");
     assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み");
     assert.deepEqual(await page.evaluate(() => [localStorage.length ? JSON.stringify({ ...localStorage }).includes("654321") : false, sessionStorage.length]), [false, 0], "端末に保存しない");
-    await s.locator('[data-act="hideNewCode"]').click();
-    assert.equal(await s.locator('[data-f="newCode"]').innerText({ timeout: 1000 }).catch(() => ""), "");
+    await s.locator('[data-act="editCode"]').click();
+    assert.equal(await s.locator("[data-msg]").innerText(), "", "次の入力を始めたら通知を消す");
     await page.close();
   } finally { await browser.close(); }
 });
 
-test("アクセスコード: 未設定なら確認なしで設定でき、手入力だけ。失敗は理由を出す。画面を閉じると新しいコードは消える", async (t) => {
+test("アクセスコード: 未設定なら確認なしで設定でき、手入力だけ。失敗は理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -198,11 +201,12 @@ test("アクセスコード: 未設定なら確認なしで設定でき、手入
     assert.equal(await s.locator('[data-f="code"]').inputValue(), code, "失敗したら入力を残す");
     await page.evaluate(() => { window.__failCode = false; });
     await s.locator('[data-act="saveCode"]').click();
-    await s.locator('[data-f="newCodeBox"]').waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent === "アクセスコードを設定しました。");
+    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み");
     assert.equal(await page.locator(".confirm-dialog").count(), 0);
     assert.deepEqual((await page.evaluate(() => window.__calls)).filter(c => c.action === "setAccessCode").at(-1), { action: "setAccessCode", facilityId: "fA", code });
     await page.evaluate(() => window.__settings.close());
-    assert.equal(await page.evaluate(() => document.querySelector('[data-f="newCode"]').textContent), "");
+    assert.equal(await page.evaluate(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent), "", "画面を閉じると通知を消す");
     await page.close();
   } finally { await browser.close(); }
 });
@@ -554,7 +558,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);
         // 出さないもの
-        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="newCodeBox"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
+        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
           assert.equal(await s.locator(sel).isVisible(), false, sel);
         assert.equal(await s.locator("[data-dealer]").count(), 0);
         assert.ok(!(await s.innerText()).includes("ディーラーへの共有"));

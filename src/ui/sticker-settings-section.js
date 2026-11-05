@@ -7,7 +7,8 @@ import { accessCodeError, accessCodeStatus, qrImageUrl, shareableDealers, verify
 const HELP = "看護師が台紙を撮影して送るための設定です。アクセスコードは台紙やQRコードには載らず、設定後に再表示もできません。看護師へは別途お伝えください。忘れた場合は新しいコードに変更してください。ディーラーへの共有は、チェックを入れた後に送られた写真が対象です。";
 const VIEW_HELP = "看護師が台紙を撮影して送るためのQRコードと台紙を、表示・印刷できます。アクセスコードは台紙やQRコードには載りません。アクセスコードの設定・変更、QRコードの作り直し、ディーラーへの共有は、施設の管理者・副管理者が行います。";
 const ROTATE_HELP = "QRコードを紛失したときなどに作り直せます。これまでのQRコードは使えなくなります。";
-const QR_NOT_ISSUED_NOTE ="QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください。";
+const CODE_NOTE = "設定したコードは後から確認できません。控えてから保存してください。";
+const QR_NOT_ISSUED_NOTE = "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください。";
 const NOT_LINKED_HELP = "ディーラーの会社との関連付けは運営者が登録します。受注一覧の閲覧の許可とは別の設定です。";
 const STALE_NOTE = "許可の後に発注先の情報が変わったため、公開を止めています。チェックを外して、入れ直してください。";
 
@@ -50,7 +51,7 @@ function openQrDialog({ svg, facilityName, printActions = [] }) {
  * 施設設定の「IOLシール写真」。所属者全員に出し、コードの状態・QR コードの表示ができる。台紙と QR コードの印刷は、QR のモーダルから開く。
  * アクセスコードの設定と変更・QR コードの作り直し・ディーラーへの写真の共有は、管理者・副管理者だけに出す(canManage。サーバーも同じ規則で拒否する)。
  * 写真の共有は stickerPhotoGrants で、受注閲覧の許可(「ディーラー画面での閲覧」)とは別の設定。
- * 文字はすべて textContent。新しいコードはこの画面に1回だけ出し、端末には保存しない。
+ * 文字はすべて textContent。入力したコードは保存の後に画面へ出さず、端末にも保存しない。
  * @param {{api: ReturnType<import("../data/sticker-settings-api.js").createStickerSettingsApi>, confirm?: Function, getDealers?: () => Array<object>, canManage?: boolean}} deps getDealers: 施設の発注先(台紙の上部の表示の初期値。読むだけ)。canManage: 変更の操作を出すか(既定は出す)
  */
 export function createStickerSettingsSection({ api, confirm = confirmDialog, getDealers = () => [], canManage = true }) {
@@ -68,24 +69,17 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const codeError = h("p", { class: "error-message", "data-err": "code" });
   const saveCode = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "saveCode" });
   const cancelCode = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "cancelCode" }, "キャンセル");
-  const codeForm = h("div", { "data-f": "codeForm", hidden: true }, codeInput, codeError, h("div", { class: "settings-actions" }, saveCode, cancelCode));
-  const newCode = h("strong", { "data-f": "newCode" });
-  const hideNew = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "hideNewCode" }, "閉じる");
-  const newCodeBox = h("div", { "data-f": "newCodeBox", role: "status", hidden: true },
-    h("p", {}, "新しいアクセスコード: ", newCode), h("p", { class: "form-hint" }, "看護師へお伝えください。閉じると再表示できません。"), hideNew);
-
-  const clearNewCode = () => { newCode.textContent = ""; newCodeBox.hidden = true; };
+  const codeForm = h("div", { "data-f": "codeForm", hidden: true }, codeInput, codeError, h("p", { class: "form-hint", "data-f": "codeNote" }, CODE_NOTE), h("div", { class: "settings-actions" }, saveCode, cancelCode));
   const closeForm = () => { codeInput.value = ""; codeError.textContent = ""; codeForm.hidden = true; };
 
   codeBtn.addEventListener("click", () => {
     if (!manage()) return;
-    clearNewCode();
+    msg.textContent = "";
     saveCode.textContent = settings && settings.accessCodeSet ? "変更する" : "設定する";
     codeForm.hidden = false;
     codeInput.focus();
   });
   cancelCode.addEventListener("click", closeForm);
-  hideNew.addEventListener("click", clearNewCode);
   saveCode.addEventListener("click", async () => {
     if (busy || !manage()) return;
     const code = codeInput.value.trim();
@@ -98,9 +92,8 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     try {
       await api.setAccessCode(facilityId, code);
       closeForm();
-      newCode.textContent = code;
-      newCodeBox.hidden = false;
-      await load();
+      msg.textContent = changing ? "アクセスコードを変更しました。" : "アクセスコードを設定しました。";
+      await load().catch(() => {});   // 保存は成功している。表示の読み直しの失敗では通知を変えない
     } catch (e) {
       codeError.textContent = describeCallableError(e);
     } finally { busy = false; saveCode.disabled = false; }
@@ -196,7 +189,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
     // 変更の操作は、管理者・副管理者だけに出す
     for (const el of manageOnly) setShown(el, editable);
-    if (!editable) { closeForm(); clearNewCode(); dealerList.replaceChildren(); return; }
+    if (!editable) { closeForm(); dealerList.replaceChildren(); return; }
     const dealers = shareableDealers(settings.dealers);
     dealerList.replaceChildren(...(dealers.length ? dealers.map(dealerRow)
       : [h("p", { class: "form-hint" }, "共有できるディーラーはありません", createInfoTip(NOT_LINKED_HELP, { label: "共有できるディーラーの説明" }).root)]));
@@ -209,7 +202,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
-    h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm, newCodeBox,
+    h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm,
     h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
     shareHead, dealerList,
     msg);
@@ -228,7 +221,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     facilityId = fid; facilityName = name || ""; settings = null;
     setShown(codeStatus, false);
     msg.textContent = "";
-    clearNewCode(); closeForm();
+    closeForm();
     try {
       await load();
     } catch (e) {
@@ -239,6 +232,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     }
   };
   /** 画面を閉じるときに、表示中の新しいコードと入力を消す */
-  section._clear = () => { gen += 1; clearNewCode(); closeForm(); };
+  section._clear = () => { gen += 1; msg.textContent = ""; closeForm(); };
   return section;
 }
