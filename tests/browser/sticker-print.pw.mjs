@@ -64,8 +64,10 @@ async function openPage(browser, query = "", width = 390) {
   await page.waitForFunction(() => window.__ready);
   return page;
 }
+/** 印刷は QR のモーダルから開く */
 const openPrint = async (page, act) => {
-  await page.click(`[data-act="${act}"]`);
+  await page.click('[data-act="showQr"]');
+  await page.click(`.sticker-qr-dialog [data-act="${act}"]`);
   await page.waitForSelector('.sticker-print-view [data-act="print"]:not([disabled])');
 };
 const headerLines = (page) => page.locator('[data-f="header"]').allTextContents();
@@ -211,6 +213,7 @@ test("QR: 印刷のたびに有効な入口を受け取り、作り直した後�
     await openPrint(page, "printSheet");
     assert.ok((await qrHref()).includes('data-gen="0"'));
     await page.click('[data-act="closePrint"]');
+    await page.click('[data-f="rotateTip"] .info-tip-btn');
     await page.click('[data-act="rotateQr"]');
     await page.waitForSelector(".sticker-qr-dialog");
     await page.click('.sticker-qr-dialog [data-act="printQr"]');
@@ -219,9 +222,11 @@ test("QR: 印刷のたびに有効な入口を受け取り、作り直した後�
     assert.ok((await qrHref()).includes('data-gen="1"'));
     await page.click('[data-act="closePrint"]');
     const gets = (await page.evaluate(() => window.__calls)).filter(c => c[0] === "getEntryQr");
-    assert.deepEqual(gets, [["getEntryQr", "fA"], ["getEntryQr", "fA"]]);
+    assert.deepEqual(gets, [["getEntryQr", "fA"], ["getEntryQr", "fA"], ["getEntryQr", "fA"]], "モーダルの表示と、印刷のたびの取得");
+    await page.click('[data-act="showQr"]');
+    await page.waitForSelector(".sticker-qr-dialog");
     await page.evaluate(() => { window.__failQr = true; });
-    await page.click('[data-act="printSheet"]');
+    await page.click('.sticker-qr-dialog [data-act="printSheet"]');
     await page.waitForFunction(() => document.querySelector("[data-msg]").textContent.includes("権限"));
     assert.equal(await page.locator(".sticker-print-view").count(), 0);
     await page.close();

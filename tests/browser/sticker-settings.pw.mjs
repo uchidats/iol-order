@@ -43,6 +43,7 @@ const stickerPhotoCall = async (p) => {
   const manager = role === "admin" || role === "subadmin";
   // サーバーと同じ規則: 注文者・代理入力者の変更の操作は拒否し、表示には共有の状態を含めない
   if (!manager && ["setAccessCode", "rotateEntryQr", "setDealerShare", "delete"].includes(p.action)) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます");
+  if (p.action === "getSettings" && window.__slowSettings) await new Promise(r => setTimeout(r, 1500));
   if (p.action === "getSettings") return { accessCodeSet: state.set, accessCodeUpdatedAt: state.set ? state.updatedAt : null, entryIssued: state.entry, verifyBlockedUntil: state.lock ? "2026-11-06T03:05:00.000Z" : null, canManage: manager && q.get("deny") !== "1", ...(manager && q.get("deny") !== "1" ? { dealers: state.dealers } : {}) };
   if (p.action === "setAccessCode") { if (window.__failCode) fail("functions/permission-denied", "この施設の管理者・副管理者のみ操作できます"); state.set = true; state.lock = false; state.updatedAt = "2026-11-05T01:00:00.000Z"; return { ok: true }; }
   if (p.action === "getEntryQr" && !state.entry && !manager) fail("functions/failed-precondition", "QRコードはまだ発行されていません。施設の管理者・副管理者に発行を依頼してください");
@@ -214,10 +215,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await ready(page);
         const s = section(page);
         const rotate = s.locator('[data-act="rotateQr"]');
-        // 通常の表示: 3つのボタンだけ。作り直しは ⓘ の中
+        // 通常の表示: 「QRコードを表示」だけ。作り直しは ⓘ の中、印刷はモーダルの中
         assert.equal(await rotate.isVisible(), false, "通常は出さない");
-        for (const act of ["showQr", "printSheet", "printQr"]) assert.equal(await s.locator(`[data-act="${act}"]`).isVisible(), true, act);
-        assert.deepEqual(await s.locator('[data-act="showQr"]').locator("xpath=..").locator("button").evaluateAll(l => l.map(b => b.dataset.act)), ["showQr", "printSheet", "printQr"]);
+        assert.deepEqual(await s.locator('[data-act="showQr"]').locator("xpath=..").locator("button").evaluateAll(l => l.map(b => b.dataset.act)), ["showQr"]);
+        assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0, "施設設定の画面に印刷のボタンを出さない");
 
         const scrollWidth = () => page.evaluate(() => document.documentElement.scrollWidth);
         const closedWidth = await scrollWidth();
@@ -322,7 +323,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const page = await openPage(browser, "", width);
         await ready(page);
         const s = section(page);
-        const outer = await s.locator('[data-act="printSheet"]').evaluate((el) => { const c = getComputedStyle(el), r = el.getBoundingClientRect(); return { justify: getComputedStyle(el.parentElement).justifyContent, height: r.height, width: r.width, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize }; });
+        const outer = await s.locator('[data-act="showQr"]').evaluate((el) => { const c = getComputedStyle(el), r = el.getBoundingClientRect(); return { justify: getComputedStyle(el.parentElement).justifyContent, height: r.height, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize }; });
         assert.equal(outer.justify, "normal", "施設設定の画面の並びは変えない");
         await s.locator('[data-act="showQr"]').click();
         await page.waitForSelector(".sticker-qr-dialog");
@@ -332,7 +333,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           const a = d.querySelector('[data-act="printSheet"]'), b = d.querySelector('[data-act="printQr"]'), body = d.querySelector(".modal-body"), c = getComputedStyle(a);
           const cs = getComputedStyle(body);
           return { a: box(a), b: box(b), left: box(body).left + parseFloat(cs.paddingLeft), right: box(body).right - parseFloat(cs.paddingRight), labels: [a.textContent, b.textContent], gap: box(b).left - box(a).right,
-            style: { height: box(a).height, width: box(a).width, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize } };
+            style: { height: box(a).height, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize } };
         });
         assert.deepEqual(m.labels, ["台紙を印刷", "QRコードのみ印刷"]);
         const center = (m.left + m.right) / 2;
@@ -354,6 +355,24 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
     } finally { await browser.close(); }
   });
 }
+
+test("QR のモーダル: 設定の読み直しの途中でも、印刷と QR のみの印刷を開ける(管理者・注文者)", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    for (const [query, act] of [["", "printSheet"], ["", "printQr"], ["?view=member&role=orderer", "printSheet"], ["?view=member&role=proxy", "printQr"]]) {
+      const page = await openPage(browser, query);
+      await ready(page);
+      await page.evaluate(() => { window.__slowSettings = true; });
+      await section(page).locator('[data-act="showQr"]').click();
+      await page.click(`.sticker-qr-dialog [data-act="${act}"]`);
+      await page.waitForSelector(".sticker-print-view");
+      assert.equal(await page.locator(".sticker-qr-dialog").count(), 0, "モーダルは閉じる");
+      assert.deepEqual(page.errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
 
 test("写真の共有: チェックで自動保存し、受注閲覧の許可の処理を呼ばない。失敗はチェックを戻して理由を出す", async (t) => {
   const browser = await launch(chromium, "chromium");
@@ -472,8 +491,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const s = section(page);
         assert.equal(await s.isVisible(), true, role);
         assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03 変更)");
-        // 出すもの
-        for (const act of ["showQr", "printSheet", "printQr"]) assert.equal(await s.locator(`[data-act="${act}"]`).isVisible(), true, act);
+        // 出すもの(印刷はモーダルの中)
+        assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
+        assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);
         // 出さないもの
         for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="newCodeBox"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
           assert.equal(await s.locator(sel).isVisible(), false, sel);
@@ -510,7 +530,8 @@ test("役割ごとの表示: 注文者も台紙を印刷できる(発注先は�
     for (const q of ["?view=member&role=orderer", "?view=member&role=proxy&dealerList=fail"]) {
       const page = await openPage(browser, q);
       await ready(page);
-      await section(page).locator('[data-act="printSheet"]').click();
+      await section(page).locator('[data-act="showQr"]').click();
+      await page.click('.sticker-qr-dialog [data-act="printSheet"]');
       await page.waitForSelector(".sticker-print-view");
       assert.equal((await page.evaluate(() => window.__calls)).some(c => c.action === "getEntryQr"), true);
       assert.equal(await section(page).locator("[data-msg]").innerText(), "", q);

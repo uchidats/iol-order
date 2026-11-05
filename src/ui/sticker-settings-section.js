@@ -47,7 +47,7 @@ function openQrDialog({ svg, facilityName, printActions = [] }) {
 }
 
 /**
- * 施設設定の「IOLシール写真」。所属者全員に出し、コードの状態・QR コードの表示と印刷・台紙の印刷ができる。
+ * 施設設定の「IOLシール写真」。所属者全員に出し、コードの状態・QR コードの表示ができる。台紙と QR コードの印刷は、QR のモーダルから開く。
  * アクセスコードの設定と変更・QR コードの作り直し・ディーラーへの写真の共有は、管理者・副管理者だけに出す(canManage。サーバーも同じ規則で拒否する)。
  * 写真の共有は stickerPhotoGrants で、受注閲覧の許可(「ディーラー画面での閲覧」)とは別の設定。
  * 文字はすべて textContent。新しいコードはこの画面に1回だけ出し、端末には保存しない。
@@ -110,8 +110,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   /* ---------- QR コード ---------- */
   const showQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "showQr" }, "QRコードを表示");
   const rotateQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "rotateQr" }, "QRコードを作り直す");
-  const printSheet = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "printSheet" }, "台紙を印刷");
-  const printQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "printQr" }, "QRコードのみ印刷");
   /** 印刷の画面を開く。QR は毎回サーバーから有効な入口を受け取る(作り直した後に古い QR を印刷しない) */
   const openPrint = async (kind) => {
     if (busy) return;
@@ -125,18 +123,23 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     } finally { busy = false; }
   };
   const printActions = [{ act: "printSheet", label: "台紙を印刷", run: () => openPrint("sheet") }, { act: "printQr", label: "QRコードのみ印刷", run: () => openPrint("qr") }];
-  printSheet.addEventListener("click", () => openPrint("sheet"));
-  printQr.addEventListener("click", () => openPrint("qr"));
+  // 印刷はモーダルから開く。設定の読み直しの間もモーダルの印刷を押せるよう、QR を受け取った時点で busy を解く
   const qrAction = async (fn) => {
     if (busy) return;
     busy = true; msg.textContent = "";
+    let svg;
     try {
-      const { svg } = await fn(facilityId);
-      openQrDialog({ svg, facilityName, printActions });
+      ({ svg } = await fn(facilityId));
+    } catch (e) {
+      msg.textContent = describeCallableError(e);
+      return;
+    } finally { busy = false; }
+    openQrDialog({ svg, facilityName, printActions });
+    try {
       await load();
     } catch (e) {
       msg.textContent = describeCallableError(e);
-    } finally { busy = false; }
+    }
   };
   showQr.addEventListener("click", () => qrAction(api.getEntryQr));
   // 「QRコードを作り直す」は通常は出さず、見出しのⓘの中に置く(管理者・副管理者だけ)。
@@ -184,7 +187,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     const editable = manage();
     // QR の初回の発行は管理者・副管理者だけ。未発行なら、注文者・代理入力者には表示・印刷を出さず、依頼の案内を出す
     const canUseQr = editable || settings.entryIssued !== false;
-    for (const el of [showQr, printSheet, printQr]) setShown(el, canUseQr);
+    setShown(showQr, canUseQr);
     setShown(qrNote, !canUseQr);
     lockNote.textContent = verifyLockNotice(settings, { canManage: editable });
     lockNote.hidden = !lockNote.textContent;
@@ -205,7 +208,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions sticker-code-row" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
-    h("h4", { style: "position: relative" }, "QRコード", rotateTip.root), h("div", { class: "settings-actions" }, showQr, printSheet, printQr), qrNote,
+    h("h4", { style: "position: relative" }, "QRコード", rotateTip.root), h("div", { class: "settings-actions" }, showQr), qrNote,
     shareHead, dealerList,
     msg);
 
