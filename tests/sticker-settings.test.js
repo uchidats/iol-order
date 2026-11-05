@@ -30,7 +30,7 @@ test("自動で作るコード: 形式に合い、毎回違い、偏りの出る
 
 test("コードの状態: 未設定・設定済み(変更日は日本時間)。コードそのものは扱わない", () => {
   assert.equal(accessCodeStatus({ accessCodeSet: false, accessCodeUpdatedAt: null }), "未設定");
-  assert.equal(accessCodeStatus({ accessCodeSet: true, accessCodeUpdatedAt: "2026-11-02T15:30:00.000Z" }), "設定済み(2026/11/03 変更)");
+  assert.equal(accessCodeStatus({ accessCodeSet: true, accessCodeUpdatedAt: "2026-11-02T15:30:00.000Z" }), "設定済み(2026/11/03)");
   assert.equal(accessCodeStatus({ accessCodeSet: true, accessCodeUpdatedAt: null }), "設定済み");
 });
 

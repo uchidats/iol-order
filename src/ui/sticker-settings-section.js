@@ -108,7 +108,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   });
 
   /* ---------- QR コード ---------- */
-  const showQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "showQr" }, "QRコードを表示");
+  const showQr = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "showQr", "aria-label": "QRコードを表示" }, "表示");   // 「変更」と同じ見た目
   const rotateQr = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "rotateQr" }, "QRコードを作り直す");
   /** 印刷の画面を開く。QR は毎回サーバーから有効な入口を受け取る(作り直した後に古い QR を印刷しない) */
   const openPrint = async (kind) => {
@@ -147,6 +147,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const rotateTip = createInfoTip(ROTATE_HELP, { label: "QRコードの作り直し" });
   rotateTip.root.dataset.f = "rotateTip";
   rotateTip.popup.removeAttribute("role");   // 操作を含むので tooltip にしない
+  rotateTip.popup.style.marginTop = "0";     // 行の高さが増えた分、マウスを ⓘ からボタンへ動かす途中で閉じないように詰める
   rotateTip.popup.append(h("div", { class: "settings-actions" }, rotateQr));
   rotateTip.popup.addEventListener("mousedown", (e) => e.preventDefault());
   rotateQr.addEventListener("click", async () => {
@@ -208,7 +209,7 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("IOLシール写真", canManage ? HELP : VIEW_HELP),
     h("h4", {}, "アクセスコード"), h("div", { class: "settings-actions sticker-code-row" }, codeStatus, codeBtn), lockNote, codeForm, newCodeBox,
-    h("h4", { style: "position: relative" }, "QRコード", rotateTip.root), h("div", { class: "settings-actions" }, showQr), qrNote,
+    h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
     shareHead, dealerList,
     msg);
 

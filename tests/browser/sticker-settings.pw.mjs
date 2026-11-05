@@ -112,7 +112,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const [role, width] of [["admin", 390], ["subadmin", 1100]]) {
         const page = await openPage(browser, `?role=${role}`, width);
         await ready(page);
-        assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03 変更)");
+        assert.equal(await section(page).locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03)");
         assert.equal(await section(page).locator('[data-act="editCode"]').innerText(), "変更");
         assert.deepEqual(await section(page).locator("[data-share] label span:first-of-type").allInnerTexts(), ["X商事 立川", "Y医療"], "関連付けのない発注先は出さない");
         assert.deepEqual(await section(page).locator("[data-dealer]").evaluateAll(l => l.map(i => i.checked)), [false, true]);
@@ -167,7 +167,7 @@ test("アクセスコード: 変更は確認の後に保存し、新しいコー
     assert.equal(await s.locator('[data-f="newCode"]').innerText(), "654321");
     assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), false);
     assert.equal(await s.locator('[data-f="code"]').inputValue(), "", "入力欄に残さない");
-    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/05 変更)");
+    assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/05)");
     assert.deepEqual(await page.evaluate(() => [localStorage.length ? JSON.stringify({ ...localStorage }).includes("654321") : false, sessionStorage.length]), [false, 0], "端末に保存しない");
     await s.locator('[data-act="hideNewCode"]').click();
     assert.equal(await s.locator('[data-f="newCode"]').innerText({ timeout: 1000 }).catch(() => ""), "");
@@ -215,9 +215,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await ready(page);
         const s = section(page);
         const rotate = s.locator('[data-act="rotateQr"]');
-        // 通常の表示: 「QRコードを表示」だけ。作り直しは ⓘ の中、印刷はモーダルの中
+        // 通常の表示: 「表示」だけ。作り直しは ⓘ の中、印刷はモーダルの中
         assert.equal(await rotate.isVisible(), false, "通常は出さない");
-        assert.deepEqual(await s.locator('[data-act="showQr"]').locator("xpath=..").locator("button").evaluateAll(l => l.map(b => b.dataset.act)), ["showQr"]);
+        assert.equal(await s.locator('[data-act="showQr"]').innerText(), "表示");
+        assert.equal(await s.locator('[data-act="showQr"]').getAttribute("aria-label"), "QRコードを表示");
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0, "施設設定の画面に印刷のボタンを出さない");
 
         const scrollWidth = () => page.evaluate(() => document.documentElement.scrollWidth);
@@ -225,8 +226,10 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await openRotateTip(s);
         assert.equal(await rotate.isVisible(), true, "ⓘ の中に出す");
         assert.match(await s.locator('[data-f="rotateTip"] .info-tip-pop').innerText(), /これまでのQRコードは使えなくなります/);
-        const box = await rotate.boundingBox(), aux = await s.locator('[data-act="showQr"]').boundingBox();
-        assert.equal(box.height, aux.height, "ボタンの高さはほかの補助ボタンと同じ");
+        const box = await rotate.boundingBox();
+        assert.equal(await rotate.evaluate(e => getComputedStyle(e).minHeight), "36px", "ボタンの大きさは変えない");
+        const pop = await s.locator('[data-f="rotateTip"] .info-tip-pop').boundingBox();
+        assert.ok(box.x >= pop.x && box.x + box.width <= pop.x + pop.width, `${width}: ボタンは説明の枠の中`);
         assert.ok(box.x >= 0 && box.x + box.width <= width, `${width}: 画面の中に収まる`);
         assert.equal(await scrollWidth(), closedWidth, `${width}: ⓘ を開いても画面の幅は増えない`);
 
@@ -282,7 +285,7 @@ test("QR: 見出しの行の高さはほかの見出しと同じ。マウスで 
 });
 
 for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
-  test(`アクセスコードの「変更」: 「許可する」と同じ見た目で、状態は左、ボタンは同じ右端。ほかのボタンは変えない: ${name}`, async (t) => {
+  test(`アクセスコードの「変更」・QRコードの「表示」: 「許可する」と同じ見た目で右端をそろえ、見出し・内容・次の項目を詰めない。ほかのボタンは変えない: ${name}`, async (t) => {
     const browser = await launch(type, name);
     if (!browser) return t.skip(`${name} を起動できません`);
     try {
@@ -303,7 +306,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 0.5, `${width}: 右端が同じ`);
         assert.ok(st.x + st.width <= a.x, `${width}: 状態はボタンの左`);
         assert.ok(st.y < a.y + a.height && a.y < st.y + st.height, `${width}: 同じ行`);
-        assert.equal(await s.locator('[data-act="showQr"]').evaluate(e => getComputedStyle(e).minHeight), "36px", "ほかの補助ボタンは変えない");
+        // QRコード: 見出しと同じ行で、「変更」と同じ見た目・同じ右端
+        const show = s.locator('[data-act="showQr"]');
+        assert.deepEqual(await style(show), await style(code), `${width}: 「表示」は「変更」と同じ見た目`);
+        const q = await show.boundingBox(), head = await s.locator(".sticker-qr-row h4").boundingBox();
+        assert.ok(Math.abs((q.x + q.width) - (a.x + a.width)) < 0.5, `${width}: 「表示」と「変更」の右端が同じ`);
+        assert.ok(head.y < q.y + q.height && q.y < head.y + head.height && head.x + head.width <= q.x, `${width}: 見出しと同じ行`);
+        // 項目の間隔
+        const heads = await s.evaluate((el) => {
+          const box = (n) => n.getBoundingClientRect();
+          const h4s = [...el.querySelectorAll(":scope > h4")], row = el.querySelector(":scope > .sticker-code-row:not(.sticker-qr-row)"), qr = el.querySelector(".sticker-qr-row");
+          return { headToContent: box(row).top - box(h4s[0]).bottom, contentToQr: box(qr).top - box(row).bottom, qrToShare: box(h4s[1]).top - box(qr).bottom };
+        });
+        assert.ok(heads.headToContent > 5.9 && heads.contentToQr > 15.9 && heads.qrToShare > 15.9, `${width}: ${JSON.stringify(heads)}`);
+        assert.equal(await s.locator('[data-f="rotateTip"] [data-act="rotateQr"]').evaluate(e => getComputedStyle(e).minHeight), "36px", "ほかの補助ボタンは変えない");
 
         await code.click();
         assert.equal(await s.locator('[data-f="codeForm"]').isVisible(), true, "機能はそのまま");
@@ -323,8 +339,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         const page = await openPage(browser, "", width);
         await ready(page);
         const s = section(page);
-        const outer = await s.locator('[data-act="showQr"]').evaluate((el) => { const c = getComputedStyle(el), r = el.getBoundingClientRect(); return { justify: getComputedStyle(el.parentElement).justifyContent, height: r.height, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize }; });
-        assert.equal(outer.justify, "normal", "施設設定の画面の並びは変えない");
+        assert.equal(await s.locator('[data-f="rotateTip"] .settings-actions').evaluate(e => getComputedStyle(e).justifyContent), "normal", "モーダルの外の並びは変えない");
         await s.locator('[data-act="showQr"]').click();
         await page.waitForSelector(".sticker-qr-dialog");
         const m = await page.evaluate(() => {
@@ -333,7 +348,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           const a = d.querySelector('[data-act="printSheet"]'), b = d.querySelector('[data-act="printQr"]'), body = d.querySelector(".modal-body"), c = getComputedStyle(a);
           const cs = getComputedStyle(body);
           return { a: box(a), b: box(b), left: box(body).left + parseFloat(cs.paddingLeft), right: box(body).right - parseFloat(cs.paddingRight), labels: [a.textContent, b.textContent], gap: box(b).left - box(a).right,
-            style: { height: box(a).height, radius: c.borderRadius, background: c.backgroundColor, fontSize: c.fontSize } };
+            style: { minHeight: c.minHeight, background: c.backgroundColor, classes: a.className } };
         });
         assert.deepEqual(m.labels, ["台紙を印刷", "QRコードのみ印刷"]);
         const center = (m.left + m.right) / 2;
@@ -346,8 +361,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           assert.ok(Math.abs((m.a.left + m.b.right) / 2 - center) < 1, `${width}: 中央`);
           assert.ok(Math.abs(m.gap - 8) < 0.01, `間隔は変えない: ${m.gap}`);
         }
-        const { justify, ...size } = outer;
-        assert.deepEqual(m.style, size, "ボタンは施設設定の画面と同じ見た目");
+        assert.deepEqual(m.style, { minHeight: "36px", background: "rgb(241, 245, 249)", classes: "btn btn-secondary btn-aux" }, "ボタンの見た目は変えない");
         await page.click('.sticker-qr-dialog [data-act="close"]');
         assert.deepEqual(page.errors, []);
         await page.close();
@@ -490,7 +504,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         await ready(page);
         const s = section(page);
         assert.equal(await s.isVisible(), true, role);
-        assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03 変更)");
+        assert.equal(await s.locator('[data-f="codeStatus"]').innerText(), "設定済み(2026/11/03)");
         // 出すもの(印刷はモーダルの中)
         assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);
