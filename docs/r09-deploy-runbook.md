@@ -5,11 +5,24 @@
 
 - プロジェクト: `medconf-iol-dev` / リージョン: `asia-northeast1`
 - 実行サービスアカウント: `iol-functions-dev@medconf-iol-dev.iam.gserviceaccount.com`(全関数で共通。ユーザー管理の鍵なし)
-- 2026-11-05 の読み取りの結果: Storage の権限なし、写真用のバケットなし、Secret は既存の4個、必要な API(Storage・Secret Manager・Cloud Scheduler)は有効、本番に R09 のデータなし。
+- 配備の前(2026-11-05)の状態: Storage の権限なし、写真用のバケットなし、Secret は既存の4個、必要な API(Storage・Secret Manager・Cloud Scheduler)は有効、本番に R09 のデータなし。
+
+## 実施の状況(2026-11-05 時点)
+
+機能は停止のまま(`STICKER_PHOTO_ENABLED=false`、対象の施設なし)。どの施設も利用できない。
+
+| 段階 | 状況 | 結果 |
+| --- | --- | --- |
+| 1. バケットと IAM | 実施済み | この文書のコマンドどおり。確認の結果は期待どおり(匿名の一覧は 401) |
+| 2. Secret | 実施済み | 作成の方法を変更(段階 2 の記録)。有効な版が1つ、自動レプリケーション |
+| 3. Rules・インデックス | 実施済み | 差分は全拒否の 8 領域(28 行の追加)と `stickerPhotos` の1本だけ。インデックスは `READY`。旧版のルールセットは `6e8a3125…`(戻すときに使う) |
+| 4. 新しい5関数 | 実施済み | 5つとも `ACTIVE`。既存の 38 関数は更新時刻・設定とも変更なし |
+| 5. 停止の状態での確認 | 一部を除き実施済み | 下の一覧の応答はすべて期待どおり。**別々の回線からの送信元 IP の確認は未実施** |
+| 6〜8 | 未実施 | 運営者の指示の後に行う |
 
 ## 既存の機能への影響(先に読む)
 
-- `functions/index.js` は `STICKER_TICKET_SECRET` を宣言している。**段階 2 の前に Functions 全体を配備しない。** その間に注文・メールの関数を直すときは、関数を指定して配備する(例 `--only functions:createOrder`)。
+- `functions/index.js` は `STICKER_TICKET_SECRET` を宣言している。段階 2 が済むまで Functions 全体を配備しない(2026-11-05 に登録済み)。**注文・メールの関数を直すときは、これからも関数を指定して配備する**(例 `--only functions:createOrder`)。既存の関数の環境変数は配備の時期によって値が異なるものがあるので、全体を配備すると、それらの関数の環境変数も現在の `.env` の値に揃う。
 - 段階 4・7 は新しい5関数だけを指定する。既存の関数は再配備しない。
 - Rules の差は R09 の領域の全拒否の追加だけ。インデックスは `stickerPhotos` の1つが増えるだけ(既存のものは削除しない。`--force` を付けない)。
 
@@ -54,11 +67,17 @@ curl -s -o /dev/null -w "%{http_code}\n" "https://storage.googleapis.com/storage
 
 ## 段階 2. Secret
 
-値は画面・ログに出さない(乱数をそのまま渡す)。
+値は画面・ログ・ファイルに出さない。
 
-```bash
-openssl rand -base64 48 | gcloud secrets create STICKER_TICKET_SECRET --project=medconf-iol-dev --replication-policy=automatic --data-file=-
-```
+**2026-11-05 の実施(当初の手順からの変更)**: 当初の手順は `openssl rand -base64 48 | gcloud secrets create … --data-file=-` だった。この環境(Windows)では Bash の `gcloud` が動かず、PowerShell のパイプは値の末尾に改行を足すおそれがあるので、次の方法に変えた。
+
+1. 同名の Secret がないことを確かめる。
+2. `gcloud secrets create STICKER_TICKET_SECRET --project=medconf-iol-dev --replication-policy=automatic --labels=firebase-managed=functions`(ラベルは既存の4個と同じ)。
+3. PowerShell の `RandomNumberGenerator` で 48 バイトの乱数をメモリ内に作り、Base64 の文字列(64 文字)にする。
+4. 文字列を Secret Manager の REST API(`:addVersion`)へ直接送り、変数を消す。値はファイルに書かない。
+5. 権限は、この Secret に限って `iol-functions-dev` へ `roles/secretmanager.secretAccessor` を付ける(既存の4個と同じ形)。
+
+値は読み戻していない。段階 4 の配備で関数に割り当てられたことを確かめた。実際の署名は、段階 7 で確かめる。
 
 確認(値は読まない)。期待: 有効な版が1つ。
 
@@ -66,7 +85,8 @@ openssl rand -base64 48 | gcloud secrets create STICKER_TICKET_SECRET --project=
 gcloud secrets versions list STICKER_TICKET_SECRET --project=medconf-iol-dev --format="table(name,state)"
 ```
 
-- 参照の権限は、段階 4 の配備のときに CLI がこの Secret だけに付ける。関数への割り当ては `stickerEntryApi`・`stickerPhotoUpload` の2つだけ。
+- 関数への割り当ては `stickerEntryApi`・`stickerPhotoUpload` の2つだけ。全関数が同じ実行サービスアカウントなので、IAM では2関数に絞れない(権限上はほかの関数の実行環境からも読める)。絞っているのはコードの `secrets:` の宣言で、既存のメール用の Secret と同じ扱い。
+- 段階 4 の配備のとき、CLI は「権限を付けた」と表示するが、同じ内容の再設定で、権限は変わらない(前後で確認済み)。
 - 既存の Secret(メール関連の4個)は変更しない。
 - 鍵を替えると、発行済みのチケット(最長 30 分)が無効になるだけで、保存済みの写真には影響しない。
 
@@ -84,11 +104,12 @@ gcloud firestore indexes composite list --project medconf-iol-dev --format="tabl
 
 ## 段階 4. 新しい5関数(機能は停止のまま)
 
-`functions/.env.medconf-iol-dev` に次を足す(値は停止のまま)。
+`functions/.env.medconf-iol-dev` に次を足す(値は停止のまま)。`--non-interactive` では既定値のある変数も入力を求められて失敗するので、`STICKER_PHOTO_BUCKET` も明記する。
 
 ```
 STICKER_PHOTO_ENABLED=false
 STICKER_PHOTO_FACILITY_IDS=
+STICKER_PHOTO_BUCKET=medconf-iol-dev-sticker-photos
 ```
 
 ```bash
@@ -143,9 +164,18 @@ CORS(事前確認)。期待: 許可のヘッダーは `https://iol.medconf.jp` �
 curl -s -i -X OPTIONS "$BASE/stickerEntryApi" -H "Origin: https://evil.example" -H "Access-Control-Request-Method: POST" | grep -i "access-control-allow-origin"
 ```
 
-**送信元 IP の取り方(設計書 §8-6 (4))**: 別々の回線(例: Wi-Fi と携帯の回線)から、上の `stickerEntryApi` の確認を1回ずつ送る → Firestore の `stickerRateLimits` で `scope` が `ip` の文書が**2つ**(それぞれ `count` 1)なら正しい。1つにまとまっていたら、機能を有効にせず `clientIpOf` を直す。IP そのものは記録されない(文書の ID はハッシュ)。
+**送信元 IP の取り方(設計書 §8-6 (4))**: 別々の回線(例: Wi-Fi と携帯の回線)から、上の `stickerEntryApi` の確認を1回ずつ送る → Firestore の `stickerRateLimits` で `scope` が `ip` の文書が回線ごとに分かれていれば(それぞれの回線の `count` が 1 ずつ増える)正しい。1つにまとまっていたら、機能を有効にせず `clientIpOf` を直す。IP そのものは記録されない(文書の ID はハッシュ)。
 
 - 確認の要求は、停止中も回数制限の記録を作る(送信元ごとに 10 分で 30 回まで)。この記録は、機能を有効にした後に `stickerPhotoCleanup` が期限切れのものから消す。
+- `stickerPhotoCleanup` は公開していない。未認証の呼び出しは `403`(本文なしの POST は `411` になるので、`Content-Length` を付けて確かめる)。実行の権限は `iol-functions-dev` だけ。スケジューラは 24 時間ごとに呼ぶが、停止の間は何もしない。
+- `stickerPhotoUpload` の 503 は、Cloud Run の要求ログに ERROR として残る。アプリのエラーではない。
+
+**2026-11-05 の実環境の確認の結果(偽のトークン・コードだけを使用。一覧のとおり)**
+
+- 確認 `PERMISSION_DENIED`、保存 `503`(チケットなし・偽のチケット)、別オリジン `403`、`POST` `405`、画像 `401`(未ログイン・偽の ID トークン)、API `UNAUTHENTICATED`(`list`・`status`)、`stickerPhotoCleanup` `403`。
+- CORS: `stickerEntryApi` は別オリジンでも許可のヘッダーが正規のサイトのまま。`stickerPhotoUpload`・`stickerPhotoImage` は別オリジンの事前確認が `403`。`stickerPhotoApi` は別オリジンをそのまま返す(`createOrder` などの既存の callable と同じ。ID トークンが必須で Cookie を使わない。設計書 §8-2 のとおり)。
+- バケット: 匿名の一覧 `401`、匿名の XML 一覧・オブジェクトの取得 `403`、オブジェクト 0 個。
+- 確認の呼び出しを1回行ったので、`stickerRateLimits` に記録が3件(`ip`・`token`・`tokenDay`。各 `count` 1)ある。IP そのものは含まない。段階 5 の送信元 IP の確認では、この `ip` の文書も数に入る(別の回線から送ると、`ip` の文書が増えることを確かめる)。
 
 ## 段階 6. 画面(`main` へ統合。表示の設定は false のまま)
 

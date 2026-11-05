@@ -566,15 +566,16 @@ Functions・Rules・写真専用バケットはいずれも新規の領域に閉
 
 0. **公開前のテスト**: `npm test`、`npm run test:rules`、`npm run test:functions`、`npm run test:functions:e2e`(`functions/index.js` 全体の読み込みと CORS を含む)、R09 と既存画面のブラウザテスト。
 1. **バケットと IAM**(§8-4): 作成(asia-northeast1・均一なアクセス・公開アクセスの防止・Soft Delete 無効〔0 日〕・バージョニング無効)→ 実行サービスアカウントへバケット単位の `roles/storage.objectUser` → 設定と、クライアント・匿名から読めないことを読み取りだけで確かめる。
-2. **Secret**: `STICKER_TICKET_SECRET`(32 バイト以上の乱数)を登録する。値はチャット・文書・ログに書かない。
+2. **Secret**: `STICKER_TICKET_SECRET`(32 バイト以上の乱数)を登録する。値はチャット・文書・ログに書かない(実際の方法は `docs/r09-deploy-runbook.md` 段階 2)。
 3. **Firestore Rules・インデックス**: 配備し、インデックスの作成の完了を待つ。
 4. **Functions**: 設定値(`STICKER_PHOTO_ENABLED=false` のまま・`STICKER_PHOTO_BUCKET`)を入れ、新しい5つの関数を配備する(既存の関数は変更がなければ触らない)。
 5. **配備の後の確認(機能は停止のまま)**: 送信元 IP の取り方(§8-6 (4))、未認証・別オリジンへの応答、`stickerEntryApi` の事前確認(CORS)。
 6. **画面**: `main` へ push(表示の設定は false のまま)。
 7. **有効化**: `STICKER_PHOTO_FACILITY_IDS` に最初の施設だけを入れて `STICKER_PHOTO_ENABLED=true` → 実機で、コードの設定・QR・撮影・送信・閲覧・削除・共有を確かめる → 表示の設定を true にして公開し、マニュアルを更新する。
 
-### 9-4. 行っていないこと(2026-11-05 時点)
-IAM の変更、バケットの作成、Secret の登録、Functions・Rules・インデックス・画面の配備、`main` への統合、実機(Galaxy・iPhone)と実際のバケットでの確認、マニュアル。いずれも §9-1 の準備とユーザーの指示の後に行う。
+### 9-4. 実施の状況(2026-11-05 時点)
+本番で実施済み(ユーザーの指示による): §9-3 の 1〜4(バケット・IAM・Secret・Rules・インデックス・新しい5関数)と、5 のうち未認証・別オリジンへの応答と CORS の確認。機能は停止のままで、どの施設も利用できない。結果の詳細は `docs/r09-deploy-runbook.md`。
+行っていないこと: 別々の回線からの送信元 IP の確認(§8-6 (4))、画面の配備と `main` への統合、機能の有効化、実機(Galaxy・iPhone)と実際のバケットでの保存・閲覧の確認、マニュアル。いずれもユーザーの指示の後に行う。
 
 
 ## 10. 将来のアイデア: OCR・バーコード認識によるディーラー別の写真表示(未実装)
