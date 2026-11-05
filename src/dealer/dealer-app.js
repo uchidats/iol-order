@@ -1,5 +1,6 @@
 import { h } from "../ui/markdown-view.js";
 import { describeCallableError } from "../data/registration-api.js";
+import { STICKER_VIEWER_ENABLED } from "../domain/sticker-photo-view.js";
 import { facilityFilterOf, selectionFor, formatJstDateTime, formatDate, mailStatusText, mailNeedsAttention, jstDate, mondayOf, addDays, weekStartLabel, spanLabel, dateFieldLabel, isDealerManager, restoreFacilitySelection } from "../domain/dealer-portal.js";
 import { historyCardGroups } from "../domain/order-history-view.js";
 import { lensDayHead, lensRow } from "../ui/history-lens.js";
@@ -37,7 +38,7 @@ const INITIAL_WEEKS = 3;
 const lensOf = (l) => ({ lineNo: l.no, surgeryDate: l.surgeryDate || "", model: l.toricModel || l.model, power: l.power, quantity: l.quantity, doctorName: l.doctorName || "" });
 const doctorOf = (l) => (l.doctorName ? `${l.doctorName}Dr` : "担当医の記録なし");
 
-export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, setMenu = () => {}, facilityView = { load: () => null, save: () => {} } }) {
+export function createDealerApp({ mount, api, stickerApi = null, onSignOut, setSubtitle = () => {}, setRememberDevice = () => {}, setMenu = () => {}, facilityView = { load: () => null, save: () => {} } }) {
   let ctx = null;          // getContext の結果(会社・施設の候補・初期選択)
   let selected = new Set();
   let lastQuery = null, cursor = null, items = [], busy = false;
@@ -99,6 +100,28 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     panel.hidden = true;
     settingsView.hidden = false;
     window.scrollTo(0, 0);
+  }
+
+  // ---------- シール写真(☰メニューから開く。受注一覧の処理とは別で、施設が写真の共有を許可した分だけをサーバーが返す) ----------
+  let stickerView = null;
+  function dropStickerView() {
+    if (stickerView) stickerView.close();
+    panel.hidden = false;
+  }
+  async function openStickerPhotos() {
+    if (!ctx || ctx.testMode || !stickerApi || !STICKER_VIEWER_ENABLED) return;
+    if (!stickerView) {
+      const { createStickerPhotoViewer } = await import("../ui/sticker-photo-viewer.js");
+      stickerView = createStickerPhotoViewer({
+        mount, title: "シール写真", backLabel: "受注一覧に戻る",
+        info: "施設が共有を許可した医療機関の IOL シール台紙の写真です。許可された後に送られた写真だけを閲覧できます。",
+        onClose: () => { panel.hidden = false; window.scrollTo(0, 0); }
+      });
+    }
+    if (settingsView) settingsView.hidden = true;
+    panel.hidden = true;
+    window.scrollTo(0, 0);
+    await stickerView.open(stickerApi.dealerSource({ companyId: ctx.company.id }));
   }
 
   const signOutBtn = () => {
@@ -247,6 +270,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     ctx = context;
     selected = new Set();
     dropSettings();
+    dropStickerView();
     document.body.classList.remove("dealer-report-open");
     setSubtitle(ctx.company.name);
     // 会社のテーマカラー(サーバーが所属を確かめた context の値。未設定は標準の青)。端末には覚えない(確認前に会社の色を出さない)
@@ -256,7 +280,7 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
     applySubTheme(ctx.subTheme);
     // 氏名・所属会社・ディーラー設定(会社管理者・支店管理者)・会社の切り替え・ログアウトはヘッダーの「☰」メニュー(サーバーが確かめた context の値)
     setMenu({ name: ctx.me.name || "", companyName: ctx.company.name, branchName: ctx.me.branch ? ctx.me.branch.name : "",
-      canSwitch: choices.length > 1, canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
+      canSwitch: choices.length > 1, canStickerPhotos: STICKER_VIEWER_ENABLED && !ctx.testMode && Boolean(stickerApi), canSettings: !ctx.testMode && isDealerManager(ctx.me.role) });
     if (ctx.testMode) return showTestMode();
     // 医療機関のチェック: 端末に記憶した選択(今の閲覧可能な施設だけ)。未保存ならサーバーの初期選択(担当施設 → 全施設)
     const restored = restoreFacilitySelection(facilityView.load(ctx.company.id), ctx.facilities || [], ctx.selectedFacilityIds || []);
@@ -643,5 +667,5 @@ export function createDealerApp({ mount, api, onSignOut, setSubtitle = () => {},
   /** 今の画面(使い方・ヘルプの戻るボタンの文言に使う) */
   const currentView = () => (settingsView && !settingsView.hidden ? "settings" : ctx && !ctx.testMode ? "portal" : "other");
 
-  return { showLogin, showMessage, enter, switchCompany: () => showCompanyChoice(), openSettings, currentView };
+  return { showLogin, showMessage, enter, switchCompany: () => showCompanyChoice(), openSettings, openStickerPhotos, currentView };
 }

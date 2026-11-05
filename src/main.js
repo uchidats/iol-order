@@ -12,6 +12,8 @@ import * as registrationFlow from "./domain/registration-flow.js";
 import { createRegistrationApi, describeCallableError } from "./data/registration-api.js";
 import { createOrderApi } from "./data/order-api.js";
 import { createDealerPortalApi } from "./data/dealer-portal-api.js";
+import { createStickerPhotoApi, stickerImageUrl } from "./data/sticker-photo-api.js";
+import { STICKER_VIEWER_ENABLED } from "./domain/sticker-photo-view.js";
 import { canOpenDealerPortalMenu } from "./domain/dealer-portal.js";
 import { loadHeaderTheme } from "./ui/header-theme.js";
 import { loadSubTheme } from "./ui/sub-theme.js";
@@ -90,6 +92,7 @@ async function bootstrapWithFirebase(config) {
   let ctx = null;     // { service, db, repository, settingsApi }
   const relatedLinksView = createRelatedLinksView();
   let settings = null; // 施設設定画面（施設管理者のみ・初回表示時に生成）
+  let stickerViewer = null;  // IOLシール写真の一覧・拡大(所属メンバー全員が閲覧。初回表示時に生成)
   let orderHistory = null;  // 注文履歴（所属メンバー全員が閲覧。管理者・副管理者は削除も・初回表示時に生成）
   let applications = null;  // 施設登録の申請の一覧・承認・却下(承認権限のある運営者のみ。権限はサーバーが確認する)
   let preregistrations = null;  // 施設の事前登録(運営者 = platformAdmin のみ。権限はサーバーが確認する)
@@ -141,6 +144,7 @@ async function bootstrapWithFirebase(config) {
       location.reload(); // 入力内容・計測値をメモリごと破棄(下書きは施設ごとに保存しているため、別の施設には引き継がない)
     },
     onOpenHistory: leaveSettings(() => { leaveOverlay(); openHistory(); }),
+    onOpenStickerPhotos: leaveSettings(() => { leaveOverlay(); openStickerPhotos(); }),
     onOpenSettings: leaveSettings(() => { leaveOverlay(); openSettings(); }),
     onOpenApplications: leaveSettings(() => { leaveOverlay(); openApplications(); }),
     onOpenPreregistrations: leaveSettings(() => { leaveOverlay(); openPreregistrations(); }),
@@ -223,7 +227,7 @@ async function bootstrapWithFirebase(config) {
   function backFromHelp() {
     leaveOverlay();
     if (decideAccess(state).state !== ACCESS.GRANTED) return;
-    for (const v of [settings, orderHistory, applications, preregistrations, dealerOperator]) if (v && v.isOpen()) v.close();
+    for (const v of [settings, orderHistory, stickerViewer, applications, preregistrations, dealerOperator]) if (v && v.isOpen()) v.close();
     if (registration.open) closeOnboarding();
     setOrderViewHidden(false);
     window.scrollTo(0, 0);
@@ -237,6 +241,7 @@ async function bootstrapWithFirebase(config) {
     if (!canApproveFacilities || !ctx || !ctx.registrationApi) return;
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (stickerViewer && stickerViewer.isOpen()) stickerViewer.close();
     if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     if (dealerOperator && dealerOperator.isOpen()) dealerOperator.close();
     if (!applications) {
@@ -252,6 +257,7 @@ async function bootstrapWithFirebase(config) {
     if (!isPlatformAdmin || !ctx || !ctx.registrationApi) return;
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (stickerViewer && stickerViewer.isOpen()) stickerViewer.close();
     if (applications && applications.isOpen()) applications.close();
     if (!preregistrations) {
       const { createFacilityPreregistrations } = await import("./ui/facility-preregistrations.js");
@@ -264,7 +270,7 @@ async function bootstrapWithFirebase(config) {
   /** ディーラー管理を開く(運営者のみ。会社・担当者・関連付けの権限はサーバーが確認する) */
   async function openDealerOperator() {
     if (!isPlatformAdmin || !ctx || !ctx.dealerPortalApi) return;
-    for (const v of [settings, orderHistory, applications, preregistrations]) if (v && v.isOpen()) v.close();
+    for (const v of [settings, orderHistory, stickerViewer, applications, preregistrations]) if (v && v.isOpen()) v.close();
     if (!dealerOperator) {
       const { createDealerPortalOperator } = await import("./ui/dealer-portal-operator.js");
       dealerOperator = createDealerPortalOperator({ mount: document.querySelector("main.main-content"), api: ctx.dealerPortalApi, onClose: () => setOrderViewHidden(false) });
@@ -281,6 +287,7 @@ async function bootstrapWithFirebase(config) {
     if (applications && applications.isOpen()) applications.close();
     if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     if (dealerOperator && dealerOperator.isOpen()) dealerOperator.close();
+    if (stickerViewer && stickerViewer.isOpen()) stickerViewer.close();
     if (!orderHistory) {
       const { createOrderHistory } = await import("./ui/order-history.js");
       orderHistory = createOrderHistory({
@@ -293,6 +300,23 @@ async function bootstrapWithFirebase(config) {
     setOrderViewHidden(true);
     // 削除ボタンは管理者・副管理者だけに出す(実行の可否はサーバーの deleteOrder が確認する)
     await orderHistory.open({ id: access.facilityId, name: facilityName(access.facilityId), canDelete: isManagerRole(access.role) });
+  }
+
+  /** IOLシール写真を開く(閲覧のみ。削除は管理者・副管理者に表示)。権限は stickerPhotoApi・stickerPhotoImage が毎回確認する */
+  async function openStickerPhotos() {
+    const access = decideAccess(state);
+    if (!STICKER_VIEWER_ENABLED || access.state !== ACCESS.GRANTED || !ctx || !ctx.stickerPhotoApi) return;
+    for (const v of [settings, orderHistory, applications, preregistrations, dealerOperator]) if (v && v.isOpen()) v.close();
+    if (!stickerViewer) {
+      const { createStickerPhotoViewer } = await import("./ui/sticker-photo-viewer.js");
+      stickerViewer = createStickerPhotoViewer({
+        mount: document.querySelector("main.main-content"), title: "IOLシール写真", backLabel: "注文画面に戻る",
+        info: "手術室から送られた IOL シール台紙の写真です。施設の所属者全員が閲覧できます。ディーラーには、施設設定で共有を許可した発注先だけが閲覧できます。",
+        onClose: () => setOrderViewHidden(false)
+      });
+    }
+    setOrderViewHidden(true);
+    await stickerViewer.open(ctx.stickerPhotoApi.facilitySource({ facilityId: access.facilityId, facilityName: facilityName(access.facilityId), canDelete: isManagerRole(access.role) }));
   }
 
   /** 施設設定を開く。表示は管理者・副管理者のみ（書き込みはFirestoreルール・Functionsでも検証される） */
@@ -318,6 +342,7 @@ async function bootstrapWithFirebase(config) {
       });
     }
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (stickerViewer && stickerViewer.isOpen()) stickerViewer.close();
     if (applications && applications.isOpen()) applications.close();
     if (preregistrations && preregistrations.isOpen()) preregistrations.close();
     if (dealerOperator && dealerOperator.isOpen()) dealerOperator.close();
@@ -370,6 +395,7 @@ async function bootstrapWithFirebase(config) {
     if (decideAccess(state).state !== ACCESS.GRANTED) return;
     if (settings && settings.isOpen()) settings.close();
     if (orderHistory && orderHistory.isOpen()) orderHistory.close();
+    if (stickerViewer && stickerViewer.isOpen()) stickerViewer.close();
     if (applications && applications.isOpen()) { applications.close(); setOrderViewHidden(false); }
     if (preregistrations && preregistrations.isOpen()) { preregistrations.close(); setOrderViewHidden(false); }
     if (dealerOperator && dealerOperator.isOpen()) { dealerOperator.close(); setOrderViewHidden(false); }
@@ -411,11 +437,11 @@ async function bootstrapWithFirebase(config) {
     if (access.state === ACCESS.GRANTED) {
       menu.update({
         user: state.user, facilityName: facilityName(access.facilityId),
-        canSwitch: access.memberships.length > 1, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
+        canSwitch: access.memberships.length > 1, canStickerPhotos: STICKER_VIEWER_ENABLED, canSettings: isManagerRole(access.role), canApprove: canApproveFacilities, canPreregister: isPlatformAdmin, canDealerAdmin: isPlatformAdmin,
         canDealerPortal: canOpenDealerPortalMenu({ isPlatformAdmin, memberships: access.memberships }),   // ディーラー用受注一覧(運営者・テスト眼科の利用者。表示だけ)
         canAbout: canViewIntroduction({ isPlatformAdmin })
       });
-      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
+      if ((settings && settings.isOpen()) || (orderHistory && orderHistory.isOpen()) || (stickerViewer && stickerViewer.isOpen()) || (applications && applications.isOpen()) || (preregistrations && preregistrations.isOpen()) || (dealerOperator && dealerOperator.isOpen())) setOrderViewHidden(true); // 設定・履歴画面の表示中は注文画面を隠したまま
     } else {
       relatedLinksView.clear();
       menu.update(null);
@@ -634,6 +660,12 @@ async function bootstrapWithFirebase(config) {
       registrationApi: createRegistrationApi({
         functions: sdk.functions.getFunctions(app, "asia-northeast1"),
         httpsCallable: sdk.functions.httpsCallable
+      }),
+      stickerPhotoApi: createStickerPhotoApi({
+        functions: sdk.functions.getFunctions(app, "asia-northeast1"),
+        httpsCallable: sdk.functions.httpsCallable,
+        imageUrl: stickerImageUrl(FIREBASE_CONFIG.projectId),
+        getIdToken: () => auth.currentUser.getIdToken()
       }),
       dealerPortalApi: createDealerPortalApi({
         functions: sdk.functions.getFunctions(app, "asia-northeast1"),
