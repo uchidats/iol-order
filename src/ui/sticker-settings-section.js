@@ -159,14 +159,14 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
 
   /* ---------- 台紙の注意事項(施設ごと。管理者・副管理者だけが編集する。台紙の上部に印刷する) ---------- */
   const noteBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editNote" }, "変更");
-  const noteHead = h("div", { class: "settings-actions sticker-code-row sticker-qr-row", "data-f": "noteHead" }, h("h4", {}, "台紙の注意事項"), noteBtn);
+  const noteHead = h("div", { class: "settings-actions sticker-code-row sticker-qr-row", "data-f": "noteHead" },
+    h("h4", {}, "台紙の注意事項", createInfoTip(`${SHEET_NOTE_MAX_LENGTH}文字以内。改行できます。空欄で保存すると、台紙に注意事項を印刷しません。`, { label: "台紙の注意事項の説明" }).root), noteBtn);
   const noteView = h("p", { class: "sticker-note-view", "data-f": "noteView" });
   const noteInput = h("textarea", { class: "form-control", "data-f": "note", rows: "3", maxlength: String(SHEET_NOTE_MAX_LENGTH), "aria-label": "台紙の注意事項" });
   const noteError = h("p", { class: "error-message", "data-err": "note" });
   const saveNote = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "saveNote" }, "保存する");
   const cancelNote = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "cancelNote" }, "キャンセル");
   const noteForm = h("div", { "data-f": "noteForm", hidden: true }, noteInput, noteError,
-    h("p", { class: "form-hint" }, `${SHEET_NOTE_MAX_LENGTH}文字以内。改行できます。空欄で保存すると、台紙に注意事項を印刷しません。`),
     h("div", { class: "settings-actions" }, saveNote, cancelNote));
   const closeNote = () => { noteInput.value = ""; noteError.textContent = ""; noteForm.hidden = true; setShown(noteView, manage()); };
   noteBtn.addEventListener("click", () => {

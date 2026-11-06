@@ -510,6 +510,18 @@ test("台紙の注意事項: 管理者が編集して保存できる。改行を
       assert.ok(Math.abs((code.x + code.width) - (edit.x + edit.width)) < 0.5 && code.height === edit.height, "ほかの「変更」と同じ大きさ・右端");
 
       await s.locator('[data-act="editNote"]').click();
+      // 入力の説明は常に出さず、見出しの右のⓘを押したときだけ出す
+      const noteHelp = "150文字以内。改行できます。空欄で保存すると、台紙に注意事項を印刷しません。";
+      const noteTip = s.locator('[data-f="noteHead"] h4 [aria-label="台紙の注意事項の説明"]');
+      const notePop = s.locator('[data-f="noteHead"] h4 .info-tip-pop');
+      assert.ok(!(await s.locator('[data-f="noteForm"]').innerText()).includes("150文字以内"), "入力欄の下に説明を出さない");
+      assert.equal(await notePop.isVisible(), false);
+      await noteTip.click();
+      assert.equal(await notePop.isVisible(), true);
+      assert.equal(await notePop.innerText(), noteHelp);
+      await noteTip.click();
+      await page.mouse.move(0, 0);
+      assert.equal(await notePop.isVisible(), false);
       assert.equal(await input.inputValue(), "1行目\n2行目");
       assert.equal(await input.getAttribute("maxlength"), "150");
       assert.equal(await view.isVisible(), false);
