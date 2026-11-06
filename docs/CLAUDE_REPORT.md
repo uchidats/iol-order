@@ -3,20 +3,20 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-06
-- **作業**: 「台紙を印刷」の画面の説明をⓘへ移動。Zenbook で実施。
-- 直前の作業(同日): 撮影画面の「台紙を印刷」の追加(`5ef58d1`。`stickerEntryApi` のみ配備)。
+- **作業**: 写真の一覧を最終手術日の新しい順に変更。Zenbook で実施。
+- 直前の作業(同日): 「台紙を印刷」の画面の説明をⓘへ移動(`55855a9`)。
 
 ## 変更内容
-- `src/ui/sticker-print-view.js`: 題名の右に既存のⓘ(`createInfoTip`)を追加し、説明を移動。文言は変更なし。施設設定と撮影画面の両方の「台紙を印刷」に反映。
-- `src/ui/sticker-print.css`: ⓘの説明が画面の外へ出ないよう、見出しを位置の基準にした。
-- 見本、印刷、上部の表示・発注先の変更は変更なし。「QRコードのみ印刷」の画面の説明もそのまま。
-- 文書: 設計書(決定 62)、ROADMAP。
+- `src/domain/sticker-photo-view.js`: 最終手術日の新しい順、同じ手術日は撮影の新しい順。未入力は入力のあるものの下。送信日のまとまりは維持し、中で最初に来るセッションの順に並ぶ。
+- 医療機関用とディーラー用で同じ処理のため、どちらにも反映。
+- 検索条件、表示、ほかの機能は変更なし。サーバーの取得も変更なし(並べ替えは読み込み済みの写真が対象)。
+- 文書: 設計書(決定 63)、ROADMAP。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- `tests/browser/sticker-print.pw.mjs`(3ブラウザ。ⓘの開閉と QR のみの画面の確認を追加)、`tests/asset-stamp.test.js`。
+- `tests/sticker-photo-view.test.js`(並びの確認を追加)、`tests/browser/sticker-photo-viewer.pw.mjs`、`tests/asset-stamp.test.js`。
 - 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。
 
 ## push・Firebaseデプロイ
