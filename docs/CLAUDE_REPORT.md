@@ -3,23 +3,23 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-06
-- **作業**: A4 の台紙の文字を BIZ UDP明朝 Medium に統一。Zenbook で実施。
-- 直前の作業(同日): 「台紙の注意事項」の説明をⓘへ移動(`46a9a99`)。
+- **作業**: 撮影画面で外部のカメラをキャンセルするとプレビューが黒くなる不具合を修正。Zenbook で実施。
+- 直前の作業(同日): 台紙の文字を BIZ UDP明朝 Medium に統一(`35c8426`)。
 
 ## 変更内容
-- `src/ui/sticker-print-view.js`: 台紙の文字(題名・上部の表示・注意事項・見出し行)のフォントを変更。題名だけ太字、ほかは Medium(500)。端末のフォントを使い、フォントファイルの追加なし。
-- フォールバック: BIZ UD明朝 → 游明朝 → ヒラギノ明朝 → Noto Serif → MS P明朝 → serif。
-- 折り返しを、端末のフォントの実際の文字の幅で計算するように変更(`src/domain/sticker-print.js`)。従来の見積もりでは英大文字が続くと QR に重なり用紙の外へ出ていたため。
-- A4 縦、2列×6行、貼付枠 76×41mm、日付欄 14mm、QR 28mm などの寸法は変更なし。「QRコードのみ印刷」と Web 画面のフォントも変更なし。
-- 文書: 設計書(決定 58)、ROADMAP。
+- 原因(コードから確認): カメラの変数が残るため開き直しが動かず、戻ったことを検知する処理もなかった。実機のログは未取得。
+- `src/sticker/sticker-app.js`: 外部のカメラを開く前にストリームを止め、戻ったら開き直す。使用中なら間隔を置いて3回まで。許可済みのときだけ自動で開き、確かめられないときと自動で戻せないときは「カメラを再開」を出す。開く処理は同時に1つだけにし、古い結果は捨てる。
+- `src/ui/sticker-camera.js`: 映像が出ないときに時間切れで失敗にし、ストリームを止める。
+- ほかのアプリから戻って映像が切れていたときも開き直す。撮影した場合のプレビュー・確認・送信は変更なし。
+- 文書: 設計書(決定 59)、試験運用の手順書、ROADMAP。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- `tests/sticker-print.test.js`、`tests/asset-stamp.test.js`、`tests/browser/sticker-print.pw.mjs`(3ブラウザ。フォント、太さ、QR のみの印刷のフォント、文字の幅の確認を追加)。
-- Chromium の実際の出力で BIZ-UDPMincho-Medium が使われ、PDF に埋め込まれることを確認。A4 の印刷表示を画像でも確認。フォントがない場合を、フォールバックに差し替えて確認。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実際のプリンターでの印刷は未確認。
+- `tests/browser/sticker-capture.pw.mjs`(Android の画面とユーザーエージェントを模した Chromium。Firefox は許可を確かめられない場合)、`tests/browser/sticker-camera-check.pw.mjs`、`tests/asset-stamp.test.js`。
+- 未確認: Galaxy S24 Ultra の Chrome の実機。外部のカメラの起動とキャンセルは自動テストでは模擬で、実機の動きは確認していない。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。
 
 ## push・Firebaseデプロイ
 - `main` へ通常の push(公開サイトに反映)。Firebase のデプロイなし。

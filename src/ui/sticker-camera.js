@@ -11,7 +11,10 @@ export const CAMERA_REQUEST = Object.freeze({ width: 4096, height: 3072 });
 /** 暫定の JPEG の品質(設計 §3-4。実機検証の後に決める) */
 export const JPEG_QUALITY = 0.92;
 
-/** 背面カメラを開いて <video> に映す。{ stream, track, settings, capabilities } */
+/** 映像が出るまで待つ上限(ms)。カメラの許可の確認は含まない */
+const VIDEO_START_TIMEOUT_MS = 5000;
+
+/** 背面カメラを開いて <video> に映す。{ stream, track, settings, capabilities }。映せないときはストリームを止めて失敗にする */
 export async function startCamera(video, request = CAMERA_REQUEST) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("このブラウザはカメラを使えません");
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -21,8 +24,19 @@ export async function startCamera(video, request = CAMERA_REQUEST) {
   video.srcObject = stream;
   video.setAttribute("playsinline", "");   // iOS: 全画面にしない
   video.muted = true;
-  await video.play();
-  if (!video.videoWidth) await new Promise(r => video.addEventListener("loadedmetadata", r, { once: true }));
+  let timer = null;
+  try {
+    const shown = (async () => {
+      await video.play();
+      if (!video.videoWidth) await new Promise(r => video.addEventListener("loadedmetadata", r, { once: true }));
+    })();
+    shown.catch(() => {});   // 時間切れの後の失敗は無視する
+    await Promise.race([shown, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("映像が出ません")), VIDEO_START_TIMEOUT_MS); })]);
+  } catch (e) {
+    stream.getTracks().forEach(t => t.stop());
+    if (video.srcObject === stream) video.srcObject = null;
+    throw e;
+  } finally { clearTimeout(timer); }
   const track = stream.getVideoTracks()[0];
   return {
     stream, track,

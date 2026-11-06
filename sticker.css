@@ -17,6 +17,7 @@
 .sticker-shutter { width: 68px; height: 68px; padding: 0; border: 4px solid var(--primary); border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 30px var(--primary); cursor: pointer; }
 .sticker-shutter[hidden] { display: none; }
 .sticker-shutter:disabled { opacity: 0.5; }
+.sticker-resume[hidden] { display: none; }
 .sticker-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .sticker-actions-split { justify-content: space-between; }
 .sticker-actions-split .btn { flex: 1 1 0; }

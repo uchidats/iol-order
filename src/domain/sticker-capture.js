@@ -19,7 +19,8 @@ export const MESSAGES = Object.freeze({
   reenterCode: "時間が過ぎたため、もう一度コードを入力してください。写真は残っています",
   lowResolution: "この端末では解像度が低い可能性があります。文字が読めるか拡大して確認してください",
   blurry: "ピンぼけの疑いがあります。文字が読めるか拡大して確認してください",
-  cameraFailed: "カメラを起動できません"
+  cameraFailed: "カメラを起動できません",
+  cameraPaused: "カメラが停止しました。「カメラを再開」を押してください"
 });
 
 const JST_MS = 9 * 60 * 60 * 1000;

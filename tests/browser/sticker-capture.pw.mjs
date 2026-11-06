@@ -300,6 +300,219 @@ test("撮影画面: 未来の日付は送らない。ピンぼけの疑いの印
   } finally { await browser.close(); }
 });
 
+/* 外部のカメラのキャンセルからの復帰。Android の Chrome に合わせた画面で、getUserMedia の呼び出しとストリームを記録する */
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; SM-S928Q) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
+function cameraSpy() {
+  const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  const cam = window.__cam = { calls: 0, streams: [], plan: [], fileClicks: 0 };
+  navigator.mediaDevices.getUserMedia = async (c) => {
+    cam.calls += 1;
+    const next = cam.plan.shift();
+    if (next === "hang") return new Promise(() => {});
+    if (next) throw new DOMException("camera", next);
+    const s = await real(c);
+    cam.streams.push(s);
+    return s;
+  };
+  const click = HTMLInputElement.prototype.click;
+  HTMLInputElement.prototype.click = function () { if (this.type === "file") cam.fileClicks += 1; else click.call(this); };
+  window.__setHidden = (hidden) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  window.__liveStreams = () => cam.streams.filter(s => s.getTracks().some(t => t.readyState === "live")).length;
+}
+async function openAndroid(browser, { permission = true } = {}) {
+  const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, userAgent: ANDROID_UA, ...(permission ? { permissions: ["camera"] } : {}) });
+  const page = await context.newPage();
+  await page.addInitScript(cameraSpy);
+  const fake = await fakeFunctions(page);
+  await page.goto(`${base}sticker.html#f=${TOKEN}`);
+  await enterCode(page);
+  await playing(page);
+  return { page, context, fake };
+}
+/** 映像が実際に動いている(1つのストリームだけが生きていて、video がそれを映している) */
+const playing = (page) => page.waitForFunction(() => {
+  const v = document.querySelector('[data-f="video"]');
+  return v && v.videoWidth > 0 && !v.paused && v.srcObject && v.srcObject.active && window.__liveStreams() === 1 && window.__cam.streams.includes(v.srcObject);
+});
+const cam = (page) => page.evaluate(() => ({ calls: window.__cam.calls, live: window.__liveStreams(), fileClicks: window.__cam.fileClicks }));
+const pressExternal = async (page) => {
+  await page.click('[data-act="file"]');
+  assert.equal((await cam(page)).live, 0, "外部のカメラを開く前に、ストリームを止める");
+};
+const leaveAndCancel = async (page) => { await page.evaluate(() => window.__setHidden(true)); await page.evaluate(() => window.__setHidden(false)); };
+const stickerNote = (page) => page.locator('[data-f="cameraNote"]').innerText();
+
+test("Android のキャンセル: 外部のカメラから写真なしで戻ると、再読み込みなしでプレビューが戻る。古いストリームは残らない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context, fake } = await openAndroid(browser);
+    assert.deepEqual(await cam(page), { calls: 1, live: 1, fileClicks: 0 }, "開くのは1回だけ");
+    await page.evaluate(() => { window.__marker = "same-page"; });
+    for (let round = 1; round <= 3; round += 1) {
+      await pressExternal(page);
+      assert.equal((await cam(page)).fileClicks, round);
+      await leaveAndCancel(page);
+      await playing(page);
+      assert.deepEqual(await cam(page), { calls: 1 + round, live: 1, fileClicks: round }, `${round}回目`);
+    }
+    assert.equal(await page.evaluate(() => window.__marker), "same-page", "再読み込みしない");
+    assert.equal(await page.isVisible('[data-act="resumeCamera"]'), false);
+    assert.equal(await page.isVisible('[data-act="shutter"]'), true);
+    assert.equal(await stickerNote(page), "");
+    // 戻った後もそのまま撮影して送信できる
+    await shoot(page);
+    await page.click('[data-act="send"]');
+    await screen(page, "done").waitFor();
+    assert.equal(fake.uploads.length, 1);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("Android のキャンセル: cancel のイベントだけでも戻る。戻った直後のカメラ使用中は、開き直して回復する", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context } = await openAndroid(browser);
+    await pressExternal(page);
+    await page.locator('[data-f="file"]').evaluate(e => e.dispatchEvent(new Event("cancel")));
+    await playing(page);
+    await pressExternal(page);
+    await page.evaluate(() => { window.__cam.plan = ["NotReadableError", "NotReadableError"]; });
+    await leaveAndCancel(page);
+    await playing(page);
+    assert.deepEqual(await cam(page).then(c => [c.calls, c.live]), [5, 1], "2回失敗して3回目で開く");
+    assert.equal(await page.isVisible('[data-act="resumeCamera"]'), false);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("Android のキャンセル: 自動で戻せないときは黒い画面のままにせず「カメラを再開」を出し、押すと戻る", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context } = await openAndroid(browser);
+    await pressExternal(page);
+    await page.evaluate(() => { window.__cam.plan = ["NotReadableError", "NotReadableError", "NotReadableError"]; });
+    await leaveAndCancel(page);
+    await page.locator('[data-act="resumeCamera"]').waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-f="cameraNote"]').textContent === "カメラを起動できません");
+    assert.equal(await page.isVisible('[data-act="shutter"]'), false);
+    assert.equal(await page.isVisible('[data-act="file"]'), true, "外部のカメラの操作は残す");
+    await page.click('[data-act="resumeCamera"]');
+    await playing(page);
+    assert.equal(await page.isVisible('[data-act="resumeCamera"]'), false);
+    assert.equal(await page.isVisible('[data-act="shutter"]'), true);
+    assert.equal(await stickerNote(page), "");
+
+    // カメラの応答が止まったままのときも操作を出し、押すと開き直す
+    await pressExternal(page);
+    await page.evaluate(() => { window.__cam.plan = ["hang"]; });
+    await leaveAndCancel(page);
+    await page.waitForFunction(() => document.querySelector('[data-f="cameraNote"]').textContent.includes("カメラを再開"), null, { timeout: 10000 });
+    await page.click('[data-act="resumeCamera"]');
+    await playing(page);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("Android のキャンセル: 許可が確かめられないときは確認を出さず、「カメラを再開」を押すまで開かない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context } = await openAndroid(browser);
+    await page.evaluate(() => { navigator.permissions.query = async () => ({ state: "prompt" }); });
+    await pressExternal(page);
+    await leaveAndCancel(page);
+    await page.locator('[data-act="resumeCamera"]').waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-f="cameraNote"]').textContent.includes("カメラを再開"));
+    await page.waitForTimeout(700);
+    assert.equal((await cam(page)).calls, 1, "getUserMedia を呼ばない");
+    await page.click('[data-act="resumeCamera"]');
+    await playing(page);
+    assert.equal((await cam(page)).calls, 2);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("外部のカメラで撮った場合: プレビュー・確認・送信は今までどおり。戻った後にカメラを余分に開かず、撮り直すと映像が戻る", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context, fake } = await openAndroid(browser);
+    const jpeg = await page.evaluate(async () => {
+      const c = document.createElement("canvas"); c.width = 1200; c.height = 900;
+      const x = c.getContext("2d"); for (let i = 0; i < 400; i += 1) { x.fillStyle = i % 2 ? "#000" : "#fff"; x.fillRect((i * 37) % 1200, (i * 53) % 900, 30, 30); }
+      const b = await new Promise(r => c.toBlob(r, "image/jpeg"));
+      return [...new Uint8Array(await b.arrayBuffer())];
+    });
+    await pressExternal(page);
+    await page.evaluate(() => window.__setHidden(true));
+    await page.evaluate(() => window.__setHidden(false));
+    await page.setInputFiles('[data-f="file"]', { name: "a.jpg", mimeType: "image/jpeg", buffer: Buffer.from(jpeg) });
+    await screen(page, "review").waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-f="preview"]').naturalWidth === 1200);
+    await page.waitForTimeout(600);
+    assert.deepEqual(await cam(page).then(c => [c.calls, c.live]), [1, 0], "確認の間はカメラを開かない");
+    await page.click('[data-act="retake"]');
+    await screen(page, "camera").waitFor();
+    await playing(page);
+    await pressExternal(page);
+    await page.setInputFiles('[data-f="file"]', { name: "a.jpg", mimeType: "image/jpeg", buffer: Buffer.from(jpeg) });
+    await screen(page, "review").waitFor();
+    await page.click('[data-act="send"]');
+    await screen(page, "done").waitFor();
+    assert.equal(fake.uploads.length, 1);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("映像が切れたとき: ほかのアプリから戻る・映像が終わると開き直す。動いているときは開き直さない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context } = await openAndroid(browser);
+    await leaveAndCancel(page);
+    await page.waitForTimeout(300);
+    assert.equal((await cam(page)).calls, 1, "動いていれば開き直さない");
+    await page.evaluate(() => { window.__setHidden(true); const track = document.querySelector('[data-f="video"]').srcObject.getVideoTracks()[0]; track.stop(); });
+    await page.evaluate(() => window.__setHidden(false));
+    await playing(page);
+    assert.equal((await cam(page)).calls, 2);
+    await page.evaluate(() => { const track = document.querySelector('[data-f="video"]').srcObject.getVideoTracks()[0]; track.stop(); track.dispatchEvent(new Event("ended")); });
+    await playing(page);
+    assert.equal((await cam(page)).calls, 3);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("カメラの許可を確かめられないブラウザ: 戻っても確認を出さず「カメラを再開」を出す: firefox", async (t) => {
+  const browser = await launch(firefox, "firefox");
+  if (!browser) return t.skip("firefox を起動できません");
+  try {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await page.addInitScript(cameraSpy);
+    await fakeFunctions(page);
+    await page.goto(`${base}sticker.html#f=${TOKEN}`);
+    await enterCode(page);
+    await playing(page);
+    await page.evaluate(() => { navigator.permissions.query = async () => { throw new TypeError("camera"); }; });
+    await pressExternal(page);
+    await leaveAndCancel(page);
+    await page.locator('[data-act="resumeCamera"]').waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-f="cameraNote"]').textContent.includes("カメラを再開"));
+    assert.equal((await cam(page)).calls, 1);
+    await page.click('[data-act="resumeCamera"]');
+    await playing(page);
+    await context.close();
+  } finally { await browser.close(); }
+});
+
 test("sticker.html: 検索エンジンに載せず、参照元を送らない", () => {
   const html = fs.readFileSync(path.join(ROOT, "sticker.html"), "utf8");
   assert.match(html, /name="robots" content="noindex, nofollow"/);
