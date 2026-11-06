@@ -2781,7 +2781,6 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .settings-section[data-section="stickerPhotos"] > .settings-heading + .sticker-code-row { margin-top: 10px; }
 .settings-section[data-section="stickerPhotos"] > .sticker-qr-row { margin-top: 16px; }
 .settings-section[data-section="stickerPhotos"] > [data-f="codeForm"], .settings-section[data-section="stickerPhotos"] > [data-f="noteForm"] { margin-top: 8px; }
-.sticker-note-view { margin-top: 6px; font-size: 0.9rem; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
 /* QR の下の、撮影ページを開くアイコン。色は関連リンクと同じ。見た目は小さいまま、タップできる範囲を広げる */
 .sticker-qr-open { position: relative; display: inline-flex; vertical-align: middle; color: var(--primary); }
 .sticker-qr-open::after { content: ""; position: absolute; inset: -11px; }

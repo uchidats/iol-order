@@ -493,7 +493,7 @@ test("QR のモーダル: 作り直すとリンクも新しい URL になる。�
   } finally { await browser.close(); }
 });
 
-test("台紙の注意事項: 管理者が編集して保存できる。改行を保ち、空欄も保存でき、失敗は理由を出して入力を残す。取り消せる", async (t) => {
+test("台紙の注意事項: 本文は通常は出さず、「変更」で今の内容を編集する。保存・キャンセルで閉じる。改行を保ち、空欄も保存でき、失敗は理由を出して入力を残す", async (t) => {
   const browser = await launch(chromium, "chromium");
   if (!browser) return t.skip("chromium を起動できません");
   try {
@@ -501,11 +501,11 @@ test("台紙の注意事項: 管理者が編集して保存できる。改行を
       const page = await openPage(browser, "", width);
       await ready(page);
       const s = section(page);
-      const view = s.locator('[data-f="noteView"]'), input = s.locator('[data-f="note"]');
+      const input = s.locator('[data-f="note"]'), form = s.locator('[data-f="noteForm"]');
       const notice = () => page.evaluate(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent);
       const saves = () => page.evaluate(() => window.__calls.filter(c => c.action === "setSheetNote"));
-      assert.equal(await view.evaluate(e => e.textContent), "1行目\n2行目");
-      assert.equal(await view.evaluate(e => getComputedStyle(e).whiteSpace), "pre-line", "改行を見せる");
+      assert.equal(await form.isVisible(), false, "通常は入力欄を出さない");
+      assert.ok(!(await s.innerText()).includes("1行目"), "通常は本文を出さない");
       const code = await s.locator('[data-act="editCode"]').boundingBox(), edit = await s.locator('[data-act="editNote"]').boundingBox();
       assert.ok(Math.abs((code.x + code.width) - (edit.x + edit.width)) < 0.5 && code.height === edit.height, "ほかの「変更」と同じ大きさ・右端");
 
@@ -524,14 +524,14 @@ test("台紙の注意事項: 管理者が編集して保存できる。改行を
       assert.equal(await notePop.isVisible(), false);
       assert.equal(await input.inputValue(), "1行目\n2行目");
       assert.equal(await input.getAttribute("maxlength"), "150");
-      assert.equal(await view.isVisible(), false);
       await input.fill("変更した");
       await s.locator('[data-act="cancelNote"]').click();
       assert.equal(await s.locator('[data-f="noteForm"]').isVisible(), false);
-      assert.equal(await view.evaluate(e => e.textContent), "1行目\n2行目", "取り消すと変わらない");
+      assert.ok(!(await s.innerText()).includes("1行目"), "閉じると本文を出さない");
       assert.deepEqual(await saves(), []);
 
       await s.locator('[data-act="editNote"]').click();
+      assert.equal(await input.inputValue(), "1行目\n2行目", "取り消すと変わらない");
       await input.fill("新しい1行目\n新しい2行目\n\n");
       await page.evaluate(() => { window.__failNote = true; });
       await s.locator('[data-act="saveNote"]').click();
@@ -542,15 +542,18 @@ test("台紙の注意事項: 管理者が編集して保存できる。改行を
       await s.locator('[data-act="saveNote"]').click();
       await page.waitForFunction(() => document.querySelector('[data-section="stickerPhotos"] [data-msg]').textContent === "台紙の注意事項を保存しました。");
       assert.equal(await s.locator('[data-f="noteForm"]').isVisible(), false);
-      assert.equal(await view.evaluate(e => e.textContent), "新しい1行目\n新しい2行目");
+      assert.ok(!(await s.innerText()).includes("新しい1行目"), "保存しても本文を出さない");
       assert.deepEqual((await saves()).at(-1), { action: "setSheetNote", facilityId: "fA", note: "新しい1行目\n新しい2行目" });
 
       await s.locator('[data-act="editNote"]').click();
       assert.equal(await notice(), "", "次の入力を始めたら通知を消す");
+      assert.equal(await input.inputValue(), "新しい1行目\n新しい2行目", "保存した内容を編集できる");
       await input.fill("");
       await s.locator('[data-act="saveNote"]').click();
-      await page.waitForFunction(() => document.querySelector('[data-f="noteView"]').textContent === "なし");
-      assert.equal((await saves()).at(-1).note, "", "空欄も保存できる");
+      await page.waitForFunction(() => window.__calls.filter(c => c.action === "setSheetNote").at(-1).note === "");
+      await form.waitFor({ state: "hidden" });
+      await s.locator('[data-act="editNote"]').click();
+      assert.equal(await input.inputValue(), "", "空欄も保存できる");
       assert.deepEqual(page.errors, []);
       await page.close();
     }
@@ -678,7 +681,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.equal(await s.locator('[data-act="showQr"]').isVisible(), true);
         assert.equal(await s.locator('[data-act="printSheet"], [data-act="printQr"]').count(), 0);
         // 出さないもの
-        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="noteHead"]', '[data-f="noteView"]', '[data-f="noteForm"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
+        for (const sel of ['[data-act="editCode"]', '[data-f="rotateTip"]', '[data-act="rotateQr"]', '[data-f="codeForm"]', '[data-f="noteHead"]', '[data-f="noteForm"]', '[data-f="shareHead"]', '[data-f="dealers"]'])
           assert.equal(await s.locator(sel).isVisible(), false, sel);
         assert.equal(await s.locator("[data-dealer]").count(), 0);
         assert.ok(!(await s.innerText()).includes("ディーラーへの共有"));

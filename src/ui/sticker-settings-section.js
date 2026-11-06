@@ -161,20 +161,18 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const noteBtn = h("button", { type: "button", class: "btn btn-outline-sm", "data-act": "editNote" }, "変更");
   const noteHead = h("div", { class: "settings-actions sticker-code-row sticker-qr-row", "data-f": "noteHead" },
     h("h4", {}, "台紙の注意事項", createInfoTip(`${SHEET_NOTE_MAX_LENGTH}文字以内。改行できます。空欄で保存すると、台紙に注意事項を印刷しません。`, { label: "台紙の注意事項の説明" }).root), noteBtn);
-  const noteView = h("p", { class: "sticker-note-view", "data-f": "noteView" });
   const noteInput = h("textarea", { class: "form-control", "data-f": "note", rows: "3", maxlength: String(SHEET_NOTE_MAX_LENGTH), "aria-label": "台紙の注意事項" });
   const noteError = h("p", { class: "error-message", "data-err": "note" });
   const saveNote = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "saveNote" }, "保存する");
   const cancelNote = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "cancelNote" }, "キャンセル");
   const noteForm = h("div", { "data-f": "noteForm", hidden: true }, noteInput, noteError,
     h("div", { class: "settings-actions" }, saveNote, cancelNote));
-  const closeNote = () => { noteInput.value = ""; noteError.textContent = ""; noteForm.hidden = true; setShown(noteView, manage()); };
+  const closeNote = () => { noteInput.value = ""; noteError.textContent = ""; noteForm.hidden = true; };
   noteBtn.addEventListener("click", () => {
     if (!manage()) return;
     msg.textContent = "";
     noteInput.value = (settings && settings.sheetNote) || "";
     noteForm.hidden = false;
-    setShown(noteView, false);
     noteInput.focus();
   });
   cancelNote.addEventListener("click", closeNote);
@@ -186,7 +184,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     try {
       await api.setSheetNote(facilityId, note);
       settings = { ...settings, sheetNote: note };
-      noteView.textContent = note || "なし";
       closeNote();
       msg.textContent = "台紙の注意事項を保存しました。";
       await load().catch(() => {});   // 保存は成功している。表示の読み直しの失敗では通知を変えない
@@ -235,8 +232,6 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
     codeBtn.textContent = settings.accessCodeSet ? "変更" : "設定";
     // 変更の操作は、管理者・副管理者だけに出す
     for (const el of manageOnly) setShown(el, editable);
-    noteView.textContent = settings.sheetNote || "なし";
-    if (!noteForm.hidden) setShown(noteView, false);
     if (!editable) { closeForm(); noteForm.hidden = true; dealerList.replaceChildren(); return; }
     const dealers = shareableDealers(settings.dealers);
     dealerList.replaceChildren(...(dealers.length ? dealers.map(dealerRow)
@@ -246,13 +241,13 @@ export function createStickerSettingsSection({ api, confirm = confirmDialog, get
   const shareHead = h("h4", { "data-f": "shareHead" }, "ディーラーへの共有");
   const qrNote = h("p", { class: "form-hint", "data-f": "qrNotIssued" }, QR_NOT_ISSUED_NOTE);
   setShown(qrNote, false);
-  const manageOnly = [codeBtn, rotateTip.root, noteHead, noteView, shareHead, dealerList];
+  const manageOnly = [codeBtn, rotateTip.root, noteHead, shareHead, dealerList];
   if (!canManage) for (const el of manageOnly) setShown(el, false);
   const section = h("section", { class: "settings-section", "data-section": "stickerPhotos", hidden: true },
     createSectionHeading("眼内レンズ使用報告", canManage ? HELP : VIEW_HELP),
     h("div", { class: "settings-actions sticker-code-row" }, h("div", { class: "dealer-portal-name" }, h("h4", {}, "アクセスコード"), codeStatus), codeBtn), lockNote, codeForm,
     h("div", { class: "settings-actions sticker-code-row sticker-qr-row" }, h("h4", {}, "QRコード", rotateTip.root), showQr), qrNote,
-    noteHead, noteView, noteForm,
+    noteHead, noteForm,
     shareHead, dealerList,
     msg);
 
