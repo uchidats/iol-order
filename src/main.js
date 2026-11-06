@@ -316,7 +316,7 @@ async function bootstrapWithFirebase(config) {
     if (!stickerViewer) {
       const { createStickerPhotoViewer, ORDER_BACK_CLASS } = await import("./ui/sticker-photo-viewer.js");
       stickerViewer = createStickerPhotoViewer({
-        mount: document.querySelector("main.main-content"), title: "IOLシール写真", backLabel: "注文画面に戻る", backClass: ORDER_BACK_CLASS,
+        mount: document.querySelector("main.main-content"), title: "眼内レンズ使用報告", backLabel: "注文画面に戻る", backClass: ORDER_BACK_CLASS,
         info: "手術室から送られた IOL シール台紙の写真です。施設の所属者全員が閲覧できます。ディーラーには、施設設定で共有を許可した発注先だけが閲覧できます。",
         onClose: () => setOrderViewHidden(false)
       });

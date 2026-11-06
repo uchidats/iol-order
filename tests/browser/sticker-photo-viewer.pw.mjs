@@ -39,7 +39,7 @@ window.__source = (kind) => ({
   readImage: async (a) => { window.__reads.push(a); if (a.photoId === window.__hidden) return null; return pixel(); },
   deletePhoto: kind === "manager" ? async (id, photoId) => { if (window.__failDelete) throw Object.assign(new Error("x"), { code: "functions/permission-denied", message: "この施設の管理者・副管理者のみ操作できます" }); window.__deleted.push(photoId); return { ok: true }; } : null
 });
-window.__viewer = createStickerPhotoViewer({ mount: document.querySelector("main"), title: "IOLシール写真", info: "説明", backLabel: "注文画面に戻る", ...(order ? { backClass: ORDER_BACK_CLASS } : {}), now: () => NOW,
+window.__viewer = createStickerPhotoViewer({ mount: document.querySelector("main"), title: "眼内レンズ使用報告", info: "説明", backLabel: "注文画面に戻る", ...(order ? { backClass: ORDER_BACK_CLASS } : {}), now: () => NOW,
   onClose: () => { window.__closed += 1; }, confirm: async () => window.__confirm !== false });
 // 比較の基準: 施設設定の「注文画面に戻る」と同じ要素
 if (order) document.body.insertAdjacentHTML("beforeend", '<button type="button" class="btn btn-outline-sm" id="btnSettingsClose">注文画面に戻る</button>');
@@ -203,6 +203,30 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const page = await openPage(browser, "dealer");
       assert.equal(await page.getAttribute('#stickerPhotoViewer [data-act="back"]', "class"), "btn btn-secondary");
       await page.close();
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webkit", webkit]]) {
+  test(`一覧の見出し: スマートフォンの幅でも「眼内レンズ使用報告」が1行に収まり、ボタンと重ならない: ${name}`, async (t) => {
+    const browser = await launch(type, name);
+    if (!browser) return t.skip(`${name} を起動できません`);
+    try {
+      for (const width of [320, 360, 390, 430]) {
+        const page = await browser.newPage({ viewport: { width, height: 800 } });
+        await page.goto(`${base}?back=order`);
+        await page.waitForFunction(() => window.__ready === true);
+        await page.evaluate(() => window.__viewer.open(window.__source("member")));
+        await page.waitForSelector('[data-photo="a2"]');
+        const m = await page.evaluate(() => {
+          const title = document.querySelector(".settings-heading h2"), range = document.createRange();
+          range.selectNodeContents(title);
+          const r = title.getBoundingClientRect(), back = document.querySelector('[data-act="back"]').getBoundingClientRect();
+          return { text: title.textContent, lines: new Set([...range.getClientRects()].map(x => Math.round(x.top))).size, overlap: r.right > back.left && r.bottom > back.top && r.top < back.bottom, wide: document.documentElement.scrollWidth > window.innerWidth };
+        });
+        assert.deepEqual(m, { text: "眼内レンズ使用報告", lines: 1, overlap: false, wide: false }, `${width}px`);
+        await page.close();
+      }
     } finally { await browser.close(); }
   });
 }

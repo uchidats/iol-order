@@ -513,6 +513,36 @@ test("カメラの許可を確かめられないブラウザ: 戻っても確認
   } finally { await browser.close(); }
 });
 
+test("画面の名称: コード入力・撮影・確認・完了の見出しは「眼内レンズ使用報告」で、スマートフォンの幅でも1行に収まる", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context } = await openPage(browser, "chromium");
+    const check = async (where) => {
+      for (const width of [320, 360, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 });
+        const m = await page.evaluate(() => {
+          const title = document.querySelector(".header-title"), range = document.createRange();
+          range.selectNodeContents(title);
+          return { text: title.textContent, tab: document.title, lines: new Set([...range.getClientRects()].map(x => Math.round(x.top))).size, wide: document.documentElement.scrollWidth > window.innerWidth };
+        });
+        assert.deepEqual(m, { text: "眼内レンズ使用報告", tab: "眼内レンズ使用報告", lines: 1, wide: false }, `${where} ${width}px`);
+      }
+    };
+    await screen(page, "code").waitFor();
+    await check("コード入力");
+    await enterCode(page);
+    await screen(page, "camera").waitFor();
+    await check("撮影");
+    await shoot(page);
+    await check("確認");
+    await page.click('[data-act="send"]');
+    await screen(page, "done").waitFor();
+    await check("完了");
+    await context.close();
+  } finally { await browser.close(); }
+});
+
 test("sticker.html: 検索エンジンに載せず、参照元を送らない", () => {
   const html = fs.readFileSync(path.join(ROOT, "sticker.html"), "utf8");
   assert.match(html, /name="robots" content="noindex, nofollow"/);
