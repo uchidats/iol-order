@@ -35,7 +35,7 @@ function openQrDialog({ svg, url, printActions = [] }) {
   const img = h("img", { class: "share-qr", alt: "眼内レンズ使用報告のQRコード", src: qrImageUrl(svg) });
   const overlay = h("div", { class: "modal-overlay share-dialog sticker-qr-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "stickerQrTitle" },
     h("div", { class: "modal-card" },
-      h("div", { class: "modal-header modal-header-simple" }, h("h2", { class: "modal-title", id: "stickerQrTitle" }, "眼内レンズ使用報告のQRコード"), entryLink(url)),
+      h("div", { class: "modal-header modal-header-simple" }, h("h2", { class: "modal-title", id: "stickerQrTitle" }, "眼内レンズ使用報告"), entryLink(url)),
       h("div", { class: "modal-body" }, h("div", { class: "share-qr-box" }, img),
         h("div", { class: "settings-actions" }, printActions.map(a => { const b = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": a.act }, a.label); b.addEventListener("click", () => { close(); a.run(); }); return b; }))),
       h("div", { class: "modal-footer" }, closeBtn)));

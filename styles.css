@@ -2789,7 +2789,6 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .sticker-qr-dialog .settings-actions { justify-content: center; margin-top: 16px; }   /* QR のモーダルの印刷のボタンは中央 */
 .sticker-qr-dialog .modal-title { min-width: 0; }   /* 題名の右に撮影ページのリンク(並びと間隔は .modal-header のまま) */
 .sticker-qr-dialog .sticker-qr-open { flex: none; }
-@media (max-width: 360px) { .sticker-qr-dialog .modal-title { font-size: 0.95rem; } }   /* 狭い画面でも題名を1行に */
 
 /* ---------- IOL シール写真の閲覧画面(医療機関用・ディーラー用で共通。src/ui/sticker-photo-viewer.js) ---------- */
 .sticker-viewer-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }

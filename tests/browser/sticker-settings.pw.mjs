@@ -136,7 +136,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       await section(page).locator('[data-act="showQr"]').click();
       await page.waitForSelector(".sticker-qr-dialog");
       const box = await page.locator(".sticker-qr-dialog .modal-card").innerText();
-      assert.ok(box.includes("眼内レンズ使用報告のQRコード") && !box.includes("A眼科"));
+      assert.ok(box.includes("眼内レンズ使用報告") && !box.includes("A眼科"));
       assert.ok(!/https?:|sticker\.html/.test(box), "URL は文字で出さない");
       assert.ok((await page.locator(".sticker-qr-dialog img").getAttribute("src")).startsWith("data:image/svg+xml"));
       assert.equal(await page.evaluate(() => window.__evil === undefined), true, "SVG の中のスクリプトは動かない");
@@ -462,7 +462,7 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
           const t = title.getBoundingClientRect(), a = link.getBoundingClientRect(), card = dialog.querySelector(".modal-card").getBoundingClientRect(), text = range.getBoundingClientRect();
           return { text: title.textContent, inHeader: link.parentElement.classList.contains("modal-header"), gap: a.left - text.right, middle: Math.abs((a.top + a.bottom) / 2 - (t.top + t.bottom) / 2), lines: new Set([...range.getClientRects()].map(r => Math.round(r.top))).size, inside: a.right <= card.right, below: dialog.querySelectorAll(".share-url").length, qr: dialog.querySelector(".share-qr").getBoundingClientRect().width, wide: dialog.querySelector(".modal-card").getBoundingClientRect().right > window.innerWidth };
         });
-        assert.equal(m.text, "眼内レンズ使用報告のQRコード");
+        assert.equal(m.text, "眼内レンズ使用報告");
         assert.ok(m.inHeader && m.below === 0, `${width}: リンクは題名の右だけ`);
         assert.ok(m.gap >= 8 && m.gap <= 16, `${width}: 題名との間隔 ${m.gap}`);
         assert.ok(m.middle < 1, `${width}: 題名と縦の中央をそろえる`);
