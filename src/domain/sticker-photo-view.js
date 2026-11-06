@@ -91,9 +91,9 @@ export function sessionLabel(session, nowMs) {
 }
 
 /**
- * 一覧の表示: 送信日 → 医療機関 → 撮影セッション。セッションの中は送信順。
- * 並びは最終手術日の新しい順で、同じ手術日は撮影の新しい順。手術日が未入力のセッションは、入力のあるものの下に撮影の新しい順で並べる。
- * 送信日・医療機関のまとまりは、その中で最初に来るセッションの順に並ぶ。
+ * 一覧の表示: 送信日 → 医療機関 → 撮影セッション。送信日は新しい順で、セッションの中は送信順。
+ * 送信日の中は最終手術日の新しい順で、同じ手術日は撮影の新しい順。手術日が未入力のセッションは、入力のあるものの下に撮影の新しい順で並べる。
+ * 医療機関のまとまりは、その中で最初に来るセッションの順に並ぶ。
  * @param {Array<{sessionId:string, seq:number, takenAt:string, facilityId:string, facilityName?:string}>} photos
  * @returns {Array<{date:string, facilities:Array<{facilityId:string, facilityName:string, sessions:object[]}>}>}
  */
@@ -110,5 +110,5 @@ export function groupForView(photos) {
     if (!byFacility.has(facilityId)) byFacility.set(facilityId, { facilityId, facilityName: session.photos[0].facilityName || "", sessions: [] });
     byFacility.get(facilityId).sessions.push(session);
   }
-  return [...days].map(([date, byFacility]) => ({ date, facilities: [...byFacility.values()] }));
+  return [...days].sort(([a], [b]) => b.localeCompare(a)).map(([date, byFacility]) => ({ date, facilities: [...byFacility.values()] }));
 }

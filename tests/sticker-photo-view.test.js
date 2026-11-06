@@ -176,7 +176,7 @@ test("呼び出し: 利用できるかは status、ディーラーは dealerList
   assert.deepEqual([await api.facilityEnabled("fA"), await api.dealerHasShares({ companyId: "cX" })], [false, false]);
 });
 
-test("一覧の並び: 最終手術日の新しい順で、同じ手術日は撮影の新しい順。未入力は下。送信日のまとまりは保つ", () => {
+test("一覧の並び: 送信日は新しい順。その中は最終手術日の新しい順で、同じ手術日は撮影の新しい順。未入力は下", () => {
   const p = (sessionId, takenAt, lastSurgeryDate) => ({ ...photo(sessionId, 1, takenAt), lastSurgeryDate });
   const days = groupForView([
     p("a", "2026-11-06T01:00:00Z", "2026-11-02"),   // 11/6 送信・11/2 の手術分
@@ -187,5 +187,5 @@ test("一覧の並び: 最終手術日の新しい順で、同じ手術日は撮
     p("f", "2026-11-04T01:00:00Z", null)
   ]);
   const flat = days.map(d => [d.date, d.facilities.flatMap(f => f.sessions.map(s => s.sessionId))]);
-  assert.deepEqual(flat, [["2026-11-05", ["c", "b", "d"]], ["2026-11-06", ["a", "e"]], ["2026-11-04", ["f"]]]);
+  assert.deepEqual(flat, [["2026-11-06", ["a", "e"]], ["2026-11-05", ["c", "b", "d"]], ["2026-11-04", ["f"]]]);
 });
