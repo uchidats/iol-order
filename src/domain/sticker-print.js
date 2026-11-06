@@ -42,12 +42,12 @@ const unitsOf = (ch) => (/[ -~｡-ﾟ]/.test(ch) ? 0.5 : 1);
 /** 1pt の mm */
 export const MM_PER_PT = 0.3528;
 
-/** 文字列を幅に合わせて折り返す(全角 1・半角 0.5 で数える) */
-function wrapUnits(text, unitsPerLine) {
+/** 文字列を幅に合わせて折り返す。measure は1文字の幅(全角 1 とする比)。既定は全角 1・半角 0.5 */
+function wrapUnits(text, unitsPerLine, measure = unitsOf) {
   const lines = [];
   let line = "", units = 0;
   for (const ch of text) {
-    const u = unitsOf(ch);
+    const u = measure(ch);
     if (units + u > unitsPerLine) { lines.push(line); line = ""; units = 0; }
     line += ch;
     units += u;
@@ -56,9 +56,9 @@ function wrapUnits(text, unitsPerLine) {
   return lines;
 }
 
-/** 上部の表示を幅に合わせて折り返す(全角 1・半角 0.5 で数える)。入らない分は出さない */
-export function wrapHeader(text, unitsPerLine = HEADER_LINE_UNITS, maxLines = HEADER_MAX_LINES) {
-  return wrapUnits(String(text || "").replace(/\s*[\r\n]+\s*/g, " ").trim(), unitsPerLine).slice(0, maxLines);
+/** 上部の表示を幅に合わせて折り返す。入らない分は出さない */
+export function wrapHeader(text, unitsPerLine = HEADER_LINE_UNITS, maxLines = HEADER_MAX_LINES, measure = unitsOf) {
+  return wrapUnits(String(text || "").replace(/\s*[\r\n]+\s*/g, " ").trim(), unitsPerLine, measure).slice(0, maxLines);
 }
 
 /** 台紙の注意事項の文字の大きさ(大きい順に試す) */
@@ -72,9 +72,10 @@ const NOTE_FRAME_GAP = 1.5;  // 貼付枠との間(mm)
  * 最小の大きさでも入らない分は出さず truncated を返す(QR・貼付枠には重ねない)。枠の寸法は変えない。
  * @param {string} note 改行を含む文字列
  * @param {number} headerLines 上部の表示の行数
+ * @param {(ch:string) => number} [measure] 1文字の幅(全角 1 とする比)
  * @returns {{lines:string[], pt:number, x:number, y:number, lineHeight:number, truncated:boolean}} y は1行目のベースライン(mm)
  */
-export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE) {
+export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE, measure = unitsOf) {
   const rows = String(note ?? "").replace(/\r\n?/g, "\n").trimEnd().split("\n").map(l => l.trimEnd());
   const top = s.marginTop + 15 + (Math.max(1, headerLines) - 1) * 5.5 + 2.2;
   const bottom = s.marginTop + s.headHeight - NOTE_FRAME_GAP;
@@ -82,7 +83,7 @@ export function fitSheetNote(note, headerLines = 1, s = SHEET, page = PAGE) {
   const place = (pt) => {
     const lineHeight = pt * MM_PER_PT * NOTE_LINE_RATIO;
     const unitsPerLine = Math.floor(width / (pt * MM_PER_PT));
-    const lines = rows.flatMap(r => (r ? wrapUnits(r, unitsPerLine) : [""]));
+    const lines = rows.flatMap(r => (r ? wrapUnits(r, unitsPerLine, measure) : [""]));
     return { lines, pt, lineHeight, x: page.margin, y: top + pt * MM_PER_PT, capacity: Math.max(0, Math.floor((bottom - top) / lineHeight)) };
   };
   if (rows.length === 1 && !rows[0]) return { ...place(NOTE_POINTS[0]), lines: [], capacity: undefined, truncated: false };

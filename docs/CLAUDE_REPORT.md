@@ -3,20 +3,23 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-06
-- **作業**: 施設設定の「台紙の注意事項」の入力の説明をⓘへ移動。Zenbook で実施。
-- 直前の作業(同日): 施設設定の見出しの変更(`dd66170`)、写真の拡大表示の操作の改善(`5ceca1e`)。
+- **作業**: A4 の台紙の文字を BIZ UDP明朝 Medium に統一。Zenbook で実施。
+- 直前の作業(同日): 「台紙の注意事項」の説明をⓘへ移動(`46a9a99`)。
 
 ## 変更内容
-- `src/ui/sticker-settings-section.js`: 入力欄の下の説明を削除し、見出しの右に既存のⓘ(`createInfoTip`)を追加。説明の文言は変更なし。
-- 入力欄、「保存する」「キャンセル」、文字数の上限、改行、保存処理、権限は変更なし。説明がなくなった分だけ、ボタンの位置が上へ詰まる。
-- 文書: 設計書(決定 57)、ROADMAP。
+- `src/ui/sticker-print-view.js`: 台紙の文字(題名・上部の表示・注意事項・見出し行)のフォントを変更。題名だけ太字、ほかは Medium(500)。端末のフォントを使い、フォントファイルの追加なし。
+- フォールバック: BIZ UD明朝 → 游明朝 → ヒラギノ明朝 → Noto Serif → MS P明朝 → serif。
+- 折り返しを、端末のフォントの実際の文字の幅で計算するように変更(`src/domain/sticker-print.js`)。従来の見積もりでは英大文字が続くと QR に重なり用紙の外へ出ていたため。
+- A4 縦、2列×6行、貼付枠 76×41mm、日付欄 14mm、QR 28mm などの寸法は変更なし。「QRコードのみ印刷」と Web 画面のフォントも変更なし。
+- 文書: 設計書(決定 58)、ROADMAP。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- `tests/browser/sticker-settings.pw.mjs`(3ブラウザ。説明がⓘを押したときだけ出ることの確認を追加)、`tests/asset-stamp.test.js`。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。
+- `tests/sticker-print.test.js`、`tests/asset-stamp.test.js`、`tests/browser/sticker-print.pw.mjs`(3ブラウザ。フォント、太さ、QR のみの印刷のフォント、文字の幅の確認を追加)。
+- Chromium の実際の出力で BIZ-UDPMincho-Medium が使われ、PDF に埋め込まれることを確認。A4 の印刷表示を画像でも確認。フォントがない場合を、フォールバックに差し替えて確認。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。実際のプリンターでの印刷は未確認。
 
 ## push・Firebaseデプロイ
 - `main` へ通常の push(公開サイトに反映)。Firebase のデプロイなし。

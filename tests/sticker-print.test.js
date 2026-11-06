@@ -102,6 +102,11 @@ test("上部の表示の折り返し: 全角と半角の幅で分け、3行ま�
   assert.equal(wrapHeader("あ".repeat(200)).length, 3);
   assert.deepEqual(wrapHeader("a\nb"), ["a b"]);
   assert.deepEqual(wrapHeader(""), []);
+  // 実際の文字の幅で折り返す(英大文字は半角の見積もりより広い)
+  const wide = (ch) => (ch === "W" ? 1 : 0.5);
+  assert.deepEqual(wrapHeader("WWWiiii", 2, 3, wide), ["WW", "Wii", "ii"]);
+  assert.deepEqual(fitSheetNote("W".repeat(60), 1, SHEET, PAGE, () => 1).lines.map(l => l.length), [48, 12]);
+  assert.deepEqual(fitSheetNote("W".repeat(60), 1).lines.map(l => l.length), [60], "測らないときは今までの見積もり");
 });
 
 test("QR のみ: 2列×4行の8枚で、QR は約 40mm。切り取り線は枠の間にあり、QR にかからない", () => {

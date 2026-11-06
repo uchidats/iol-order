@@ -109,6 +109,11 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.ok(Math.abs(centers[i][0] - x) < 0.5, `見出し ${i} の横の中央: ${centers[i][0]}`);
         assert.ok(Math.abs(centers[i][1] - 42.5) < 0.7, `見出し ${i} の縦の中央: ${centers[i][1]}`);
       });
+      // 台紙の文字はすべて BIZ UDP明朝 Medium(ない端末は明朝体へ)。太さは題名だけ太字で、ほかは Medium
+      const fonts = await page.locator(".sticker-print-svg text").evaluateAll(all => all.map(t => [t.getAttribute("font-family"), t.getAttribute("font-weight")]));
+      assert.ok(fonts.length >= 6);
+      for (const [family] of fonts) assert.match(family, /^'BIZ UDP明朝 Medium', 'BIZ UDPMincho Medium',.*'Yu Mincho'.*serif$/);
+      assert.deepEqual(fonts.map(f => f[1]), ["700", ...fonts.slice(1).map(() => "500")]);
       assert.equal(await page.locator('[data-f="sheetDealer"]').count(), 0, "1社なら選択を出さない");
       await page.click('[data-act="print"]');
       assert.equal(await page.evaluate(() => window.__printed), 1);
@@ -130,6 +135,9 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       const text = await page.locator(".sticker-print-svg").textContent();
       assert.ok(text.includes("立川病院") && text.includes("IOLシール写真"));
       assert.ok(!/https?:|sticker\.html|コード/.test(text), "URL・アクセスコードを載せない");
+      const qrFonts = await page.locator(".sticker-print-svg text").evaluateAll(all => [...new Set(all.map(t => t.getAttribute("font-family")))]);
+      assert.deepEqual(qrFonts, ["'Yu Gothic', 'Meiryo', 'Hiragino Sans', 'Noto Sans CJK JP', sans-serif"], "QR のみの印刷のフォントは変えない");
+      assert.equal(await page.locator(".sticker-print-svg text[font-weight]").count(), 0);
       await page.close();
     } finally { await browser.close(); }
   });
@@ -169,6 +177,29 @@ test("台紙の注意事項: 長文でも QR・貼付枠に重ならず、入ら
     assert.equal(await qrOnly.locator('.sticker-print-svg [data-f="sheetNote"]').count(), 0);
     assert.ok(!(await qrOnly.locator(".sticker-print-svg").textContent()).includes("1行目の注意"));
     await qrOnly.close();
+  } finally { await browser.close(); }
+});
+
+test("台紙の文字の幅: 英大文字が続く表示・注意事項も QR に重ならず、用紙の外へ出ない。かな・漢字も見切れない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const note = "JOHNSON & JOHNSON VISION CARE MEDICAL ".repeat(4).trim();
+    const page = await openPage(browser, `?note=${encodeURIComponent(note)}`, 1100);
+    await openPrint(page, "printSheet");
+    const check = () => page.evaluate(() => {
+      const svg = document.querySelector(".sticker-print-svg"), b = svg.getBoundingClientRect(), mm = b.width / 210, qr = svg.querySelector("image").getBoundingClientRect();
+      const texts = [...svg.querySelectorAll('[data-f="header"], [data-f="sheetNote"]')];
+      return { qrLeft: (qr.left - b.left) / mm, right: Math.max(...texts.map(e => (e.getBoundingClientRect().right - b.left) / mm)), lines: svg.querySelectorAll('[data-f="header"]').length, shown: svg.querySelectorAll('[data-f="header"]').length ? [...svg.querySelectorAll('[data-f="header"]')].map(e => e.textContent).join("") : "" };
+    });
+    for (const text of ["W".repeat(100), "JOHNSON & JOHNSON VISION CARE MEDICAL ALCON ".repeat(3).slice(0, 100).trim(), "あ".repeat(100), "アイウエオカキクケコ".repeat(10)]) {
+      await page.fill('[data-f="sheetHeader"]', text);
+      const m = await check();
+      assert.ok(m.right < m.qrLeft, `QR に重ならない: ${JSON.stringify(m)}`);
+      assert.ok(m.lines <= 3);
+      assert.equal(m.shown, text, "100文字の表示は欠けない");
+    }
+    await page.close();
   } finally { await browser.close(); }
 });
 

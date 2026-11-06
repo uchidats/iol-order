@@ -2,12 +2,30 @@ import { h } from "./markdown-view.js";
 import { qrImageUrl } from "../domain/sticker-settings.js";
 import {
   PAGE, SHEET_TITLE, QR_LABEL, HEADER_MAX_LENGTH, MM_PER_PT,
-  dealerLabel, defaultHeaderText, initialDealer, wrapHeader, fitSheetNote, sheetLayout, qrSheetLayout
+  SHEET, dealerLabel, defaultHeaderText, initialDealer, wrapHeader, fitSheetNote, sheetLayout, qrSheetLayout
 } from "../domain/sticker-print.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const FONT = "'Yu Gothic', 'Meiryo', 'Hiragino Sans', 'Noto Sans CJK JP', sans-serif";
+/** 台紙の文字。端末の明朝体を使う(フォントファイルは配らない)。BIZ UDP明朝 Medium がない端末は、近い明朝体から順に使う */
+const SHEET_FONT = "'BIZ UDP明朝 Medium', 'BIZ UDPMincho Medium', 'BIZ UDPMincho', 'BIZ UD明朝 Medium', 'BIZ UDMincho Medium', '游明朝', 'Yu Mincho', 'YuMincho', 'Hiragino Mincho ProN', 'Noto Serif CJK JP', 'Noto Serif JP', 'MS PMincho', serif";
+const SHEET_WEIGHT = "500";
 const PT = MM_PER_PT;
+
+/**
+ * 台紙の文字の実際の幅を測る(全角 1 とする比)。端末で使われるフォントの幅に合わせて折り返し、英大文字が続いても QR・用紙の外へ出さない。
+ * 測れないときは undefined(全角 1・半角 0.5 の見積もりを使う)
+ */
+function sheetTextMeasure() {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return undefined;
+  ctx.font = `${SHEET_WEIGHT} 100px ${SHEET_FONT}`;
+  const widths = new Map();
+  return (ch) => {
+    if (!widths.has(ch)) widths.set(ch, ctx.measureText(ch).width / 100);
+    return widths.get(ch);
+  };
+}
 const LINE = { stroke: "#999999", "stroke-width": "0.2" };
 const HEADING_PT = 9;   // 見出し行(日付・使用レンズ)の文字の大きさ
 
@@ -18,6 +36,7 @@ function svgEl(tag, attrs = {}, text = null) {
   return el;
 }
 const label = (x, y, text, pt, extra = {}) => svgEl("text", { x, y, "font-size": pt * PT, "font-family": FONT, fill: "#000000", ...extra }, text);
+const sheetLabel = (x, y, text, pt, extra = {}) => label(x, y, text, pt, { "font-family": SHEET_FONT, "font-weight": SHEET_WEIGHT, ...extra });
 const line = (l, extra = {}) => svgEl("line", { ...l, ...LINE, ...extra });
 const qrImage = (url, { x, y, size }) => svgEl("image", { href: url, x, y, width: size, height: size });
 
@@ -28,15 +47,15 @@ function pageSvg(children) {
 }
 
 /** 台紙の SVG(A4 実寸の座標)。枠の中には何も描かない。注意事項は上部の余白に出す(fitSheetNote の結果) */
-function sheetSvg({ headerText, qrUrl, note }) {
+function sheetSvg({ headerLines, qrUrl, note }) {
   const lay = sheetLayout();
   return pageSvg([
-    label(PAGE.margin, lay.headTop + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
-    ...wrapHeader(headerText).map((t, i) => label(PAGE.margin, lay.headTop + 15 + i * 5.5, t, 11, { "data-f": "header" })),
+    sheetLabel(PAGE.margin, lay.headTop + 7, SHEET_TITLE, 14, { "font-weight": "700" }),
+    ...headerLines.map((t, i) => sheetLabel(PAGE.margin, lay.headTop + 15 + i * 5.5, t, 11, { "data-f": "header" })),
     qrImage(qrUrl, lay.qr),
     ...lay.lines.map(l => line(l)),
-    ...lay.headings.map(hd => label(hd.x, hd.y + HEADING_PT * PT * 0.36, hd.text, HEADING_PT, { "text-anchor": "middle", "data-f": "sheetHeading" })),
-    ...note.lines.map((t, i) => label(note.x, note.y + i * note.lineHeight, t, note.pt, { "data-f": "sheetNote" }))
+    ...lay.headings.map(hd => sheetLabel(hd.x, hd.y + HEADING_PT * PT * 0.36, hd.text, HEADING_PT, { "text-anchor": "middle", "data-f": "sheetHeading" })),
+    ...note.lines.map((t, i) => sheetLabel(note.x, note.y + i * note.lineHeight, t, note.pt, { "data-f": "sheetNote" }))
   ]);
 }
 
@@ -122,6 +141,7 @@ export function openSheetPrint({ facilityName, dealers = [], qrSvg, sheetNote = 
   const header = h("input", { type: "text", class: "form-control", "data-f": "sheetHeader", maxlength: String(HEADER_MAX_LENGTH), autocomplete: "off", "aria-label": "台紙の上部の表示" });
   header.value = defaultHeaderText(facilityName, initialDealer(dealers));
   const noteWarning = h("p", { class: "error-message", "data-f": "noteTruncated", role: "status" }, "注意事項が長いため、入りきらない部分は印刷されません。施設設定で短くしてください。");
+  const measure = sheetTextMeasure();
   let view = null;
   header.addEventListener("input", () => view.render());
   const select = dealers.length > 1 ? h("select", { class: "form-control", "data-f": "sheetDealer", "aria-label": "発注先" },
@@ -131,9 +151,10 @@ export function openSheetPrint({ facilityName, dealers = [], qrSvg, sheetNote = 
     title: "台紙を印刷", hint: `${SCALE_HINT}上部の表示は、この印刷のときだけ変更できます(設定は変わりません)。`,
     controls: [select, header, noteWarning].filter(Boolean), qrUrl, print,
     renderPage: () => {
-      const note = fitSheetNote(sheetNote, wrapHeader(header.value).length);
+      const headerLines = wrapHeader(header.value, undefined, undefined, measure);
+      const note = fitSheetNote(sheetNote, headerLines.length, SHEET, PAGE, measure);
       noteWarning.style.display = note.truncated ? "" : "none";
-      return sheetSvg({ headerText: header.value, qrUrl, note });
+      return sheetSvg({ headerLines, qrUrl, note });
     }
   });
   return view;
