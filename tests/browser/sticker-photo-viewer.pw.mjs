@@ -504,8 +504,8 @@ test("シール写真: 医療機関は関連リンクの中に、利用できる
       root.remove();
       return { inMenu, ...out };
     });
-    assert.deepEqual(facility, { inMenu: false, beforeAnswer: [true, []], stickerOnly: [false, ["IOLシール写真"]], both: ["資料", "IOLシール写真"],
-      sameLook: [true, true, true, true, true], clicked: [1, true], afterSaveEmpty: [false, ["IOLシール写真"]], off: [true, []], cleared: [true, []], nextFacility: ["資料"] });
+    assert.deepEqual(facility, { inMenu: false, beforeAnswer: [true, []], stickerOnly: [false, ["眼内レンズ使用報告"]], both: ["資料", "眼内レンズ使用報告"],
+      sameLook: [true, true, true, true, true], clicked: [1, true], afterSaveEmpty: [false, ["眼内レンズ使用報告"]], off: [true, []], cleared: [true, []], nextFacility: ["資料"] });
     await page.close();
     page = await browser.newPage();
     await page.goto(base);

@@ -27,7 +27,7 @@ export function renderRelatedLinks(documents, root = document.querySelector(".re
   if (onOpenStickerPhotos) {
     const li = document.createElement("li"), a = document.createElement("a");
     a.className = "ref-link"; a.href = "#"; a.id = "refLinkStickerPhotos";
-    a.textContent = "IOLシール写真";
+    a.textContent = "眼内レンズ使用報告";
     a.addEventListener("click", (e) => { e.preventDefault(); onOpenStickerPhotos(); });
     a.append(linkIcon()); li.append(a); items.push(li);
   }
