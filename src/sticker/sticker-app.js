@@ -48,7 +48,16 @@ export function createStickerApp({ mount, controller, now = Date.now }) {
   let external = false, leftPage = false, returnTimer = null;   // 外部のカメラを開いている間
 
   /* ---------- 共通 ---------- */
-  const facility = h("p", { class: "sticker-facility", "data-f": "facility", hidden: true });
+  const facility = h("p", { class: "sticker-facility", "data-f": "facility" });
+  const printSheet = h("button", { type: "button", class: "btn btn-outline-sm sticker-print-sheet", "data-act": "printSheet" }, "台紙を印刷");
+  const facilityRow = h("div", { class: "sticker-facility-row", "data-f": "facilityRow", hidden: true }, facility, printSheet);
+  // 様式は施設設定と同じ処理を使う(ui/sticker-print-view.js)。材料は毎回サーバーから受け取る(最新の注意事項・有効な QR)
+  printSheet.addEventListener("click", async () => {
+    const sheet = await controller.loadSheet();
+    if (!sheet) return;
+    const print = await import("../ui/sticker-print-view.js");
+    print.openSheetPrint(sheet);
+  });
   const lastSent = h("p", { class: "sticker-last-sent", "data-f": "lastSent", hidden: true });
   const message = h("p", { class: "error-message sticker-message", "data-f": "error", role: "alert" });
   const notice = h("p", { class: "sticker-notice", "data-f": "notice", role: "status" });
@@ -260,12 +269,13 @@ export function createStickerApp({ mount, controller, now = Date.now }) {
     for (const [name, el] of [["no-token", noToken], ["code", codeForm], ["camera", camScreen], ["review", reviewScreen], ["done", doneScreen]]) el.hidden = state.screen !== name;
     const t = now();
     const verified = Boolean(state.facilityName) && state.screen !== "code";
-    facility.hidden = lastSent.hidden = !verified;   // 確認の前には出さない
+    facilityRow.hidden = lastSent.hidden = !verified;   // 確認の前には出さない
     facility.textContent = verified ? state.facilityName : "";
     lastSent.textContent = verified ? lastSentLabel(state.last, t) : "";
     message.textContent = state.error;
     notice.textContent = state.notice;
     next.disabled = state.busy;
+    printSheet.disabled = state.sheetBusy || state.sending;
 
     showPreview(state.photo ? state.photo.blob : null);
     const p = state.photo;
@@ -285,6 +295,6 @@ export function createStickerApp({ mount, controller, now = Date.now }) {
     if (state.screen === "code" || state.screen === "no-token") { if (!state.photo) closeCamera(); }
   }
 
-  mount.replaceChildren(facility, lastSent, noToken, codeForm, camScreen, reviewScreen, doneScreen, notice, message);
+  mount.replaceChildren(facilityRow, lastSent, noToken, codeForm, camScreen, reviewScreen, doneScreen, notice, message);
   return { render };
 }

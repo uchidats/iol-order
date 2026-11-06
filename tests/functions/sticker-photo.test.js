@@ -8,6 +8,7 @@ import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { createStickerPhotoService, clientIpOf } from "../../functions/src/sticker-photo-service.js";
 import { createStickerBucket } from "../../functions/src/sticker-bucket.js";
 import { RegistrationError } from "../../functions/src/registration.js";
+import { SHEET_NOTE_DEFAULT } from "../../functions/src/sticker-photo.js";
 import { createDealerPortalService } from "../../functions/src/dealer-portal.js";
 import {
   STICKER_LIMITS, STICKER_RATE_LIMITS, hashAccessCode, verifyAccessCode, issueTicket, sha256Hex, photoIdOf, newEntryToken, rateLimitDocId, usageDayKey
@@ -1101,4 +1102,52 @@ test("役割ごとの権限: QR の初回の発行は管理者・副管理者だ
   const s = await api("ordA", "getSettings", { facilityId: F });
   assert.ok(typeof s.verifyBlockedUntil === "string" && s.canManage === false);
   assert.equal(s.verifyFailures24h, undefined);
+});
+
+// ================= 撮影画面の台紙(ログインなし) =================
+const sheetOf = (token, ticket, s = svc) => s.entry({ data: { action: "sheet", token, ticket }, ip: "198.51.100.7" });
+
+test("台紙: チケットと入口の施設の分だけ、印刷に使う項目を返す。コード・メールアドレスは返さない", async () => {
+  await db.doc(`facilities/${F}/stickerSettings/sheet`).set({ note: "施設Aの注意" });
+  await db.doc(`facilities/${F}/facilityDealers/dB`).set({ facilityId: F, name: "Y医療", mailName: "Y医療 本社", orderEmails: ["y@example.jp"], sortOrder: 1 });
+  const r = await sheetOf(TOKEN, ticketFor());
+  assert.deepEqual(Object.keys(r).sort(), ["dealers", "facilityName", "qrSvg", "sheetNote"]);
+  assert.equal(r.facilityName, "fA眼科");
+  assert.equal(r.sheetNote, "施設Aの注意");
+  assert.ok(r.qrSvg.includes(TOKEN));
+  assert.deepEqual(r.dealers.map(d => Object.keys(d).sort()), [["id", "mailName", "name"], ["id", "mailName", "name"]]);
+  assert.ok(!JSON.stringify(r).includes("@example.jp"), "メールアドレスを返さない");
+  assert.ok(!JSON.stringify(r).includes(accessRecord.hash ?? "no-hash-field"));
+  assert.equal((await sheetOf(TOKEN_B, ticketFor(G))).sheetNote, SHEET_NOTE_DEFAULT, "未設定の施設は既定の文");
+});
+
+test("台紙: 他施設の入口・偽のチケット・期限切れ・コードの変更・無効な入口・機能の停止は返さない", async () => {
+  await rejects(sheetOf(TOKEN_B, ticketFor(F)), "permission-denied");
+  await rejects(sheetOf(TOKEN, ticketFor(G)), "permission-denied");
+  await rejects(sheetOf(TOKEN, undefined), "unauthenticated");
+  await rejects(sheetOf(TOKEN, "x.y"), "unauthenticated");
+  await rejects(sheetOf(TOKEN, issueTicket({ facilityId: F, codeGeneration: 1, secret: "z".repeat(40), now: clock.t }).ticket), "unauthenticated");
+  await rejects(sheetOf(TOKEN, ticketFor(F, 1, clock.t - 31 * MIN)), "unauthenticated");
+  await rejects(sheetOf(TOKEN, ticketFor(F, 2)), "unauthenticated");
+  await rejects(sheetOf("short", ticketFor()), "permission-denied");
+  await rejects(sheetOf(newEntryToken(), ticketFor()), "permission-denied");
+  await rejects(svc.entry({ data: { action: "sheet", token: TOKEN, ticket: ticketFor(), facilityId: G }, ip: "1" }), "invalid-argument");
+  await db.doc(`stickerEntries/${TOKEN}`).update({ status: "revoked" });
+  await rejects(sheetOf(TOKEN, ticketFor()), "permission-denied");
+  await db.doc(`stickerEntries/${TOKEN}`).update({ status: "active" });
+  await db.doc(`facilities/${F}`).update({ status: "inactive" });
+  await rejects(sheetOf(TOKEN, ticketFor()), "permission-denied");
+  await db.doc(`facilities/${F}`).update({ status: "active" });
+  enabled.facilities = [G];
+  await rejects(sheetOf(TOKEN, ticketFor()), "permission-denied");
+  enabled.facilities = [F, G];
+  enabled.on = false;
+  await rejects(sheetOf(TOKEN, ticketFor()), "permission-denied");
+});
+
+test("入口の処理: action のない呼び出しは今までどおりコードの確認。チケットなしに台紙は読めない", async () => {
+  const r = await svc.entry({ data: { token: TOKEN, code: CODE }, ip: "198.51.100.7" });
+  assert.ok(r.ticket);
+  await rejects(svc.entry({ data: { token: TOKEN, code: "999999" }, ip: "198.51.100.7" }), "permission-denied");
+  await rejects(svc.entry({ data: { action: "sheet", token: TOKEN }, ip: "198.51.100.7" }), "unauthenticated");
 });

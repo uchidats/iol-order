@@ -1,11 +1,13 @@
 /* 看護師の撮影画面(sticker.html)専用。共通の見た目は styles.css を読むだけで、変更しない */
 .sticker-main { display: flex; flex-direction: column; gap: 10px; padding-bottom: 24px; }
 .sticker-screen { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border-light); border-radius: var(--radius-md, 8px); background: #fff; }
-.sticker-screen[hidden], .sticker-facility[hidden], .sticker-last-sent[hidden], .sticker-warning[hidden], .sticker-date[hidden] { display: none; }
+.sticker-screen[hidden], .sticker-facility-row[hidden], .sticker-last-sent[hidden], .sticker-warning[hidden], .sticker-date[hidden] { display: none; }
 .sticker-label { display: flex; align-items: center; gap: 6px; font-weight: 700; }
 .sticker-code { min-height: 44px; font-size: 1.2rem; letter-spacing: 0.2em; }
 .sticker-wide { width: 100%; }
-.sticker-facility { margin: 0; font-weight: 700; }
+.sticker-facility-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sticker-facility { margin: 0; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.sticker-print-sheet { flex: none; padding: 6px 12px; font-size: 0.85rem; white-space: nowrap; }
 .sticker-last-sent { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
 .sticker-message:empty, .sticker-notice:empty { display: none; }
 .sticker-message, .sticker-notice { margin: 0; }

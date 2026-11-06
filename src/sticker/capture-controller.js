@@ -25,7 +25,7 @@ export function createCaptureController({ api, token, sha256, newUploadId = () =
   let gen = 0;           // 「終了」の後に届いた結果を捨てる
   const state = {
     screen: token ? "code" : "no-token",   // no-token / code / camera / review / done
-    busy: false, sending: false, error: "", notice: "", canResend: false,
+    busy: false, sending: false, sheetBusy: false, error: "", notice: "", canResend: false,
     facilityName: "", last: null, sentCount: 0,
     surgeryDate: "", surgeryLocked: false,
     photo: null,        // { blob, width, height, blurWarned, uploadId, sha256 }
@@ -34,9 +34,10 @@ export function createCaptureController({ api, token, sha256, newUploadId = () =
   const emit = () => onChange(state);
   const set = (patch) => { Object.assign(state, patch); emit(); };
 
-  function needCode() {
+  /** コードの再入力へ。autoSend が false なら、確認の後に写真を送らず確認画面へ戻す */
+  function needCode(autoSend = true) {
     ticket = null;
-    resume = true;
+    resume = autoSend;
     set({ screen: "code", sending: false, error: "", notice: MESSAGES.reenterCode, canResend: false });
   }
 
@@ -93,14 +94,15 @@ export function createCaptureController({ api, token, sha256, newUploadId = () =
       ticket = r.result.ticket;
       expiresAt = r.result.expiresAt;
       const resuming = resume && state.photo;
+      const keepPhoto = Boolean(state.photo);
       resume = false;
       Object.assign(state, {
         busy: false, notice: "", facilityName: r.result.facilityName, sentCount: 0, surgeryLocked: false,
-        surgeryDate: resuming ? state.surgeryDate : "",   // 新しいセッション。再送する写真の値は残す
+        surgeryDate: keepPhoto ? state.surgeryDate : "",   // 新しいセッション。残した写真の値は残す
         last: { lastSentAt: r.result.lastSentAt, lastSurgeryDate: r.result.lastSurgeryDate }
       });
       if (resuming) { set({ screen: "review" }); return send(); }
-      set({ screen: "camera" });
+      set({ screen: keepPhoto ? "review" : "camera" });
     },
     /** 撮影した写真(アップロードIDはここで1回だけ作る) */
     takePhoto({ blob, width, height, blurWarned = false }) {
@@ -116,13 +118,30 @@ export function createCaptureController({ api, token, sha256, newUploadId = () =
       set({ surgeryDate: value, error: "" });
     },
     send,
+    /**
+     * 台紙の印刷の材料を受け取る。写真の送信には触らない(期限切れのときも、写真を自動で送らない)
+     * @returns {Promise<object|null>} 受け取れなかったら null(画面は state の表示だけ)
+     */
+    async loadSheet() {
+      if (state.sheetBusy || state.sending) return null;
+      if (!ticket || now() >= expiresAt) { needCode(false); return null; }
+      const myGen = gen;
+      set({ sheetBusy: true, error: "" });
+      const r = await api.sheet({ token, ticket });
+      if (myGen !== gen) return null;
+      state.sheetBusy = false;
+      if (r.ok) { emit(); return r.result; }
+      if (r.reason === "ticket") { needCode(false); return null; }
+      set({ error: r.reason === "network" ? MESSAGES.connection : MESSAGES.sheetFailed });
+      return null;
+    },
     /** 続けて撮影(コードの再入力なし) */
     continueShooting() { set({ screen: "camera", done: null, error: "" }); },
     /** 終了: セッションと写真をメモリから消す */
     finish() {
       gen += 1;
       ticket = null; expiresAt = 0; resume = false;
-      set({ screen: token ? "code" : "no-token", busy: false, sending: false, error: "", notice: "", canResend: false, facilityName: "", last: null, sentCount: 0,
+      set({ screen: token ? "code" : "no-token", busy: false, sending: false, sheetBusy: false, error: "", notice: "", canResend: false, facilityName: "", last: null, sentCount: 0,
         surgeryDate: "", surgeryLocked: false, photo: null, done: null });
     }
   };

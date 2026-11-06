@@ -25,6 +25,7 @@ export const STICKER_ORIGIN = "https://iol.medconf.jp";
 export const LIMIT_MESSAGE = "送信の上限に達しました。時間をおいてお試しください";
 const VERIFY_FAILED = "アクセスコードを確認してください";
 const VERIFY_BLOCKED = "しばらくしてからお試しください";
+const SHEET_FAILED = "台紙を準備できませんでした";
 const NOT_ALLOWED = "この施設の写真を操作する権限がありません";
 const NO_FACILITY = "sticker-none";          // 入口が無効なときも同じ読み取りをするための、存在しない施設
 const PLACEHOLDER_CODE = "000000";           // 形式の違うコードでも同じ計算をするための値(結果は使わない)
@@ -194,6 +195,38 @@ export function createStickerPhotoService({
     await db.runTransaction(async (tx) => { audit(tx, { action: "verify.success", facilityId: fid, sessionId: issued.sessionId, ipHash }); });
     return { ticket: issued.ticket, expiresAt: issued.expiresAt, facilityName: String(fac.get("name") || ""), ...(await lastSent(fid)) };
   }
+
+  /** 施設の台紙の注意事項(未設定なら既定の文) */
+  const sheetNoteOf = (sheet) => (sheet.exists ? String(sheet.get("note") ?? "") : SHEET_NOTE_DEFAULT);
+
+  /**
+   * 撮影画面の「台紙を印刷」。ログインなしで、チケット(コードの確認の証明)と入口トークンの両方が同じ施設のときだけ返す。
+   * 施設はチケットから取り、クライアントの申告は使わない。返す項目は印刷に使うものだけを列挙する(コード・メールアドレスなどは返さない)。
+   * 無効になった入口(QR の作り直し)は通さない(古い QR を印刷させない)
+   */
+  async function sheet(data) {
+    strict(data, ["action", "token", "ticket"]);
+    if (!isEnabled()) throw new RegistrationError("permission-denied", SHEET_FAILED);
+    const ticket = await verifyTicket(data.ticket, ticketSecret(), {
+      now: now(), currentGeneration: async (fid) => { const a = await accessRef(fid).get(); return a.exists ? a.get("codeGeneration") : null; }
+    });
+    if (!ticket.ok) throw new RegistrationError("unauthenticated", SHEET_FAILED);
+    const fid = ticket.facilityId;
+    if (!isEntryToken(data.token)) throw new RegistrationError("permission-denied", SHEET_FAILED);
+    const [entry, fac, note, dealers] = await Promise.all([
+      entryRef(data.token).get(), facilityRef(fid).get(), sheetSettingRef(fid).get(), db.collection(`facilities/${fid}/facilityDealers`).get()
+    ]);
+    const usable = entry.exists && entry.get("status") === "active" && entry.get("facilityId") === fid && facilityOn(fid) && fac.exists && fac.get("status") === "active";
+    if (!usable) throw new RegistrationError("permission-denied", SHEET_FAILED);
+    const list = dealers.docs
+      .map(d => ({ id: d.id, name: String(d.get("name") ?? ""), mailName: String(d.get("mailName") ?? ""), sortOrder: d.get("sortOrder") ?? 0 }))
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(({ id, name, mailName }) => ({ id, name, mailName }));
+    return { facilityName: String(fac.get("name") || ""), sheetNote: sheetNoteOf(note), dealers: list, qrSvg: (await qrOf(data.token)).svg };
+  }
+
+  /** ログインなしの入口(stickerEntryApi)。既定はコードの確認 */
+  const entry = ({ data, ip }) => (data && data.action === "sheet" ? sheet(data) : verify({ data, ip }));
 
   /* ======================= HTTP の共通処理 ======================= */
 
@@ -446,7 +479,7 @@ export function createStickerPhotoService({
     const dayFailures = day?.exists && t - day.get("windowStart") < rateLimits.dayWindowMs ? day.get("count") ?? 0 : 0;
     const base = { accessCodeSet: access.exists, accessCodeUpdatedAt: access.exists ? isoOf(access.get("updatedAt")) : null, entryIssued: entry.exists,
       verifyBlockedUntil: blockedUntil ? new Date(blockedUntil).toISOString() : null, canManage,
-      sheetNote: sheet.exists ? String(sheet.get("note") ?? "") : SHEET_NOTE_DEFAULT };   // 台紙を印刷するので所属者全員に返す
+      sheetNote: sheetNoteOf(sheet) };   // 台紙を印刷するので所属者全員に返す
     if (!canManage) return base;
     const [dealers, links] = await Promise.all([
       db.collection(`facilities/${fid}/facilityDealers`).get(), db.collection(`facilities/${fid}/dealerPortalLinks`).get()
@@ -713,5 +746,5 @@ export function createStickerPhotoService({
     return { removedObjects, removedLimits };
   }
 
-  return { verify, api, handleUpload, handleImage, cleanup, dealerScope };
+  return { verify, entry, api, handleUpload, handleImage, cleanup, dealerScope };
 }

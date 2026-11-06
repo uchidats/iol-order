@@ -286,7 +286,7 @@ const stickerPhotos = createStickerPhotoService({
 // CORS はブラウザの読み取りの制限で、認可ではない。不正な利用はコード・回数制限・チケットで止める
 const STICKER_CORS = isDemoProject() ? [STICKER_ORIGIN, /^http:\/\/127\.0\.0\.1:\d+$/] : [STICKER_ORIGIN];
 export const stickerEntryApi = onCall({ ...options, cors: STICKER_CORS, secrets: [STICKER_TICKET_SECRET] },
-  (request) => wrap(({ data }) => stickerPhotos.verify({ data, ip: clientIpOf(request.rawRequest) }))(request));
+  (request) => wrap(({ data }) => stickerPhotos.entry({ data, ip: clientIpOf(request.rawRequest) }))(request));
 export const stickerPhotoApi = onCall(options, wrap(stickerPhotos.api));
 export const stickerPhotoUpload = onRequest({ region: REGION, serviceAccount: RUNTIME_SERVICE_ACCOUNT, secrets: [STICKER_TICKET_SECRET],
   timeoutSeconds: 300, memory: "1GiB", maxInstances: 10, concurrency: 1 }, stickerPhotos.handleUpload);

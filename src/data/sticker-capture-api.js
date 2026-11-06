@@ -34,6 +34,20 @@ export function createCaptureApi({ baseUrl, fetchImpl = (...a) => fetch(...a) })
     },
 
     /**
+     * 台紙の印刷の材料。施設はチケットからサーバーが決める。ticket はチケットの期限切れ・コードの変更
+     * @returns {Promise<{ok:true, result:{facilityName:string, sheetNote:string, dealers:Array<object>, qrSvg:string}}|{ok:false, reason:"ticket"|"failed"|"network"}>}
+     */
+    async sheet({ token, ticket }) {
+      let res;
+      try {
+        res = await fetchImpl(`${baseUrl}/stickerEntryApi`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: { action: "sheet", token, ticket } }), cache: "no-store" });
+      } catch { return { ok: false, reason: "network" }; }
+      const body = await res.json().catch(() => null);
+      if (res.ok && body && body.result) return { ok: true, result: body.result };
+      return { ok: false, reason: body && body.error && body.error.status === "UNAUTHENTICATED" ? "ticket" : "failed" };
+    },
+
+    /**
      * 画像を保存する。通信の失敗は status: null
      * @returns {Promise<{status:number|null, body:object|null}>}
      */

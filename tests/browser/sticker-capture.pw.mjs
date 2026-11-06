@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, firefox } from "playwright-core";
@@ -43,13 +44,20 @@ const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers
 
 /** 偽の Functions。server.uploads に受け取ったヘッダーを残す */
 async function fakeFunctions(page, over = {}) {
-  const s = { verifies: [], uploads: [], uploadReplies: over.uploadReplies || [], verifyReplies: over.verifyReplies || [], last: over.last || { lastSentAt: null, lastSurgeryDate: null } };
+  const s = { sheets: [], sheetReplies: over.sheetReplies || [], verifies: [], uploads: [], uploadReplies: over.uploadReplies || [], verifyReplies: over.verifyReplies || [], last: over.last || { lastSentAt: null, lastSurgeryDate: null } };
   const json = (route, status, body) => route.fulfill({ status, headers: { ...CORS, "content-type": "application/json" }, body: JSON.stringify(body) });
   await page.route(`${FN}**`, async (route) => {
     const r = route.request();
     if (r.method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
     if (r.url().endsWith("/stickerEntryApi")) {
-      s.verifies.push(JSON.parse(r.postData()).data);
+      const data = JSON.parse(r.postData()).data;
+      if (data.action === "sheet") {
+        s.sheets.push(data);
+        const reply = s.sheetReplies.shift();
+        if (reply) return json(route, reply.status, reply.body);
+        return json(route, 200, { result: { facilityName: "立川病院", sheetNote: "挿入されなかったレンズには×\n最初の手術日を記入", dealers: [{ id: "dA", name: "栗原 立川", mailName: "栗原医療器械店　立川支店" }], qrSvg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>' } });
+      }
+      s.verifies.push(data);
       const next = s.verifyReplies.shift();
       if (next) return json(route, next.status, next.body);
       return json(route, 200, { result: { ticket: `ticket-${s.verifies.length}`, expiresAt: Date.now() + 1800000, facilityName: "立川病院", ...s.last } });
@@ -539,6 +547,103 @@ test("画面の名称: コード入力・撮影・確認・完了の見出しは
     await page.click('[data-act="send"]');
     await screen(page, "done").waitFor();
     await check("完了");
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+/* 台紙の印刷(ログインなし。様式は施設設定と同じ処理) */
+const openSheet = async (page) => {
+  await page.click('[data-act="printSheet"]');
+  await page.waitForSelector('.sticker-print-view [data-act="print"]:not([disabled])');
+};
+
+test("台紙を印刷: 施設名の右端に出し、施設設定と同じ様式・フォント・QR・注意事項を A4 の1ページで印刷する。コードは載せない", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const { page, context, fake } = await openPage(browser, "chromium");
+    await page.addInitScript(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; });
+    await page.evaluate(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; });
+    assert.equal(await page.isVisible('[data-act="printSheet"]'), false, "コードの確認の前には出さない");
+    await enterCode(page);
+    await screen(page, "camera").waitFor();
+    for (const width of [320, 390, 1000]) {
+      await page.setViewportSize({ width, height: 844 });
+      const m = await page.evaluate(() => {
+        const row = document.querySelector('[data-f="facilityRow"]').getBoundingClientRect(), b = document.querySelector('[data-act="printSheet"]').getBoundingClientRect(), f = document.querySelector('[data-f="facility"]').getBoundingClientRect();
+        return { right: Math.abs(row.right - b.right), sameRow: b.top < f.bottom && b.bottom > f.top, overlap: f.right > b.left, wide: document.documentElement.scrollWidth > window.innerWidth };
+      });
+      assert.deepEqual(m, { right: 0, sameRow: true, overlap: false, wide: false }, `${width}px`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openSheet(page);
+    assert.equal(fake.sheets.length, 1);
+    assert.deepEqual(Object.keys(fake.sheets[0]).sort(), ["action", "ticket", "token"], "施設はチケットから決める。コードは送らない");
+    assert.equal(fake.sheets[0].token, TOKEN);
+    const svg = page.locator(".sticker-print-svg");
+    assert.equal(await svg.locator("text").first().textContent(), "眼内レンズ使用報告");
+    assert.deepEqual(await svg.locator('[data-f="header"]').allTextContents(), ["立川病院　→　栗原医療器械店　立川支店"]);
+    assert.deepEqual(await svg.locator('[data-f="sheetNote"]').allTextContents(), ["挿入されなかったレンズには×", "最初の手術日を記入"]);
+    assert.deepEqual(await svg.locator('[data-f="sheetHeading"]').allTextContents(), ["日付", "使用レンズ", "日付", "使用レンズ"]);
+    assert.equal(await svg.locator("image").count(), 1);
+    assert.match(await svg.locator("text").first().getAttribute("font-family"), /^'BIZ UDP明朝 Medium'/);
+    const sizes = await svg.evaluate((e) => {
+      const lines = [...e.querySelectorAll('line[stroke="#999999"]')], vals = (a, b) => [...new Set(lines.filter(l => l.getAttribute(a) === l.getAttribute(b)).map(l => Number(l.getAttribute(a === "x1" ? "x1" : "y1"))))].sort((p, q) => p - q);
+      return { xs: vals("x1", "x2"), ys: vals("y1", "y2"), qr: Number(e.querySelector("image").getAttribute("width")) };
+    });
+    assert.deepEqual(sizes, { xs: [12, 26, 102, 108, 122, 198], ys: [40, 45, 86, 127, 168, 209, 250, 291], qr: 28 }, "2列×6行・枠 76×41mm・日付 14mm・QR 28mm");
+    assert.ok(!(await svg.textContent()).includes("123456"), "アクセスコードを印刷しない");
+    await page.click('[data-act="print"]');
+    assert.equal(await page.evaluate(() => window.__printed), 1);
+    const file = path.join(os.tmpdir(), `sticker-capture-${process.pid}-${Date.now()}.pdf`);
+    await page.pdf({ path: file, preferCSSPageSize: true, printBackground: true });
+    const raw = fs.readFileSync(file).toString("latin1");
+    fs.unlinkSync(file);
+    const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);
+    assert.equal((raw.match(/\/Type\s*\/Page[^s]/g) || []).length, 1);
+    assert.ok(Math.abs(Number(box[1]) - 595.28) < 1 && Math.abs(Number(box[2]) - 841.89) < 1);
+
+    // 閉じると撮影へ戻り、そのまま撮影・送信できる。写真・コードは端末に保存しない
+    await page.click('[data-act="closePrint"]');
+    assert.equal(await page.locator(".sticker-print-view").count(), 0);
+    await shoot(page);
+    await page.click('[data-act="send"]');
+    await screen(page, "done").waitFor();
+    assert.equal(fake.uploads.length, 1);
+    assert.equal(await page.isVisible('[data-act="printSheet"]'), true, "完了の画面でも使える");
+    assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 0]);
+    assert.deepEqual(page.errors, []);
+    await page.click('[data-act="finish"]');
+    assert.equal(await page.isVisible('[data-act="printSheet"]'), false, "終了の後は出さない");
+    await context.close();
+  } finally { await browser.close(); }
+});
+
+test("台紙を印刷: 期限切れはコードの入力へ。残した写真は自動で送らず確認画面へ戻す。失敗は案内を出し、撮影は続けられる", async (t) => {
+  const browser = await launch(chromium, "chromium");
+  if (!browser) return t.skip("chromium を起動できません");
+  try {
+    const expired = { status: 401, body: { error: { status: "UNAUTHENTICATED", message: "x" } } };
+    const denied = { status: 403, body: { error: { status: "PERMISSION_DENIED", message: "x" } } };
+    const { page, context, fake } = await openPage(browser, "chromium", { sheetReplies: [denied, expired] });
+    await enterCode(page);
+    await shoot(page);
+    await page.click('[data-act="printSheet"]');
+    await page.waitForFunction(() => document.querySelector('[data-f="error"]').textContent === "台紙を準備できませんでした。もう一度お試しください");
+    assert.equal(await screen(page, "review").isVisible(), true, "写真の確認はそのまま");
+    assert.equal(await page.isEnabled('[data-act="printSheet"]'), true);
+    await page.click('[data-act="printSheet"]');
+    await screen(page, "code").waitFor();
+    await enterCode(page);
+    await screen(page, "review").waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(fake.uploads.length, 0, "押していないのに送らない");
+    assert.equal(await page.locator('[data-f="preview"]').evaluate(i => i.naturalWidth > 0), true, "写真は残る");
+    await openSheet(page);
+    await page.click('[data-act="closePrint"]');
+    await page.click('[data-act="send"]');
+    await screen(page, "done").waitFor();
+    assert.equal(fake.uploads.length, 1);
     await context.close();
   } finally { await browser.close(); }
 });

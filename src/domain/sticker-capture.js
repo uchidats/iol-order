@@ -20,7 +20,8 @@ export const MESSAGES = Object.freeze({
   lowResolution: "この端末では解像度が低い可能性があります。文字が読めるか拡大して確認してください",
   blurry: "ピンぼけの疑いがあります。文字が読めるか拡大して確認してください",
   cameraFailed: "カメラを起動できません",
-  cameraPaused: "カメラが停止しました。「カメラを再開」を押してください"
+  cameraPaused: "カメラが停止しました。「カメラを再開」を押してください",
+  sheetFailed: "台紙を準備できませんでした。もう一度お試しください"
 });
 
 const JST_MS = 9 * 60 * 60 * 1000;
