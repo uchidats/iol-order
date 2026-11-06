@@ -1,7 +1,7 @@
 /* IOL シール写真の印刷(台紙・QR のみ)。印刷の画面を開いている間だけ読む(sticker-print-view.js)。@page がほかの印刷に影響しないよう、閉じたら外す */
 .sticker-print-view { position: fixed; inset: 0; z-index: 2000; overflow: auto; background: #e2e8f0; color: #0f172a; }
 .sticker-print-toolbar { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: #fff; border-bottom: 1px solid #cbd5e1; }
-.sticker-print-title { margin: 0; font-size: 1.1rem; }
+.sticker-print-title { position: relative; margin: 0; font-size: 1.1rem; }   /* ⓘの説明の位置の基準 */
 .sticker-print-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .sticker-print-page { width: min(calc(100% - 16px), 210mm); margin: 8px auto; background: #fff; box-shadow: 0 1px 4px rgba(15, 23, 42, 0.3); }
 .sticker-print-svg { display: block; width: 100%; height: auto; }

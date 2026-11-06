@@ -3,28 +3,24 @@
 > このファイルは作業完了ごとに上書きする最新1件。記録のルールは `CLAUDE.md`。実データ・認証情報・バックアップの中身は書かない。
 
 - **日時**: 2026-11-06
-- **作業**: 撮影画面(sticker.html)に「台紙を印刷」を追加。Zenbook で実施。
-- 直前の作業(同日): 関連リンクの文言の変更(`890d7f0`)、撮影の画面と一覧の見出しの変更(`47e8ee8`)、外部のカメラのキャンセルからの復帰(`192dc50`。Galaxy の実機は未確認)。
+- **作業**: 「台紙を印刷」の画面の説明をⓘへ移動。Zenbook で実施。
+- 直前の作業(同日): 撮影画面の「台紙を印刷」の追加(`5ef58d1`。`stickerEntryApi` のみ配備)。
 
 ## 変更内容
-- コードの確認の後、施設名の右端に「台紙を印刷」を表示。Google ログインは不要。
-- `functions/src/sticker-photo-service.js`: `stickerEntryApi` に `action: "sheet"` を追加。チケットと入口トークンの両方が同じ施設のときだけ返す。施設はチケットから決める。返す項目は施設名・注意事項・発注先の名称・QR の SVG だけ。無効な入口・他施設の入口は通さない。
-- 画面: 様式は施設設定と同じ `src/ui/sticker-print-view.js`(二重管理なし)。材料は押すたびにサーバーから受け取る。
-- 期限切れはコードの入力へ戻し、残した写真は自動で送らず確認画面へ戻す。
-- 注文・メールの処理は変更なし。管理者権限の公開なし。
-- 文書: 設計書(決定 61)、試験運用の手順書、ROADMAP。
+- `src/ui/sticker-print-view.js`: 題名の右に既存のⓘ(`createInfoTip`)を追加し、説明を移動。文言は変更なし。施設設定と撮影画面の両方の「台紙を印刷」に反映。
+- `src/ui/sticker-print.css`: ⓘの説明が画面の外へ出ないよう、見出しを位置の基準にした。
+- 見本、印刷、上部の表示・発注先の変更は変更なし。「QRコードのみ印刷」の画面の説明もそのまま。
+- 文書: 設計書(決定 62)、ROADMAP。
 
 ## commit ID
 - 本体: 本ファイルを含む commit(`git log -1`)。
 
 ## テスト結果(関連するものだけを実行)
-- `tests/functions/sticker-photo.test.js`(エミュレータ。他施設の入口・偽のチケット・期限切れ・コードの変更・無効な入口・機能の停止の拒否を追加)。
-- `tests/browser/sticker-capture.pw.mjs`(台紙の様式・寸法・A4 の1ページ・撮影と送信への影響なし)、`tests/sticker-capture.test.js` ほかの関連する単体テスト、`tests/asset-stamp.test.js`。
-- 未確認: スマートフォンから実際のプリンターへの印刷、本番の正しいコードでの台紙の取得(コードの入力は利用者の操作)。
-- 未実行: `npm test` 全体、ほかのブラウザテスト、Rules。
+- `tests/browser/sticker-print.pw.mjs`(3ブラウザ。ⓘの開閉と QR のみの画面の確認を追加)、`tests/asset-stamp.test.js`。
+- 未実行: `npm test` 全体、ほかのブラウザテスト、Functions、Rules。
 
 ## push・Firebaseデプロイ
-- `main` へ通常の push(公開サイトに反映)。Firebase は `stickerEntryApi` のみ配備。
+- `main` へ通常の push(公開サイトに反映)。Firebase のデプロイなし。
 
 ## 残課題
 - R09 の実機の確認(手順書の段階 8-2、`docs/r09-pilot-guide.md`)。

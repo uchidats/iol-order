@@ -115,6 +115,20 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       for (const [family] of fonts) assert.match(family, /^'BIZ UDP明朝 Medium', 'BIZ UDPMincho Medium',.*'Yu Mincho'.*serif$/);
       assert.deepEqual(fonts.map(f => f[1]), ["700", ...fonts.slice(1).map(() => "500")]);
       assert.equal(await page.locator('[data-f="sheetDealer"]').count(), 0, "1社なら選択を出さない");
+      // 説明は初期状態では出さず、題名の右のⓘを押したときだけ出す
+      const tipBtn = page.locator('.sticker-print-title [aria-label="台紙を印刷の説明"]'), tipPop = page.locator(".sticker-print-title .info-tip-pop");
+      assert.equal(await tipPop.isVisible(), false);
+      assert.equal(await page.locator(".sticker-print-toolbar > .form-hint:not([role])").count(), 0, "説明を常に出さない");
+      await tipBtn.click();
+      assert.equal(await tipPop.isVisible(), true);
+      const tipBox = await tipPop.boundingBox(), titleBox = await page.locator(".sticker-print-title").boundingBox(), screenSize = page.viewportSize();
+      assert.ok(tipBox.x >= 0 && tipBox.x + tipBox.width <= screenSize.width && tipBox.y >= titleBox.y + titleBox.height && tipBox.y + tipBox.height <= screenSize.height, `説明は見出しのすぐ下の画面の中: ${JSON.stringify(tipBox)}`);
+      assert.equal(await tipPop.evaluate((e) => { const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); }), true, "ほかの要素に隠れない");
+      const tipText = await tipPop.innerText();
+      assert.ok(tipText.startsWith("印刷の倍率は100%(実際のサイズ)にしてください。") && tipText.endsWith("(設定は変わりません)。"), tipText);
+      await tipBtn.click();
+      await page.mouse.move(0, 0);
+      assert.equal(await tipPop.isVisible(), false);
       await page.click('[data-act="print"]');
       assert.equal(await page.evaluate(() => window.__printed), 1);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "見本は画面の幅に収まる");
@@ -131,6 +145,8 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
       assert.equal(await page.locator(".sticker-print-svg image").count(), 8);
       assert.equal(await page.locator('.sticker-print-svg line[stroke-dasharray]').count(), 4);
       assert.equal(await page.locator('[data-f="sheetHeader"]').count(), 0, "編集欄は台紙だけ");
+      assert.match(await page.locator(".sticker-print-toolbar > .form-hint").first().innerText(), /^印刷の倍率は100%/, "QR のみの画面の説明は変えない");
+      assert.equal(await page.locator(".sticker-print-title .info-tip").count(), 0);
       assert.equal(await page.locator(".sticker-print-svg text", { hasText: "／" }).count(), 0);
       const text = await page.locator(".sticker-print-svg").textContent();
       assert.ok(text.includes("立川病院") && text.includes("IOLシール写真"));

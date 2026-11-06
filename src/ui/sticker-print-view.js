@@ -1,4 +1,5 @@
 import { h } from "./markdown-view.js";
+import { createInfoTip } from "./info-tip.js";
 import { qrImageUrl } from "../domain/sticker-settings.js";
 import {
   PAGE, SHEET_TITLE, QR_LABEL, HEADER_MAX_LENGTH, MM_PER_PT,
@@ -91,7 +92,7 @@ function loadQr(url) {
 }
 
 /** 印刷の画面(見本・操作)。操作の部分は印刷されない */
-function openView({ title, hint, controls = [], renderPage, qrUrl, print }) {
+function openView({ title, hint, hintInTip = false, controls = [], renderPage, qrUrl, print }) {
   const styles = loadPrintStyles();
   const printBtn = h("button", { type: "button", class: "btn btn-primary btn-aux", "data-act": "print", disabled: true }, "印刷する");
   const closeBtn = h("button", { type: "button", class: "btn btn-secondary btn-aux", "data-act": "closePrint" }, "閉じる");
@@ -99,9 +100,9 @@ function openView({ title, hint, controls = [], renderPage, qrUrl, print }) {
   const page = h("div", { class: "sticker-print-page" });
   const view = h("div", { class: "sticker-print-view", role: "dialog", "aria-modal": "true", "aria-label": title },
     h("div", { class: "sticker-print-toolbar" },
-      h("h2", { class: "sticker-print-title" }, title),
+      h("h2", { class: "sticker-print-title" }, title, hintInTip ? createInfoTip(hint, { label: `${title}の説明` }).root : null),
       ...controls,
-      h("p", { class: "form-hint" }, hint),
+      hintInTip ? null : h("p", { class: "form-hint" }, hint),
       h("div", { class: "sticker-print-actions" }, closeBtn, printBtn),
       message),
     page);
@@ -148,7 +149,7 @@ export function openSheetPrint({ facilityName, dealers = [], qrSvg, sheetNote = 
     h("option", { value: "" }, "発注先を表示しない"), dealers.map(d => h("option", { value: d.id }, dealerLabel(d)))) : null;
   if (select) select.addEventListener("change", () => { header.value = defaultHeaderText(facilityName, dealers.find(d => d.id === select.value)); view.render(); });
   view = openView({
-    title: "台紙を印刷", hint: `${SCALE_HINT}上部の表示は、この印刷のときだけ変更できます(設定は変わりません)。`,
+    title: "台紙を印刷", hint: `${SCALE_HINT}上部の表示は、この印刷のときだけ変更できます(設定は変わりません)。`, hintInTip: true,
     controls: [select, header, noteWarning].filter(Boolean), qrUrl, print,
     renderPage: () => {
       const headerLines = wrapHeader(header.value, undefined, undefined, measure);
