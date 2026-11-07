@@ -34,6 +34,7 @@ export function createAuthUi(handlers) {
   // 所属なしユーザーの入力途中の値（再描画で消えないよう保持）
   const draft = { name: "", applicantName: null };   // applicantName: 未入力(null)の間は、ログイン情報の表示名を初期値にする
   let lastArgs = null;
+  let emailOpen = false;   // ログイン画面の「メールでログイン」を開いているか(描き直しても保つ。初期は閉じる)
 
   // 施設名の入力中の重複候補の確認(登録は止めない。別の施設の場合は、そのまま登録できる)。表示するのは候補の施設名のみ(最大5件)
   let nameTimer = null, nameSeq = 0;
@@ -196,7 +197,8 @@ export function createAuthUi(handlers) {
     lastArgs = args;
     const { access, user, notice, error, facilities = [], busy = false, registration = null, pendingInvites = [], pendingBusy = false } = args;
     const state = access.state;
-    panel.classList.toggle("is-auth-loading", state === ACCESS.LOADING);   // 「認証状態を確認しています」の間は外枠なし(表示の切り替えだけ。CSS)
+    panel.classList.toggle("is-auth-loading", state === ACCESS.LOADING);
+    panel.classList.toggle("is-auth-signin", state === ACCESS.SIGNED_OUT);   // ログイン画面は左の色の線なし(CSS)   // 「認証状態を確認しています」の間は外枠なし(表示の切り替えだけ。CSS)
 
     if (state === ACCESS.LEGACY) {
       panel.hidden = true;
@@ -250,14 +252,22 @@ export function createAuthUi(handlers) {
           <div class="form-group">
             <button type="button" class="btn btn-secondary" id="btnAuthGoogle">Googleでログイン</button>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="authEmailInput">メールでログイン（パスワード不要）</label>
-            <input type="email" id="authEmailInput" class="form-control" autocomplete="email" placeholder="メールアドレス">
-            <button type="button" class="btn btn-secondary" id="btnAuthEmailLink">ログインリンクを送信</button>
+          <div class="form-group auth-email">
+            <button type="button" class="form-label auth-email-toggle" id="btnAuthEmailToggle" aria-expanded="${emailOpen}" aria-controls="authEmailBody">メールでログイン</button>
+            <div class="auth-email-body" id="authEmailBody"${emailOpen ? "" : " hidden"}>
+              <input type="email" id="authEmailInput" class="form-control" autocomplete="email" placeholder="メールアドレス" aria-label="メールアドレス">
+              <button type="button" class="btn btn-secondary" id="btnAuthEmailLink">ログインリンクを送信</button>
+            </div>
           </div>
           ${msg}
         </div>`;
       $("btnAuthGoogle").addEventListener("click", () => handlers.onGoogle());
+      $("btnAuthEmailToggle").addEventListener("click", () => {
+        emailOpen = !emailOpen;
+        $("btnAuthEmailToggle").setAttribute("aria-expanded", String(emailOpen));
+        $("authEmailBody").hidden = !emailOpen;
+        if (emailOpen) $("authEmailInput").focus();
+      });
       $("btnAuthEmailLink").addEventListener("click", () => handlers.onEmailLink($("authEmailInput").value));
       return;
     }

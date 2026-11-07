@@ -243,6 +243,15 @@ body {
 .auth-signin .feature-desc + .form-group { margin-top: 14px; }
 .auth-signin .form-group + .form-group { margin-top: 24px; }   /* Google とメールの区切り(前のまとまりの下の余白と重ねて 24px) */
 .auth-signin #authEmailInput + #btnAuthEmailLink { margin-top: 12px; }
+/* ログイン画面のカードは左の色の線なし(背景・枠線・角丸はそのまま) */
+#authPanel.feature-card.is-auth-signin { border-left: 1px solid var(--border-light); }
+/* 「メールでログイン」は折りたたみ(初期は閉じる)。見出し全体が開閉のボタンで、右に ∨ / ∧ */
+.auth-signin .auth-email-toggle { width: 100%; margin-bottom: 0; padding: 0; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer; }
+.auth-signin .auth-email-toggle::after { content: "∨"; margin-left: 2px; font-size: 0.9em; font-weight: 700; color: #6b7280; }
+.auth-signin .auth-email-toggle[aria-expanded="true"]::after { content: "∧"; }
+.auth-signin .auth-email-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
+.auth-signin .auth-email-body { margin-top: 8px; }
+.auth-signin .auth-email-body[hidden] { display: none; }
 /* ログイン画面の Google・メールアドレス欄・送信ボタンは高さ 40px(この画面だけ。上下の余白だけを詰め、横幅・文字・左右の余白は共通のまま) */
 .auth-signin #btnAuthGoogle, .auth-signin #authEmailInput, .auth-signin #btnAuthEmailLink { height: 40px; min-height: 40px; padding-top: 0; padding-bottom: 0; }
 
