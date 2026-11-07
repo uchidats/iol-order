@@ -2376,6 +2376,7 @@ input[type="date"], .lens-line select { color-scheme: light; }
 .settings-actions > .btn[data-act="add"],
 #btnSettingsClose,
 .sticker-viewer-back,
+.dealer-manage-add > .btn[data-act="addBranch"],
 .settings-section[data-section="theme"] .btn[data-act="theme-reset"] {
   min-width: 60px;
   min-height: 36px;
@@ -2642,6 +2643,9 @@ button.manual-nav-link { font-family: inherit; line-height: 1.5; cursor: pointer
 .dealer-manage-add { display: flex; gap: 6px; margin-top: 8px; }
 .dealer-manage-add .form-control { flex: 1 1 auto; min-width: 0; }
 .dealer-manage-add .btn, .dealer-manage-actions .btn { flex: none; white-space: nowrap; }
+/* ディーラー設定: 担当者の支店の絞り込み・支店名・支店の「追加」は高さ 40px(スマホ・PC)。文字・左右の余白・角丸は施設設定の入力欄と「追加」と同じ。横幅は従来どおり */
+.dealer-manage-filter, .dealer-manage-add .form-control { height: 40px; min-height: 40px; padding-top: 0; padding-bottom: 0; }
+.dealer-manage-add > .btn[data-act="addBranch"] { height: 40px; min-height: 40px; }
 .dealer-manage-branch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .dealer-manage-branch .dealer-manage-actions { margin: 0 0 0 auto; }
 .dealer-search-area, .dealer-week-area, .dealer-ordered-area { display: flex; flex-direction: column; gap: 10px; }

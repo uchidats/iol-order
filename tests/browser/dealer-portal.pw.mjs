@@ -1034,6 +1034,15 @@ for (const [name, type] of [["chromium", chromium], ["firefox", firefox], ["webk
         assert.deepEqual(await page.locator("#headerMenuPanel .header-menu-item").allInnerTexts(), ["ディーラー設定", "使い方・ヘルプ", "ログアウト"]);
         await page.click("#menuDealerSettings");
         await page.locator(".dealer-manage-staff").first().waitFor();
+        // 支店の絞り込み・支店名・「追加」は高さ 40px。文字・余白・角丸は施設設定の入力欄・「追加」と同じ。ほかの部品は変えない
+        const sizes = await page.evaluate(() => {
+          const info = (sel) => { const e = document.querySelector(sel), c = getComputedStyle(e), r = e.getBoundingClientRect(); return { h: r.height, top: Math.round(r.top), font: `${Math.round(parseFloat(c.fontSize) * 10) / 10}px`, pad: `${c.paddingTop} ${c.paddingRight} ${c.paddingBottom} ${c.paddingLeft}`, radius: c.borderRadius }; };
+          return { filter: info('[data-f="branchFilter"]'), input: info('[data-f="newBranch"]'), add: info('[data-act="addBranch"]'), rename: info('[data-act="renameBranch"]') };
+        });
+        assert.deepEqual(sizes.filter, { ...sizes.filter, h: 40, font: "16px", pad: "0px 14px 0px 14px", radius: "10px" }, "支店の絞り込み");
+        assert.deepEqual(sizes.input, { ...sizes.input, h: 40, font: "16px", pad: "0px 14px 0px 14px", radius: "10px" }, "支店名");
+        assert.deepEqual(sizes.add, { ...sizes.add, h: 40, font: "14.4px", pad: "0px 14px 0px 14px", radius: "6px", top: sizes.input.top }, "「追加」は支店名と横並びで同じ高さ");
+        assert.equal(sizes.rename.h, 34, "ほかのボタンは変えない");
         assert.equal(await page.locator("#dealerPanel").isVisible(), false, "受注一覧は隠す");
         assert.equal(await page.locator("#dealerSettings .settings-head h2").innerText(), "ディーラー設定");
         assert.equal(await page.locator("#dealerSettings .settings-head .info-tip-btn").count(), 1);
